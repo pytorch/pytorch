@@ -211,6 +211,14 @@ class CUDAAllocator : public DeviceAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  virtual void createExplicitDrainPool(
+      c10::DeviceIndex, MempoolId_t, std::shared_ptr<CUDAAllocator>) {
+    TORCH_CHECK(false, name(), " does not support explicit drain reuse");
+  }
+  virtual void drainPoolReuse(c10::DeviceIndex, MempoolId_t) {
+    TORCH_CHECK(false, name(), " does not support explicit drain reuse");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex /*device*/,
@@ -571,6 +579,15 @@ inline void setUseOnOOM(
 }
 inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setNoSplit(device, mempool_id);
+}
+inline void createExplicitDrainPool(
+    c10::DeviceIndex device,
+    MempoolId_t id,
+    std::shared_ptr<CUDAAllocator> allocator) {
+  get()->createExplicitDrainPool(device, id, std::move(allocator));
+}
+inline void drainPoolReuse(c10::DeviceIndex device, MempoolId_t id) {
+  get()->drainPoolReuse(device, id);
 }
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);

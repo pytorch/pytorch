@@ -1,4 +1,5 @@
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/impl/ExplicitDrainReuse.h>
 
 #include <c10/core/RingBuffer.h>
 #include <c10/core/impl/GPUTrace.h>
@@ -245,6 +246,9 @@ struct Block {
                      // of its expandable_segment_.
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
+  bool explicit_drain_quarantined{false};
+  bool explicit_drain_held{false};
+  Block* explicit_drain_next{nullptr};
   int event_count{0}; // number of outstanding CUDA events
   int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
   std::shared_ptr<GatheredContext> context_when_allocated;
@@ -1332,6 +1336,7 @@ struct PrivatePool {
   MempoolId_t id{0, 0};
   // Number of live graphs using this pool
   int use_count{1};
+  detail::ExplicitDrainReuse<Block> reuse;
   // Number of unfreed cudaMallocs made for this pool. When use_count and
   // cudaMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
@@ -1788,6 +1793,8 @@ class DeviceCachingAllocator {
       size_t size,
       cudaStream_t stream,
       void* addr) {
+    TORCH_CHECK(!pool.owner_PrivatePool || !pool.owner_PrivatePool->reuse.enabled,
+                "mallocWithAddress is unsupported for explicit-drain pools");
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     Block search_key(device_id, stream, 0);
     search_key.ptr = addr;
@@ -2623,6 +2630,12 @@ class DeviceCachingAllocator {
           block, cuda::getCurrentCUDAStream(device_id).stream());
     }
     block->allocated = false;
+    auto* private_pool = block->pool->owner_PrivatePool;
+    if (private_pool && private_pool->reuse.enabled &&
+        (!block->stream_uses.empty() || private_pool->reuse.disabled ||
+         private_pool->use_count == 0)) {
+      block->explicit_drain_quarantined = true;
+    }
 
     // following logic might modifying underlying Block, causing the size
     // changed. We store ahead for reporting
@@ -2898,6 +2911,8 @@ class DeviceCachingAllocator {
   std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
     auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(!get_private_pool(id)->reuse.enabled,
+                "checkpoint is unsupported for explicit-drain pools");
     insert_events_deferred_until_no_capture(context);
 
     auto pool = graph_pools.find(id);
@@ -3141,6 +3156,8 @@ class DeviceCachingAllocator {
     TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
 
     PrivatePool* private_pool = pool->second.get();
+    TORCH_CHECK(!private_pool->reuse.enabled,
+                "checkpoint restore is unsupported for explicit-drain pools");
 
     freeBlocksAllocatedToPool(private_pool, rr);
 
@@ -3236,7 +3253,7 @@ class DeviceCachingAllocator {
         block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
-            !block->stream_uses.empty();
+            !block->stream_uses.empty() || block->explicit_drain_quarantined;
 
         segment_info.total_size += block_info.size;
         if (block_info.allocated) {
@@ -3335,6 +3352,47 @@ class DeviceCachingAllocator {
     // Choose if this pool should not split a segment
     std::lock_guard<std::recursive_mutex> lock(mutex);
     no_split_pools.insert(mempool_id);
+  }
+
+  void createExplicitDrainPool(
+      MempoolId_t id, std::shared_ptr<CUDAAllocator> allocator) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+#ifdef USE_ROCM
+    TORCH_CHECK(false, "explicit drain reuse is CUDA-only in this private v0");
+#endif
+    // Validate before registering a pool: a throwing MemPool constructor has
+    // no destructor to undo a prior createOrIncrefPool call.
+    TORCH_CHECK(allocator, "explicit drain reuse requires a custom allocator");
+    TORCH_CHECK(!capture_tracker_.hasActiveCaptures(),
+                "cannot enable explicit drain reuse during capture");
+    TORCH_CHECK(graph_pools.count(id) == 0,
+                "explicit drain reuse requires a new pool");
+    auto pool = std::make_unique<PrivatePool>(id, std::move(allocator));
+    pool->reuse.enabled = true;
+    no_split_pools.insert(id);
+    try {
+      graph_pools.emplace(id, std::move(pool));
+    } catch (...) {
+      no_split_pools.erase(id);
+      throw;
+    }
+  }
+
+  void drainPoolReuse(MempoolId_t id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto* pp = get_private_pool(id);
+    TORCH_CHECK(pp->use_count > 0 && pp->reuse.enabled,
+                "drain_reuse requires a live explicit-drain pool");
+    TORCH_CHECK(!pp->reuse.disabled && !pp->reuse.publishing,
+                "explicit-drain pool is disabled or already publishing");
+    TORCH_CHECK(!capture_tracker_.hasActiveCaptures(),
+                "drain_reuse is not supported while a capture is active");
+    // The caller chooses a quiescent point. This holds the device allocator
+    // mutex, but waits only this pool's events and never calls its backend.
+    pp->reuse.drain(
+        [&] { synchronize_and_free_events(context, pp); },
+        [&](Block* block) { free_block(block, context); });
   }
 
   // See Note [Interaction with CUDA graph capture]
@@ -3491,6 +3549,11 @@ class DeviceCachingAllocator {
     auto pp = get_private_pool(mempool_id);
     auto uc = --(pp->use_count);
     TORCH_INTERNAL_ASSERT(uc >= 0);
+    if (uc == 0 && pp->reuse.enabled) {
+      // Private v0: retain the whole strict pool until runtime teardown. This
+      // deliberately does NOT implement TE's release-before-PG-destruction.
+      return;
+    }
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
@@ -4005,6 +4068,10 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
 
+    auto* private_pool = block->pool->owner_PrivatePool;
+    if (private_pool && private_pool->reuse.hold(block)) {
+      return; // CCA still owns the block; completion alone does not publish it.
+    }
     record_trace(
         TraceEntry::FREE_COMPLETED,
         int64_t(block->ptr),
@@ -4203,6 +4270,12 @@ class DeviceCachingAllocator {
 
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
+    if (auto* pp = pool.owner_PrivatePool; pp && pp->reuse.enabled) {
+      TORCH_CHECK(pp->use_count > 0 && !pp->reuse.disabled && !pp->reuse.publishing,
+                  "explicit-drain pool is retired, disabled, or publishing");
+      TORCH_CHECK(!is_capture_context(),
+                  "explicit-drain pool allocation is not supported in capture");
+    }
 
     if (C10_UNLIKELY(
             allowed_memory_maximum.has_value() &&
@@ -4518,6 +4591,10 @@ class DeviceCachingAllocator {
       return false;
     BlockPool& pool = *p.pool;
 
+    if (pool.owner_PrivatePool && pool.owner_PrivatePool->reuse.enabled) {
+      return false; // Never rank-locally reclaim collective-backed segments.
+    }
+
     // because of std::unique_ptr, block cannot be trivially copied
     // Use constructor for search key.
     Block key(p.search_key.device, p.search_key.stream, p.search_key.size);
@@ -4815,9 +4892,23 @@ class DeviceCachingAllocator {
           continue;
         }
 
-        EventPool::Event event = std::move(e->first);
-
-        C10_CUDA_CHECK(cudaEventSynchronize(*event));
+        auto* pp = block->pool->owner_PrivatePool;
+        const bool strict = pp && pp->reuse.enabled;
+        if (strict && pp->reuse.disabled) {
+          ++e;
+          continue;
+        }
+        EventPool::Event event;
+        if (!strict) {
+          event = std::move(e->first);
+        }
+        try {
+          C10_CUDA_CHECK(cudaEventSynchronize(strict ? *e->first : *event));
+        } catch (...) {
+          if (strict) pp->reuse.disabled = true;
+          throw;
+        }
+        if (strict) event = std::move(e->first);
 
         block->event_count--;
         if (block->event_count == 0) {
@@ -4854,6 +4945,8 @@ class DeviceCachingAllocator {
   }
 
   void insert_events(Block* block) {
+    auto* pp = block->pool->owner_PrivatePool;
+    try {
     c10::DeviceIndex prev_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
@@ -4870,6 +4963,12 @@ class DeviceCachingAllocator {
     }
 
     C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
+    } catch (...) {
+      // A strict block stays CCA-owned even if event setup is incomplete.
+      // Never let a later allocation/drain treat it as safely reusable.
+      if (pp && pp->reuse.enabled) pp->reuse.disabled = true;
+      throw;
+    }
   }
 
   void insert_events_deferred_until_no_capture(
@@ -4905,19 +5004,27 @@ class DeviceCachingAllocator {
       // Iterate over this stream's (event, block) pairs.
       while (!it->second.empty()) {
         auto& e = it->second.front();
-        EventPool::Event event = std::move(e.first);
         Block* block = e.second;
-
-        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
+        auto* pp = block->pool->owner_PrivatePool;
+        const bool strict = pp && pp->reuse.enabled;
+        if (strict && pp->reuse.disabled) {
+          break; // Preserve this owner after a terminal error; no recovery claim.
+        }
+        EventPool::Event event;
+        if (!strict) event = std::move(e.first);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(
+            cudaEventQuery(strict ? *e.first : *event));
         if (err == cudaErrorNotReady) {
           // ignore and clear the error if not ready
           (void)cudaGetLastError();
           // Return the ownership of the Event (unique ptr)
-          e.first = std::move(event);
+          if (!strict) e.first = std::move(event);
           break;
         } else if (err != cudaSuccess) {
+          if (strict) pp->reuse.disabled = true;
           C10_CUDA_CHECK(err);
         }
+        if (strict) event = std::move(e.first);
 
         block->event_count--;
         if (block->event_count == 0) {
@@ -5607,6 +5714,18 @@ class NativeCachingAllocator : public CUDAAllocator {
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->setNoSplit(std::move(mempool_id));
+  }
+
+  void createExplicitDrainPool(
+      c10::DeviceIndex device,
+      MempoolId_t id,
+      std::shared_ptr<CUDAAllocator> allocator) override {
+    assertValidDevice(device);
+    device_allocator[device]->createExplicitDrainPool(id, std::move(allocator));
+  }
+  void drainPoolReuse(c10::DeviceIndex device, MempoolId_t id) override {
+    assertValidDevice(device);
+    device_allocator[device]->drainPoolReuse(id);
   }
 
   // CUDAGraph interactions

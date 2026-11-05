@@ -23,7 +23,8 @@ struct TORCH_CUDA_CPP_API MemPool {
           nullptr,
       bool is_user_created = true,
       bool use_on_oom = false,
-      bool no_split = false);
+      bool no_split = false,
+      bool explicit_drain = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -32,6 +33,8 @@ struct TORCH_CUDA_CPP_API MemPool {
 
   MempoolId_t id();
   int use_count();
+  bool explicit_drain() const { return explicit_drain_; }
+  void drain_reuse();
   c10::DeviceIndex device();
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
@@ -39,6 +42,7 @@ struct TORCH_CUDA_CPP_API MemPool {
   static std::atomic<CaptureId_t> uid_;
   static std::atomic<CaptureId_t> uuid_;
   bool is_user_created_;
+  bool explicit_drain_{false};
   MempoolId_t id_;
   c10::DeviceIndex device_;
 };

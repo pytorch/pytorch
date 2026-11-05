@@ -2474,7 +2474,9 @@ def get_signal_pad_size() -> int:
 _symm_mem_pools: dict[_device, torch.cuda.MemPool | torch.xpu.MemPool] = {}
 
 
-def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
+def get_mem_pool(
+    device: _device, *, reuse_policy: str | None = None
+) -> torch.cuda.MemPool | torch.xpu.MemPool:
     """
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
@@ -2511,6 +2513,16 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     # undefined behaviors. We could consider relaxing this in the future if we
     # establish stream tracking and implicit synchronization around an
     # allocation.
+    if reuse_policy not in (None, "automatic", "explicit_drain"):
+        raise ValueError("unknown symmetric pool reuse policy")
+    strict = reuse_policy == "explicit_drain"
+    if strict and (torch.device(device).type != "cuda" or torch.version.hip is not None):
+        raise RuntimeError("explicit_drain is CUDA native CCA only in this private v0")
+    if device in _symm_mem_pools:
+        pool = _symm_mem_pools[device]
+        if reuse_policy is not None and bool(getattr(pool, "explicit_drain", False)) != strict:
+            raise RuntimeError("cannot change an existing symmetric pool's reuse policy")
+        return pool
     if device not in _symm_mem_pools:
         allocator = get_mempool_allocator(device)
         # Create a new pool with the given allocator and the preset options.
@@ -2518,6 +2530,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
             allocator,
             use_on_oom=False,
             no_split=True,
+            **({"explicit_drain": True} if strict else {}),
         )
 
     return _symm_mem_pools[device]

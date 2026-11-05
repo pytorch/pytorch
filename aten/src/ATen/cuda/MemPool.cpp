@@ -19,22 +19,36 @@ MemPool::MemPool(
     std::shared_ptr<CUDACachingAllocator::CUDAAllocator> allocator,
     bool is_user_created,
     bool use_on_oom,
-    bool no_split)
-    : is_user_created_(is_user_created) {
+    bool no_split,
+    bool explicit_drain)
+    : is_user_created_(is_user_created), explicit_drain_(explicit_drain) {
+  TORCH_CHECK(!explicit_drain || (allocator && no_split && !use_on_oom),
+              "explicit drain requires a custom allocator, no_split, and no OOM lending");
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
     id_ = {uuid_++, 0};
   }
   device_ = c10::cuda::current_device();
-  CUDACachingAllocator::createOrIncrefPool(
-      device_, id_, std::move(allocator));
-  if (use_on_oom) {
-    CUDACachingAllocator::setUseOnOOM(device_, id_, true);
+  if (explicit_drain) {
+    // Creation, validation and strict policy registration are one allocator
+    // operation. Unsupported contexts cannot leave an abandoned empty pool.
+    CUDACachingAllocator::createExplicitDrainPool(
+        device_, id_, std::move(allocator));
+  } else {
+    CUDACachingAllocator::createOrIncrefPool(
+        device_, id_, std::move(allocator));
+    if (use_on_oom) {
+      CUDACachingAllocator::setUseOnOOM(device_, id_, true);
+    }
+    if (no_split) {
+      CUDACachingAllocator::setNoSplit(device_, id_);
+    }
   }
-  if (no_split) {
-    CUDACachingAllocator::setNoSplit(device_, id_);
-  }
+}
+
+void MemPool::drain_reuse() {
+  CUDACachingAllocator::drainPoolReuse(device_, id_);
 }
 
 MemPool::~MemPool() {

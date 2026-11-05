@@ -1709,9 +1709,12 @@ class MemPool(_MemPool):
         allocator: _cuda_CUDAAllocator | None = None,
         use_on_oom: bool = False,
         no_split: bool = False,
+        explicit_drain: bool = False,
     ):
+        # Private v0: long-lived pools only. drain_reuse may hold the device
+        # allocator mutex; retired pools retain segments until runtime teardown.
         # pyrefly: ignore [bad-argument-count]
-        super().__init__(allocator, True, use_on_oom, no_split)
+        super().__init__(allocator, True, use_on_oom, no_split, explicit_drain)
 
     @classmethod
     def from_py_allocator(
