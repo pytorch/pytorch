@@ -1050,7 +1050,7 @@ if __name__ == "__main__":
         self.assertEqual({mark.name for mark in test_p.pytestmark}, {"periodic"})
 
     def test_periodic_rejects_positional_hours(self):
-        with self.assertRaisesRegex(TypeError, "pass hours by keyword"):
+        with self.assertRaisesRegex(TypeError, "test function or class, got int; pass hours by keyword"):
             periodic(24)
 
     @periodic(hours=24)

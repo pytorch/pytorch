@@ -3057,11 +3057,12 @@ def periodic(fn=None, *, hours=4):
     periodic_daily takes precedence over periodic. Both reuse
     PYTORCH_TEST_WITH_PERIODIC to enable tests in periodic mode.
 
-    The periodic and periodic_daily test configurations select the matching
-    marker and set PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs setting
-    that flag without a marker filter run both groups on their own cadence;
-    hours does not enforce timing in those jobs. Non-scheduled periodic-strict
-    runs cover both groups by default; manual dispatch can select either.
+    The periodic test config selects "periodic and not periodic_daily";
+    periodic_daily selects "periodic_daily". Both set PYTORCH_TEST_WITH_PERIODIC.
+    Other periodic jobs setting that flag without a marker filter run both
+    groups on their own cadence; hours does not enforce timing in those jobs.
+    Non-scheduled periodic-strict runs cover both groups by default; manual
+    dispatch can select either.
     Tests in files outside the default Python test sweep (e.g. distributed or
     quantization) never run in CI unless such a job runs those files.
 
@@ -3074,7 +3075,10 @@ def periodic(fn=None, *, hours=4):
     Such a test runs only in jobs that set both flags, like periodic-strict.
     """
     if fn is not None and not callable(fn):
-        raise TypeError("periodic expects a test or @periodic(hours=24); pass hours by keyword")
+        raise TypeError(
+            f"periodic() expects a test function or class, got {type(fn).__name__}; "
+            "pass hours by keyword (hours=4 or hours=24)"
+        )
     if hours not in (4, 24):
         raise ValueError("periodic supports only hours=4 or hours=24")
     if fn is None:

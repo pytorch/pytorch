@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/periodic-strict.yml
   schedule:
+    # Keep the daily-slot cron in sync with selected-test-configs in both build jobs.
     - cron: 45 0 * * *
     - cron: 45 4,8,12,16,20 * * *
   push:
@@ -15,7 +16,7 @@ on:
       - release/*
   workflow_dispatch:
     inputs:
-      periodic-marker:
+      periodic-configs:
         description: Periodic test configs to run
         type: choice
         default: all
@@ -56,13 +57,12 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.6 8.9'
-      selected-test-configs: ${{ inputs.periodic-marker != 'all' && inputs.periodic-marker || ((github.event_name != 'schedule' || github.event.schedule == '45 0 * * *') && 'periodic,periodic_daily' || 'periodic') }}
+      selected-test-configs: ${{ inputs.periodic-configs != 'all' && inputs.periodic-configs || ((github.event_name != 'schedule' || github.event.schedule == '45 0 * * *') && 'periodic,periodic_daily' || 'periodic') }}
       test-matrix: |
         { include: [
           { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
-          { config: "periodic_daily", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
-          { config: "periodic_daily", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "periodic_daily", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -94,13 +94,12 @@ jobs:
       build-environment: linux-jammy-py3.11-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      selected-test-configs: ${{ inputs.periodic-marker != 'all' && inputs.periodic-marker || ((github.event_name != 'schedule' || github.event.schedule == '45 0 * * *') && 'periodic,periodic_daily' || 'periodic') }}
+      selected-test-configs: ${{ inputs.periodic-configs != 'all' && inputs.periodic-configs || ((github.event_name != 'schedule' || github.event.schedule == '45 0 * * *') && 'periodic,periodic_daily' || 'periodic') }}
       test-matrix: |
         { include: [
           { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "periodic_daily", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "periodic_daily", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "periodic_daily", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
       python-version: "3.11"
       compiler: clang21
