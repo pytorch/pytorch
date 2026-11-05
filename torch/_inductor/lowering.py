@@ -768,6 +768,19 @@ def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
     return make_pointwise(lambda out: out, force_output_cast=True)(x)
 
 
+def _is_scalar_for_sub_alpha(x: Any) -> bool:
+    if isinstance(x, (int, float, sympy.Basic)):
+        return True
+    if isinstance(x, IRNode):
+        device = x.get_device()
+        if device is not None and device.type == "cpu":
+            # Dynamic Python scalars arrive as 0d CPU inputs, possibly behind
+            # a dtype conversion and a broadcast view.
+            reads = x.get_read_names()
+            return bool(reads) and all(V.graph.is_unspec_arg(name) for name in reads)
+    return False
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
@@ -818,11 +831,12 @@ def make_pointwise(
                         if use_fma_for_alpha != "sub":
                             return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
                         fma_alpha = -alpha
-                        # Eager CUDA keeps Python scalars at opmath precision.
+                        # Eager CUDA keeps scalars at opmath precision,
+                        # including dynamic scalars represented as CPU inputs.
                         opmath_scalar_indices = tuple(
                             i
                             for i, x in enumerate(original_inputs)
-                            if isinstance(x, (int, float, sympy.Basic))
+                            if _is_scalar_for_sub_alpha(x)
                         )
 
                 if fma_alpha is None:
@@ -888,7 +902,18 @@ def make_pointwise(
                         alpha_expr = ops.index_expr(fma_alpha, dtype)
                     else:
                         alpha_expr = ops.constant(fma_alpha, dtype)
-                    out = ops.fma(inputs_loaded[1], alpha_expr, inputs_loaded[0])
+                    if (
+                        torch.version.hip
+                        and dtype in low_pr_fp
+                        and 1 in opmath_scalar_indices
+                    ):
+                        # ROCm's low precision scalar kernel rounds the opmath
+                        # multiply separately; tensor operands still use FMA.
+                        out = ops.add(
+                            inputs_loaded[0], ops.mul(inputs_loaded[1], alpha_expr)
+                        )
+                    else:
+                        out = ops.fma(inputs_loaded[1], alpha_expr, inputs_loaded[0])
                 if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.

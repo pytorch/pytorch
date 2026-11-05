@@ -1362,13 +1362,14 @@ class TestAlphaFMA(TestCase):
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(
         [op for op in binary_ufuncs if op.name == "sub"],
-        allowed_dtypes=[torch.float16, torch.bfloat16],
+        allowed_dtypes=[torch.float32, torch.float16, torch.bfloat16],
     )
     @config.patch(emulate_precision_casts=True)
     @parametrize("other_is_tensor", [False, True])
     @parametrize("dynamic", [False, True])
+    @parametrize("inplace", [False, True])
     def test_alpha_fma_scalar_precision(
-        self, device, dtype, op, other_is_tensor, dynamic
+        self, device, dtype, op, other_is_tensor, dynamic, inplace
     ):
         a = torch.full([256], 2, device=device, dtype=dtype)
         other = 1 / 3
@@ -1376,12 +1377,22 @@ class TestAlphaFMA(TestCase):
             other = torch.full_like(a, other)
 
         def fn(a, other):
+            if inplace:
+                return op.inplace_variant(a, other, alpha=6)
             return op(a, other, alpha=6)
 
+        expected = fn(a.clone(), other)
         actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), a, other)
-        self.assertIn("tl.fma", code)
+        if (
+            torch.version.hip
+            and dtype in (torch.float16, torch.bfloat16)
+            and not other_is_tensor
+        ):
+            self.assertNotIn("tl.fma", code)
+        else:
+            self.assertIn("tl.fma", code)
         self.assertIn("'enable_fp_fusion': False", code)
-        self.assertEqual(actual, fn(a, other), atol=0, rtol=0, exact_device=True)
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
 
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(
