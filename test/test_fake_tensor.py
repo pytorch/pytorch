@@ -5541,6 +5541,12 @@ class TestCppFakeTensorModeBindings(TestCase):
         no_grad_meta = torch.empty(2, device="meta")
         no_grad = torch._C._from_meta_and_device(no_grad_meta, fake.device, mode)
         self.assertFalse(no_grad.requires_grad)
+        for layout in (torch.sparse_coo, torch.sparse_csr):
+            sparse_meta = torch.empty(2, 2, layout=layout, device="meta")
+            sparse = torch._C._from_meta_and_device(sparse_meta, fake.device, mode)
+            self.assertTrue(torch._C._is_fake_tensor(sparse))
+            self.assertEqual(sparse.layout, layout)
+            self.assertEqual(sparse.device, torch.device("cpu"))
 
         # A fake also reads as meta, on the meta device or inside a kernel, but
         # is rejected
