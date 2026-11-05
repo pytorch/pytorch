@@ -201,7 +201,8 @@ class FSDPParam:
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
-    _needs_nonzero_padding: bool
+    # Shard(i), i > 0, whose dim size the shard world size does not divide
+    _uneven_nonzero_dim: bool
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -351,7 +352,7 @@ class FSDPParam:
             shard_rank = 0
             shard_world_size = 1
 
-        self._needs_nonzero_padding = (
+        self._uneven_nonzero_dim = (
             shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0
         )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
@@ -362,26 +363,30 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
-        layout = _get_all_gather_output_layout(
-            padded_sharded_size, shard_dim, shard_world_size
+        self._default_all_gather_output_layouts = (
+            _get_all_gather_output_layout(
+                padded_sharded_size, shard_dim, shard_world_size
+            ),
         )
-        if self._needs_nonzero_padding:
-            layout = _AllGatherOutputLayout(self._orig_size, layout.outer_size)
-        self._default_all_gather_output_layouts = (layout,)
-        length = self.sharded_size[shard_dim]
-        if self._needs_nonzero_padding and self.sharded_size != padded_sharded_size:
-            # Padding between outer rows cannot back a contiguous logical shard.
-            local_data = sharded_param.reshape(self.sharded_size).contiguous()
-        else:
-            local_data = param_data.new_zeros(padded_sharded_size)
-            if sharded_param.numel() > 0:
-                local_data.narrow(shard_dim, 0, length).copy_(sharded_param)
-        if self.offload_to_cpu and not local_data.is_meta:
-            local_data = local_data.cpu()
+        # Pre-pad the sharded parameter to avoid padding before all-gather. For
+        # uneven Shard(i), i > 0, padding would sit between the rows of the dims
+        # before i, so keep the shard compact and pad it in all_gather_inputs.
+        padded_sharded_param = param_data.new_zeros(
+            self.sharded_size if self._uneven_nonzero_dim else padded_sharded_size
+        )
+        if sharded_param.numel() > 0:
+            padded_sharded_param.narrow(
+                dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
+            ).copy_(sharded_param)
+        if self.offload_to_cpu and not padded_sharded_param.is_meta:
+            padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                local_data = local_data.pin_memory()
-        self._sharded_param_data = local_data.view(-1)
-        sharded_param = local_data.narrow(shard_dim, 0, length)
+                padded_sharded_param = padded_sharded_param.pin_memory()
+        self._sharded_param_data = padded_sharded_param.view(-1)
+        length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
+        sharded_param = padded_sharded_param.narrow(
+            dim=shard_dim, start=0, length=length
+        )
         if not sharded_param.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
@@ -859,6 +864,13 @@ class FSDPParam:
                 "Both fsdp_pre_all_gather and fsdp_post_all_gather should be defined "
                 f"if using all-gather extensions: {inner_tensor}"
             )
+        if has_fsdp_pre_all_gather and self._uneven_nonzero_dim:
+            raise NotImplementedError(
+                "FSDP does not support uneven sharding on dim "
+                f"{self.fsdp_placement.dim} for all-gather extensions: "
+                f"{self._orig_size} (world size: "
+                f"{cast(FSDPMeshInfo, self.mesh_info).shard_mesh_size})"
+            )
         if has_release_all_gather_outputs and not has_fsdp_post_all_gather:
             raise AssertionError(
                 "fsdp_should_release_all_gather_outputs_after_post_all_gather "
@@ -892,14 +904,6 @@ class FSDPParam:
             self._release_all_gather_outputs_after_post_all_gather = should_release
         self._unsharded_inner_tensors: list[torch.Tensor] = []
 
-    @property
-    def uses_compact_all_gather(self) -> bool:
-        return (
-            self._needs_nonzero_padding
-            and self.sharded_state == ShardedState.SHARDED
-            and self._extension_all_gather_output_layouts is None
-        )
-
     def init_all_gather_outputs(
         self,
         all_gather_input_numels: list[int],
@@ -909,16 +913,22 @@ class FSDPParam:
     ):
         if len(self.all_gather_outputs) > 0:
             return  # already initialized
-        if self.uses_compact_all_gather:
-            if len(all_gather_input_numels) != 1:
-                raise AssertionError("Expected one input for an ordinary parameter")
+        output_numels = [numel * world_size for numel in all_gather_input_numels]
+        if self._uneven_nonzero_dim:
+            # The copy-out drops the padding (see _default_all_gather_output_fn)
             output_numels = [self._orig_size.numel()]
-        else:
-            output_numels = [numel * world_size for numel in all_gather_input_numels]
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel]), dtype=dtype, device=device)
             for numel, dtype in zip(output_numels, all_gather_input_dtypes)
         ]
+
+    @property
+    def pads_all_gather_input(self) -> bool:
+        """Whether this rank's shard is shorter than the padded shard on a nonzero dim."""
+        return (
+            self._uneven_nonzero_dim
+            and self.sharded_size != self.padded_sharded_param_size
+        )
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
@@ -957,18 +967,6 @@ class FSDPParam:
                     f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
                 )
             unsharded_tensor = self.all_gather_outputs[0]
-        if self._needs_nonzero_padding and hasattr(
-            inner_tensor, "fsdp_post_all_gather"
-        ):
-            if (
-                unsharded_tensor.numel() != self._orig_size.numel()
-                or not unsharded_tensor.is_contiguous()
-            ):
-                raise ValueError(
-                    "fsdp_post_all_gather must return compact logical parameter "
-                    f"data for uneven {self.fsdp_placement}: expected "
-                    f"{self._orig_size.numel()} contiguous elements"
-                )
         unsharded_param = torch.as_strided(
             unsharded_tensor,
             self._orig_size,
@@ -1225,6 +1223,15 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
+            if self.pads_all_gather_input:
+                dim = self.fsdp_placement.dim
+                padded = sharded_param_data.new_zeros(
+                    self.padded_sharded_param_size, dtype=self.param_dtype
+                )
+                padded.narrow(dim, 0, self.sharded_size[dim]).copy_(
+                    sharded_param_data.view(self.sharded_size)
+                )
+                return [padded.view(-1)]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
@@ -1503,15 +1510,15 @@ class FSDPParam:
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if self._needs_nonzero_padding:
-            if local_tensor.size() != self.sharded_size:
+        stored_size = (
+            self.sharded_size if self._uneven_nonzero_dim else padded_sharded_size
+        )
+        if local_tensor.size() != stored_size and not same_local_tensor:
+            if shard_dim != 0:
                 raise AssertionError(
-                    f"Expected logical shard size {self.sharded_size}, got {local_tensor.size()}"
+                    f"Shard({shard_dim}) expects local tensor size {stored_size}: "
+                    f"{local_tensor.size()=}"
                 )
-            if not local_tensor.is_contiguous():
-                local_tensor = local_tensor.contiguous()
-                updated_local_tensor = True
-        elif local_tensor.size() != padded_sharded_size and not same_local_tensor:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
@@ -1521,7 +1528,7 @@ class FSDPParam:
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
-        if updated_local_tensor or not same_local_tensor:
+        if not same_local_tensor:
             self._sharded_param_data = local_tensor.view(-1)
         if not isinstance(self.sharded_param, DTensor):
             raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")

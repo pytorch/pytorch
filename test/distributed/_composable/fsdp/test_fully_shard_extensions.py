@@ -773,6 +773,16 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output.sum().backward()
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_uneven_shard_dim1(self):
+        # Lazy init rejects the extension, also when patched in after init
+        model = nn.Linear(9, 2, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+        self._patch_extension(model, lambda *args: None, lambda *args, **kwargs: None)
+        msg = "FSDP does not support uneven sharding on dim 1 for all-gather extensions"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            model(torch.randn((2, 9), device=device_type))
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_layout_cache(self):
         # FSDP caches layouts per kind, dim, size and dtype of the inputs. Shard(1)
         # reassembles a plain tensor's rows but concatenates a dim-0 record.
