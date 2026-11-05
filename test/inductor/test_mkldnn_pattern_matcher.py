@@ -961,9 +961,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
-    @skipIfXpu(
-        msg="Different with CPU, two linears will be concat on XPU for better performance"
-    )
     def test_linear_add_bias(self, device="cpu"):
         self.device = device
 
@@ -1034,7 +1031,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @skipIfXpu
     def test_linear_add_bias_float_constant(self, device="cpu"):
         # Regression test: is_linear_add_bias should not crash when
         # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
@@ -1209,9 +1205,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    @skipIfXpu(
-        msg="Different with CPU, two linears will be concat on XPU for better performance"
-    )
     def test_multi_linear_share_same_input(self, device="cpu"):
         self.device = device
 
