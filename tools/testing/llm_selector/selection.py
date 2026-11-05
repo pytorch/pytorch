@@ -202,8 +202,8 @@ RUN_ALL_PATTERNS = [
     r"^conftest\.py$",
     r"^test/(.*/)?(\.?pytest\.ini|pyproject\.toml|tox\.ini|setup\.cfg)$",
     r"^torch/testing/_internal/common_(utils|device_type|dtype|cuda)\.py$",
-    # assertEqual.
-    r"^torch/testing/_comparison\.py$",
+    # torch.testing: assertEqual, make_tensor and freeze_rng_state.
+    r"^torch/testing/(__init__|_comparison|_creation|_utils)\.py$",
     # Loads the failure lists for every dynamo and inductor wrapped run.
     r"^torch/testing/_internal/dynamo_test_failures\.py$",
     r"^tools/testing/",
@@ -222,8 +222,8 @@ RUN_ALL_PATTERNS = [
     # pull.yml and trunk.yml call these from the PR; they decide which tests TD drops.
     r"^\.github/workflows/(target_determination|llm_td_retrieval)\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
-    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl)/",
-    r"^\.github/scripts/(filter_test_configs|parse_ref)\.py$",
+    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl|pytest-cache-download|pytest-cache-upload)/",
+    r"^\.github/scripts/(filter_test_configs|parse_ref|pytest_cache|pytest_caching_utils)\.py$",
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
@@ -344,7 +344,8 @@ def import_pattern(modules: Iterable[str]) -> str:
         forms.append(rf"from[[:space:]]+{dotted(parents)}[[:space:]]+{names_of}")
     quoted = rf"""load_test_module\(["']({paths})["']\)"""
     quoted += rf"""|import_module\(["']{names}["'][,)[:space:]]"""
-    return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
+    # A statement can also follow a `;` or a compound statement's `:`.
+    return rf"(^|[;:])[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
 def alts(names: Iterable[str]) -> str:
@@ -372,7 +373,7 @@ def data_file_readers(
     deleted: Collection[str] = (),
 ) -> tuple[list[str], dict[str, list[str]]] | None:
     """The paths under test/ that may read an edited file under test/ that is
-    neither a failure list nor a test file (see edited_tests), split into those
+    neither a failure list nor a candidate test file, split into those
     reading a file that needs no further reader and, by file, those reading a
     file only they can read. A file needs no further reader when it is deleted,
     when NO_READER_RE matches it, when a driver runs its directory (see
@@ -390,7 +391,7 @@ def data_file_readers(
         for f in changed_files
         if f.startswith("test/")
         and not FAILURE_LIST_DIR_RE.match(f)
-        and not (f.endswith(".py") and edited_tests([f], candidates))
+        and not (f.endswith(".py") and normalize_test_name(f, candidates))
     ]
     exempt = [
         f
@@ -686,7 +687,7 @@ class Selection:
         if "inductor" in missing:
             return cls(
                 run_all=True,
-                reason="an edited inductor failure list entry could not be resolved to the file defining its test class or was rejected",
+                reason="an edited inductor failure list entry was not resolved to the file defining its test class",
             )
         # The dynamo_cpython config runs only the tests under test/cpython/.
         if "dynamo_cpython" in missing:
