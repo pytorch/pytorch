@@ -75,21 +75,37 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
 
 
 class ShardJob:
-    def __init__(self) -> None:
+    def __init__(self, head_start: float = 0.0) -> None:
+        # Seconds of work the shard runs outside these tests, e.g. extra
+        # test.sh steps pinned to it.
+        self.head_start = head_start
         self.serial: list[ShardedTest] = []
         self.parallel: list[ShardedTest] = []
 
-    def get_total_time(self) -> float:
-        """Default is the value for which to substitute if a test has no time"""
+    def get_tests_time(self, parallel: Sequence[ShardedTest] | None = None) -> float:
+        """Estimated time of this shard's tests, with the parallel ones started
+        in the given order (default: assignment order)."""
         procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
-        for test in self.parallel:
+        for test in self.parallel if parallel is None else parallel:
             min_index = procs.index(min(procs))
             procs[min_index] += test.get_time()
-        time = max(procs) + sum(test.get_time() for test in self.serial)
-        return time
+        return max(procs) + sum(test.get_time() for test in self.serial)
 
-    def convert_to_tuple(self) -> tuple[float, list[ShardedTest]]:
-        return (self.get_total_time(), self.serial + self.parallel)
+    def get_total_time(self) -> float:
+        return self.head_start + self.get_tests_time()
+
+    def convert_to_tuple(
+        self, run_order: Callable[[ShardedTest], float] | None = None
+    ) -> tuple[float, list[ShardedTest]]:
+        """Return the estimated time of this shard's tests and the tests, serial
+        ones first, each group sorted by run_order (default: assignment order)."""
+        serial, parallel = self.serial, self.parallel
+        if run_order is not None:
+            serial, parallel = (
+                sorted(serial, key=run_order),
+                sorted(parallel, key=run_order),
+            )
+        return (self.get_tests_time(parallel), serial + parallel)
 
 
 def get_with_pytest_shard(
@@ -229,52 +245,51 @@ def calculate_shards(
     sort_by_time: bool = True,
     allow_pytest_sharding: bool = True,
     xdist_workers: Callable[[str], int] | None = None,
+    head_start: Sequence[float] | None = None,
 ) -> list[tuple[float, list[ShardedTest]]]:
-    """Assign tests to num_shards shards; see get_with_pytest_shard for
-    xdist_workers."""
+    """Assign tests to num_shards shards, longest first.
+
+    Each shard lists its serial tests, then its parallel tests. With
+    sort_by_time, each group runs longest first; otherwise it keeps the order of
+    `tests` (e.g. TD priority). head_start gives each shard's seconds of work
+    outside these tests, which the assignment balances against but the returned
+    times exclude; it counts as serial time when sizing the serial shards, an
+    approximation when a head-start shard is not one of them. Every shard must
+    pass the same head_start, since each computes the full plan and keeps its
+    own slice. Tests without a known time are dealt round robin after the timed
+    ones and ignore head_start. See get_with_pytest_shard for xdist_workers."""
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
-
-    # Divide tests into pytest shards
-    if sort_by_time:
-        known_tests = [
-            x
-            for x in tests
-            if get_duration(x, test_file_times, test_class_times) is not None
-        ]
-        unknown_tests = [x for x in tests if x not in known_tests]
-
-        pytest_sharded_tests = sorted(
-            get_with_pytest_shard(
-                known_tests,
-                test_file_times,
-                test_class_times,
-                allow_pytest_sharding=allow_pytest_sharding,
-                xdist_workers=xdist_workers,
-            ),
-            key=lambda j: j.get_time(),
-            reverse=True,
-        ) + get_with_pytest_shard(
-            unknown_tests,
-            test_file_times,
-            test_class_times,
-            allow_pytest_sharding=allow_pytest_sharding,
-            xdist_workers=xdist_workers,
+    head_start = [0.0] * num_shards if head_start is None else list(head_start)
+    if len(head_start) != num_shards:
+        raise AssertionError(
+            f"head_start has {len(head_start)} entries for {num_shards} shards"
         )
-    else:
-        pytest_sharded_tests = get_with_pytest_shard(
-            tests,
-            test_file_times,
-            test_class_times,
-            allow_pytest_sharding=allow_pytest_sharding,
-            xdist_workers=xdist_workers,
-        )
+
+    # Divide tests into pytest shards and assign the longest first; tests
+    # without a time keep their order and are assigned round robin at the end.
+    pytest_sharded_tests = get_with_pytest_shard(
+        tests,
+        test_file_times,
+        test_class_times,
+        allow_pytest_sharding=allow_pytest_sharding,
+        xdist_workers=xdist_workers,
+    )
     del tests
+    # Keyed by identity: ShardedTest is unhashable, and every piece stays alive
+    # in the shards until this function returns.
+    input_order = {id(test): i for i, test in enumerate(pytest_sharded_tests)}
+    pytest_sharded_tests = sorted(
+        (test for test in pytest_sharded_tests if test.time is not None),
+        key=lambda test: test.get_time(),
+        reverse=True,
+    ) + [test for test in pytest_sharded_tests if test.time is None]
 
     serial_tests = [test for test in pytest_sharded_tests if must_serial(test.name)]
     parallel_tests = [test for test in pytest_sharded_tests if test not in serial_tests]
 
-    serial_time = sum(test.get_time() for test in serial_tests)
+    # Head-start work runs alone on its shard, like serial tests.
+    serial_time = sum(test.get_time() for test in serial_tests) + sum(head_start)
     parallel_time = sum(test.get_time() for test in parallel_tests)
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
     estimated_time_per_shard = total_time / num_shards
@@ -299,7 +314,7 @@ def calculate_shards(
     else:
         num_serial_shards = max(math.ceil(serial_time / total_time * num_shards), 1)
 
-    sharded_jobs = [ShardJob() for _ in range(num_shards)]
+    sharded_jobs = [ShardJob(seconds) for seconds in head_start]
     shard(
         sharded_jobs=sharded_jobs[:num_serial_shards],
         pytest_sharded_tests=serial_tests,
@@ -312,7 +327,8 @@ def calculate_shards(
         serial=False,
     )
 
-    return [job.convert_to_tuple() for job in sharded_jobs]
+    run_order = None if sort_by_time else (lambda test: input_order[id(test)])
+    return [job.convert_to_tuple(run_order) for job in sharded_jobs]
 
 
 def get_test_case_configs(dirpath: str) -> None:
