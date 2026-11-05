@@ -1014,6 +1014,7 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(write_cache.called, not routed)
 
 
+@instantiate_parametrized_tests
 class TunableOpPretuneRealGpuTest(InductorTestCase):
     """The ladder against a real compile, worker and results file.
 
@@ -1022,12 +1023,95 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     hipBLASLt accepts and that each reaches the file runtime reads.
 
     InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it, so the compile always starts
-    cold and this does not exercise the cache bypass;
-    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
+    per test and clears _pretuned_gemms with it, so each test starts cold.
+    test_a_warm_rerun_still_lowers_the_gemm compiles twice inside that one
+    directory, which is what actually exercises the cache bypass --
+    test_enabled_modes_bypass_the_fx_graph_cache only asks the validator
+    about a hand-built aten graph, so it cannot see the AOT level at all.
     """
 
     hw_classification = HardwareClassification.CUDA
+
+    def _tunableop_process_cleanup(self):
+        """Restore the process-global TunableOp knobs a compile leaves set."""
+        tunable = torch.cuda.tunable
+        self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
+        for getter, setter in (
+            (tunable.is_enabled, tunable.enable),
+            (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
+            (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
+            (tunable.get_rotating_buffer_size, tunable.set_rotating_buffer_size),
+        ):
+            self.addCleanup(setter, getter())
+        self.addCleanup(tunableop.shutdown_worker)
+
+    @parametrize("bundled", (False, True))
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_a_warm_rerun_still_lowers_the_gemm(self, bundled):
+        """The bypass, end to end: a second compile must still reach the worker.
+
+        test_enabled_modes_bypass_the_fx_graph_cache asks the validator about a
+        hand-built aten graph, which is what the Inductor FX cache sees.
+        AOTAutogradCache asks the same validator about the pre-decomposition
+        graph, so only a real second compile can show whether the entry was
+        bypassed at both levels. Counted as submissions to the worker rather
+        than rows in the results file: the first compile tunes the shape, so a
+        second one that does lower it records nothing new.
+        """
+        def fn(a, b):
+            return a @ b
+
+        self._tunableop_process_cleanup()
+        tunable = torch.cuda.tunable
+        submitted: list = []
+        real_submit = tunableop.submit
+
+        def _spy(job, timeout=None):
+            submitted.append(job)
+            return real_submit(job, timeout=timeout)
+
+        with tempfile.TemporaryDirectory(prefix="tunableop_warm_rerun_") as d:
+            tunable.enable(False)
+            tunable.set_filename(os.path.join(d, "results.csv"), False)
+            tunable.set_max_tuning_duration(1)
+            tunable.set_max_tuning_iterations(1)
+            tunable.set_rotating_buffer_size(0)
+            with (
+                config.patch(
+                    {
+                        "cuda.autotune_tunableop_mode": "tune",
+                        # Ladder off: its per-bucket memo is module-global and
+                        # would make the second compile look idle even when it
+                        # did lower. The routed aten candidate has no memo.
+                        "cuda.autotune_tunableop_ladder": False,
+                        # Needed for the aten candidate to be benchmarked at
+                        # all; with one choice autotune returns without it.
+                        "max_autotune": True,
+                    }
+                ),
+                torch._functorch.config.patch({"bundled_autograd_cache": bundled}),
+                mock.patch(
+                    "torch._inductor.tunableop.submit", side_effect=_spy
+                ),
+            ):
+                a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                torch.compile(fn)(a, b)
+                cold = len(submitted)
+                # Same graph, same cache directory, fresh Dynamo state: the
+                # shape a deployed second run would take.
+                torch._dynamo.reset()
+                torch.compile(fn)(a, b)
+                warm = len(submitted) - cold
+
+        self.assertGreater(cold, 0, "the cold compile never routed a GEMM")
+        self.assertGreater(
+            warm,
+            0,
+            "the warm rerun never routed a GEMM: the compile was served from "
+            "cache, so the pass did no work",
+        )
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfWindows(msg="pass_fds not supported on Windows.")

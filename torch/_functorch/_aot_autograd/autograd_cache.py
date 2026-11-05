@@ -384,6 +384,21 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
+    # Both TunableOp passes do their work while lowering, so an AOT hit skips
+    # all of it and the rerun records nothing. Unlike the Inductor-level
+    # bypass this cannot ask whether the graph holds a CUDA GEMM: the graph
+    # here is pre-decomposition, so its targets are torch-level and carry no
+    # aten overload packet. Mode set means no AOT caching, CPU-only and
+    # GEMM-free graphs included -- the cost of a tune or reuse pass, which is
+    # a deliberate offline run, not the steady state.
+    from torch._inductor import tunableop
+
+    if tunableop.is_enabled():
+        raise BypassAOTAutogradCache(
+            "TunableOp tune and reuse modes must lower every CUDA GEMM; unset "
+            "cuda.autotune_tunableop_mode (TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE)"
+        )
+
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
     ):
