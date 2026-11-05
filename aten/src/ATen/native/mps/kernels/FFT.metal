@@ -371,6 +371,11 @@ constexpr uint first_radix(uint n) {
   return p2 > 1 ? p2 : n % 3 == 0 ? 3 : n % 5 == 0 ? 5 : 1;
 }
 
+// Radices of the dynamic kernel families, one bit per radix. Bit 1 is length 1.
+#define MASK_P2 ((1u << 1) | (1u << 2) | (1u << 4) | (1u << 8) | (1u << 16))
+#define MASK_P235 (MASK_P2 | (1u << 3) | (1u << 5))
+#define MASK_P2357 (MASK_P235 | (1u << 7))
+
 template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 kernel void fft_kernel(
     device const I* in,
@@ -384,7 +389,7 @@ kernel void fft_kernel(
     uint tid [[thread_index_in_threadgroup]],
     uint3 tg [[threadgroup_position_in_grid]]) {
   constexpr bool G = F & kFFTGlobalStage;
-  constexpr bool P2 = !G && MASK && (MASK & ~kFFTMaskP2) == 0;
+  constexpr bool P2 = !G && MASK && (MASK & ~MASK_P2) == 0;
   constexpr bool four_step = F & kFFTFourStepTwiddles;
   constexpr uint EPT = fft_points_per_thread(N, F);
   const uint n = N ? N : p.n, B = C || G ? 1 : p.tgb, J = N ? N / EPT : p.jt;
@@ -475,68 +480,48 @@ kernel void fft_kernel(
 // Only single-pass kernels come in fp16: anything longer runs in fp32
 #define INST_FP32(IK, OK, F, X) INSTF(IK##_f, OK##_f, F, X)
 
-// Flag combinations the planner requests (LD extended loads, ST extended
-// stores, TW four-step twiddles), as literals because #F is part of the kernel
-// name
-#define F_PLAIN 0
-#define F_INV 1
-#define F_PACKED 2
-#define F_TW 4
-#define F_INV_TW 5
-#define F_PACKED_TW 6
-#define F_ST 8
-#define F_INV_ST 9
-#define F_LD_TW 20
-#define F_INV_LD_TW 21
-#define F_LD_ST 24
-#define F_GLOBAL 32
-#define F_INV_GLOBAL 33
-#define F_PACKED_GLOBAL 34
-#define F_INV_PACKED_GLOBAL 35
-#define F_INV_PACKED_REAL 67
-#define F_INV_GLOBAL_REAL 97
-
+// Lists of (input kind, output kind, F) the planner requests, F as the literal
+// sum of the kFFT* bits (FFT.h) since #F ends the kernel name: 1 inverse, 2
+// packed loads, 4 four-step twiddles, 8 extended stores, 16 extended loads, 32
+// global stage, 64 packed real stores
 #define C_f float2
 #define C_h half2
 #define R_f float
 #define R_h half
 
-#define BASIC(_, X)   \
-  _(C, C, F_PLAIN, X) \
-  _(C, C, F_INV, X) _(R, C, F_PACKED, X) _(C, R, F_INV_PACKED_REAL, X)
-#define EXT1(_, X) \
-  _(C, C, F_TW, X) _(C, C, F_INV_TW, X) _(C, C, F_ST, X) _(C, C, F_INV_ST, X)
-#define EXT2(_, X)    \
-  _(C, C, F_LD_TW, X) \
-  _(C, C, F_INV_LD_TW, X) _(C, C, F_LD_ST, X) _(R, C, F_TW, X)
-#define EXT3(_, X)        \
-  _(R, C, F_PACKED_TW, X) \
-  _(R, C, F_LD_TW, X) _(R, C, F_LD_ST, X) _(C, R, F_INV_ST, X)
+#define BASIC(_, X) \
+  _(C, C, 0, X)     \
+  _(C, C, 1, X) _(R, C, 2, X) _(C, R, 67, X)
+#define EXT1(_, X) _(C, C, 4, X) _(C, C, 5, X) _(C, C, 8, X) _(C, C, 9, X)
+#define EXT2(_, X) \
+  _(C, C, 20, X)   \
+  _(C, C, 21, X) _(C, C, 24, X) _(R, C, 4, X)
+#define EXT3(_, X) \
+  _(R, C, 6, X)    \
+  _(R, C, 20, X) _(R, C, 24, X) _(C, R, 9, X)
 #define EXT(_, X) EXT1(_, X) EXT2(_, X) EXT3(_, X)
-#define PLAIN(_, X) BASIC(_, X) _(R, C, F_PLAIN, X) _(C, R, F_INV, X)
+#define PLAIN(_, X) BASIC(_, X) _(R, C, 0, X) _(C, R, 1, X)
 
 // The smallest family factoring n (radix branches cost registers); p16: 1, 16
 #define FAMILY(MASK, NAME) \
   PLAIN(INST, (MASK, NAME, 0, false)) EXT(INST_FP32, (MASK, NAME, 0, false))
-FAMILY(kFFTMaskP2, "p2_")
-FAMILY(kFFTMaskP235, "p235_")
-FAMILY(kFFTMaskP2357, "p2357_")
-PLAIN(INST, (kFFTMaskP16, "p16_", 0, false))
+FAMILY(MASK_P2, "p2_")
+FAMILY(MASK_P235, "p235_")
+FAMILY(MASK_P2357, "p2357_")
+PLAIN(INST, (((1u << 16) | (1u << 1)), "p16_", 0, false))
 
-#define FIXED_X(N) ((N & (N - 1) ? kFFTMaskP235 : kFFTMaskP2), #N "_", N, false)
+#define FIXED_X(N) ((N & (N - 1) ? MASK_P235 : MASK_P2), #N "_", N, false)
 #define FIXED(N) BASIC(INST, FIXED_X(N)) EXT(INST_FP32, FIXED_X(N))
 FFT_FIXED_SIZES(FIXED)
 
-#define CONTIG(N) BASIC(INST, (kFFTMaskP2, #N "c_", N, true))
+#define CONTIG(N) BASIC(INST, (MASK_P2, #N "c_", N, true))
 FFT_CONTIG_SIZES(CONTIG)
 
-#define GLOBAL1(_, X) \
-  _(float2, float2, F_GLOBAL, X) _(float2, float2, F_INV_GLOBAL, X)
-#define GLOBAL2(_, X) \
-  _(float, float2, F_PACKED_GLOBAL, X) _(float2, float2, F_INV_PACKED_GLOBAL, X)
+#define GLOBAL1(_, X) _(float2, float2, 32, X) _(float2, float2, 33, X)
+#define GLOBAL2(_, X) _(float, float2, 34, X) _(float2, float2, 35, X)
 #define GLOBAL(R)                                   \
   GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false)) \
   GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false)) \
-  INSTF(float2, float, F_INV_GLOBAL_REAL, ((1u << R), "g" #R "_", 0, false))
+  INSTF(float2, float, 97, ((1u << R), "g" #R "_", 0, false))
 FFT_GLOBAL_RADICES(GLOBAL)
-INSTF(float2, float2, F_GLOBAL, ((1u << kFFTUnpackRadix), "g1_", 0, false))
+INSTF(float2, float2, 32, ((1u << kFFTUnpackRadix), "g1_", 0, false))
