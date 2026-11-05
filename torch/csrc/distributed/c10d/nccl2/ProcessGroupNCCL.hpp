@@ -74,6 +74,9 @@ TORCH_API void waitForNcclChildComm(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+// A coalescing window's batch result; defined in ProcessGroupNCCLBackend.cpp.
+struct CoalescedBatchResult;
+
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
  public:
@@ -749,6 +752,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
   // returns a work covering all of them.
   std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_works_;
+  // Shared by the batch's send()/recv() sentinels; filled in endCoalescing().
+  std::shared_ptr<CoalescedBatchResult> coalescing_result_;
 
   // Configs issued between startTimeEstimate() and endTimeEstimate().
   bool time_estimate_active_ = false;
