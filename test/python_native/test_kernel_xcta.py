@@ -3,7 +3,6 @@
 
 import sys
 import unittest
-from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -130,7 +129,8 @@ class TestKernelXcta(TestCase):
 
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
     def test_welford_long_subrows(self, dtype):
-        """Split one Welford row into the 16384-element sub-rows B200 selects."""
+        """Split one Welford row into 16384-element sub-rows, the geometry B200's Welford
+        rule launches; TestXctaConfig pins the selector."""
         n = 1 << 22
         x = torch.randn(1, n, device="cuda", dtype=dtype)
         key = f"long_subrows_{dtype}"
@@ -144,31 +144,49 @@ class TestKernelXcta(TestCase):
         want = torch.var_mean(x.double(), dim=1, correction=0)
         self.assertEqual(res, tuple(w.float() for w in want), atol=1e-4, rtol=1e-4)
 
-    def test_b200_welford_subrow_target(self):
-        # Only single-row Welford at the 256 MiB and 2 GiB anchors shortens sub-rows.
-        default = kernel_xcta._XctaConfig().subrow_target
-        welford, plain = T.WelfordOps(correction=0), T.SumOps(acc=cutlass.Float32)
-        n = 128 << 20
-        cases = (
-            ((1, n), welford, "var0", 16384),
-            ((2, n), welford, "var0", default),
-            ((1, n - 2048), welford, "var0", default),
-            ((1, n), plain, "sum", default),
+
+class TestXctaConfig(TestCase):
+    @parametrize(
+        "case,updates,subrow_target",
+        [
+            ("var_256mib", {}, 16384),
+            ("fp32_2gib", {"dtype": torch.float32, "N": 512 << 20}, 16384),
+            ("var_mean", {"nouts": 2, "welford_outs": 2}, 16384),
+            (
+                "var_mean_trait",
+                {"nouts": 2, "welford_outs": T.welford_outputs(T.VarMeanOps())},
+                16384,
+            ),
+            (
+                "return_mean",
+                {"welford_outs": T.welford_outputs(T.WelfordOps(return_mean=True))},
+                8192,
+            ),
+            ("two_rows", {"M": 2}, 8192),
+            ("off_anchor", {"N": (128 << 20) - 2048}, 8192),
+            ("sum", {"welford_outs": 0}, 8192),
+            ("acc64", {"acc_bits": 64}, 8192),
+            ("sm90", {"cc": (9, 0)}, 8192),
+        ],
+        name_fn=lambda case, updates, subrow_target: case,
+    )
+    def test_b200_welford_subrow_target(self, case, updates, subrow_target):
+        """Lengthen sub-rows only for single-row Welford at the 256 MiB and 2 GiB anchors."""
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float16,
+            N=128 << 20,
+            M=1,
+            nouts=1,
+            welford_outs=1,
+            acc_bits=32,
         )
-        caps = SimpleNamespace(cc=(10, 0))
-        for shape, trait, key, want in cases:
-            x = torch.empty(shape, device="cuda", dtype=torch.float16)
-            with (
-                self.subTest(shape=shape, key=key),
-                mock.patch.object(kernel_xcta._hw, "caps", return_value=caps),
-                mock.patch.dict(kernel_xcta._GEOM, clear=True),
-            ):
-                kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
-                # Geometry keys carry the sub-row target sixth.
-                self.assertEqual({k[5] for k in kernel_xcta._GEOM}, {want})
+        cfg = kernel_xcta.select_xcta_config(**(args | updates))
+        self.assertEqual(cfg, kernel_xcta._XctaConfig(subrow_target=subrow_target))
 
 
 instantiate_parametrized_tests(TestKernelXcta)
+instantiate_parametrized_tests(TestXctaConfig)
 
 
 if __name__ == "__main__":
