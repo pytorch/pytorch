@@ -49,6 +49,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -206,7 +207,7 @@ class TestFP8Types(TestCase):
         self.assertIn("triton_helpers.fp8e4m3fn_to_float32", code)
         self.assertNotIn("'in_ptr0': '*fp8e4nv'", code)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @config.patch({"force_disable_caches": True})
     def test_float8_e4m3fn_uint8_storage_arithmetic_falls_back(self, device):
         bits = torch.arange(256, device=device, dtype=torch.uint8)
@@ -2666,7 +2667,7 @@ class TestE8M0ToFloat(TestCase):
         (torch.float64, torch.float32, torch.float16, torch.bfloat16),
     )
     @parametrize("direct_input", (False, True))
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "xpu"])
     def test_conversion(self, device, dtype, direct_input):
         raw = torch.tensor(
             [0, 1, 126, 127, 128, 129, 254, 255],
@@ -2692,7 +2693,7 @@ class TestE8M0ToFloat(TestCase):
             self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
 
     @parametrize("direct_input", (False, True))
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "xpu"])
     def test_codegen(self, device, direct_input):
         raw = torch.tensor(
             [0, 1, 126, 127, 128, 129, 254, 255],
@@ -2718,7 +2719,7 @@ class TestE8M0ToFloat(TestCase):
         code_str = "\n".join(code)
         self.assertIn("4194304", code_str)
         self.assertIn("2139095041", code_str)
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             self.assertIn("bitcast=True", code_str)
             self.assertNotIn("libdevice.ldexp", code_str)
         else:
@@ -2831,7 +2832,7 @@ class TestCvtE8M0Rceil(TestCase):
         self.assertEqual(compiled_result, expected)
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+@unittest.skipIf(not HAS_GPU_AND_TRITON, "Requires GPU + Triton")
 @unittest.skipIf(
     utils.is_nvidia_sm100_or_later(),
     "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
@@ -2858,12 +2859,13 @@ class TestE8M0Log2PatternBitManip(TestCase):
             return biased.to(torch.uint8)
 
         inp = torch.tensor(
-            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device="cuda", dtype=torch.float32
+            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device=GPU_TYPE, dtype=torch.float32
         )
         eager_result = fn(inp)
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, eager_result)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6057")
     def test_correct_for_values_one_ulp_above_power_of_two(self):
         """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
 
@@ -2886,14 +2888,15 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=GPU_TYPE, dtype=torch.float32)
 
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device=GPU_TYPE
         )
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6057")
     def test_regression_gh178045_encoding_correctness(self):
         """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
 
@@ -2928,11 +2931,11 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=GPU_TYPE, dtype=torch.float32)
 
         # The correct e8m0 encoding for "1 ULP above 2^e" is E8M0_BIAS + (e+1)
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device=GPU_TYPE
         )
 
         torch._dynamo.reset()
@@ -2947,7 +2950,9 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestE8M0ToFloat, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 if __name__ == "__main__":
