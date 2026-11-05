@@ -14,7 +14,7 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
 from tools.testing.target_determination.heuristics.edited_by_pr import (
@@ -65,10 +65,11 @@ ALWAYS_COVERED = {
     ),
 }
 LLM_SELECTION_FILE = "llm_selection.json"
-# The selector, run by the default branch's workflow, writes this file into
-# ADDITIONAL_CI_FILES_FOLDER, and run_test.py reads it from the PR's checkout.
-# The reader requires exactly its own SELECTION_VERSION and SWEEPS, so a bump
-# or a new sweep turns selection off for unrebased PRs until they rebase.
+# The selector, run by the default branch's workflow, will write this file into
+# ADDITIONAL_CI_FILES_FOLDER, and run_test.py will read it from the PR's checkout.
+# The reader rejects any other SELECTION_VERSION, unknown keys and unknown
+# sweeps, so a bump, a new field or a new sweep turns selection off for
+# unrebased PRs until they rebase.
 SELECTION_VERSION = 1
 # Modules per import_pattern that importers() greps for: Linux caps one
 # argument, such as the pattern git grep gets, at 128 KiB.
@@ -383,9 +384,8 @@ def grep_failure(e: Exception) -> Selection:
 class Selection:
     files: set[str] = field(default_factory=set)
     sweeps: set[str] = field(default_factory=set)
-    # The model's own run_all, a fallback of from_model_output (see its
-    # docstring), or one of select_tests.select() and main(), which set it
-    # without asking the model or when the selector fails.
+    # The model's own run_all, or a fallback when the selector fails or does
+    # not ask the model.
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should skip the files the selection does not cover,
@@ -489,14 +489,16 @@ class Selection:
     @classmethod
     def from_json(cls, d: dict) -> Selection:
         """The selection in `d`; ValueError, KeyError or TypeError unless `d`
-        is a selection file of SELECTION_VERSION. Without candidates it covers
-        only the files it names, so it must be run_all."""
+        is a selection file of SELECTION_VERSION. Without candidates it would
+        skip every file it does not name, so it must be run_all."""
         if (
             not isinstance(d, dict)
             or type(d.get("version")) is not int
             or d["version"] != SELECTION_VERSION
         ):
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
+        if unknown := set(d) - {"version", *(f.name for f in fields(cls))}:
+            raise ValueError(f"unknown keys {sorted(unknown)}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = (
             d["run_all"],
