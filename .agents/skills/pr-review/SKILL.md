@@ -187,7 +187,7 @@ Go through **every changed line** in the diff and evaluate it against the review
 When you have the Agent tool, whatever the PR's size, and unless the Time Budget's convergence or posting window is open (see "Time Budget"), spawn these reviewers in parallel, each over the full diff with the checklist's path and the `REVIEW.md` paths covering the changed files, with which files each one covers (Step 1, item 5), and each told to report every candidate problem with its `file:line` and evidence:
 
 - **Correctness and security:** logic, edge cases, error handling, concurrency, dtype, device and shape handling, and the checklist's security items.
-- **Tests:** missing coverage, tests that cannot fail or do not check what they claim, flakiness.
+- **Tests:** how the PR's tests are written: tests that cannot fail or do not check what they claim, flakiness, and the checklist's Testing items. Whether the PR needs more tests is not a finding unless the checklist or an applicable `REVIEW.md` requires the test. A test the PR deletes without explaining why is a finding.
 - **API and compatibility** (also give it [bc-guidelines.md](bc-guidelines.md)): public names, backward compatibility, docstrings, error messages, documentation.
 - **Conventions and PyTorch infrastructure:** existing utilities and idioms the PR should use, the checklist's PyTorch Infrastructure items, performance.
 
