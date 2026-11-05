@@ -15569,21 +15569,29 @@ class TestCommon(TestCase):
         self.assertEqual(result, x, atol=1, rtol=0)
 
     def test_fft_private_ops_edge_dims(self, device):
-        # The private ops wrap negative dims like the CPU
+        # The private ops wrap negative dims and transform empty axes like the CPU
         x = torch.randn(3, 16, dtype=torch.complex64, device=device)
         self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+        self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
+
+    @parametrize("n", [176400, 1 << 25])  # global-memory passes; real lengths beyond two tile passes
+    def test_rfft_long(self, device, n):
+        x = torch.randn(2, n)
+        y = torch.fft.rfft(x.to(device)).cpu()
+        self.assertEqual(y, torch.fft.rfft(x), atol=5e-2, rtol=1e-4)
 
     @dtypes(torch.float32, torch.float16)
     @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 4096, 4099])
-    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("kind", ["fft", "ifft", "rfft"])
     @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
     def test_fft_strides(self, device, dtype, n, kind, layout):
         complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
-        x = torch.randn(5, 2 * n + 3, device=device, dtype=complex_dtype)
-        x = {"sliced": x[:, 3::2], "transposed": x[:, :n].t().contiguous().t()}.get(layout, x[:, :n].contiguous())
-        op = getattr(torch.fft, kind)
-        kwargs = {"norm": "ortho"}
-        reference = op(x.cpu().to(torch.complex128), **kwargs)
+        length = 2 * n if kind == "rfft" else n
+        x = torch.randn(5, 2 * length + 3, device=device, dtype=dtype if kind == "rfft" else complex_dtype)
+        x = {"sliced": x[:, 3::2], "transposed": x[:, :length].t().contiguous().t()}.get(layout, x[:, :length].contiguous())
+        op = torch._fft_r2c if kind == "rfft" else getattr(torch.fft, kind)
+        kwargs = {"dim": [1], "normalization": 1, "onesided": True} if kind == "rfft" else {"norm": "ortho"}
+        reference = op(x.cpu().to(torch.complex128 if x.is_complex() else torch.float64), **kwargs)
         if layout == "out":
             kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
         result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else 2e-5
