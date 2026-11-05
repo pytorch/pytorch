@@ -3794,7 +3794,7 @@ class _TestParamsMaxPoolBase:
     def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
-            # Overlapping stride first: some tests only use the first sample
+            # Overlapping stride first: inductor_one_sample (test_torchinductor_opinfo.py) runs only the first sample
             'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
@@ -3872,12 +3872,6 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
-    # Under autograd, return_indices=False calls max_pool*d_with_indices and drops the indices, so its
-    # grad samples duplicate the return_indices=True ones. MPS max_pool2d is the exception: it has its
-    # own kernel and backward (max_pool2d_backward).
-    mps_max_pool2d = op_info.name == 'nn.functional.max_pool2d' and torch.device(device).type == 'mps'
-    if requires_grad and not mps_max_pool2d:
-        params_generator.kwargs['return_indices'] = [True]
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
