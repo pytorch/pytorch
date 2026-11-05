@@ -2,11 +2,13 @@
 
 #include <torch/headeronly/cuda/KernelUtils.h>
 #include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Half.h>
 
 #include <cuda_runtime.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -50,6 +52,37 @@ template <typename scalar_t, typename index_t>
 __global__ void specialized_add_kernel(scalar_t* out, index_t numel) {
   torch::headeronly::fastSpecializedAtomicAdd(
       out, index_t{0}, numel, static_cast<scalar_t>(1));
+}
+
+__global__ void complex_math_kernel(float* out) {
+  const torch::headeronly::complex<float> z(1.0f, 0.5f);
+  float sum = 0.0f;
+
+  sum += torch::headeronly::acos(z).real();
+  sum += torch::headeronly::acosh(z).real();
+  sum += torch::headeronly::asin(z).real();
+  sum += torch::headeronly::asinh(z).real();
+  sum += torch::headeronly::atan(z).real();
+  sum += torch::headeronly::atanh(z).real();
+  sum += torch::headeronly::cos(z).real();
+  sum += torch::headeronly::cosh(z).real();
+  sum += torch::headeronly::exp(z).real();
+  sum += torch::headeronly::expm1(z).real();
+  sum += torch::headeronly::log(z).real();
+  sum += torch::headeronly::log10(z).real();
+  sum += torch::headeronly::log1p(z).real();
+  sum += torch::headeronly::log2(z).real();
+  sum += torch::headeronly::pow(z, z).real();
+  sum += torch::headeronly::sin(z).real();
+  sum += torch::headeronly::sinh(z).real();
+  sum += torch::headeronly::sqrt(z).real();
+  sum += torch::headeronly::tan(z).real();
+  sum += torch::headeronly::tanh(z).real();
+
+  sum += c10_complex_math::pow(z, 2.0f).real();
+  sum += ::sqrt(z).real();
+  sum += std::tanh(z).real();
+  out[0] = sum;
 }
 
 // Scatters +1 into each of `indices` of a `numel`-element tensor starting
@@ -245,5 +278,18 @@ TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {
   float host = -1.0f;
   CUDA_ASSERT_OK(cudaMemcpy(&host, d, sizeof(float), cudaMemcpyDeviceToHost));
   EXPECT_EQ(host, 1.0f);
+  cudaFree(d);
+}
+
+TEST(TestComplexMath, DeviceBranches) {
+  SKIP_IF_NO_CUDA();
+  float* d = nullptr;
+  CUDA_ASSERT_OK(cudaMalloc(&d, sizeof(float)));
+  complex_math_kernel<<<1, 1>>>(d);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
+  float host = std::numeric_limits<float>::quiet_NaN();
+  CUDA_ASSERT_OK(cudaMemcpy(&host, d, sizeof(float), cudaMemcpyDeviceToHost));
+  EXPECT_TRUE(std::isfinite(host));
   cudaFree(d);
 }
