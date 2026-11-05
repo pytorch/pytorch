@@ -38,8 +38,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/FFT_metallib.h>
 #endif
 
-// Stage radices of the threadgroup kernels (the kFFTMaskP2357 set) and of the global-memory passes, largest first
-constexpr auto kRadices = {16, 8, 4, 2, 3, 5, 7};
 #define FFT_RADIX_ENTRY(R) R,
 constexpr auto kGlobalRadices = {FFT_GLOBAL_RADICES(FFT_RADIX_ENTRY)};
 constexpr auto kFixedSizes = {FFT_FIXED_SIZES(FFT_RADIX_ENTRY)};
@@ -50,8 +48,8 @@ constexpr int64_t kLongPoints = 1 << 17;
 // Past this length, tiles strided on both sides no longer coalesce
 constexpr int64_t kMaxCoalescedPoints = 1024;
 
-// Radix sequence of n over `rs` (largest first; {1} for n = 1), empty when n has other prime factors
-c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n, std::initializer_list<int> rs) {
+// Radix sequence of n over `rs` (largest first, threadgroup kernels by default; {1} for n = 1), empty for other factors
+c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n, std::initializer_list<int> rs = {16, 8, 4, 2, 3, 5, 7}) {
   c10::SmallVector<uint32_t, kFFTMaxStages> plan(n == 1, 1);
   for (const auto r : rs) {
     for (; n % r == 0; n /= r) {
@@ -62,7 +60,7 @@ c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n, std::initializer_li
 }
 
 bool is_smooth(int64_t n) {
-  return !radices(n, kRadices).empty();
+  return !radices(n).empty();
 }
 
 // Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
@@ -77,11 +75,12 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
   if (t.defined()) {
     return t;
   }
-  const bool chirp = kind == Table::Chirp || kind == Table::ChirpFFT;
   const auto k = kind == Table::W2
       ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
       : at::arange(n, at::kDouble);
-  const auto angle = chirp ? k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n) : k.mul(-2 * M_PI / n);
+  const auto angle = kind == Table::W || kind == Table::W2
+      ? k.mul(-2 * M_PI / n)
+      : k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n);
   const auto c = at::polar(at::ones_like(angle), angle);
   const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
   const auto b = kind == Table::ChirpFFT
@@ -91,19 +90,14 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
 }
 
 struct Dim {
-  int64_t size;
-  int64_t in_stride;
-  int64_t out_stride;
+  int64_t size, in_stride, out_stride;
 };
 
 struct Batch {
   Tensor in;
   Tensor out;
   c10::SmallVector<Dim, c10::metal::max_ndim> dims; // Innermost first
-  // Transforms, and the element strides along the axis
-  int64_t numel = 1;
-  int64_t si = 0;
-  int64_t so = 0;
+  int64_t numel, si, so; // Transforms, and the element strides along the axis
 };
 
 // Batch dims of a pass along `dim` (every other dim), innermost first, merged where both tensors allow it
@@ -114,10 +108,7 @@ Batch collapse(const Tensor& in, const Tensor& out, int64_t dim) {
       dims.push_back(d);
     }
   }
-  std::sort(dims.begin(), dims.end(), [&](auto a, auto b) {
-    return std::make_pair(std::abs(in.stride(a)), std::abs(out.stride(a))) <
-        std::make_pair(std::abs(in.stride(b)), std::abs(out.stride(b)));
-  });
+  std::ranges::sort(dims, {}, [&](auto d) { return std::make_pair(std::abs(in.stride(d)), std::abs(out.stride(d))); });
 
   Batch b{in, out, {}, 1, in.stride(dim), out.stride(dim)};
   for (const auto d : dims) {
@@ -153,7 +144,7 @@ struct Pass {
 
 // Encodes n-point transforms of the batch (half: packed real pairs)
 void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool half, const Pass& x) {
-  const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
+  const auto radix = x.global ? radices(x.global, kGlobalRadices) : radices(n);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
   const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
   const uint32_t n_u32 = to_u32(n);
@@ -455,10 +446,6 @@ Tensor _fft_r2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 Tensor _fft_c2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
-  if (dim.empty()) {
-    return self.clone();
-  }
   auto out = at::empty(self.sizes(), self.options());
   return _fft_c2c_mps_out(self, dim, normalization, forward, out);
 }
@@ -467,12 +454,10 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   TORCH_CHECK(self.scalar_type() == kFloat || self.scalar_type() == kHalf, "Only float and half dtypes are supported");
   TORCH_CHECK(out.scalar_type() == c10::toComplexType(self.scalar_type()));
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
-  const auto input_sizes = self.sym_sizes();
-  SymDimVector out_sizes(input_sizes.begin(), input_sizes.end());
+  SymDimVector out_sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   const auto last_dim = maybe_wrap_dim(dim.back(), self.dim());
-  auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
   if (onesided) {
-    out_sizes[last_dim] = last_dim_halfsize;
+    out_sizes[last_dim] = out_sizes[last_dim] / 2 + 1;
   }
   at::native::resize_output_symint(out, out_sizes);
   if (self.numel() == 0) {
@@ -504,15 +489,8 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
   const auto last_dim = maybe_wrap_dim(dim.back(), self.dim());
-  TORCH_INTERNAL_ASSERT(self.size(last_dim) == last_dim_size / 2 + 1,
-                        "_fft_c2r: expected ",
-                        last_dim_size / 2 + 1,
-                        " elements in dim ",
-                        last_dim,
-                        ", but got ",
-                        self.size(last_dim));
-  const auto in_sizes = self.sym_sizes();
-  SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  TORCH_INTERNAL_ASSERT(self.size(last_dim) == last_dim_size / 2 + 1);
+  SymDimVector out_sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   out_sizes[last_dim] = last_dim_size;
   at::native::resize_output_symint(out, out_sizes);
   if (out.numel() == 0) {
