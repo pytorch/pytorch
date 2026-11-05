@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -21,6 +22,21 @@ class Info:
     _setup_context_fn: Callable | None
 
 
+class _ForwardInputs(threading.local):
+    """What a custom op's autograd kernel passes its autograd.Function's
+    forward besides the op's arguments: the dispatch keyset and the
+    keyword-only arguments. Passing them to apply would make them inputs of the
+    autograd.Function, which backward would then have to hide. A stack because
+    the code between the push and forward can call custom ops itself; they
+    push and pop their own entries before forward pops this one."""
+
+    def __init__(self) -> None:
+        self.stack: list[tuple[_C.DispatchKeySet, dict[str, Any]]] = []
+
+
+_forward_inputs = _ForwardInputs()
+
+
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
@@ -32,25 +48,39 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         utils.is_tensorlist_like_type(a.type)
         for a in (*schema.arguments, *schema.returns)
     )
-
-    @dataclass
-    class Metadata:
-        keyset: _C.DispatchKeySet
-        keyword_only_args: dict[str, Any]
+    # What utils.fill_defaults would add, computed once: schema.arguments
+    # builds new Argument objects on every access. A list default is mutable,
+    # so each call must get its own, and schemas with one use fill_defaults.
+    positional_defaults = tuple(
+        a.default_value for a in schema.arguments if not a.kwarg_only
+    )
+    kwarg_only_defaults = {
+        a.name: a.default_value for a in schema.arguments if a.kwarg_only
+    }
+    has_list_default = any(
+        isinstance(d, list)
+        for d in (*positional_defaults, *kwarg_only_defaults.values())
+    )
 
     def redispatch_no_grad(keyset, args, kwargs):
+        pyobj_dispatcher = op._pyobj_dispatcher
+        if pyobj_dispatcher is not None:
+            return pyobj_dispatcher.redispatch_below_autograd(keyset, *args, **kwargs)
         with _C._AutoDispatchBelowAutograd():
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            return result
+            return op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
 
     def forward(ctx, *args):
-        metadata = args[-1]
-        args = args[:-1]
-
+        keyset, kwargs = _forward_inputs.stack.pop()
         with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+            pyobj_dispatcher = op._pyobj_dispatcher
+            if pyobj_dispatcher is not None:
+                result = pyobj_dispatcher.redispatch_below_autograd(
+                    keyset, *args, **kwargs
+                )
+            else:
+                result = op.redispatch(
+                    keyset & _C._after_autograd_keyset, *args, **kwargs
+                )
             if info._setup_context_fn:
                 # The Dispatcher will remove args that are equal to their default
                 # values from (args, kwargs). We're going to add it back so that
@@ -62,7 +92,11 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 # adds a new default arg, then they must update
                 # their setup_context (along with the rest of their operator
                 # registrations)
-                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                if has_list_default:
+                    args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                else:
+                    args = (*args, *positional_defaults[len(args) :])
+                    kwargs = {**kwarg_only_defaults, **kwargs}
 
                 if has_kwarg_only_args:
                     info._setup_context_fn(
@@ -74,13 +108,8 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
     def backward(ctx, *grads):
         if info._backward_fn:
-            try:
-                prev_needs_input_grad = ctx.needs_input_grad
-                ctx.needs_input_grad = prev_needs_input_grad[:-1]
-                result = info._backward_fn(ctx, *grads)
-            finally:
-                ctx.needs_input_grad = prev_needs_input_grad
-            num_actual_inputs = len(prev_needs_input_grad) - 1
+            result = info._backward_fn(ctx, *grads)
+            num_actual_inputs = len(ctx.needs_input_grad)
             valid_return_counts = {num_actual_inputs, num_positional_args}
             actual = len(result) if isinstance(result, tuple) else 1
             if actual not in valid_return_counts:
@@ -107,8 +136,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     )
                 if has_tensorlist_like_args:
                     result = result[:num_actual_inputs]
-                return (*result, None)
-            return result, None
+            return result
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
             f"formula was registered. "
@@ -142,7 +170,16 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             return redispatch_no_grad(keyset, args, keyword_only_args)
 
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
-            result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
+            stack = _forward_inputs.stack
+            entry = (keyset, keyword_only_args)
+            stack.append(entry)
+            try:
+                result = Generated.apply(*args)  # type: ignore[attr-defined]
+            finally:
+                # forward pops the entry. If apply raised before forward ran,
+                # remove it so no other forward can take it.
+                if stack and stack[-1] is entry:
+                    stack.pop()
         else:
             result = redispatch_no_grad(keyset, args, keyword_only_args)
         return result

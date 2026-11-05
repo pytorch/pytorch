@@ -2,11 +2,12 @@
 import collections
 import inspect
 import logging
+import operator
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -299,6 +300,11 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
+        # Runs instead of a kernel disabled with set_kernel_enabled. The lambda
+        # keeps _disable_dynamo from unwrapping fn or setting attributes on it.
+        self._init_fn_without_dynamo: Callable[..., object] = torch._disable_dynamo(
+            lambda *args, **kwargs: fn(*args, **kwargs)
+        )
 
         self._backend_fns: dict[str | None, Callable] = {}
         # The utils.caller_module() of each register_kernel call, by dispatch key,
@@ -400,40 +406,53 @@ class CustomOpDef:
     def _make_backend_fn(
         self, device_type: str | None, fn: Callable[..., object]
     ) -> Callable[..., object]:
-        """Wraps fn to choose between the default implementation or the
-        device-specific one, depending on whether device_type's kernel is
-        disabled."""
+        """Makes a stand-in for fn in _backend_fns. Its first call replaces it
+        with fn wrapped to disable Dynamo. Building that wrapper needs
+        torch._dynamo, which can't be imported while torch is being imported,
+        and some custom ops are defined then.
+        """
 
-        @torch._disable_dynamo
-        def wrapped_fn(*args, **kwargs):
-            if device_type in self._disabled_kernel:
-                return self._init_fn(*args, **kwargs)
-            else:
-                return fn(*args, **kwargs)
+        def stub(*args: object, **kwargs: object) -> object:
+            from torch._dynamo.eval_frame import _disabled_wrapper
 
-        return wrapped_fn
+            wrapper = _disabled_wrapper(fn, wrapping=False, explicit_signature=True)
+            if self._backend_fns.get(device_type) is stub:
+                self._backend_fns[device_type] = wrapper
+            return wrapper(*args, **kwargs)
+
+        return stub
 
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
+        def get_module():
+            return inspect.getmodule(self._backend_fns[device_type])
+
+        is_inplace = self._is_inplace
+        is_out = self._is_out
+        out_kwarg_names = self._out_kwarg_names
+        schema = self._opoverload._schema
+        check_aliasing = not (is_inplace or is_out or schema._is_view_op())
+        any_output_is_alias = _C._any_output_is_alias_to_input_or_output
+
         def backend_impl(*args, **kwargs):
-            result = self._backend_fns[device_type](*args, **kwargs)
+            if device_type in self._disabled_kernel:
+                result = self._init_fn_without_dynamo(*args, **kwargs)
+            else:
+                result = self._backend_fns[device_type](*args, **kwargs)
 
-            def get_module():
-                fn = self._backend_fns[device_type]
-                return inspect.getmodule(fn)
-
-            schema = self._opoverload._schema
-            if self._is_inplace:
+            if check_aliasing:
+                if any_output_is_alias(args, kwargs, result):
+                    raise utils._aliasing_constraint_error(self._name, get_module)
+            elif is_inplace:
                 if result is not args[0]:
                     raise RuntimeError(
                         f"{self._name} (with implementation in {get_module()}): "
                         "An operator tagged with torch.Tag.inplace must "
                         "return its first argument."
                     )
-            elif self._is_out:
-                out_kwarg_names = self._out_kwarg_names
+            elif is_out:
                 if len(out_kwarg_names) == 1:
                     returns_out_args = result is kwargs[out_kwarg_names[0]]
                 else:
@@ -451,14 +470,6 @@ class CustomOpDef:
                         "An operator tagged with torch.Tag.out must "
                         "return its mutable keyword-only arguments."
                     )
-            elif not schema._is_view_op():
-                utils._c_check_aliasing_constraint(
-                    self._name,
-                    args,
-                    kwargs,
-                    result,
-                    get_module,
-                )
             return result
 
         return backend_impl
@@ -815,11 +826,30 @@ class CustomOpDef:
 
     def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
-        self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
+        # When no input needs grad, autograd_impl only redispatches below
+        # Autograd (redispatch_no_grad), which the dispatcher can do itself.
+        self._lib.impl(
+            self._name,
+            autograd_impl,
+            "Autograd",
+            with_keyset=True,
+            _skip_if_no_grad=True,
+        )
 
     def _register_adinplaceorview_dispatcher_impl(self) -> None:
         schema = self._opoverload._schema
         if not (schema._is_view_op() or schema.is_mutable):
+            return
+
+        if not schema._is_view_op():
+            # Bumps the version of each mutated argument, then redispatches
+            # past ADInplaceOrView, in C++.
+            mutated_args = [
+                i
+                for i, a in enumerate(schema.arguments)
+                if a.alias_info is not None and a.alias_info.is_write
+            ]
+            self._lib.m.register_mutation_version_bump(self._name, mutated_args)  # type: ignore[union-attr]
             return
 
         self._lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
@@ -828,16 +858,11 @@ class CustomOpDef:
             self._register_mutation_version_bump(schema)
 
     def _register_mutation_version_bump(self, schema: _C.FunctionSchema) -> None:
+        # For a mutable view op; see _register_adinplaceorview_dispatcher_impl.
         mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
-
-        is_view = schema._is_view_op()
-        if is_view:
-            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
-                f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
-            )
-        else:
-            op = self._opoverload
-            after_ADInplaceOrView_keyset = _C._after_ADInplaceOrView_keyset
+        original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+            f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
+        )
 
         def adinplaceorview_impl(keyset, *args, **kwargs):
             # The dispatcher normalizes non-keyword-only arguments into args.
@@ -848,12 +873,8 @@ class CustomOpDef:
             for key in mutated_keys:
                 if key in kwargs:
                     increment_version(kwargs[key])
-            if is_view:
-                # View ops need the C++ fallback for aliasing tracking
-                return original_kernel.call_boxed(keyset, *args, **kwargs)
-            # Non-view mutable ops: increment_version is sufficient,
-            # redispatch directly past ADInplaceOrView to the backend.
-            return op.redispatch(keyset & after_ADInplaceOrView_keyset, *args, **kwargs)
+            # View ops need the C++ fallback for aliasing tracking
+            return original_kernel.call_boxed(keyset, *args, **kwargs)
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -889,8 +910,17 @@ class CustomOpDef:
 
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
-    def __call__(self, *args, **kwargs):
-        return self._opoverload(*args, **kwargs)
+    if TYPE_CHECKING:
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    else:
+        # Python looks up __call__ on the type. With a C getter, calling a
+        # CustomOpDef calls the OpOverload's _op (the PyObject dispatch fast
+        # path) with the caller's arguments, without a Python frame.
+        # OpOverload.__call__ only calls _op. Dynamo traces the call as a call
+        # to the OpOverload (see UserDefinedObjectVariable.call_function).
+        __call__ = property(operator.attrgetter("_opoverload._op"))
 
     def register_vmap(
         self,
