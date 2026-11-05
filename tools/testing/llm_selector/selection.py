@@ -1,6 +1,6 @@
 """The test selection an LLM makes for one change, and how CI applies it.
 
-A selection names test files (paths under test/ without .py), every file of the model's
+A selection names test files (paths under test/ without .py), never test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
 when the selection names the file, names that config as a sweep, or is run_all,
@@ -56,7 +56,8 @@ TEST_SH_GLOBS = (
     "inductor",
 )
 # The files the branches of those globs run with run_test.py --inductor, which
-# compiles every test, so like a sweep any change can break them.
+# compiles every test, so like a sweep any change can break them. A config gets
+# the set of the first TEST_SH_GLOBS entry it contains.
 ALWAYS_COVERED = {
     "inductor_cpp_wrapper": frozenset({"test_torch"}),
     "inductor": frozenset(
@@ -64,15 +65,17 @@ ALWAYS_COVERED = {
     ),
 }
 LLM_SELECTION_FILE = "llm_selection.json"
-# The selector runs from the default branch and run_test.py from the PR, so
-# bump this whenever an older reader would misread the selection file.
+# The selector, run by the default branch's workflow, writes this file into
+# ADDITIONAL_CI_FILES_FOLDER, and run_test.py reads it from the PR's checkout.
+# The reader requires exactly its own SELECTION_VERSION and SWEEPS, so a bump
+# or a new sweep turns selection off for unrebased PRs until they rebase.
 SELECTION_VERSION = 1
 # Modules per import_pattern that importers() greps for: Linux caps one
 # argument, such as the pattern git grep gets, at 128 KiB.
 MAX_GREP_MODULES = 100
 # Longest chain of test modules importing each other that importers() follows.
 MAX_IMPORT_HOPS = 8
-# More edited failure-list classes than this are not looked up one by one, so
+# More edited failure-list classes than this are not looked up at all, so
 # everything runs for an inductor entry, the cpython/ tests for a CPython entry
 # and the dynamo_wrapped sweep for the others, as for a class that is not found.
 MAX_FAILURE_LIST_CLASSES = 50
@@ -84,8 +87,9 @@ ENFORCEMENT_ENABLED = False
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
 # custom_backend and mobile, which have none, and
-# torch_openreg/tests, whose driver test_openreg is never a candidate), and
-# TD's ADDITIONAL_MAPPINGS.
+# torch_openreg/tests, whose driver test_openreg is never a candidate), TD's
+# ADDITIONAL_MAPPINGS, and the tests that read a file that neither importers
+# nor data_file_readers traces to them.
 DRIVER_MAPPINGS = {
     # run_test.py runs test_cpp_extensions_aot.py as both aot drivers.
     **{
@@ -103,8 +107,21 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
     "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
     "test_ao_sparsity": [r"^test/ao/"],
-    # It checks every CPython test .diff against its .py.
-    "test_cpython_diff_sync": [r"^test/cpython/.*\.diff$"],
+    # It checks every CPython test .diff against its .py, with these tools.
+    "test_cpython_diff_sync": [
+        r"^test/cpython/v3_13/",
+        r"^tools/(cpython_diff_sync|regenerate_cpython_diffs)\.py$",
+    ],
+    # They load the library that CMakeLists.txt builds from custom_ops.cpp.
+    **{
+        t: [r"^test/inductor/(CMakeLists\.txt|custom_ops\.cpp)$"]
+        for t in (
+            "inductor/test_aot_inductor_custom_ops",
+            "inductor/test_gpu_cpp_wrapper",
+        )
+    },
+    # It parses the tracker at import.
+    "test_cpp_api_parity": [r"^test/cpp_api_parity/parity-tracker\.md$"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
     # test_jit imports jit/test_backend_nnapi.py, which imports test_nnapi.py.
@@ -123,7 +140,7 @@ DRIVER_MAPPINGS = {
     },
     "onnx/test_models_onnxruntime": [r"^test/onnx/test_models\.py$"],
     "distributed/launcher/test_run": [
-        r"^test/distributed/launcher/bin/test_script(_init_method|_is_torchelastic_launched)?\.py$"
+        r"^test/distributed/launcher/bin/test_script(\.sh|(_init_method|_is_torchelastic_launched)?\.py)$"
     ],
     "distributed/test_launcher": [r"^test/distributed/bin/test_script\.py$"],
     "test_package": [r"^test/package/"],
@@ -139,7 +156,8 @@ FAILURE_LIST_DIR_RE = re.compile(
 )
 FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
 # test_dynamic_shapes.py and test_inline_and_install.py name DynamicShapesFoo and
-# InlineAndInstallFoo after Foo (see make_test_cls_with_patches).
+# InlineAndInstallFoo after Foo (see make_test_cls_with_patches), but other
+# files define such classes under the full name.
 PATCHED_PREFIX_RE = re.compile(r"^(DynamicShapes|InlineAndInstall)(?=[A-Z])")
 # instantiate_device_type_tests names TestFooCPU after TestFoo.
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
@@ -148,11 +166,13 @@ EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
 # Edited files under test/ that need no reader: docs; the sources, build files
 # and scripts of the C++ tests under test/cpp/, which are never candidates and
 # so always run (importers still finds the Python tests importing a .py file);
-# and the files of the directories without a candidate test, which only CI
-# scripts build and run_test.py never runs, except the .py files of
-# custom_operator, which has candidates.
+# the files of custom_backend, inductor/cpp, jit_hooks and mobile, which no
+# candidate reads and run_test.py never runs, and the non-.py files of
+# custom_operator, which only CI scripts build; and run_doctests.sh, which
+# nothing under test/ runs.
 NO_READER_RE = re.compile(
     r"\.(md|rst)$|^test/cpp/.*(\.(c|cc|cpp|cu|h|hpp|py|sh)|/CMakeLists\.txt)$"
+    r"|^test/run_doctests\.sh$"
     r"|^test/(custom_backend|inductor/cpp|jit_hooks|mobile)/"
     r"|^test/custom_operator/.*(?<!\.py)$"
 )
@@ -199,7 +219,7 @@ RUN_ALL_PATTERNS = [
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types|torch_tpu)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu(-rocm|-xpu)?/)",
+    r"^\.ci/docker/(build\.sh|requirements-(ci|docs)\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|java/|ubuntu(-rocm|-xpu)?/)",
 ]
 
 
@@ -220,7 +240,9 @@ def normalize_test_name(
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
-    """The candidates the change edits, and those that run an edited file, such as test_jit for test/jit/*."""
+    """The candidates the change edits, and their drivers: the DRIVER_MAPPINGS
+    tests that run an edited file, such as test_jit for test/jit/*, but not the
+    candidates that import one."""
     edited = {
         n
         for f in changed_files
@@ -255,7 +277,10 @@ def importers(
     following the importers takes more than MAX_IMPORT_HOPS hops (grep rounds)."""
     found: set[str] = set()
     seen: set[str] = set()
-    frontier = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
+    paths = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
+    # A run_test.py entry's path, such as test/test_autoload_enable.py, stands
+    # for the file it runs.
+    frontier = {TEST_FILES.get(f[5:-3], f) for f in paths}
     for hop in range(MAX_IMPORT_HOPS + 1):
         tests = edited_tests(sorted(frontier), candidates)
         found |= tests
@@ -279,11 +304,12 @@ def import_pattern(modules: Iterable[str]) -> str:
     # directory; and load_test_module (a SourceFileLoader) takes the path.
     # The CPython tests under test/cpython redirect test.<name> to <name>, so
     # `from test import <name>` imports their sibling module <name>.
-    # A parenthesized `from <package> import (`, or `from . import (`, may
-    # span lines, so it counts as importing every module of that package (for
-    # `from . import (`, of any package). Without a relative or `test.` prefix,
-    # a name that is also a standard library module, such as random, imports
-    # that module instead, and a bare `test` the test/ package.
+    # A parenthesized `from <package> import (` may span lines, so it counts
+    # as importing every module of that package, and `from . import (`,
+    # `from .. import (` or `from test import (` every module of any package.
+    # Without a relative or `test.` prefix, a name that is also a standard
+    # library module, such as random, imports that module instead, and a bare
+    # `test` the test/ package.
     bare = sys.stdlib_module_names | {"test"}
 
     def dotted(names: set[str]) -> str:
@@ -345,7 +371,7 @@ def data_file_readers(
     test/cpp/ other than a .md or .rst that names it outside a // comment line.
     None for more than MAX_DATA_FILES files only their readers can read. A file
     is read by the paths naming its basename outside a # comment line, as
-    test_run.py runs bin/test_script.py; a .py file also by its importers; and
+    test_run.py runs bin/test_script.sh; a .py file also by its importers; and
     an expect file (see EXPECT_RE) also by the paths defining a class whose
     name starts with its test class, as test_tensorboard.py builds the path of
     TestTensorBoard.*.expect for TestTensorBoardSummary."""
@@ -420,10 +446,11 @@ def failure_list_sources(
     naming a class that is not looked up (no `grep`, see importers, or more
     than MAX_FAILURE_LIST_CLASSES classes) or that `grep` does not find in a
     .py file. Also the list ("dynamo", "inductor" or "compiled_autograd", even
-    for a CPython entry) holding an entry that dynamo_test_failures.py rejects
-    at import: one in a subdirectory or, for the dynamo and inductor lists, one
-    without exactly one "." or one edited in both the expected failures and
-    the skips."""
+    for a CPython entry) holding an entry it does not look up: one in a
+    subdirectory or, for the dynamo and inductor lists, one without exactly one
+    "." (dynamo_test_failures.py rejects both at import, except in
+    compiled_autograd_skips) or one edited in both the expected failures and
+    the skips (a clash it rejects at import, or a move)."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
@@ -438,15 +465,14 @@ def failure_list_sources(
             unparsed.add(d[1])
         elif m := FAILURE_LIST_RE.match(f):
             cpython = d[1] == "dynamo" and re.match(r"CPython\d+-", name)
-            classes.setdefault(PATCHED_PREFIX_RE.sub("", m[2]), set()).add(
-                "dynamo_cpython" if cpython else m[1]
-            )
+            classes.setdefault(m[2], set()).add("dynamo_cpython" if cpython else m[1])
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
         return [], unparsed.union(*classes.values())
     sources: list[str] = []
     missing = unparsed
     for c, lists in sorted(classes.items()):
-        found = [f for f in grep(class_pattern([c])) if f.endswith(".py")]
+        names = [c, PATCHED_PREFIX_RE.sub("", c)]
+        found = [f for f in grep(class_pattern(names)) if f.endswith(".py")]
         sources += found
         if not found:
             missing |= lists
@@ -480,6 +506,9 @@ def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
 
+TEST_INFRA_REASON = "change touches test infrastructure"
+
+
 def parse_model_output(
     out: object, candidates: set[str], grep: Callable[[str], list[str]] | None = None
 ) -> tuple[set[str], set[str]]:
@@ -495,7 +524,8 @@ def parse_model_output(
     selects no candidate is malformed, and so is a `tests` name that matches no
     candidate: the model was told to copy the names from the candidate list.
     With `grep` (see importers), a name of a file that a driver runs, such as
-    jit/test_freezing, names the driver instead."""
+    jit/test_freezing, names the driver instead. A run_all answer's `tests` and
+    `dirs` are not checked, since everything runs."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     if missing := sorted({"tests", "dirs", "sweeps", "run_all", "reason"} - out.keys()):
@@ -518,7 +548,8 @@ def parse_model_output(
         # Everything runs, so the names need no lookup.
         return set(), set(sweeps)
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
-    if grep is not None and not all(names.values()):
+    paths: set[str] = set()
+    if grep is not None and (dirs or not all(names.values())):
         # Every file under test/ at the head.
         paths = set(grep("^"))
         names = {
@@ -534,7 +565,8 @@ def parse_model_output(
             .removeprefix("test/")
         )
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
-        in_dir |= edited_tests([f"test/{prefix}/"], candidates)
+        under = [p for p in paths if p.startswith(f"test/{prefix}/")]
+        in_dir |= edited_tests(under if grep else [f"test/{prefix}/"], candidates)
         if not in_dir:
             raise ValueError(f"dirs entry {d!r} matches no test file")
         files |= in_dir
@@ -607,7 +639,8 @@ class Selection:
         other lists it reports add the dynamo_wrapped sweep. `deleted` lists the
         changed files the change deletes, including the old path of every
         moved file, since changed_files diffs with --no-renames: a deleted file
-        needs no reader, so one missing from it can run everything.
+        needs no reader, so one missing from it can run everything. So do more
+        than MAX_DATA_FILES edited files under test/ that need a reader.
 
         A missing or malformed output, a change to test infrastructure, an
         edited inductor failure list naming an unknown class, too many import
@@ -636,7 +669,7 @@ class Selection:
         except GREP_ERRORS as e:
             return grep_failure(e)
         if needs_run_all(changed_files):
-            return cls(run_all=True, reason="change touches test infrastructure")
+            return cls(run_all=True, reason=TEST_INFRA_REASON)
         # Before any grep, so that a failed one cannot turn it into an error.
         if isinstance(out, dict) and out["run_all"]:
             return cls(
@@ -654,7 +687,7 @@ class Selection:
         if "inductor" in missing:
             return cls(
                 run_all=True,
-                reason="an edited inductor failure list entry could not be resolved to the file defining its test class",
+                reason="an edited inductor failure list entry could not be resolved to the file defining its test class or was rejected",
             )
         # The dynamo_cpython config runs only the tests under test/cpython/.
         if "dynamo_cpython" in missing:
