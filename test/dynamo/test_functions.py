@@ -542,13 +542,21 @@ partial_fn = functools.partial(fn, scale=2)
             def __call__(self, *args, **kwargs):
                 return super().__call__(*args, **kwargs)
 
+        class PartialSubclassWithReduce(functools.partial):
+            def __reduce__(self):
+                return (PartialSubclassWithReduce, (capture_args,))
+
         def fn(inner, x):
             p = functools.partial(inner, "b")
             return p.func is capture_args, p.args, x.sin()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(3)
-        for cls in (PartialSubclass, PartialSubclassWithCall):
+        for cls in (
+            PartialSubclass,
+            PartialSubclassWithCall,
+            PartialSubclassWithReduce,
+        ):
             inner = cls(capture_args, "a")
             self.assertEqual(opt_fn(inner, x), fn(inner, x))
         self.assertTrue(opt_fn(PartialSubclass(capture_args, "a"), x)[0])
@@ -594,6 +602,81 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertIs(res.func, capture_args)
         self.assertEqual(res.args, ref.args)
         self.assertEqual(res.keywords, ref.keywords)
+        self.assertEqual(res(1), ref(1))
+
+    def test_functools_partial_nested_instance_reduce_ignored(self):
+        # The dict state is read through partial's own __reduce__, so an
+        # instance __reduce__ (which itself creates the dict) cannot hide it.
+        def fn(inner, x):
+            p = functools.partial(inner)
+            return p.func is capture_args, p.args, x.sin()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "a")
+        saved = functools.partial.__reduce__(inner)
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+
+        inner.__reduce__ = lambda: saved
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertFalse(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_functools_partial_nested_vars_not_flattened(self):
+        # vars() and hasattr() create the instance dict, so CPython stops
+        # flattening.
+        def traced(x):
+            inner = functools.partial(capture_args, "a")
+            vars(inner)
+            p = functools.partial(inner)
+            return p.func is inner, p.args, x.sin()
+
+        def sourced(inner, x):
+            vars(inner)
+            p = functools.partial(inner)
+            return p.func is inner, p.args, x.sin()
+
+        x = torch.randn(3)
+        opt_traced = torch.compile(traced, backend="eager", fullgraph=True)
+        self.assertEqual(opt_traced(x), traced(x))
+        self.assertTrue(opt_traced(x)[0])
+        opt_sourced = torch.compile(sourced, backend="eager", fullgraph=True)
+        self.assertEqual(
+            opt_sourced(functools.partial(capture_args, "a"), x),
+            sourced(functools.partial(capture_args, "a"), x),
+        )
+        self.assertTrue(opt_sourced(functools.partial(capture_args, "a"), x)[0])
+
+        def sourced_hasattr(inner, x):
+            hasattr(inner, "__dict__")
+            p = functools.partial(inner)
+            return p.func is inner, p.args, x.sin()
+
+        opt_hasattr = torch.compile(sourced_hasattr, backend="eager", fullgraph=True)
+        self.assertTrue(opt_hasattr(functools.partial(capture_args, "a"), x)[0])
+
+    def test_functools_partial_nested_subclass_func_property_not_flattened(self):
+        # CPython merges the native fields, not a subclass's func property.
+        # Dynamo models the property, so such a subclass is left wrapped, and
+        # the returned partial still calls the stored function.
+        def visible(*args, **kwargs):
+            return "visible"
+
+        class PartialWithFuncProperty(functools.partial):
+            @property
+            def func(self):
+                return visible
+
+        def fn(inner, x):
+            return functools.partial(inner, "b"), x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        inner = PartialWithFuncProperty(capture_args, "a")
+        ref, _ = fn(inner, x)
+        res, _ = opt_fn(inner, x)
         self.assertEqual(res(1), ref(1))
 
     def test_functools_partial_traced_setattr_graph_breaks(self):

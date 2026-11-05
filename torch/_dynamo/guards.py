@@ -163,6 +163,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    FunctoolsPartialDictStateSource,
     GenericAttrSource,
     GetItemSource,
     GlobalSource,
@@ -339,6 +340,10 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
         and value.__self__ is expected.receiver
         and value == getattr(expected.receiver, expected.name)
     )
+
+
+def _functools_partial_dict_state(value: Any) -> object:
+    return functools.partial.__reduce__(value)[2][3]
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -2251,6 +2256,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, FunctoolsPartialDictStateSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_functools_partial_dict_state,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -5493,7 +5507,6 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if (
             id(obj) in self.guard_tree_values
-            and hasattr(obj, "__dict__")
             and not inspect.isclass(obj)
             and not inspect.ismodule(obj)
             and not inspect.isroutine(obj)
@@ -5501,6 +5514,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             and type(obj).__module__.partition(".")[0] != "torch"
             and _pickles_from_dict(type(obj))
             and not hasattr(type(obj), "__slots__")
+            # Last: on some objects (functools.partial) it creates __dict__.
+            and hasattr(obj, "__dict__")
             and id(obj) not in self._whole_compared_values
         ):
             # A guarded user object (a train pipeline, a wrapper holding a

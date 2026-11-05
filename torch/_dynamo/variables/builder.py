@@ -134,7 +134,6 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrProxySource,
     AttrSource,
-    CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
     ConstDictKeySource,
@@ -144,6 +143,7 @@ from ..source import (
     DictSubclassGetItemSource,
     DynamicScalarSource,
     FloatTensorSource,
+    FunctoolsPartialDictStateSource,
     GetItemSource,
     GlobalSource,
     GradSource,
@@ -1680,26 +1680,21 @@ class VariableBuilder:
             # value's instance dict was never created. Subclasses qualify too,
             # before 3.13 only if they keep partial's __call__. Reading
             # value.__dict__ would create the dict, so read the state from
-            # __reduce__, whose dict slot is None while it is unset. Subclasses
-            # overriding __reduce__ are not flattened, as the guard on that
-            # state would call the override.
+            # partial's own __reduce__, whose dict slot is None while it is
+            # unset. CPython merges the native fields, so subclasses that
+            # override func, args or keywords are not flattened.
             flattenable = False
             dict_state_source = None
             value_type = type(value)
-            if value_type.__reduce__ is functools.partial.__reduce__ and (
+            if all(
+                getattr(value_type, name) is getattr(functools.partial, name)
+                for name in ("func", "args", "keywords")
+            ) and (
                 sys.version_info >= (3, 13)
                 or value_type.__call__ is functools.partial.__call__
             ):
-                flattenable = value.__reduce__()[2][3] is None
-                dict_state_source = GetItemSource(
-                    GetItemSource(
-                        CallFunctionNoArgsSource(
-                            AttrSource(self.get_source(), "__reduce__")
-                        ),
-                        2,
-                    ),
-                    3,
-                )
+                flattenable = functools.partial.__reduce__(value)[2][3] is None
+                dict_state_source = FunctoolsPartialDictStateSource(self.get_source())
             return FunctoolsPartialVariable(
                 func_obj,
                 args,

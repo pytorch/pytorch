@@ -411,6 +411,28 @@ class MappingProxyMappingSource(ChainedSource):
         return "__import__('gc').get_referents({0})[0]"
 
 
+# The instance dict state of a functools.partial: the dict, or None while it
+# was never created. Read through partial's own __reduce__, so neither creates
+# the dict nor calls an instance or subclass override.
+@dataclass_with_cached_hash(frozen=True)
+class FunctoolsPartialDictStateSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_reduce() -> None:
+            codegen.load_import_from("functools", "partial")
+            codegen.extend_output(codegen.create_load_attrs("__reduce__"))
+
+        codegen.add_push_null(load_reduce)
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+        for index in (2, 3):
+            codegen.append_output(codegen.create_load_const(index))
+            codegen.append_output(create_binary_subscr())
+
+    @property
+    def _name_template(self) -> str:
+        return "__import__('functools').partial.__reduce__({0})[2][3]"
+
+
 # Represents obj.__mro__ where object is type object
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):

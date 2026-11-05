@@ -3846,6 +3846,9 @@ class FunctoolsPartialVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         # functools.partial uses slots, so attributes are constant
+        if name == "__dict__":
+            # Like reading it, hasattr creates the instance dict.
+            self.flattenable = False
         return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     # func / args / keywords are read-only members on partial objects.
@@ -3871,6 +3874,10 @@ class FunctoolsPartialVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name == "__dict__":
+            # Reading __dict__ creates the instance dict, after which CPython
+            # no longer flattens this partial.
+            self.flattenable = False
         try:
             return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
