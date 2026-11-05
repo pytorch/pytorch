@@ -1894,6 +1894,12 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_16 = st.to(torch.float16)
         self.assertFalse(st_16 is st)
         self.assertEqual(st_16.dtype, torch.float16)
+        # round is forwarded to the local shards, which reject it without a
+        # narrowing conversion
+        st_16 = st.to(torch.float16, round="toward_zero")
+        self.assertEqual(st_16.dtype, torch.float16)
+        with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+            st.to(dtype=st.dtype, round="toward_zero")
         # test device to
         st_cpu = st.to(device=torch.device("cpu"))
         self.assertFalse(st_cpu is st)

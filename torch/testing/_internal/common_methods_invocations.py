@@ -17822,19 +17822,13 @@ op_db: list[OpInfo] = [
     OpInfo(
         "round_to",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
+        # Only CPU and CUDA have kernels.
+        dtypesIfMPS=empty_types(),
+        dtypesIfXPU=empty_types(),
+        supports_out=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_round_to,
-        skips=(
-            # The gradient is the identity (like a plain dtype conversion), which
-            # finite differences of a rounding function do not reproduce; gradcheck
-            # also cannot compare float64 inputs with lower-precision outputs.
-            DecorateInfo(unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_grad"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients", "test_forward_mode_AD"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
-        ),
     ),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16, torch.float16),

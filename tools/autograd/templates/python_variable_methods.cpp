@@ -39,6 +39,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/RoundedConversion.h>
 #include "c10/core/Stream.h"
 
 #include <optional>
@@ -417,11 +419,16 @@ static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, 
 }
 
 // Tensor.to(..., round=...): round_to converts, and a device change is a separate
-// transfer, ordered so that the conversion runs on the accelerator.
+// transfer. The conversion runs on a device with a round_to kernel, preferring
+// an accelerator and, between two, the source, so that less data is
+// transferred.
 static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> device, std::optional<ScalarType> dtype, bool non_blocking, std::optional<c10::MemoryFormat> optional_memory_format, std::string_view mode) {
   pybind11::gil_scoped_release no_gil;
+  const auto target_dtype = dtype.value_or(self.scalar_type());
+  // Fail before any transfer.
+  at::native::check_round_to(self, target_dtype, mode);
   const auto convert = [&](const Tensor& t) {
-    return t.round_to(dtype.value_or(t.scalar_type()), mode, optional_memory_format);
+    return t.round_to(target_dtype, mode, optional_memory_format);
   };
   if (!device.has_value()) {
     return convert(self);
@@ -429,7 +436,11 @@ static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> dev
   const auto move = [&](const Tensor& t) {
     return t.to(t.options().device(*device), non_blocking);
   };
-  if (device->is_cpu() && !self.is_cpu()) {
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::round_to", "out");
+  const auto has_kernel = [](Device d) {
+    return op.hasKernelForDispatchKey(c10::computeDispatchKey(std::nullopt, std::nullopt, d));
+  };
+  if (has_kernel(self.device()) && (!self.is_cpu() || !has_kernel(*device))) {
     return move(convert(self));
   }
   return convert(move(self));
