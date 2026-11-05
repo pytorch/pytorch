@@ -20,7 +20,6 @@ from .base import VariableTracker
 from .builtin import (
     BaseBuiltinVariable,
     BoolBuiltinVariable,
-    BuiltinTypeVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
     BytesBuiltinVariable,
@@ -37,6 +36,7 @@ from .builtin import (
     SetBuiltinVariable,
     StrBuiltinVariable,
     TupleBuiltinVariable,
+    TypeVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -246,7 +246,7 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
-    "BuiltinTypeVariable",
+    "TypeVariable",
     "IntBuiltinVariable",
     "FloatBuiltinVariable",
     "ComplexBuiltinVariable",
