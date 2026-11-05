@@ -483,10 +483,10 @@ void prepareTrace(
   // device rows only when it may trace a GPU. The key goes first because
   // libkineto stops parsing at the first malformed line, and a custom config
   // can contain one.
-  const std::string gpuTracingConfig = has_device_activity
-      ? "GPU_TRACING_ENABLED=true\n"
-      : "GPU_TRACING_ENABLED=false\n";
-  const std::string configStr = gpuTracingConfig +
+  const std::string deviceTracingConfig = has_device_activity
+      ? "DEVICE_TRACING_ENABLED=true\n"
+      : "DEVICE_TRACING_ENABLED=false\n";
+  const std::string configStr = deviceTracingConfig +
       appendCustomConfig(traceIdStr, config.custom_profiler_config) +
       extraConfig;
 

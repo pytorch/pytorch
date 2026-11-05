@@ -116,7 +116,7 @@ TEST(SyncActivityProfilerHandler, GpuTracingFollowsEachTraceConfig) {
     EXPECT_EQ(profiler.resetCalls, 2 * traces);
   };
 
-  runTrace("GPU_TRACING_ENABLED=false");
+  runTrace("DEVICE_TRACING_ENABLED=false");
   expectHookCalls(0);
 
   // GPU tracing is allowed by default.
@@ -124,7 +124,7 @@ TEST(SyncActivityProfilerHandler, GpuTracingFollowsEachTraceConfig) {
   expectHookCalls(1);
 
   // An earlier GPU trace does not arm a later trace that opts out.
-  runTrace("GPU_TRACING_ENABLED=false");
+  runTrace("DEVICE_TRACING_ENABLED=false");
   expectHookCalls(1);
 }
 
@@ -140,7 +140,7 @@ TEST(SyncActivityProfilerHandler, OnlyTracesThatArmGpuReportGpuStop) {
 
   // The GPU tracer keeps its stopped state, which a trace that never armed it
   // must not report.
-  prepareTrace(handler, "GPU_TRACING_ENABLED=false");
+  prepareTrace(handler, "DEVICE_TRACING_ENABLED=false");
   handler.startTrace();
   EXPECT_FALSE(profiler.isStopped());
   handler.stopTrace();
@@ -159,7 +159,7 @@ TEST(SyncActivityProfilerHandler, DynamicToggleFollowsTraceConfig) {
   };
 
   // Toggling a trace that opts out never reaches the GPU hooks.
-  runToggledTrace("GPU_TRACING_ENABLED=false");
+  runToggledTrace("DEVICE_TRACING_ENABLED=false");
   EXPECT_EQ(profiler.enableCalls, 0);
   EXPECT_EQ(profiler.disableCalls, 0);
   EXPECT_EQ(profiler.syncCalls, 0);
@@ -200,7 +200,7 @@ TEST(SyncActivityProfilerHandler, EveryTraceStartsToggledOn) {
 
   // A trace that opts out of GPU tracing still starts toggled on, so its
   // first toggle off reaches its child sessions.
-  prepareTrace(handler, "GPU_TRACING_ENABLED=false");
+  prepareTrace(handler, "DEVICE_TRACING_ENABLED=false");
   EXPECT_TRUE(profiler.toggledOn());
   handler.startTrace();
   handler.stopTrace();

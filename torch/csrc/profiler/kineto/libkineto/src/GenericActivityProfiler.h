@@ -445,7 +445,7 @@ class GenericActivityProfiler {
   // registered, and a trace config that allows it, which can change with
   // every trace.
   bool shouldTraceGpu() const {
-    return !cpuOnly_ && config_ && config_->gpuTracingEnabled();
+    return !cpuOnly_ && config_ && config_->deviceTracingEnabled();
   }
 
   void addOverheadSample(profilerOverhead& counter, int64_t overhead) {

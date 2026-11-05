@@ -92,8 +92,8 @@ class Config : public AbstractConfig {
   // device tracer must honor it too, by returning no session from configure.
   // The KINETO_CONFIG file is parsed after the client's config string, so it
   // can override what the client asked for.
-  [[nodiscard]] bool gpuTracingEnabled() const {
-    return gpuTracingEnabled_;
+  [[nodiscard]] bool deviceTracingEnabled() const {
+    return deviceTracingEnabled_;
   }
 
   void setSelectedActivityTypes(const std::set<ActivityType>& types) {
@@ -348,7 +348,7 @@ class Config : public AbstractConfig {
 
   // Lets a client keep a trace that requested no device activity away from
   // the GPU tracer, which may be shared with other tools.
-  bool gpuTracingEnabled_{true};
+  bool deviceTracingEnabled_{true};
   std::set<ActivityType> selectedActivityTypes_;
 
   // The activity profiler settings are all on-demand

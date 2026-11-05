@@ -109,8 +109,8 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
     if (!cpuOnly) {
       // PTI is first touched when a trace that allows GPU tracing configures
       // the profiler. PyTorch sessions that request only CPU activity never
-      // start it. Configs without GPU_TRACING_ENABLED, such as on-demand ones,
-      // allow it.
+      // start it. Configs without DEVICE_TRACING_ENABLED, such as on-demand
+      // ones, allow it.
       api.registerProfilerFactory([]() -> std::unique_ptr<IActivityProfiler> {
         XpuptiScopeProfilerConfig::registerFactory();
         return std::make_unique<XPUActivityProfiler>();

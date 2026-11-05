@@ -103,7 +103,7 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
     configure(
         const std::set<ActivityType>& activity_types,
         const libkineto::Config& config) {
-  if (!config.gpuTracingEnabled()) {
+  if (!config.deviceTracingEnabled()) {
     return nullptr;
   }
   // Without PTI, the trace goes on without XPU activities, as a CUDA trace

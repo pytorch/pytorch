@@ -863,7 +863,7 @@ TEST_F(AsyncClientTest, StaleGpuStopDoesNotEndOptOutTrace) {
 
   // The stopped state is still set when the next trace opts out.
   startTime = now + seconds(kWarmupSecs + 1);
-  const auto cpuCfg = makeConfig(startTime, "GPU_TRACING_ENABLED = false");
+  const auto cpuCfg = makeConfig(startTime, "DEVICE_TRACING_ENABLED = false");
   handler.configure(*cpuCfg, now);
   now = startTime;
   handler.performRunLoopStep(now, now); // Warmup -> CollectTrace
