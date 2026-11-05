@@ -1103,6 +1103,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         bias,
         dtype,
     ):
+        if inductor_config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count of inlined modular indexing"
+            )
+
         # Reproducer from the coat_lite_mini model in timm
         class M(torch.nn.Module):
             def __init__(self, bias):
