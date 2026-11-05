@@ -208,6 +208,10 @@
 - test/test_mps.py
 - test/inductor/test_mps_basic.py
 
+"ciflow/periodic-strict":
+- torch/testing/_internal/common_modules.py
+- test/test_modules.py
+
 "ciflow/h100-symm-mem":
 - torch/csrc/distributed/c10d/symm_mem/**
 - torch/distributed/_symmetric_memory/**
