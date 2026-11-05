@@ -77,20 +77,21 @@ class AbstractFlightRecorderHookTest:
     def _dump_file_name(self):
         return os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
 
-    def _init_pg(self):
+    def _init_pg(self, enable_reconfigure=False):
         os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         if self._communicates:
-            store = dist.FileStore(self.file_name, self.world_size)
+            self.store = dist.FileStore(self.file_name, self.world_size)
         else:
-            store = FakeStore()
+            self.store = FakeStore()
         dist.init_process_group(
             self.backend_name,
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=self.store,
             timeout=timedelta(seconds=60),
+            enable_reconfigure=enable_reconfigure,
         )
         return dist.group.WORLD
 
@@ -600,6 +601,67 @@ class AbstractFlightRecorderHookTest:
                 ]
             ),
         )
+        hook.remove()
+
+    def test_split_group_not_recorded(self):
+        pg = self._init_pg()
+        if not pg._get_backend(self.device).supports_splitting:
+            self.skipTest(f"{self.backend_name} does not support split_group")
+        hook = self._fr_hook(pg)
+        dist.all_reduce(torch.ones(4, device=self.device))
+        entries = self._hook_entries()
+        self.assertEqual(entries[-1]["profiling_name"], self._name("all_reduce"))
+
+        child = dist.split_group(split_ranks=[list(range(self.world_size))])
+        self.assertEqual(self._hook_entries()[len(entries) :], [])
+        dist.destroy_process_group(child)
+        hook.remove()
+
+    def test_reconfigure_restarts_seq_ids(self):
+        pg = self._init_pg(enable_reconfigure=True)
+        if not pg.supports_reconfigure:
+            self.skipTest(f"{self.backend_name} does not support reconfigure")
+        hook = self._fr_hook(pg)
+        t = torch.ones(4, device=self.device)
+        peer = 1 - self.rank
+
+        def ops():
+            dist.all_reduce(t)
+            if self.rank == 0:
+                dist.send(t, peer)
+            else:
+                dist.recv(t, peer)
+
+        def reconfigure(uuid):
+            self.store.set(
+                f"fr_handle_{uuid}_{self.rank}", dist._get_reconfigure_handle()
+            )
+            handles = [
+                self.store.get(f"fr_handle_{uuid}_{rank}").decode()
+                for rank in range(self.world_size)
+            ]
+            dist._reconfigure(uuid, handles, timeout=timedelta(seconds=60)).wait()
+
+        # A reconfigurable group runs no ops until its first reconfigure.
+        reconfigure(1)
+        ops()
+        # Reconfigure may revoke in-flight work.
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+        before = len(self._hook_entries())
+        reconfigure(2)
+        ops()
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+
+        # The reconfigure itself is not recorded, and the reconfigured group
+        # counts both sequences from one again.
+        entries = self._hook_entries()[before:]
+        self.assertEqual(len(entries), 2, msg=str(entries))
+        self.assertEqual(entries[0]["profiling_name"], self._name("all_reduce"))
+        self.assertEqual(entries[0]["collective_seq_id"], 1)
+        self.assertTrue(entries[1]["is_p2p"], msg=str(entries[1]))
+        self.assertEqual(entries[1]["p2p_seq_id"], 1)
         hook.remove()
 
     def test_entries_parse_with_trace_analyzer(self):

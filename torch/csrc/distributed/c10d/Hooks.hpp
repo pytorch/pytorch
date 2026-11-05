@@ -16,6 +16,8 @@ namespace c10d {
 // the name into the trace and the analyzer keys its size rules off it, so
 // folding e.g. every allgather variant into ALLGATHER would report an
 // _allgather_base as a plain all_gather and apply the wrong check to it.
+// SPLIT, NEW_WINDOW and RECONFIGURE are group lifecycle ops, not dispatcher
+// ops; they fire with no tensors.
 // Consumers that only care about the family (NanCheckHook) can ignore the
 // extra values.
 enum class HookOpName : uint8_t {
@@ -39,6 +41,7 @@ enum class HookOpName : uint8_t {
   REDUCE_SCATTER_BASE,
   REDUCE_SCATTER_TENSOR_COALESCED,
   ALLTOALL_BASE,
+  RECONFIGURE,
   UNKNOWN,
 };
 
