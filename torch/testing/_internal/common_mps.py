@@ -55,13 +55,6 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
             "linalg.matrix_sqrth": None,
-            "max_pool2d_with_indices_backward": [
-                torch.int8,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-            ],
             "median": [torch.bool],
             "mode": None,
             "nanmedian": [torch.bool],
