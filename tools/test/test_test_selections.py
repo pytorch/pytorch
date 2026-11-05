@@ -6,12 +6,14 @@ import sys
 import unittest
 from collections import defaultdict
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.testing import test_selections
     from tools.testing.test_run import ShardedTest, TestRun
     from tools.testing.test_selections import (
         calculate_shards,
@@ -493,6 +495,63 @@ class TestCalculateShards(unittest.TestCase):
             [shard for _, shard in shards],
             [[ShardedTest("xdist_test", i, 3, piece_time)] for i in (1, 2, 3)],
         )
+
+    def test_assigns_longest_first_and_keeps_input_order(self) -> None:
+        # Assigning in input order would give shard times 3 and 1; longest
+        # first gives 2 and 2, while each shard still runs in input order.
+        test_times: dict[str, float] = {"t1": 1, "t2": 1, "t3": 2}
+        shards = calculate_shards(
+            2,
+            [TestRun("t1"), TestRun("t2"), TestRun("t3")],
+            test_times,
+            None,
+            sort_by_time=False,
+        )
+        self.assert_shards_equal(
+            [
+                (2.0, [ShardedTest("t3", 1, 1, 2)]),
+                (2.0, [ShardedTest("t1", 1, 1, 1), ShardedTest("t2", 1, 1, 1)]),
+            ],
+            shards,
+        )
+
+    def test_returned_time_follows_run_order(self) -> None:
+        # Assigned longest first, three procs finish by 3s; started in input
+        # order, the 3s test waits for a free proc and the shard takes 4s.
+        test_times: dict[str, float] = {"t1": 1, "t2": 1, "t3": 1, "t4": 3}
+        tests = [TestRun(name) for name in test_times]
+        with mock.patch.object(test_selections, "NUM_PROCS_FOR_SHARDING_CALC", 3):
+            for sort_by_time, expected in ((True, 3.0), (False, 4.0)):
+                [(time, _)] = calculate_shards(
+                    1,
+                    tests,
+                    test_times,
+                    None,
+                    must_serial=lambda _: False,
+                    sort_by_time=sort_by_time,
+                )
+                self.assertEqual(time, expected)
+
+    def test_head_start(self) -> None:
+        # Shard 1 already has 3s of other work, so it gets only the 1s test;
+        # returned times cover only the assigned tests.
+        test_times: dict[str, float] = {"t1": 2, "t2": 2, "t3": 1}
+        shards = calculate_shards(
+            2,
+            [TestRun("t1"), TestRun("t2"), TestRun("t3")],
+            test_times,
+            None,
+            head_start=[3, 0],
+        )
+        self.assert_shards_equal(
+            [
+                (1.0, [ShardedTest("t3", 1, 1, 1)]),
+                (4.0, [ShardedTest("t1", 1, 1, 2), ShardedTest("t2", 1, 1, 2)]),
+            ],
+            shards,
+        )
+        with self.assertRaisesRegex(AssertionError, "head_start has 1 entries"):
+            calculate_shards(2, [TestRun("t1")], test_times, None, head_start=[3])
 
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
