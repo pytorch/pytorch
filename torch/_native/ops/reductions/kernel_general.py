@@ -476,6 +476,8 @@ def select_general_config(
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
     if num_o == 1:
         return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
+    # The core overrides route only sum, mean, prod, amax and amin; index and Welford keys
+    # come from direct kernel calls, which today are tests.
     strided = (
         tuple(red_pairs) == ((count, 2),)
         and tuple(kept_pairs) == ((num_o, 2 * count),)
