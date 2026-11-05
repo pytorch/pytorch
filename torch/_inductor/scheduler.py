@@ -62,7 +62,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime_nccl_estimator,
 )
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .exc import GPUTooOldForTriton, TritonMissing
+from .exc import GPUTooOldForTriton, NonLinearIndexingError, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
     assign_origin_node,
@@ -96,6 +96,7 @@ from .utils import (
     is_collective,
     is_cudagraph_unsafe_op,
     is_gpu,
+    is_linear_indexing,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
@@ -3839,6 +3840,17 @@ class SchedulerNode(BaseSchedulerNode):
                     self._body, *self._sizes, normalize=should_normalize
                 )
             )
+        if config.test_configs.raise_on_modular_indexing:
+            self._check_linear_indexing(self.node)
+
+    def _check_linear_indexing(self, node: ir.Operation) -> None:
+        for dep in self.read_writes.reads_and_writes():
+            if isinstance(dep, MemoryDep) and not is_linear_indexing(dep.index):
+                origins = ", ".join(f"{o.name}={o.target}" for o in node.get_origins())
+                raise NonLinearIndexingError(
+                    f"non-linear indexing in {self.get_name()}: {dep!r}\n"
+                    f"origins: {origins}\n{self.debug_str()}"
+                )
 
     def recompute_size_and_body(
         self,

@@ -4922,8 +4922,14 @@ class PallasScheduling(SIMDScheduling):
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
         # Pallas/JAX can handle reductions to single elements efficiently
-        # without requiring split reductions
-        return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
+        # without requiring split reductions, and wants affine load/store
+        # indices (TPU memory addressing)
+        return OrderedSet(
+            [
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
+                BackendFeature.PREFER_AFFINE_INDEXING,
+            ]
+        )
 
     def can_fuse(self, node1, node2):  # type: ignore[override]
         if not super().can_fuse(node1, node2):

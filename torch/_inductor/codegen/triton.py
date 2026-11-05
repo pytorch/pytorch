@@ -2599,12 +2599,16 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             V.kernel._index_dtype = real_index_dtype
         if real_index_dtype != dtype or var.dtype != dtype:
+            index_var = var
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
+            # the cast is only valid where the index expression is, and a later
+            # indirect_indexing bounds assert needs that mask
+            var.mask_vars = index_var.mask_vars
         return var
 
     @staticmethod
@@ -9478,6 +9482,15 @@ class TritonScheduling(SIMDScheduling):
             V.graph.removed_buffers = removed_buffers_orig
             V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
+
+
+class MTIATritonScheduling(TritonScheduling):
+    """Triton scheduling for MTIA, whose memory addressing wants load/store
+    indices affine in the loop variables."""
+
+    backend_features = OrderedSet(
+        [*TritonScheduling.backend_features, BackendFeature.PREFER_AFFINE_INDEXING]
+    )
 
 
 def debug_triton_code(node: BaseSchedulerNode) -> list[str]:

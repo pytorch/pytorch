@@ -34,7 +34,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
 from .sizevars import statically_known_true
-from .utils import generate_assert
+from .utils import generate_assert, is_linear_indexing, sympy_product
 from .virtualized import V
 
 
@@ -223,6 +223,7 @@ class IndexPropagation(DefaultHandler):
     ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
+        self.iter_ranges = iter_ranges
 
         var_to_range = {
             k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
@@ -383,13 +384,21 @@ class IndexPropagation(DefaultHandler):
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)
-            if generate_assert(check):
-                self.fallback(
-                    "check_bounds",
-                    (expr, size),
-                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
-                )
-            return expr
+            if is_linear_indexing(expr) or V.choices.use_modular_indexing(
+                V.graph.current_device,
+                sympy_product(self.iter_ranges.values()),
+                "index",
+            ):
+                if generate_assert(check):
+                    self.fallback(
+                        "check_bounds",
+                        (expr, size),
+                        dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                    )
+                return expr
+            # Keep %, //, abs, clamp and negative wrapping of the index as a
+            # value computation; the load then goes through an indirect
+            # variable so its address stays affine.
 
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check, wrap_neg), {}
