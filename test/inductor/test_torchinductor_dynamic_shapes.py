@@ -24,6 +24,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyOn,
 )
@@ -812,6 +813,30 @@ class TestInductorDynamic(DynamicShapesTestCase):
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertEqual("<= 2147483647" in guards, not avoid_guards)
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
+
+    @onlyOn(GPU_TYPE)
+    @largeTensorTest("5GB", inductor=True)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    def test_dispatch_32bit_indexing_at_runtime(self, device):
+        def fn(x):
+            return x + 1
+
+        cnt = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, dynamic=True, backend=cnt)
+        small = torch.zeros(8, 1152, dtype=torch.int8, device=device)
+        actual, (code, *_) = run_and_get_code(compiled, small)
+        self.assertEqual(actual, fn(small))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertNotIn("<= 2147483647", guards)
+        FileCheck().check("'xnumel': 'i32'").check("'xnumel': 'i64'").check(
+            "async_compile.index_dtype_multi_kernel"
+        ).run(code)
+
+        # Past INT32_MAX elements the same compile has to launch the int64 copy.
+        big = torch.zeros(2**31 // 1152 + 1, 1152, dtype=torch.int8, device=device)
+        out = compiled(big)
+        self.assertEqual((out.min().item(), out.max().item()), (1, 1))
+        self.assertEqual(cnt.frame_count, 1)
 
     @onlyOn(GPU_TYPE)
     @config.patch(avoid_32bit_indexing_guards=True)

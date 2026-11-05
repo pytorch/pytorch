@@ -6147,7 +6147,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
         index_dtype = (
-            self.features.select_index_dtype()
+            self.get_index_dtype_as_torch_dtype()
             if reduction_type in arg_reduction_types
             else None
         )
@@ -6621,7 +6621,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 peer_val = self.codegen_cooperative_reduction_peer_combine(
                     block_value_name, src_dtype, default
                 )
-                index_dtype = self.features.select_index_dtype()
+                index_dtype = self.get_index_dtype_as_torch_dtype()
                 peer_idx_input = f"{result_prefix}_bidx"
                 self.post_loop_combine.writeline(f"{peer_idx_input} = {block_index}")
                 peer_idx = self.codegen_cooperative_reduction_peer_combine(
