@@ -2308,6 +2308,10 @@ class _CppFakeTensorMode:
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     epoch: _int
+    @property
+    def fake_tensor_converter(self) -> FakeTensorConverter: ...
+    @property
+    def shape_env(self) -> ShapeEnv | None: ...
     def __init__(
         self,
         converter: FakeTensorConverter,

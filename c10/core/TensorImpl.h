@@ -246,7 +246,8 @@ struct C10_API FakeTensorMode {
   // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
   // not the wrapper itself. See
   // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
+  // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
+  // only getCppFakeTensorModePyObj accesses it, under a lock.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device. Atomic, as

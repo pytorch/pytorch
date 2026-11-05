@@ -128,12 +128,7 @@ if CPP_FAKETENSOR:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
-            FakeTensorConverter(
-                copy_data=torch._functorch.config.fake_tensor_propagate_real_tensors
-            ),
-            shape_env,
-        )
+        mode = CppFakeTensorMode(shape_env=shape_env)
         mode.set_allow_fallback_kernels(allow_fallback_kernels)
         mode.allow_non_fake_inputs = allow_non_fake_inputs
         return mode
@@ -5640,6 +5635,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         inference.data_ptr()
 
     def test_maybe_get_fake_mode(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
         mode, wrapper = self._make_mode()
         other_mode, other_wrapper = self._make_mode()
         meta = torch.empty(2, device="meta")
@@ -5665,11 +5662,9 @@ class TestCppFakeTensorModeBindings(TestCase):
         python_fake = python_mode.from_tensor(torch.empty(2))
         self.assertIsNone(torch._C._maybe_get_fake_mode(python_fake))
 
-        # TODO: update once CppFakeTensorMode can rebuild a collected wrapper
         del wrapper
         gc.collect()
-        with self.assertRaisesRegex(RuntimeError, "was garbage collected"):
-            torch._C._maybe_get_fake_mode(fake)
+        self.assertIsInstance(torch._C._maybe_get_fake_mode(fake), CppFakeTensorMode)
 
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
@@ -5736,19 +5731,19 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         class Unrebuildable:
             @classmethod
-            def _from_cpp_mode(cls, *args):
+            def _from_cpp_mode(cls, cpp_mode):
                 raise RuntimeError("rebuild failed")
 
         class Rebuildable:
             @classmethod
-            def _from_cpp_mode(cls, cpp_mode, *args):
+            def _from_cpp_mode(cls, cpp_mode):
                 self = cls()
                 self._cpp_mode = cpp_mode
                 return self
 
         ft = torch._subclasses.fake_tensor
         try:
-            with patch.object(ft, "CppFakeTensorMode", Unrebuildable, create=True):
+            with patch.object(ft, "CppFakeTensorMode", Unrebuildable):
                 with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
                     torch._C._get_dispatch_mode(fake)
                 with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
@@ -5764,7 +5759,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 torch._C.DispatchKey.Fake
             )
         finally:
-            with patch.object(ft, "CppFakeTensorMode", Rebuildable, create=True):
+            with patch.object(ft, "CppFakeTensorMode", Rebuildable):
                 try:
                     got = torch._C._get_dispatch_mode(fake)
                     # Suspending and restoring goes through the rebuilt wrapper
@@ -6027,6 +6022,104 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
             out = load_guards_state(buf.getvalue())["t"]
             self.assertEqual(maybe_get_fake_dispatch_keys(out), expected)
+
+    def test_cpp_fake_tensor_mode_init(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        shape_env = ShapeEnv()
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            mode = CppFakeTensorMode(shape_env=shape_env)
+        self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
+        self.assertIs(mode.shape_env, shape_env)
+        defaults = CppFakeTensorMode()
+        self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
+        self.assertIsNone(defaults.shape_env)
+        with self.assertRaises(AttributeError):
+            mode.unknown_attribute = True
+        # The epoch reads through to the C++ mode
+        self.assertEqual(mode.epoch, 0)
+        mode.epoch += 1
+        self.assertEqual(mode._cpp_mode.epoch, 1)
+        meta = torch.empty((), device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode._cpp_mode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
+
+    def test_cpp_fake_tensor_mode_rebuild(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        shape_env = ShapeEnv()
+        mode = CppFakeTensorMode(shape_env=shape_env)
+        converter = mode.fake_tensor_converter
+        mode.epoch += 2
+        epoch = mode.epoch
+        meta = torch.empty((), device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode._cpp_mode)
+
+        # A collected wrapper is rebuilt around the same C++ mode and state
+        ref = weakref.ref(mode)
+        del mode
+        gc.collect()
+        self.assertIsNone(ref())
+        rebuilt = torch._C._maybe_get_fake_mode(fake)
+        self.assertIsInstance(rebuilt, CppFakeTensorMode)
+        self.assertIs(rebuilt.fake_tensor_converter, converter)
+        self.assertIs(rebuilt.shape_env, shape_env)
+        self.assertEqual(rebuilt.epoch, epoch)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
+
+    def _fake_of_collected_cpp_mode(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        mode = CppFakeTensorMode()
+        meta = torch.empty((), device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode._cpp_mode)
+        del mode
+        gc.collect()
+        return fake
+
+    def test_cpp_fake_tensor_mode_rebuild_race_alive(self):
+        # A wrapper another lookup cached while _from_cpp_mode ran is returned
+        # rather than replaced, and stays cached (a nested lookup in a patched
+        # _from_cpp_mode stands in for a second thread)
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        fake = self._fake_of_collected_cpp_mode()
+        from_cpp_mode = CppFakeTensorMode._from_cpp_mode.__func__
+        inner = []
+
+        @torch._dynamo.disable
+        def reentrant(cls, cpp_mode):
+            if not inner:
+                inner.append(None)
+                inner[0] = torch._C._maybe_get_fake_mode(fake)
+            return from_cpp_mode(cls, cpp_mode)
+
+        with patch.object(CppFakeTensorMode, "_from_cpp_mode", classmethod(reentrant)):
+            self.assertIs(torch._C._maybe_get_fake_mode(fake), inner[0])
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), inner[0])
+
+    def test_cpp_fake_tensor_mode_rebuild_race_dropped(self):
+        # If the wrapper the other lookup cached is already gone, the lookup
+        # caches and returns its own
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        fake = self._fake_of_collected_cpp_mode()
+        from_cpp_mode = CppFakeTensorMode._from_cpp_mode.__func__
+        inner_refs = []
+
+        @torch._dynamo.disable
+        def reentrant(cls, cpp_mode):
+            if not inner_refs:
+                inner_refs.append(None)
+                inner_refs[0] = weakref.ref(torch._C._maybe_get_fake_mode(fake))
+            return from_cpp_mode(cls, cpp_mode)
+
+        with patch.object(CppFakeTensorMode, "_from_cpp_mode", classmethod(reentrant)):
+            rebuilt = torch._C._maybe_get_fake_mode(fake)
+        self.assertEqual(len(inner_refs), 1)
+        self.assertIsNone(inner_refs[0]())
+        self.assertIsInstance(rebuilt, CppFakeTensorMode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
 
 
 if __name__ == "__main__":
