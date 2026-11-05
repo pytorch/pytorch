@@ -109,9 +109,8 @@ static ncclComm_t get_nccl_comm(
         pg->getGroupName());
 }
 
-// Destructors are noexcept; a throwing CHECK would std::terminate. The NCCL
-// comm may already be gone (cached TokenSwitch past destroy_process_group).
-// Warn and leak instead of throwing. Library NCCL_CHECK_RESULT still exit()s.
+// Destructors are noexcept; a throwing CHECK would std::terminate. Warn
+// instead of throwing as a defensive fallback.
 static void warn_destroy_result(ncclResult_t r, const char* what) {
     if (r != ncclSuccess) {
         TORCH_WARN(what, " ignoring ", ncclGetErrorString(r));

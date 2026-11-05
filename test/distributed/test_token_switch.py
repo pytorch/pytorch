@@ -547,6 +547,11 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     def backend_str(cls):
         return "nccl"
 
+    @classmethod
+    def _cleanup_worker(cls):
+        cls._cached_token_switch = None
+        cls._cached_contract_token_switch = None
+
     @property
     def device(self):
         return torch.device("cuda", self.rank)
@@ -1406,6 +1411,10 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
                 TOKEN_SIZE_BYTES,
             )
         return cls._cached_token_switch
+
+    @classmethod
+    def _cleanup_worker(cls):
+        cls._cached_token_switch = None
 
     @skip_if_lt_x_gpu(2)
     @dtypes(torch.int32, torch.int64)
