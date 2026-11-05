@@ -6,7 +6,6 @@ from typing import Any, cast, Literal, NamedTuple
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-import torch.nn.functional as F
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
@@ -580,11 +579,37 @@ def _default_reduce_scatter_input_fn(
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 grad = unsharded_grads[i]
-                if pad := -grad.shape[shard_dim] % world_size:
-                    grad = F.pad(grad, (0, 0) * (grad.ndim - 1 - shard_dim) + (0, pad))
+                if grad.shape[shard_dim] % world_size:
+                    unsharded_grads[i] = _pad_and_reorder_by_rank(
+                        grad, shard_dim, world_size
+                    )
+                    continue
                 chunks = torch.chunk(grad, world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
+
+
+def _pad_and_reorder_by_rank(
+    grad: torch.Tensor, shard_dim: int, world_size: int
+) -> torch.Tensor:
+    """Concatenate grad's torch.chunk chunks along dim 0, each zero-padded on
+    shard_dim to ceil(size / world_size) rows, in one pass over grad."""
+    size = grad.shape[shard_dim]
+    chunk_rows = -(-size // world_size)
+    # Full chunks come first, then at most one short chunk, then empty ones
+    num_full, tail = divmod(size, chunk_rows)
+    rows = grad.new_zeros(
+        world_size, *grad.shape[:shard_dim], chunk_rows, *grad.shape[shard_dim + 1 :]
+    )
+    full = grad.narrow(shard_dim, 0, num_full * chunk_rows)
+    rows[:num_full].copy_(
+        full.unflatten(shard_dim, (num_full, chunk_rows)).movedim(shard_dim, 0)
+    )
+    if tail:
+        rows[num_full].narrow(shard_dim, 0, tail).copy_(
+            grad.narrow(shard_dim, num_full * chunk_rows, tail)
+        )
+    return rows.flatten(0, 1)
 
 
 @torch.no_grad()
