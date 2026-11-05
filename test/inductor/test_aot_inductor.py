@@ -10962,6 +10962,11 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return self.streams[0](x)
 
+        class InBoundsAsStrided(torch.nn.Module):
+            def forward(self, x):
+                # Within the input's 16 elements, at an explicit offset.
+                return x.as_strided((2, 2), (4, 1), 1) * 2
+
         x = torch.randn(4, 4, device=self.device)
         q = torch.randn(1, 2, 16, 64, device=self.device)
         mlp = torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU())
@@ -10971,6 +10976,7 @@ class AOTInductorTestsTemplate:
             (NestedRegion(), (x,)),
             (UnusedInput(), (x, torch.randn(3, device=self.device))),
             (StreamsAttribute().to(self.device), (x,)),
+            (InBoundsAsStrided(), (x,)),
             # Different attention backends.
             (Attention(), (q,)),
             (Attention(), (q.bfloat16(),)),
@@ -11082,6 +11088,11 @@ class AOTInductorTestsTemplate:
                 # Checks for errors with an effectful op.
                 return torch.linalg.inv(x)
 
+        class InputAsStrided(torch.nn.Module):
+            def forward(self, x):
+                # Past the end of a (4, 4) input.
+                return x.as_strided((4, 4), (4, 1), 1) * 2
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -11105,6 +11116,7 @@ class AOTInductorTestsTemplate:
             (SideStream(), "it uses a side stream", {}),
             (Effectful(), "_linalg_check_errors.* has side effects", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
+            (InputAsStrided(), "reads a graph input through as_strided", {}),
         ):
             with (
                 self.subTest(type(model).__name__, **configs),
@@ -11135,6 +11147,29 @@ class AOTInductorTestsTemplate:
                 (x, torch.randn(4, 4, device=self.device)),
                 inductor_configs={"aot_inductor.cudagraphs": True},
             )
+
+        class ReadsPastSlice(torch.nn.Module):
+            def forward(self, x):
+                # The slice's storage reaches further than its elements.
+                return x.as_strided((4, 8), (8, 1)) * 2
+
+        class ReadsSliceGaps(torch.nn.Module):
+            def forward(self, x):
+                # As many elements as the slice has, but through its gaps.
+                return x.as_strided((2, 8), (8, 1)) * 2
+
+        for model in (ReadsPastSlice(), ReadsSliceGaps()):
+            with (
+                self.subTest(type(model).__name__),
+                self.assertRaisesRegex(
+                    Exception, "CUDA graph: .*reads a graph input through as_strided"
+                ),
+            ):
+                AOTIRunnerUtil.compile(
+                    model,
+                    (torch.randn(4, 8, device=self.device)[:, :4],),
+                    inductor_configs={"aot_inductor.cudagraphs": True},
+                )
         devices = ["cpu"]
         if torch.cuda.device_count() >= 2:
             devices.append(f"{GPU_TYPE}:1")
@@ -11357,7 +11392,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
     )
-    def test_aot_cudagraphs_run_eagerly_with_cuda_malloc_async(self):
+    def test_aot_cudagraphs_run_fails_with_cuda_malloc_async(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
         model = torch.nn.Linear(16, 32).to(self.device)
@@ -11371,15 +11406,16 @@ class AOTInductorTestsTemplate:
 import torch
 compiled = torch._inductor.aoti_load_package({package_path!r})
 x = torch.randn(4, 16, device="cuda")
-for _ in range(3):
-    torch.testing.assert_close(compiled.run_with_lazy_cuda_graphs(x), compiled(x))
+# A warm-up call, then a capture.
+torch.testing.assert_close(compiled.run_with_lazy_cuda_graphs(x), compiled(x))
+compiled.run_with_lazy_cuda_graphs(x)
 """
         env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "backend:cudaMallocAsync"}
         proc = subprocess.run(
             [sys.executable, "-c", code], env=env, capture_output=True, text=True
         )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertRegex(proc.stderr, r"capturing failed[^\n]*backend:cudaMallocAsync")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("backend:cudaMallocAsync", proc.stderr)
 
     @xfailIfROCm
     def test_aot_cudagraphs_run_rejects_unsupported_callers(self):

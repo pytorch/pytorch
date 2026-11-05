@@ -227,12 +227,12 @@ doesn't count as a warm-up.
 - Replayed outputs are copies: they don't alias the inputs, and views among
   outputs come back as separate tensors. Eager calls return the model's own
   outputs.
-- If a capture fails, the call runs eagerly instead and the model instance
-  stops capturing, with a warning: its existing graphs keep replaying, and new
-  layouts run eagerly.
+- As with `torch.cuda.graph`, a failed capture raises the error; existing
+  graphs keep replaying, and the layout is captured again on its next call.
+  Compiling with `aot_inductor.cudagraphs=True` rejects models that can't be
+  captured.
 - Capturing needs PyTorch's native CUDA caching allocator: under
-  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
-  warning.
+  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, captures fail.
 - Once a graph is captured, the model's active constants can't change, so
   `load_constants` fails; in C++, the inactive buffer can still be updated, but
   not swapped in. Load the model again to use new weights.

@@ -17,6 +17,7 @@
 #endif
 
 #include <memory>
+#include <string>
 #include <type_traits>
 
 namespace torch::aot_inductor {
@@ -85,7 +86,13 @@ class AOTICudaTunableOpDynamicDimsGuard {
 };
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-// Deleters run in destructors, so they log errors instead of throwing.
+// These deleters run in destructors, so they log errors instead of throwing.
+inline void log_shim_error(AOTITorchError error, const char* what) {
+  if (error != AOTI_TORCH_SUCCESS) {
+    std::cerr << "AOTInductor: " << what << '\n';
+  }
+}
+
 inline void log_cuda_error(cudaError_t code, const char* call) {
   if (code != cudaSuccess) {
     std::cerr << "AOTInductor: " << call
@@ -164,9 +171,12 @@ class AOTICudaMemPool {
   explicit AOTICudaMemPool(int32_t device_index)
       : device_index_(device_index), pool_(nullptr, delete_cuda_mem_pool) {
     // A real index, which AOTICudaGraph's cleanup guards to.
-    AOTI_RUNTIME_CHECK(device_index >= 0, "AOTICudaMemPool: bad device index");
+    AOTI_RUNTIME_CHECK(
+        device_index >= 0,
+        "AOTICudaMemPool: device_index must be >= 0, got " +
+            std::to_string(device_index));
     CUDAMemPoolHandle ptr = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_create_cuda_mem_pool(device_index, &ptr));
     pool_.reset(ptr);
   }
@@ -195,7 +205,7 @@ class AOTICudaGraph {
  public:
   AOTICudaGraph() : graph_(nullptr, delete_cuda_graph) {
     CUDAGraphHandle ptr = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_create_cuda_graph(
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(
         /*keep_graph=*/0, /*num_rng_states=*/0, &ptr));
     graph_.reset(ptr);
   }
@@ -212,9 +222,9 @@ class AOTICudaGraph {
   // code changed the current stream.
   void capture_begin(const AOTICudaMemPool& pool, cudaStreamCaptureMode mode) {
     void* stream = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_current_cuda_stream(pool.device(), &stream));
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_cuda_graph_capture_begin(graph_.get(), pool.get(), mode));
     capture_stream_ = static_cast<cudaStream_t>(stream);
     device_index_ = pool.device();
@@ -226,33 +236,20 @@ class AOTICudaGraph {
     AOTICudaStreamGuard guard(capture_stream_, device_index_);
     // Called once per capture, as the shim requires, even if it fails.
     capture_stream_ = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_cuda_graph_capture_end(graph_.get()));
   }
 
   void replay() {
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
-        aoti_torch_cuda_graph_replay(graph_.get()));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_replay(graph_.get()));
   }
 
  private:
-  // Active if the status can't be read.
-  cudaStreamCaptureStatus capture_status() const noexcept {
-    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
-    if (cudaStreamIsCapturing(capture_stream_, &status) != cudaSuccess) {
-      (void)cudaGetLastError();
-      return cudaStreamCaptureStatusActive;
-    }
-    return status;
-  }
-
-  // Ends the capture if capture_end() wasn't called and it is still open,
-  // active or invalidated, with its stream current, since the captured code
-  // may have changed the current stream. An open capture on the stream is
-  // then this graph's: no other capture can begin on it while this one is.
+  // Like torch.cuda.graph's __exit__, ends the capture once, with its stream
+  // current, since the captured code may have changed the current stream.
+  // Errors are ignored: an invalidated capture fails to end but still ends.
   void end_open_capture() noexcept {
-    if (capture_stream_ == nullptr ||
-        capture_status() == cudaStreamCaptureStatusNone) {
+    if (capture_stream_ == nullptr) {
       return;
     }
     try {
@@ -261,10 +258,6 @@ class AOTICudaGraph {
     } catch (...) {
     }
     (void)cudaGetLastError();
-    if (capture_status() != cudaStreamCaptureStatusNone) {
-      std::cerr << "AOTInductor: failed to end an abandoned CUDA graph "
-                   "capture, so its stream stays capturing\n";
-    }
   }
 
   std::unique_ptr<CUDAGraphOpaque, DeleterFnPtr> graph_;

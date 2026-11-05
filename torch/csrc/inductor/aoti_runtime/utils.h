@@ -9,11 +9,9 @@
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
-// C ABIs defined in torch/csrc/inductor/aoti_torch/c/shim.h and
-// torch/csrc/stable/c/shim.h, and header-only torch/headeronly code. The same
-// rule applies to other files under torch/csrc/inductor/aoti_runtime/.
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -39,52 +37,6 @@
       throw std::runtime_error(MSG);                                      \
     }                                                                     \
   } while (0)
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
-namespace torch::aot_inductor::detail {
-// Out of line, so call sites stay small.
-[[noreturn]] AOTI_NOINLINE inline void throw_shim_error(
-    const char* call,
-    const char* file,
-    int64_t line) {
-  const char* what = torch_exception_get_what_without_backtrace();
-  std::stringstream ss;
-  if (what != nullptr && what[0] != '\0') {
-    ss << what << " (originally from ";
-  }
-  ss << call << " API call failed at " << file << ", line " << line;
-  if (what != nullptr && what[0] != '\0') {
-    ss << ")";
-  }
-  // @allow-raw-throw: keeps the caller's location in the message
-  throw std::runtime_error(std::move(ss).str());
-}
-} // namespace torch::aot_inductor::detail
-
-// Like AOTI_TORCH_ERROR_CODE_CHECK, but the error starts with the message the
-// failed shim call recorded, e.g. "out of memory", in the format
-// STABLE_TORCH_ERROR_CODE_CHECK uses. The call must be a libtorch shim that
-// records its exception, as AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE does;
-// otherwise the message can be an earlier failure's. It calls a libtorch
-// function, so use it only in code that already needs libtorch's shims.
-#define AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(call)                        \
-  if ((call) != AOTI_TORCH_SUCCESS) {                                         \
-    torch::aot_inductor::detail::throw_shim_error(#call, __FILE__, __LINE__); \
-  }
-#endif
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
-namespace torch::aot_inductor {
-// For destructors, which log errors instead of throwing; like
-// AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE, it calls a libtorch function.
-inline void log_shim_error(AOTITorchError error, const char* what) {
-  if (error != AOTI_TORCH_SUCCESS) {
-    std::cerr << "AOTInductor: " << what << ": "
-              << torch_exception_get_what_without_backtrace() << '\n';
-  }
-}
-} // namespace torch::aot_inductor
-#endif
 
 using AOTIRuntimeError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
