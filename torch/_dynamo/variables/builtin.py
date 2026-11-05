@@ -587,10 +587,12 @@ class TypeVariable(VariableTracker):
         return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        name = self.as_python_constant().__name__
-        if name in codegen.tx.f_globals:
+        fn = self.as_python_constant()
+        if fn.__module__ != "builtins":
+            raise AssertionError(f"Expected builtins module, got {fn.__module__}")
+        if fn.__name__ in codegen.tx.f_globals:
             raise AssertionError("shadowed global")
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        codegen.append_output(codegen.create_load_global(fn.__name__, add=True))
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -836,19 +838,6 @@ class BuiltinVariable(TypeVariable):
     _nonvar_fields = {
         "fn",
         *VariableTracker._nonvar_fields,
-    }
-
-    # __name__ -> type_getsets[] type_get_name (getset). Unlike the type-attribute
-    # readers on TypeVariable, BuiltinVariable exposes __name__ for any
-    # wrapped callable (not just types), so it never declines.
-    def _builtin_type_get_name(
-        self: "BuiltinVariable", tx: "InstructionTranslatorBase"
-    ) -> "VariableTracker | None":
-        source = self.source and AttrSource(self.source, "__name__")
-        return VariableTracker.build(tx, self.fn.__name__, source)
-
-    tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -1351,40 +1340,9 @@ class BuiltinVariable(TypeVariable):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # BuiltinVariable wraps built-in types like list, tuple, dict.
-        # type(self.fn).__or__(self.fn, other_val) delegates to CPython's
-        # _Py_union_type_or for type unions (e.g. list | tuple).
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or = _Py_union_type_or)
-        # https://github.com/python/cpython/blob/3.13/Objects/unionobject.c#L162 (_Py_union_type_or)
-        if not isinstance(self.fn, type):
-            return VariableTracker.build(tx, NotImplemented)
-        try:
-            other_val = other.as_python_constant()
-        except NotImplementedError:
-            return VariableTracker.build(tx, NotImplemented)
-        # pyrefly: ignore[bad-argument-count]
-        result = type(self.fn).__or__(self.fn, other_val)
-        if result is NotImplemented:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, result)
-
-    def as_proxy(self) -> Any:
-        DTYPE = {
-            bool: torch.bool,
-            int: torch.int64,
-            float: torch.float64,
-        }
-        if self.fn in DTYPE:
-            return DTYPE[self.fn]
-        return super().as_proxy()
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        name = self.fn.__name__
-        if self.fn.__module__ != "builtins":
-            raise AssertionError(f"Expected builtins module, got {self.fn.__module__}")
-        if name in codegen.tx.f_globals:
-            raise AssertionError("shadowed global")
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        if isinstance(self.fn, type):
+            return super().nb_or_impl(tx, other, reverse)
+        return VariableTracker.build(tx, NotImplemented)
 
     def constant_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
         return check_constant_args(args, kwargs)
