@@ -28,6 +28,7 @@ if not TEST_CUTEDSL:
     raise unittest.SkipTest("CuTeDSL not available")
 
 import cutlass
+import cutlass.cute as cute
 
 from torch._native.cutedsl import launch as _L
 from torch._native.ops.reductions import (
@@ -49,6 +50,13 @@ _VALUE_INDEX = {
     "max": (T.MaxDimOps(acc=cutlass.Float32), 10.0),
     "min": (T.MinDimOps(acc=cutlass.Float32), -10.0),
 }
+
+
+class _LeafSquare(T.NormOps):
+    # Projects the sum of leaves without the root, so outputs expose the squares' rounding.
+    @cute.jit
+    def project(self, acc, n):
+        return acc[0]
 
 
 def _tags(trait_key):
@@ -693,13 +701,15 @@ class TestOrderedColDevice(TestCase):
         plan = rt.trait_itree_plan(T.SumOps(), 200, 64, 4, stage=False)
         self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
 
-    @parametrize("pattern", ["negative_zero", "ties"])
+    @parametrize("pattern", ["signed_zeros", "ties"])
     def test_special_values_match_the_indexed_tree(self, device, pattern):
-        """Keep signed-zero sums and argmax ties bitwise equal to the indexed tree."""
+        """Keep signed-zero maxima and argmax ties bitwise equal to the indexed tree."""
         rows, columns = 2048, 32
-        if pattern == "negative_zero":
-            x = torch.full((rows, columns), -0.0, device=device)
-            trait, outputs = T.SumOps(), [torch.float32]
+        if pattern == "signed_zeros":
+            # max(-0, +0) keeps whichever zero the fold order favors.
+            negative = torch.rand(rows, columns, device=device) < 0.5
+            x = torch.where(negative, -0.0, 0.0)
+            trait, outputs = T.AMaxOps(), [torch.float32]
         else:
             x = torch.ones(rows, columns, device=device)
             trait, outputs = T.ArgMaxOps(), [torch.int64]
@@ -721,6 +731,32 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         if pattern == "ties":
             self.assertEqual(got[0], torch.zeros_like(got[0]))
+        else:
+            signs = torch.signbit(got[0]).unique().numel()
+            self.assertEqual(signs, 2, "one sign cannot tell fold orders apart")
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_norm2_leaf_narrow_values(self, device, dtype):
+        """Square narrow norm inputs after widening so small values do not underflow early."""
+        from torch import _native as native
+
+        values = torch.arange(-32768, 32768, device=device, dtype=torch.int32)
+        # Zero rows add exactly, so each output is its value's widened square.
+        x = torch.zeros(65, values.numel(), device=device, dtype=dtype)
+        x[0] = values.to(torch.int16).view(dtype)
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            trait, f32 = _LeafSquare(2, acc=cutlass.Float32), [torch.float32]
+            got = ct.reduce_ordered_col(trait, "norm2_leaf_square", x, f32, 1)
+            expected = x[0].float().abs().square()
+            self.assertIsNotNone(got)
+            self.assertEqual(got[0].isnan(), expected.isnan())
+            valid = ~expected.isnan()
+            self.assertEqual(
+                got[0][valid].view(torch.uint8), expected[valid].view(torch.uint8)
+            )
 
     @parametrize("op", ["sum", "argmax"])
     @parametrize("rows,served", [(8192, True), (8193, False), (16384, False)])
