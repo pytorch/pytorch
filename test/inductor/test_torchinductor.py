@@ -7460,7 +7460,13 @@ for dtype in (torch.int32, torch.int64):
         )
 
     # padding [1, 1, 0] keeps ceil_mode from being a no-op: it adds a partial window in W
-    @parametrize("padding, ceil_mode", [(0, False), ([1, 1, 0], True)])
+    @parametrize(
+        "padding, ceil_mode",
+        [
+            subtest((0, False), name="no_padding"),
+            subtest(([1, 1, 0], True), name="padding_ceil_mode"),
+        ],
+    )
     def test_max_pool3d_large_kernel(self, padding, ceil_mode: bool):
         # Window > 25 skips the low-memory decomposition for the non-unrolled reduction lowering
         def fn(x):

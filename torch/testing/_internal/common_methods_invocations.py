@@ -3805,7 +3805,7 @@ class _TestParamsMaxPoolBase:
         self.shapes = [
             [2, None],  # batch
             [2],  # channels
-            [6, 3]  # signal; 6 first so the first sample has a partial ceil_mode window
+            [6, 3]  # signal; 6 first so the first 1d sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
