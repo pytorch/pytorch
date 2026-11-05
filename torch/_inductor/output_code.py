@@ -193,8 +193,8 @@ def maybe_handle_backward_generation(
         if boxed_forward_device_index is None:
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
-            # The forward was never captured, so there is no generation to hand
-            # off.
+            # The forward was never captured, e.g. a region that opts in to CUDA
+            # Graphs for its backward only, so there is no generation to hand off.
             return
         compiled_graph_callable = compiled_graph.current_callable
         device_index = boxed_forward_device_index.value
