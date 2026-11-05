@@ -48,6 +48,7 @@ class ReduceBlock:
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
         itree: Any = None,
+        uniform_tree: bool = False,
     ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
@@ -97,6 +98,7 @@ class ReduceBlock:
             ragged_chunk=ragged_chunk,
             order=order,
             itree=itree,
+            uniform_tree_count=count if uniform_tree else 0,
         )
 
     @property
