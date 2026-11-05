@@ -378,7 +378,7 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     """Whether the ordered column kernel beats the indexed tree at this view's shape and
     output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
-    # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
+    # reduce_ordered_col also declines views narrower than a warp.
     if C < WARP:
         return False
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
@@ -783,11 +783,7 @@ def _reduce(
                     from . import kernel_coltile as ct
 
                     ordered = ct.reduce_ordered_col(
-                        trait,
-                        trait_key,
-                        col_view,
-                        out_dtypes,
-                        nouts,
+                        trait, trait_key, col_view, out_dtypes, nouts, cc=cc
                     )
                 if ordered is None:
                     ordered = _try_indexed_itree(
