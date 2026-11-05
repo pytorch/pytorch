@@ -18,9 +18,11 @@ void to_dtype_rounded_loop(TensorIteratorBase& iter, c10::RoundingMode mode) {
     // Half and BFloat16 widen to float exactly.
     using wide_t =
         std::conditional_t<std::is_same_v<src_t, double>, double, float>;
-    gpu_kernel(iter, [mode] GPU_LAMBDA(src_t x) -> dst_t {
+    gpu_kernel_nocast(iter, [mode] GPU_LAMBDA(src_t x) -> dst_t {
       return c10::convert_with_rounding<dst_t>(static_cast<wide_t>(x), mode);
     });
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unsupported rounded conversion");
   }
 }
 

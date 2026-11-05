@@ -44,6 +44,9 @@ _bwd_grad_all = {
     xfail("half"),
     xfail("cfloat"),
     xfail("chalf"),
+    # The gradient is the identity, like a plain dtype conversion's, which
+    # finite differences across the rounding do not reproduce.
+    xfail("round_to"),
     skip("normal"),
     skip("normal", variant_name="number_mean"),
     skip("linalg.lstsq"),
