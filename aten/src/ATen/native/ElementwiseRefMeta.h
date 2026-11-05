@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
+#include <c10/util/FunctionRef.h>
 
 // C++ versions of what Python FakeTensorMode runs for elementwise binary ops
 // (the torch._refs implementation and the fake_impls fast path), for
@@ -19,12 +20,19 @@ std::pair<ScalarType, ScalarType> elementwise_dtypes(
     const Tensor& b,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind);
 
+// alpha_fn is the body of refs.add / refs.sub between _maybe_broadcast and the
+// prim: it runs the ref's checks given the computation dtype, and returns the
+// alpha that prims.mul scales other by, if any.
 Tensor binary_ref_meta(
     const Tensor& self,
     const Tensor& other,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha = std::nullopt);
+    c10::function_ref<std::optional<Scalar>(ScalarType)> alpha_fn = nullptr);
+
+// utils.is_weakly_lesser_type(type(alpha), utils.dtype_to_type(dtype)), with the
+// refs' error message.
+void check_alpha_type(const Scalar& alpha, ScalarType dtype);
 
 // _make_elementwise_binary_reference, with its Python scalar checks. name is
 // the prim's name, used in the error messages.

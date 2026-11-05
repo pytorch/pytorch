@@ -5,9 +5,7 @@ import math
 import numpy as np
 
 import torch
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -22,7 +20,10 @@ FLOAT8_DTYPES = (
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
     torch.float8_e8m0fnu,
+    torch.float8_e5m3fnu,
 )
+# These only represent magnitudes: the conversions round |x|.
+UNSIGNED_DTYPES = (torch.float8_e8m0fnu, torch.float8_e5m3fnu)
 NARROWING = {
     torch.float64: (torch.float32, torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
     torch.float32: (torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
@@ -40,7 +41,7 @@ def _pair_name(pair):
 def _finite_magnitudes(dtype):
     """All finite non-negative values of dtype, in encoding order."""
     bits = torch.finfo(dtype).bits
-    signed = dtype is not torch.float8_e8m0fnu
+    signed = dtype not in UNSIGNED_DTYPES
     n = 1 << (bits - 1) if signed else 1 << bits
     int_dtype = torch.int16 if bits == 16 else torch.uint8
     values = torch.arange(n, dtype=torch.int32).to(int_dtype).view(dtype).double()
@@ -56,7 +57,7 @@ def _finite_magnitudes(dtype):
 
 def _overflow_value(dtype):
     """The default conversion's result past the largest finite magnitude."""
-    if dtype is torch.float8_e4m3fn:
+    if dtype in (torch.float8_e4m3fn, torch.float8_e5m3fnu):
         return torch.finfo(dtype).max
     if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz, torch.float8_e8m0fnu):
         return math.nan
@@ -68,12 +69,8 @@ def _expected_narrow(x, dst, mode):
     computed from a table of all of dst's finite values."""
     mags = _finite_magnitudes(dst)
     n = len(mags)
-    signed = dst is not torch.float8_e8m0fnu
-    has_neg_zero = dst not in (
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-        torch.float8_e8m0fnu,
-    )
+    signed = dst not in UNSIGNED_DTYPES
+    has_neg_zero = signed and dst not in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
     no_mantissa = dst is torch.float8_e8m0fnu
     overflow_value = _overflow_value(dst)
     virtual_next = mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]
@@ -237,9 +234,19 @@ class TestRoundedConversion(TestCase):
     def test_double_rounding(self, device):
         # Just above the midpoint between 1 and the next float16, but rounding
         # to float32 first would land exactly on the midpoint.
-        x = torch.tensor([1 + 2**-11 + 2**-40], dtype=torch.float64, device=device)
+        v = 1 + 2**-11 + 2**-40
+        x = torch.tensor([v], dtype=torch.float64, device=device)
         self.assertEqual(x.to(torch.float16).item(), 1 + 2**-10)
         self.assertEqual(x.to(torch.float32).to(torch.float16).item(), 1.0)
+        # Other conversions through c10::convert: from a Scalar, and of an
+        # operator's output.
+        y = torch.full((1,), v, dtype=torch.float16, device=device)
+        self.assertEqual(y.item(), 1 + 2**-10)
+        out = torch.empty(1, dtype=torch.float16, device=device)
+        self.assertEqual(torch.add(x, 0, out=out).item(), 1 + 2**-10)
+        z = torch.tensor([complex(v, -v)], dtype=torch.complex128, device=device)
+        expected = complex(1 + 2**-10, -(1 + 2**-10))
+        self.assertEqual(z.to(torch.complex32).to(torch.complex128).item(), expected)
 
 
 instantiate_device_type_tests(TestRoundedConversion, globals())

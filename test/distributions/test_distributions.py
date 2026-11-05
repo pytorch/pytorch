@@ -107,17 +107,21 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import softmax
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
     expectedFailureMPS,
+    expectedFailureXPU,
     instantiate_device_type_tests,
+    skipCUDAIf,
     skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    freeze_rng_state,
     gradcheck,
+    HardwareClassification,
     load_tests,
     parametrize,
     run_tests,
@@ -125,12 +129,9 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
-    TEST_XPU,
     TestCase,
 )
 
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1251,8 +1252,16 @@ class DistributionsTestCase(TestCase):
 
     def setUp(self):
         """The tests assume that the validation flag is set."""
-        torch.distributions.Distribution.set_default_validate_args(True)
         super().setUp()
+        torch.distributions.Distribution.set_default_validate_args(True)
+        # get_primary_device() only exists once instantiate_device_type_tests() has
+        # derived the class; GENERIC subclasses stay on the default device.
+        if hasattr(self, "get_primary_device"):
+            torch.set_default_device(self.get_primary_device())
+
+    def tearDown(self):
+        torch.set_default_device(None)
+        super().tearDown()
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def _check_sampler_discrete(
@@ -1334,14 +1343,8 @@ class DistributionsTestCase(TestCase):
 
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestDistributions(DistributionsTestCase):
-    def setUp(self):
-        super().setUp()
-        torch.set_default_device(self.get_primary_device())
-
-    def tearDown(self):
-        torch.set_default_device(None)
-        super().tearDown()
+class TestDistributionsDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_default_device(self, device):
         device_type = torch.device(device).type
@@ -1958,7 +1961,8 @@ class TestDistributions(DistributionsTestCase):
         entropy = dist.entropy()
         self.assertEqual(entropy.dtype, torch.double)
         expected = torch.tensor(
-            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+            scipy.stats.multinomial.entropy(total_count, p.cpu().numpy()),
+            dtype=torch.double,
         )
         self.assertEqual(entropy, expected)
         self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
@@ -2351,9 +2355,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
 
-        state = torch.get_rng_state()
-        rand = low.new(low.size()).uniform_()
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            rand = low.new(low.size()).uniform_()
         u = Uniform(low, high).rsample()
         u.backward(torch.ones_like(u))
         self.assertEqual(low.grad, 1 - rand)
@@ -2364,6 +2367,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.uniform_())
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3977")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
@@ -2404,9 +2409,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
 
-        state = torch.get_rng_state()
-        eps = loc.new(loc.size()).cauchy_()
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            eps = loc.new(loc.size()).cauchy_()
         c = Cauchy(loc, scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(loc.grad, torch.ones_like(scale))
@@ -2433,9 +2437,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
-        state = torch.get_rng_state()
-        eps = scale.new(scale.size()).cauchy_().abs_()
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            eps = scale.new(scale.size()).cauchy_().abs_()
         c = HalfCauchy(scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(scale.grad, eps)
@@ -2653,6 +2656,8 @@ class TestDistributions(DistributionsTestCase):
         return _sampler
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -2819,9 +2824,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Normal, (loc, 1.0))
         self._gradcheck_log_prob(Normal, (0.0, scale))
 
-        state = torch.get_rng_state()
-        eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
         z = Normal(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
@@ -3030,6 +3034,8 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(m1.entropy(), m2.entropy())
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5916")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_lowrank_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
@@ -3264,6 +3270,8 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3378,6 +3386,8 @@ class TestDistributions(DistributionsTestCase):
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     @skipMPS  # flaky failure
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_wishart_stable_with_precision_matrix(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
@@ -3450,6 +3460,8 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipMPS  # flaky failure
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3496,6 +3508,8 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
@@ -3521,9 +3535,8 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
         self._gradcheck_log_prob(Exponential, (rate,))
-        state = torch.get_rng_state()
-        eps = rate.new(rate.size()).exponential_()
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            eps = rate.new(rate.size()).exponential_()
         z = Exponential(rate).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(rate.grad, -eps / rate**2)
@@ -3589,9 +3602,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Laplace, (loc, 1.0))
         self._gradcheck_log_prob(Laplace, (0.0, scale))
 
-        state = torch.get_rng_state()
-        eps = torch.ones_like(loc).uniform_(-0.5, 0.5)
-        torch.set_rng_state(state)
+        with freeze_rng_state():
+            eps = torch.ones_like(loc).uniform_(-0.5, 0.5)
         z = Laplace(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
@@ -3757,6 +3769,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_generalized_pareto_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale, concentration in product(
@@ -3948,6 +3962,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Chi2(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_chi2_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
@@ -3981,6 +3997,8 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
+    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_studentT_sample(self):
         set_rng_seed(11)  # see Note [Randomized statistical tests]
@@ -4734,133 +4752,13 @@ class TestDistributions(DistributionsTestCase):
                 self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
 
 
-# TODO: Enable CUDA/XPU in `instantiate_device_type_tests` and remove the following class
-@skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestDistributionsGPU(DistributionsTestCase):
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_zero_excluded_binomial(self):
-        vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.9).to(device_type),
-        ).sample(torch.Size((100000000,)))
-        self.assertTrue((vals >= 0).all())
-        vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.1).to(device_type),
-        ).sample(torch.Size((100000000,)))
-        self.assertTrue((vals < 2).all())
-        vals = Binomial(
-            total_count=torch.tensor(1.0).to(device_type),
-            probs=torch.tensor(0.5).to(device_type),
-        ).sample(torch.Size((10000,)))
-        # vals should be roughly half zeroes, half ones
-        zeros_count = (vals == 0.0).sum()
-        ones_count = (vals == 1.0).sum()
-        if zeros_count <= 4000:
-            raise AssertionError(
-                f"Expected (vals == 0.0).sum() > 4000, got {zeros_count}"
-            )
-        if ones_count <= 4000:
-            raise AssertionError(
-                f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
-            )
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_torch_binomial_dtype_errors(self):
-        dtypes = [torch.int, torch.long, torch.short]
-        device = device_type
-
-        for count_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
-            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
-
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*",
-            ):
-                torch.binomial(total_count, total_prob)
-
-        for prob_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
-            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
-
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*",
-            ):
-                torch.binomial(total_count, total_prob)
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_poisson_gpu_sample(self):
-        set_rng_seed(1)
-        for rate in [0.12, 0.9, 4.0]:
-            self._check_sampler_discrete(
-                Poisson(torch.tensor([rate]).to(device_type)),
-                scipy.stats.poisson(rate),
-                f"Poisson(lambda={rate}, {device_type})",
-                failure_rate=1e-3,
-            )
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gamma_gpu_shape(self):
-        alpha = torch.randn(2, 3).to(device_type).exp().requires_grad_()
-        beta = torch.randn(2, 3).to(device_type).exp().requires_grad_()
-        alpha_1d = torch.randn(1).to(device_type).exp().requires_grad_()
-        beta_1d = torch.randn(1).to(device_type).exp().requires_grad_()
-        self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
-        self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
-        self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
-        self.assertEqual(Gamma(0.5, 0.5).sample().size(), ())
-        self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
-
-        def ref_log_prob(idx, x, log_prob):
-            a = alpha.view(-1)[idx].detach().cpu()
-            b = beta.view(-1)[idx].detach().cpu()
-            expected = scipy.stats.gamma.logpdf(x.cpu(), a, scale=1 / b)
-            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
-
-        self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_gamma_gpu_sample(self):
-        set_rng_seed(0)
-        for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
-            a, b = (
-                torch.tensor([alpha]).to(device_type),
-                torch.tensor([beta]).to(device_type),
-            )
-            self._check_sampler_sampler(
-                Gamma(a, b),
-                scipy.stats.gamma(alpha, scale=1.0 / beta),
-                f"Gamma(alpha={alpha}, beta={beta})",
-                failure_rate=1e-4,
-            )
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
-    def test_beta_underflow_gpu(self):
-        set_rng_seed(1)
-        num_samples = 50000
-        conc = torch.tensor(1e-2, dtype=torch.float64).to(device_type)
-        beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
-        # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
-        # TODO: increase precision once imbalance on GPU is fixed.
-        self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
-        self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
-
-
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestRsample(DistributionsTestCase):
+class TestRsampleDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
         num_samples = 100
@@ -4872,8 +4770,8 @@ class TestRsample(DistributionsTestCase):
             x = Gamma(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.sort()
-            x = x.detach().numpy()
-            actual_grad = alphas.grad[ind].numpy()
+            x = x.cpu().detach().numpy()
+            actual_grad = alphas.grad[ind].cpu().numpy()
             # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
             cdf = scipy.stats.gamma.cdf
             pdf = scipy.stats.gamma.pdf
@@ -4908,8 +4806,8 @@ class TestRsample(DistributionsTestCase):
             x = Chi2(dfs).rsample()
             x.sum().backward()
             x, ind = x.sort()
-            x = x.detach().numpy()
-            actual_grad = dfs.grad[ind].numpy()
+            x = x.cpu().detach().numpy()
+            actual_grad = dfs.grad[ind].cpu().numpy()
             # Compare with expected gradient dx/ddf along constant cdf(x,df).
             cdf = scipy.stats.chi2.cdf
             pdf = scipy.stats.chi2.pdf
@@ -4934,6 +4832,7 @@ class TestRsample(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5212
     def test_dirichlet_on_diagonal(self):
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
@@ -4944,8 +4843,8 @@ class TestRsample(DistributionsTestCase):
             x = Dirichlet(alphas).rsample()[:, 0]
             x.sum().backward()
             x, ind = x.sort()
-            x = x.detach().numpy()
-            actual_grad = alphas.grad[ind].numpy()[:, 0]
+            x = x.cpu().detach().numpy()
+            actual_grad = alphas.grad[ind].cpu().numpy()[:, 0]
             # Compare with expected gradient dx/dalpha0 along constant cdf(x,alpha).
             # This reduces to a distribution Beta(alpha[0], alpha[1] + alpha[2]).
             cdf = scipy.stats.beta.cdf
@@ -4975,6 +4874,7 @@ class TestRsample(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5213
     def test_beta_wrt_alpha(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
@@ -4986,8 +4886,8 @@ class TestRsample(DistributionsTestCase):
             x = Beta(con1s, con0s).rsample()
             x.sum().backward()
             x, ind = x.sort()
-            x = x.detach().numpy()
-            actual_grad = con1s.grad[ind].numpy()
+            x = x.cpu().detach().numpy()
+            actual_grad = con1s.grad[ind].cpu().numpy()
             # Compare with expected gradient dx/dcon1 along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
@@ -5026,8 +4926,8 @@ class TestRsample(DistributionsTestCase):
             x = Beta(con1s, con0s).rsample()
             x.sum().backward()
             x, ind = x.sort()
-            x = x.detach().numpy()
-            actual_grad = con0s.grad[ind].numpy()
+            x = x.cpu().detach().numpy()
+            actual_grad = con0s.grad[ind].cpu().numpy()
             # Compare with expected gradient dx/dcon0 along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
@@ -5052,6 +4952,7 @@ class TestRsample(DistributionsTestCase):
                 ),
             )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5214")
     def test_dirichlet_multivariate(self):
         alpha_crit = 0.25 * (5.0**0.5 - 1.0)
         num_samples = 100000
@@ -5083,6 +4984,7 @@ class TestRsample(DistributionsTestCase):
                 ),
             )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5215")
     @set_default_dtype(torch.double)
     def test_dirichlet_tangent_field(self):
         num_samples = 20
@@ -5146,7 +5048,9 @@ class TestRsample(DistributionsTestCase):
             )
 
 
-class TestDistributionShapes(DistributionsTestCase):
+class TestDistributionShapesDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.scalar_sample = 1
@@ -5771,7 +5675,9 @@ class TestDistributionShapes(DistributionsTestCase):
 
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestKL(DistributionsTestCase):
+class TestKLDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
 
@@ -6081,6 +5987,8 @@ class TestKL(DistributionsTestCase):
         self.assertEqual(expected_kl, actual_kl)
 
     @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    # Not expectedFailureXPU: subTest failures aren't raised, so the xfail wrapper sees a pass.
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5216")
     def test_compile_kl_multivariate_normal(self):
         def fn(p_mu, p_log_var, q_mu, q_log_var):
             q_var = torch.diag_embed(torch.exp(q_log_var))
@@ -6319,7 +6227,9 @@ class TestKL(DistributionsTestCase):
                 )
 
 
-class TestConstraints(DistributionsTestCase):
+class TestConstraintsDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_params_constraints(self):
         normalize_probs_dists = (
             Categorical,
@@ -6376,7 +6286,9 @@ class TestConstraints(DistributionsTestCase):
 
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
-class TestNumericalStability(DistributionsTestCase):
+class TestNumericalStabilityDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_pdf_score(
         self,
         dist_class,
@@ -6658,6 +6570,8 @@ class TestNumericalStability(DistributionsTestCase):
 
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
@@ -6709,7 +6623,9 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 @skipIfTorchDynamo("FIXME: Tries to trace through SciPy and fails")
-class TestAgainstScipy(DistributionsTestCase):
+class TestAgainstScipyDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         positive_var = torch.randn(20, dtype=torch.double).exp()
@@ -6719,114 +6635,132 @@ class TestAgainstScipy(DistributionsTestCase):
         cov_tensor = torch.randn(20, 20, dtype=torch.double)
         cov_tensor = cov_tensor @ cov_tensor.mT
         self.distribution_pairs = [
-            (Bernoulli(simplex_tensor), scipy.stats.bernoulli(simplex_tensor)),
+            (Bernoulli(simplex_tensor), scipy.stats.bernoulli(simplex_tensor.cpu())),
             (
                 Beta(positive_var, positive_var2),
-                scipy.stats.beta(positive_var, positive_var2),
+                scipy.stats.beta(positive_var.cpu(), positive_var2.cpu()),
             ),
             (
                 Binomial(10, simplex_tensor),
                 scipy.stats.binom(
-                    10 * np.ones(simplex_tensor.shape), simplex_tensor.numpy()
+                    10 * np.ones(simplex_tensor.shape), simplex_tensor.cpu().numpy()
                 ),
             ),
             (
                 Cauchy(random_var, positive_var),
-                scipy.stats.cauchy(loc=random_var, scale=positive_var),
+                scipy.stats.cauchy(loc=random_var.cpu(), scale=positive_var.cpu()),
             ),
-            (Dirichlet(positive_var), scipy.stats.dirichlet(positive_var)),
+            (Dirichlet(positive_var), scipy.stats.dirichlet(positive_var.cpu())),
             (
                 Exponential(positive_var),
-                scipy.stats.expon(scale=positive_var.reciprocal()),
+                scipy.stats.expon(scale=positive_var.reciprocal().cpu()),
             ),
             (
                 FisherSnedecor(
                     positive_var, 4 + positive_var2
                 ),  # var for df2<=4 is undefined
-                scipy.stats.f(positive_var, 4 + positive_var2),
+                scipy.stats.f(positive_var.cpu(), 4 + positive_var2.cpu()),
             ),
             (
                 Gamma(positive_var, positive_var2),
-                scipy.stats.gamma(positive_var, scale=positive_var2.reciprocal()),
+                scipy.stats.gamma(
+                    positive_var.cpu(), scale=positive_var2.reciprocal().cpu()
+                ),
             ),
-            (Geometric(simplex_tensor), scipy.stats.geom(simplex_tensor, loc=-1)),
+            (Geometric(simplex_tensor), scipy.stats.geom(simplex_tensor.cpu(), loc=-1)),
             (
                 Gumbel(random_var, positive_var2),
-                scipy.stats.gumbel_r(random_var, positive_var2),
+                scipy.stats.gumbel_r(random_var.cpu(), positive_var2.cpu()),
             ),
             (
                 GeneralizedPareto(
                     loc=random_var, scale=positive_var, concentration=random_var / 10
                 ),
                 scipy.stats.genpareto(
-                    c=random_var / 10, loc=random_var, scale=positive_var
+                    c=random_var.cpu() / 10,
+                    loc=random_var.cpu(),
+                    scale=positive_var.cpu(),
                 ),
             ),
-            (HalfCauchy(positive_var), scipy.stats.halfcauchy(scale=positive_var)),
-            (HalfNormal(positive_var2), scipy.stats.halfnorm(scale=positive_var2)),
+            (
+                HalfCauchy(positive_var),
+                scipy.stats.halfcauchy(scale=positive_var.cpu()),
+            ),
+            (
+                HalfNormal(positive_var2),
+                scipy.stats.halfnorm(scale=positive_var2.cpu()),
+            ),
             (
                 InverseGamma(positive_var, positive_var2),
-                scipy.stats.invgamma(positive_var, scale=positive_var2),
+                scipy.stats.invgamma(positive_var.cpu(), scale=positive_var2.cpu()),
             ),
             (
                 Laplace(random_var, positive_var2),
-                scipy.stats.laplace(random_var, positive_var2),
+                scipy.stats.laplace(random_var.cpu(), positive_var2.cpu()),
             ),
             (
                 # Tests fail 1e-5 threshold if scale > 3
                 LogNormal(random_var, positive_var.clamp(max=3)),
                 scipy.stats.lognorm(
-                    s=positive_var.clamp(max=3), scale=random_var.exp()
+                    s=positive_var.clamp(max=3).cpu(), scale=random_var.exp().cpu()
                 ),
             ),
             (
                 LowRankMultivariateNormal(
                     random_var, torch.zeros(20, 1, dtype=torch.double), positive_var2
                 ),
-                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2)),
+                scipy.stats.multivariate_normal(
+                    random_var.cpu(), torch.diag(positive_var2).cpu()
+                ),
             ),
             (
                 Multinomial(10, simplex_tensor),
-                scipy.stats.multinomial(10, simplex_tensor),
+                scipy.stats.multinomial(10, simplex_tensor.cpu()),
             ),
             (
                 MultivariateNormal(random_var, torch.diag(positive_var2)),
-                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2)),
+                scipy.stats.multivariate_normal(
+                    random_var.cpu(), torch.diag(positive_var2).cpu()
+                ),
             ),
             (
                 MultivariateNormal(random_var, cov_tensor),
-                scipy.stats.multivariate_normal(random_var, cov_tensor),
+                scipy.stats.multivariate_normal(random_var.cpu(), cov_tensor.cpu()),
             ),
             (
                 Normal(random_var, positive_var2),
-                scipy.stats.norm(random_var, positive_var2),
+                scipy.stats.norm(random_var.cpu(), positive_var2.cpu()),
             ),
             (
                 OneHotCategorical(simplex_tensor),
-                scipy.stats.multinomial(1, simplex_tensor),
+                scipy.stats.multinomial(1, simplex_tensor.cpu()),
             ),
             (
                 Pareto(positive_var, 2 + positive_var2),
-                scipy.stats.pareto(2 + positive_var2, scale=positive_var),
+                scipy.stats.pareto(2 + positive_var2.cpu(), scale=positive_var.cpu()),
             ),
-            (Poisson(positive_var), scipy.stats.poisson(positive_var)),
+            (Poisson(positive_var), scipy.stats.poisson(positive_var.cpu())),
             (
                 StudentT(2 + positive_var, random_var, positive_var2),
-                scipy.stats.t(2 + positive_var, random_var, positive_var2),
+                scipy.stats.t(
+                    2 + positive_var.cpu(), random_var.cpu(), positive_var2.cpu()
+                ),
             ),
             (
                 Uniform(random_var, random_var + positive_var),
-                scipy.stats.uniform(random_var, positive_var),
+                scipy.stats.uniform(random_var.cpu(), positive_var.cpu()),
             ),
             (
                 VonMises(random_var, positive_var),
-                scipy.stats.vonmises(positive_var, loc=random_var),
+                scipy.stats.vonmises(positive_var.cpu(), loc=random_var.cpu()),
             ),
             (
                 Weibull(
                     positive_var[0], positive_var2[0]
                 ),  # scipy var for Weibull only supports scalars
-                scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0]),
+                scipy.stats.weibull_min(
+                    c=positive_var2[0].cpu(), scale=positive_var[0].cpu()
+                ),
             ),
             (
                 # scipy var for Wishart only supports scalars
@@ -6847,7 +6781,7 @@ class TestAgainstScipy(DistributionsTestCase):
                         else 19
                     )
                     + positive_var[0].item(),
-                    cov_tensor,
+                    cov_tensor.cpu(),
                 ),
             ),
         ]
@@ -6906,7 +6840,7 @@ class TestAgainstScipy(DistributionsTestCase):
                 cdf = pytorch_dist.cdf(samples)
             except NotImplementedError:
                 continue
-            self.assertEqual(cdf, scipy_dist.cdf(samples), msg=pytorch_dist)
+            self.assertEqual(cdf, scipy_dist.cdf(samples.cpu()), msg=pytorch_dist)
 
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
@@ -6915,10 +6849,12 @@ class TestAgainstScipy(DistributionsTestCase):
                 icdf = pytorch_dist.icdf(samples)
             except NotImplementedError:
                 continue
-            self.assertEqual(icdf, scipy_dist.ppf(samples), msg=pytorch_dist)
+            self.assertEqual(icdf, scipy_dist.ppf(samples.cpu()), msg=pytorch_dist)
 
 
-class TestFunctors(DistributionsTestCase):
+class TestFunctorsDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_cat_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
@@ -7061,7 +6997,9 @@ class TestFunctors(DistributionsTestCase):
         self.assertEqual(actual_jac, expected_jac)
 
 
-class TestValidation(DistributionsTestCase):
+class TestValidationDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_valid_does_not_format_error(self):
         class UnformattableConstraint(Constraint):
             def check(self, value):
@@ -7173,7 +7111,9 @@ class TestValidation(DistributionsTestCase):
             d.log_prob(sample)
 
 
-class TestJit(DistributionsTestCase):
+class TestJitDevice(DistributionsTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _examples(self):
         for Dist, params in _get_examples():
             for param in params:
@@ -7251,7 +7191,7 @@ class TestJit(DistributionsTestCase):
             if Dist in xfail:
                 continue
 
-            with torch.random.fork_rng():
+            with freeze_rng_state():
                 sample = f(*values)
             traced_sample = traced_f(*values)
             self.assertEqual(sample, traced_sample)
@@ -7283,7 +7223,7 @@ class TestJit(DistributionsTestCase):
             if Dist in xfail:
                 continue
 
-            with torch.random.fork_rng():
+            with freeze_rng_state():
                 sample = f(*values)
             traced_sample = traced_f(*values)
             self.assertEqual(sample, traced_sample)
@@ -7454,14 +7394,32 @@ class TestJit(DistributionsTestCase):
 
 
 instantiate_device_type_tests(
-    TestDistributions,
-    globals(),
-    allow_mps=True,
-    except_for=(
-        "cuda",
-        "xpu",
-    ),
+    TestDistributionsDevice, globals(), allow_mps=True, allow_xpu=True
 )
+
+for _cls in (
+    TestRsampleDevice,
+    TestDistributionShapesDevice,
+    TestKLDevice,
+    TestConstraintsDevice,
+    TestNumericalStabilityDevice,
+    TestAgainstScipyDevice,
+    TestFunctorsDevice,
+    TestValidationDevice,
+    TestJitDevice,
+):
+    instantiate_device_type_tests(
+        # CUDA is excluded rather than allow-listing devices, per the ACCELERATOR
+        # lint rule; these fail on CUDA under pytorch/pytorch#200652.
+        _cls,
+        globals(),
+        except_for=("cuda",),
+        allow_xpu=True,
+    )
+
+# Otherwise the generic class stays reachable via `_cls` and gets collected again.
+del _cls
+
 
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
