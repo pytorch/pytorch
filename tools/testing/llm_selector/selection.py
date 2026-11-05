@@ -93,6 +93,8 @@ RUN_ALL_PATTERNS = [
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # The workflows that call those test workflows; they set each job's build, image and test matrix.
     r"^\.github/workflows/(pull|trunk(-rocm-sandbox)?|periodic(-strict|-rocm-mi\d+)?|slow(-rocm-mi200)?|unstable|tsan|xpu|mac-mps|native-aot|dtensor|torchtitan|dynamo-unittest|td-holdout-unstable|s390x-periodic|rocm-[\w-]+|inductor[\w-]*|(b200|h100)-[\w-]+|test-(b200|gb300|h100)|better-benchmark-b200|attention_op_microbenchmark|operator_(benchmark|microbenchmark(_compare)?))\.yml$",
+    # pull.yml and trunk.yml call these from the PR; they decide which tests TD drops.
+    r"^\.github/workflows/(target_determination|llm_td_retrieval)\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
     r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl)/",
     r"^\.github/scripts/(filter_test_configs|parse_ref)\.py$",
