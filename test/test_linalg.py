@@ -12303,6 +12303,8 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
     subtest(((2048, 32), (2, 8192, 32), [1024, 2048], False), name="ck_tile_2d_3d_k32"),
     subtest(((2048, 128), (2, 8192, 128), [1024, 2048], False), name="ck_tile_2d_3d_k128"),
+    subtest(((256, 64), (2, 20, 64), [128, 256], True), name="ck_tile_2d_3d_n20"),
+    subtest(((1024, 64), (2, 2048, 64), [512, 1024], False), name="ck_tile_2d_3d_n2048"),
     subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
     subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
     subtest(((2048, 256), (4096, 256), [32, 256], False), name="ck_tile_2d_2d_n4096_k32"),
@@ -12312,10 +12314,11 @@ _GROUPED_MM_CK_TILE_CASES = [
 
 # Every ck_tile config of each arch as "A/B layout, tile, waves, warp tile, padded dims, 1-element C stores", which
 # test_grouped_gemm_ck_tile_config_coverage requires the cases above to launch. RC is forward, RR dX and CR dW; each
-# layout also has the unaligned config (C1). Keyed by (arch, CU count): load_cost divides tiles by the CU count, so
-# which configs the cases reach depends on it. Update this table when the configs in ck_tile_group_gemm.hip change.
+# layout also has the unaligned config (C1). Keyed by (arch, CU count, dtype): each dtype has its own configs, and
+# load_cost divides tiles by the CU count, so which configs the cases reach depends on it. Update this table when the
+# configs in ck_tile_group_gemm.hip change.
 _GROUPED_MM_CK_TILE_CONFIGS = {
-    ("gfx950", 128): {
+    ("gfx950", 128, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12323,7 +12326,7 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx950", 256): {
+    ("gfx950", 256, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12331,13 +12334,27 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx942", 304): {
+    ("gfx942", 304, torch.bfloat16): {
         "RC 128x192x64 4w 32x32x16 -N-", "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-",
         "RC 256x192x64 4w 16x16x32 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x64x64 4w 16x16x32 ---", "RR 256x256x32 8w 32x32x16 ---", "RR 128x128x64 4w 16x16x32 ---",
         "RR 256x128x32 4w 16x16x32 ---", "RR 128x64x64 4w 16x16x32 ---", "RR 256x128x32 4w 16x16x32 -N-",
         "RR 256x128x64 4w 16x16x32 MNK C1",
         "CR 128x128x64 4w 32x32x16 --K", "CR 256x128x64 4w 16x16x32 MNK", "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
+    ("gfx950", 128, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
+    ("gfx950", 256, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
     },
 }
 
@@ -12450,21 +12467,22 @@ class TestGroupedMM(TestCase):
     # read from the kernel names, so a retune or another CU count can't drop a config from coverage unnoticed.
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_grouped_gemm_ck_tile_config_coverage(self, device):
+    @dtypes(torch.bfloat16, torch.float32)
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})  # same as test_grouped_gemm_rocm_backend
+    def test_grouped_gemm_ck_tile_config_coverage(self, device, dtype):
         from torch.profiler import profile, ProfilerActivity
 
         props = torch.cuda.get_device_properties(device)
-        key = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        key = (props.gcnArchName.split(":")[0], props.multi_processor_count, dtype)
         if key not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs) in {sorted(_GROUPED_MM_CK_TILE_CONFIGS)}, "
-                          f"this device is {key}")
-        dtype = torch.bfloat16
+            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs, dtype) in "
+                          f"{sorted(_GROUPED_MM_CK_TILE_CONFIGS, key=str)}, this is {key}")
         alignment = 16 // dtype.itemsize
         names = set()
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
-                if any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
-                    continue  # unaligned 16-bit cases never reach ck_tile
+                if dtype != torch.float32 and any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
+                    continue  # the unaligned 16-bit cases _check_grouped_gemm skips
                 for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
                     a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
                     b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
