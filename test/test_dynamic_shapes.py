@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    decorateIf,
     expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2398,7 +2399,14 @@ class TestSymNumberMagicMethods(TestCase):
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn in sym_node.bool_magic_methods and fn != "sym_ite"
+        ],
+    )
     def test_bool_method(self, fn):
         # sym_ite has its own tests
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
@@ -2408,9 +2416,26 @@ class TestSymNumberMagicMethods(TestCase):
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
-    @parametrize("first_type", ["int", "float"])
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn not in sym_node.only_float_magic_methods
+            and fn not in sym_node.bool_magic_methods
+        ],
+    )
+    @parametrize("first_type", ["int"])
     @parametrize("second_type", ["int", "float"])
+    @decorateIf(
+        unittest.skip("Second argument is unused or only accepts integers"),
+        lambda p: p["second_type"] == "float"
+        and (
+            p["fn"] in sym_node.bitwise_ops
+            or p["fn"] in sym_node.unary_methods
+            or p["fn"] in ("mod", "round")
+        ),
+    )
     def test_method(self, fn, first_type, second_type):
         if first_type == "float":
             # TODO: Hmm, this looks like we skip all floats

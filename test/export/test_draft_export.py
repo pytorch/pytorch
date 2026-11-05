@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     TestCase,
@@ -30,6 +31,7 @@ from torch.testing._internal.torchbind_impls import (
 from torch.utils._pytree import tree_leaves
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDraftExport(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

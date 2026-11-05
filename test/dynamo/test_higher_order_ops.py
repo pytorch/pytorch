@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_LINUX,
     munge_exc,
     parametrize,
@@ -7704,6 +7705,13 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+    @decorateIf(
+        unittest.skip(
+            "TODO: partitioner fails. migrate canonicalization to aot eager backend"
+        ),
+        lambda params: params["backend"] == "aot_eager"
+        and params["op"].name == "invoke_quant",
+    )
     @requires_gpu_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(

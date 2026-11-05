@@ -18,6 +18,7 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1377,6 +1378,8 @@ class TestDynamoTimed(TestCase):
 
 class TestTimedSync(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
     def test_timed_syncs_on_accelerator(self, device):
