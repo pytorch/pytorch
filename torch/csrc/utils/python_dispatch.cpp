@@ -667,6 +667,27 @@ static bool pyobject_dispatch_any_requires_grad(
   return false;
 }
 
+// The kernel for the dispatch key set is a C++ kernel, which needs IValues
+// anyway: convert the arguments here and call the Dispatcher, instead of going
+// back through the Python entry point. `args` are all of the operator's
+// arguments, in schema order.
+static PyObject* pyobject_dispatch_call_cpp(
+    const c10::OperatorHandle& op,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  const auto& schema = op.schema();
+  torch::jit::Stack stack;
+  stack.reserve(nargs);
+  for (const auto i : c10::irange(nargs)) {
+    stack.push_back(torch::jit::argumentToIValue(schema, i, args[i]));
+  }
+  {
+    pybind11::gil_scoped_release no_gil;
+    op.callBoxed(&stack);
+  }
+  return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -675,7 +696,10 @@ static PyObject* pyobject_dispatch_with_keyset(
     PyObject* const* args,
     Py_ssize_t nargs,
     PyObject* kwnames,
-    Py_ssize_t op_args_start) {
+    Py_ssize_t op_args_start,
+    // For a top-level dispatch, `args` are all of the operator's arguments,
+    // in schema order, with no kwargs.
+    bool all_args = false) {
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   // TODO(#187974): Figure out why we need a special case to send the Python
   // key back to the C++ Dispatcher.
@@ -693,6 +717,9 @@ static PyObject* pyobject_dispatch_with_keyset(
   // If there's no Python kernel, call back to the C++ Dispatcher
   const auto* holder =
       kernel_function.template boxedKernelFunctor<PythonKernelHolder>();
+  if (holder == nullptr && all_args && !skip_torch_function) {
+    return pyobject_dispatch_call_cpp(*self->handle, args, nargs);
+  }
   if (C10_UNLIKELY(holder == nullptr || holder->with_op())) {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
@@ -715,7 +742,8 @@ static PyObject* pyobject_dispatch_with_keyset(
         args,
         nargs,
         kwnames,
-        op_args_start);
+        op_args_start,
+        all_args);
   }
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
@@ -784,7 +812,14 @@ static PyObject* pyobject_dispatch_vectorcall(
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
-      self, key_set, skip_torch_function, op_args, nargs, kwnames, 0);
+      self,
+      key_set,
+      skip_torch_function,
+      op_args,
+      nargs,
+      kwnames,
+      0,
+      /*all_args=*/true);
   END_HANDLE_TH_ERRORS
 }
 
