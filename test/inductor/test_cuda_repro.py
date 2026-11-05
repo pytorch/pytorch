@@ -3190,6 +3190,25 @@ foo(torch.rand([256], device=\"{device_type}\"))
 
         subprocess.run([sys.executable, "-c", script], check=True)
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_triton_interpret_pdl(self):
+        import subprocess
+
+        script = f"""
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+os.environ["TORCHINDUCTOR_ENABLE_PDL"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
+foo(torch.rand([256], device=\"{device_type}\"))
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
+
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")

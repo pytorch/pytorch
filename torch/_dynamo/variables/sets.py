@@ -623,7 +623,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
@@ -981,7 +981,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def sq_contains_impl(
@@ -1290,8 +1290,8 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # frozenset is hashable, unlike set (SetVariable.hash_impl raises TypeError).
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # frozenset is hashable, unlike set (SetVariable.tp_hash_impl raises TypeError).
         # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
@@ -1357,7 +1357,7 @@ class DictKeySetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def _dictview_binop(
