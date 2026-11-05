@@ -80,6 +80,7 @@ def main():
             "-c",
             "import torch; assert torch.cuda.device_count()>=2; "
             "assert 'A10G' in torch.cuda.get_device_name(0); assert torch.version.cuda=='13.2'; "
+            "assert torch.version.git_version=='47741d8b2d367982f3a47c58cdd06c105c5c1ceb'; "
             "print(torch.version.git_version,torch.cuda.get_device_properties(0))",
         ],
         cwd=titan,

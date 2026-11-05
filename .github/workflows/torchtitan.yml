@@ -1,39 +1,14 @@
 # Owner(s): ["oncall: distributed"]
-name: torchtitan-test
+name: torchtitan-pin-boundary
 
 on:
   push:
     branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/torchtitan/*
+      - triton-pin-202417-titan-boundary-20261105
   workflow_dispatch:
-    inputs:
-      artifact-run-id:
-        type: string
-        default: ''
-        description: Reuse an existing native diagnostic PyTorch/AO/comms build.
-      fusion-only:
-        type: boolean
-        default: false
-        description: Test candidate implicit-fusion opt-in against its default.
-      reuse-candidate-wheel:
-        type: boolean
-        default: false
-        description: Reuse the verified full native candidate wheel for kernel capture.
-      boundary-controls:
-        type: boolean
-        default: false
-        description: Compare native adjacent Triton commits around the FP fusion policy change.
-      control-runner:
-        type: choice
-        default: a10g-8
-        options: [a10g-8, a10g-4, a10g-4-lf]
-        description: Allocate the original two-A10G controls on a four- or eight-device runner.
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.inputs.artifact-run-id }}-${{ github.event.inputs.boundary-controls }}-${{ github.event.inputs.fusion-only }}-${{ github.event.inputs.control-runner }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -45,7 +20,7 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    if: github.repository_owner == 'pytorch'
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -53,83 +28,22 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
-  # Resolve the stable CUDA version from generate_binary_build_matrix.py
-  # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
-  get-cuda-version:
+  native-boundary-controls:
+    name: original-strict-sft-native-boundary
+    uses: ./.github/workflows/_linux-test.yml
     needs: get-label-type
-    name: get-cuda-version
-    runs-on: ubuntu-24.04
-    if: github.repository_owner == 'pytorch'
-    outputs:
-      stable-cuda: ${{ steps.get.outputs.stable-cuda }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-          fetch-depth: 1
-      - name: Get stable CUDA version
-        id: get
-        run: |
-          set -eou pipefail
-          echo "stable-cuda=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)" >> "${GITHUB_OUTPUT}"
-
-  build:
-    name: torchtitan-x-pytorch-build
-    if: github.repository_owner == 'pytorch' && github.event.inputs.artifact-run-id == ''
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - get-cuda-version
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3.12-gcc11-torchtitan
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3.12-gcc11
-      # Diagnostic: exact already published image from the original failure.
-      ci-docker-hash: 6ce4e7e1f7fed4d82afb7c896fec3dd3ce7d6b17
-      cuda-arch-list: '8.0 8.9 9.0 10.0'
-      build-additional-packages: "torchao torchcomms"
-      # torchtitan_h100_integration disabled pending runner availability
-      test-matrix: |
-        { include: [
-          { config: "${{ github.event.inputs.reuse-candidate-wheel == 'true' && 'torchtitan_triton_pin_fusion_reuse_controls' || github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
-        ]}
-      python-version: "3.12"
-      compiler: gcc11
-      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
-    secrets: inherit
-
-  test:
-    name: torchtitan-x-pytorch-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - build
-      - get-label-type
-      - get-cuda-version
-    with:
-      build-environment: ${{ needs.build.outputs.build-environment }}
-      docker-image: ${{ needs.build.outputs.docker-image }}
-      test-matrix: ${{ needs.build.outputs.test-matrix }}
-      python-version: "3.12"
-      compiler: gcc11
-      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
-    secrets: inherit
-
-  test-reuse:
-    if: github.event.inputs.artifact-run-id != ''
-    name: native-torchtitan-controls-reuse
-    uses: ./.github/workflows/_linux-test.yml
-    needs: [get-label-type, get-cuda-version]
-    with:
-      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3.12-gcc11-torchtitan
+      # Reuse the original native build and original CUDA image. This branch
+      # changes test orchestration only; its native Torch SHA is asserted.
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-torchtitan
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-6ce4e7e1f7fed4d82afb7c896fec3dd3ce7d6b17
-      artifact-run-id: ${{ github.event.inputs.artifact-run-id }}
+      artifact-run-id: '40737992620'
       timeout-minutes: 180
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.reuse-candidate-wheel == 'true' && 'torchtitan_triton_pin_fusion_reuse_controls' || github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ github.event.inputs.control-runner == 'a10g-4-lf' && 'lf-l-x86aavx2-45-167-a10g-4' || github.event.inputs.control-runner == 'a10g-4' && format('{0}l-x86aavx2-45-167-a10g-4', needs.get-label-type.outputs.label-type) || 'mt-l-x86aavx2-189-704-a10g-8' }}" }
+          { config: "torchtitan_triton_pin_boundary_controls", shard: 1, num_shards: 1, runner: "lf-l-x86aavx2-45-167-a10g-4" }
         ]}
       python-version: '3.12'
       compiler: gcc11
-      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
+      cuda-version: '13.2'
     secrets: inherit
