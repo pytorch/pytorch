@@ -10,7 +10,6 @@ on:
       - ".github/actions/pi-agent/**"
       - ".github/workflows/*triage*.yml"
       - ".agents/skills/triaging-issues/**"
-      - ".agents/skills/distributed-triage/**"
   pull_request:
     paths:
       - "scripts/issue_triage_pi/**"
@@ -18,7 +17,6 @@ on:
       - ".github/actions/pi-agent/**"
       - ".github/workflows/*triage*.yml"
       - ".agents/skills/triaging-issues/**"
-      - ".agents/skills/distributed-triage/**"
 
 permissions:
   contents: read
