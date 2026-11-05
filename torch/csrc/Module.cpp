@@ -2981,7 +2981,9 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_property(
           "allow_meta",
-          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_.load(); },
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_meta_.load();
+          },
           [](c10::FakeTensorMode& mode, bool value) {
             mode.allow_meta_.store(value);
           })
@@ -3026,14 +3028,17 @@ Call this whenever a new thread is created in order to propagate values from
         TORCH_CHECK_VALUE(
             !impl->is_fake(), "Expected a meta tensor that is not fake");
         // Like Python's FakeTensor(mode, meta, device), which goes through
-        // _make_subclass: a new detached fake sharing meta's storage, made
-        // without dispatching. meta keeps its own device and autograd state;
-        // as in Python, the storage it shares is marked as a fake's.
+        // _make_subclass: a new detached fake sharing meta's storage (or, for a
+        // sparse meta, its indices and values). meta keeps its own device and
+        // autograd state; as in Python, the storage it shares is marked as a
+        // fake's.
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
-          // Otherwise an active dispatch mode would run the detach
-          c10::impl::ExcludeDispatchKeyGuard no_python(
-              c10::DispatchKey::Python);
+          // Otherwise an active dispatch mode would run the detach, and an
+          // active C++ mode would see the placeholder indices and values that
+          // the sparse impls' copies allocate with at::empty
+          c10::impl::ExcludeDispatchKeyGuard no_modes(c10::DispatchKeySet(
+              {c10::DispatchKey::Python, c10::DispatchKey::Fake}));
           out_impl = impl->shallow_copy_and_detach(
               impl->version_counter(), /*allow_tensor_metadata_change=*/true);
         }
