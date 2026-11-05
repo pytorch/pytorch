@@ -3091,6 +3091,14 @@ Call this whenever a new thread is created in order to propagate values from
             mode.allow_non_fake_inputs_.store(value);
           })
       .def_property(
+          "static_shapes",
+          [](const c10::FakeTensorMode& mode) {
+            return mode.static_shapes_.load();
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.static_shapes_.store(value);
+          })
+      .def_property(
           "epoch",
           [](const c10::FakeTensorMode& mode) { return mode.epoch_.load(); },
           [](c10::FakeTensorMode& mode, uint64_t value) {
