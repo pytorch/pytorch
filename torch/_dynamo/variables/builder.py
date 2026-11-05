@@ -305,7 +305,6 @@ from .misc import (
     LoggingLoggerVariable,
     NumpyDTypeVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -920,6 +919,16 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
+def lookup_tracked_variable(
+    tx: "InstructionTranslatorBase", value: object
+) -> VariableTracker | None:
+    """The VT side effects already track for `value`, if any. Every build of
+    the same object must return it, or its pending mutations are missed."""
+    if tx is None or value not in tx.output.side_effects:
+        return None
+    return tx.output.side_effects[value]
+
+
 def _is_dim_dynamic_from_source_dynamism(
     source: Source, normalized_source_name: str, dim: int
 ) -> bool:
@@ -1145,10 +1154,10 @@ class VariableBuilder:
         self,
         value: object,
     ) -> VariableTracker | None:
-        if value not in self.tx.output.side_effects:
+        result = lookup_tracked_variable(self.tx, value)
+        if result is None:
             return None
 
-        result = self.tx.output.side_effects[value]
         if self.source != result.source:
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
@@ -2714,7 +2723,7 @@ class VariableBuilder:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return ObjectVariable(value, source=self.source)
+            return VariableTracker(value=value, source=self.source)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
@@ -5810,6 +5819,8 @@ class SourcelessBuilder:
             return NumpyDTypeVariable(value)
         elif trace_rules.is_numpy_type_info(value):
             return ConstantLikeVariable(value)
+        elif (tracked := lookup_tracked_variable(tx, value)) is not None:
+            return tracked
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -5970,7 +5981,7 @@ class SourcelessBuilder:
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         elif istype(value, object):
-            return ObjectVariable(value)
+            return VariableTracker(value=value)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
