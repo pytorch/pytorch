@@ -1925,7 +1925,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.reduce_scatter(
                 [output], [[torch.ones(1)] * self.world_size], opts
             )
-            with self.assertRaises(RuntimeError):
+            # Gloo reports either the op timeout or the resulting pair closure.
+            with self.assertRaisesRegex(RuntimeError, "(Timed out|timeout)"):
                 work.wait()
             self.assertEqual(
                 WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR

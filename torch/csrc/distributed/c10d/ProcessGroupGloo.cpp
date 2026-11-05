@@ -1612,6 +1612,9 @@ class LambdaWork : public Work {
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
     return resultFuture_;
   }
+  bool hasFutureResult() const override {
+    return true;
+  }
 
  private:
   static c10::intrusive_ptr<c10::ivalue::Future> collectResults(

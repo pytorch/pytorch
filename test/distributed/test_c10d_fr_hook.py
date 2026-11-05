@@ -1283,7 +1283,7 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
         t = torch.ones(8)
         for _ in range(2):
             pg.allreduce(t)
-        # The hook expects NotImplementedError; anything else logs a warning.
+        # Its Work reports no result future.
         work = pg.allreduce(t)
         with self.assertRaisesRegex(
             NotImplementedError, "getFutureResult not implemented"
@@ -1303,36 +1303,20 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
 
 class FlightRecorderHookPythonWorkTest(TestCase):
     def test_python_work_retires_from_result(self):
-        # Python Works whose futures complete after issue, with the GIL released:
-        # get_future derives SUCCESS or COMM_ERROR and a get_future_result
-        # override passes its result through. Only SUCCESS retires; an already
-        # completed future retires at issue.
+        # A get_future_result override's future is used as is: the op retires
+        # once it completes.
         futs = []
-
-        def new_fut():
-            futs.append(torch.futures.Future())
-            return futs[-1]
-
-        class FutureWork(_NoResultWork):
-            def get_future(self):
-                return new_fut()
 
         class ResultWork(_NoResultWork):
             def get_future_result(self):
-                return new_fut()
+                futs.append(torch.futures.Future())
+                return futs[-1]
 
-        class DoneWork(_NoResultWork):
-            def get_future(self):
-                fut = torch.futures.Future()
-                fut.set_result(None)
-                return fut
-
-        kinds = [FutureWork, FutureWork, ResultWork, ResultWork, DoneWork]
         pg = dist.ProcessGroup(FakeStore(), 0, 1)
         pg._register_backend(
             torch.device("cpu"),
             dist.ProcessGroup.BackendType.CUSTOM,
-            _NoResultBackend(lambda: kinds.pop(0)(), name="pyresult"),
+            _NoResultBackend(ResultWork, name="pyresult"),
         )
         pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
         pg._set_group_name("pyresult")
@@ -1343,26 +1327,22 @@ class FlightRecorderHookPythonWorkTest(TestCase):
             return json.loads(trace).get("entries", [])
 
         before = len(entries())
-        for _ in range(5):
-            pg.allreduce(torch.ones(8))
-        self.assertEqual(len(futs), 4)
+        pg.allreduce(torch.ones(8))
+        pg.allreduce(torch.ones(8))
         new = entries()[before:]
-        self.assertEqual(
-            [e["retired"] for e in new], [False] * 4 + [True], msg=str(new)
-        )
-        self.assertEqual(new[4]["state"], "completed", msg=str(new))
-        futs[0].set_result(None)
-        futs[1].set_exception(RuntimeError("failed"))
-        futs[2].set_result(int(WorkResult.TIMEOUT))
-        futs[3].set_result(int(WorkResult.SUCCESS))
+        self.assertEqual([e["retired"] for e in new], [False, False], msg=str(new))
+        futs[0].set_result(int(WorkResult.SUCCESS))
 
         new = entries()[before:]
-        self.assertEqual(len(new), 5, msg=str(new))
-        self.assertEqual(
-            [e["retired"] for e in new], [True, False, False, True, True], msg=str(new)
-        )
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
         self.assertEqual(new[0]["state"], "completed", msg=str(new))
-        self.assertEqual(new[3]["state"], "completed", msg=str(new))
+
+        # A torch.futures.Future() can't report failure: set_exception
+        # completes it too.
+        futs[1].set_exception(RuntimeError("failed"))
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [True, True], msg=str(new))
+        self.assertEqual(new[1]["state"], "completed", msg=str(new))
         hook.remove()
 
 

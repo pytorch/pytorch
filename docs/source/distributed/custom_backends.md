@@ -131,17 +131,11 @@ above. `is_completed()`, `synchronize()`, `source_rank()` (used by
 `get_future_result()` can also be overridden. Other `Work` methods can't be
 overridden from Python.
 
-FlightRecorder calls `get_future_result()`, or `get_future()` if
-`get_future_result()` is not overridden, once per op as it is issued and
-retires the op when its result is `WorkResult.SUCCESS`
-(`torch._C._distributed_c10d.WorkResult`); other results leave it un-retired. A
-`get_future_result()` future must hold a `WorkResult` or its int value (not
-`bool`); other values read as `COMM_ERROR`. A result derived from
-`get_future()` is `SUCCESS`, or `COMM_ERROR` if the future fails. These must be
-cheap, must not block, and the future must eventually complete. Return a CPU
-future: device-aware futures, `None` or raising `NotImplementedError` opt out,
-and the op is retired at issue. Other exceptions are logged once per process
-group and the op is also retired at issue.
+FlightRecorder calls `get_future_result()` once per op as it is issued and
+records the op as completed when the returned future completes. A
+`torch.futures.Future()` can't report failure: any value, including one set
+with `set_exception()`, counts as success. It must be cheap and must not block. Ops whose Work doesn't override it are retired at
+issue.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,

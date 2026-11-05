@@ -92,6 +92,9 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+  bool hasFutureResult() const override {
+    return true;
+  }
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
 
