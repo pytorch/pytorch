@@ -1652,17 +1652,19 @@ def _make(_dynamo_fn, _dynamo_fn_name{default_params}):
         _dynamo_prior = set_eval_frame(None)
         try:
             # disable => no callback; _callback_from_stance(None) is None ("off")
-            # for most stances but False (run-only) for eager_on_recompile.
-            # Install only when non-None (skips the justknob-guarded
-            # _maybe_set_eval_frame on the common path).
-            _dynamo_callback = _callback_from_stance(None)
+            # for most stances but False (run-only) for eager_on_recompile,
+            # checked inline here. Install only when non-None (skips the
+            # justknob-guarded _maybe_set_eval_frame on the common path).
+            _dynamo_callback = (
+                False if _stance.stance == "eager_on_recompile" else None
+            )
             if _dynamo_callback is not None:
                 _maybe_set_eval_frame(_dynamo_callback)
             try:
                 # Only export needs the annotation work. Skip annotation for
                 # __torch_dispatch__ (internal detail).
                 if (
-                    torch.compiler.is_exporting()
+                    torch.compiler._is_exporting_flag
                     and _dynamo_fn_name != "__torch_dispatch__"
                 ):
                     with fx_traceback.annotate(
@@ -1692,7 +1694,7 @@ def _make(_dynamo_fn, _dynamo_fn_name{default_params}):
 _DISABLE_WRAPPER_GLOBALS = frozenset(
     {
         "set_eval_frame": set_eval_frame,
-        "_callback_from_stance": _callback_from_stance,
+        "_stance": _stance,
         "_maybe_set_eval_frame": _maybe_set_eval_frame,
         "torch": torch,
         "fx_traceback": fx_traceback,
