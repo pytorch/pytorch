@@ -22,3 +22,31 @@
 #else
 #define AT_USE_CUSPARSE_GENERIC_SPSM() 0
 #endif
+
+#if !defined(USE_ROCM)
+namespace at::cuda::sparse {
+
+// See Note [Enabling Deterministic Operations]
+// cuSPARSE documents bit-wise reproducible cusparseSpMM results only for
+// CUSPARSE_SPMM_CSR_ALG3, CUSPARSE_SPMM_COO_ALG2 and CUSPARSE_SPMM_BSR_ALG1,
+// with opA == CUSPARSE_OPERATION_NON_TRANSPOSE. CSR_ALG3 does not support
+// batched matrices, opB == CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE or complex
+// half values, and it is only deterministic from cuSPARSE 12.7 (CUDA 13.1,
+// CUSPARSE-2612). COO_ALG2 needs A described in COO format.
+inline cusparseSpMMAlg_t deterministic_spmm_alg(
+    cusparseOperation_t opA,
+    cusparseOperation_t opB,
+    cudaDataType value_type,
+    bool batched) {
+  TORCH_INTERNAL_ASSERT(opA == CUSPARSE_OPERATION_NON_TRANSPOSE);
+#if CUSPARSE_VERSION >= 12700
+  if (!batched && opB != CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE &&
+      value_type != CUDA_C_16F && value_type != CUDA_C_16BF) {
+    return CUSPARSE_SPMM_CSR_ALG3;
+  }
+#endif
+  return CUSPARSE_SPMM_COO_ALG2;
+}
+
+} // namespace at::cuda::sparse
+#endif

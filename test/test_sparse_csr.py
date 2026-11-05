@@ -32,6 +32,8 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
+    skipMPS,
+    skipXPU,
     tol,
     toleranceOverride,
 )
@@ -76,8 +78,11 @@ from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_lina
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 
 from test_sparse import (
+    check_sparse_mm_deterministic,
+    deterministiconoff,
     CUSPARSE_SPMM_COMPLEX128_SUPPORTED,
     HIPSPARSE_SPMM_COMPLEX128_SUPPORTED,
+    hub_sparse_mm_inputs,
 )
 
 if TEST_SCIPY:
@@ -1766,6 +1771,7 @@ class TestSparseCSRDevice(TestCase):
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @deterministiconoff
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
             b = b.mH if (op_b and a.shape == b.shape) else b
@@ -1973,6 +1979,7 @@ class TestSparseCSRDevice(TestCase):
     @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @skipCUDAIfNoSparseGeneric
+    @deterministiconoff
     def test_addmv(self, dtype, device, matrix_shape):
         mat = torch.randn(matrix_shape, dtype=dtype, device=device)
         mat[mat.real < 0] = 0
@@ -2061,6 +2068,7 @@ class TestSparseCSRDevice(TestCase):
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.double)
+    @deterministiconoff
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
             for index_dtype in [torch.int32, torch.int64]:
@@ -2164,6 +2172,7 @@ class TestSparseCSRDevice(TestCase):
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    @deterministiconoff
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
             if transposed:
@@ -2184,6 +2193,7 @@ class TestSparseCSRDevice(TestCase):
                   *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
+    @deterministiconoff
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
             if alpha_beta is None:
@@ -2209,6 +2219,46 @@ class TestSparseCSRDevice(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 0))
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
+
+    @onlyAccelerator
+    @skipCUDAIfRocm
+    @skipMPS
+    @skipXPU
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128,
+            *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+            *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [])
+    def test_sparse_mm_deterministic(self, device, dtype):
+        # gh-202030, see test_sparse.py::test_mm_deterministic
+        a_coo, b = hub_sparse_mm_inputs(device, dtype)
+        a = a_coo.to_sparse_csr()
+        n, k = b.shape
+        c = torch.randn_like(b)
+        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
+        a_int32 = torch.sparse_csr_tensor(a.crow_indices().int(), a.col_indices().int(), a.values(), a.shape)
+        a_batched = torch.sparse_csr_tensor(
+            torch.stack([a.crow_indices()] * 2), torch.stack([a.col_indices()] * 2),
+            torch.stack([a.values(), 2 * a.values()]), (2, n, n))
+        a_bcast = torch.sparse_csr_tensor(a.crow_indices(), a.col_indices(), a.values(), (2, n, n),
+                                          check_invariants=False)
+        b_batched = torch.randn(2, n, k, dtype=dtype, device=device)
+
+        def mm_backward():
+            d = b.detach().requires_grad_()
+            torch.sparse.mm(a, d).backward(c)
+            return d.grad
+
+        check_sparse_mm_deterministic(self, [
+            ("mm", lambda: torch.mm(a, b)),
+            ("mm int32 indices", lambda: torch.mm(a_int32, b)),
+            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
+            ("mm n=1", lambda: torch.mm(a, b1)),
+            ("mv", lambda: torch.mv(a, b[:, 0].contiguous())),
+            ("bmm", lambda: torch.bmm(a_batched, b_batched)),
+            ("bmm broadcast", lambda: torch.bmm(a_bcast, b_batched)),
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("addmv", lambda: torch.addmv(c[:, 0].contiguous(), a, b[:, 0].contiguous(), beta=0.5, alpha=2)),
+            ("mm backward", mm_backward),
+        ])
 
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
@@ -3019,6 +3069,7 @@ class TestSparseCSRDevice(TestCase):
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float64)
+    @deterministiconoff
     def test_autograd_dense_output_addmv(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_addmv
 
