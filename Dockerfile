@@ -172,7 +172,6 @@ RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
     fi
 
 # Install CUDA toolkit for devel images
-# Only runs when building devel-image target (BUILD_TYPE != official)
 # Before the Python layers on purpose: a layer is rebuilt whenever one before it
 # changes, and the torch layers change every night.
 ARG BUILD_TYPE
