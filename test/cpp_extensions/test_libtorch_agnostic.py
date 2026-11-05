@@ -41,6 +41,10 @@ def _torchVersionLessThan(major, minor):
     return (current_major < major) or (current_major == major and current_minor < minor)
 
 
+def _signed_int64(value):
+    return value - (1 << 64) if value >= (1 << 63) else value
+
+
 def skipIfTorchVersionLessThan(major, minor):
     """Skip test if PyTorch version is less than specified version."""
 
@@ -1598,7 +1602,7 @@ for warning in w:
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.empty(2, 5, device=device, dtype=torch.float32)
-        expected_p = t.data_ptr()
+        expected_p = _signed_int64(t.data_ptr())
 
         for mutable in [True, False]:
             p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
@@ -1652,7 +1656,7 @@ for warning in w:
         supported_dtypes = self.get_supported_dtypes_for_data_ptr()
         for dtype in supported_dtypes:
             t = torch.empty(2, 5, device=device, dtype=dtype)
-            expected_p = t.data_ptr()
+            expected_p = _signed_int64(t.data_ptr())
 
             for rdtype in supported_dtypes:
                 if dtype == rdtype:
@@ -1890,7 +1894,7 @@ for warning in w:
         # Test basic from_blob with contiguous tensor
         original = torch.rand(2, 3, device=device, dtype=torch.float32)
         stable_result = libtorch_agnostic.ops.my_from_blob(
-            original.data_ptr(),
+            _signed_int64(original.data_ptr()),
             original.size(),
             original.stride(),
             device,
@@ -1904,7 +1908,7 @@ for warning in w:
         transposed = torch.rand(4, 6, device=device, dtype=torch.float32).t()
 
         stable_transposed = libtorch_agnostic.ops.my_from_blob(
-            transposed.data_ptr(),
+            _signed_int64(transposed.data_ptr()),
             transposed.size(),
             transposed.stride(),
             device,
@@ -2379,7 +2383,7 @@ except RuntimeError as e:
             # We need an original tensor to create the tensor with from_blob.
             original = torch.rand(2, 3, device=device, dtype=torch.float32)
             blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
-                original.data_ptr(),
+                _signed_int64(original.data_ptr()),
                 original.size(),
                 original.stride(),
                 device,
@@ -2430,7 +2434,7 @@ except RuntimeError as e:
             # We need an original tensor to create the tensor with from_blob.
             original = torch.rand(2, 3, device=device, dtype=torch.float32)
             blob_tensor = from_blob_fn(
-                original.data_ptr(),
+                _signed_int64(original.data_ptr()),
                 original.size(),
                 original.stride(),
                 device,
@@ -2768,7 +2772,7 @@ instantiate_device_type_tests(
     TestLibtorchAgnosticMetal, globals(), allow_mps=True, only_for="mps"
 )
 
-instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
+instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None, allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
