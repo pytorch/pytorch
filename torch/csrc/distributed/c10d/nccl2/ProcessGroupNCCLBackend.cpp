@@ -142,6 +142,9 @@ class CompletedWork : public ::c10d::Work {
     result->markCompleted(resultValue(::c10d::WorkResult::SUCCESS));
     return result;
   }
+  bool hasFutureResult() const override {
+    return true;
+  }
   float getDuration() const override {
     if (!batch_) {
       return Work::getDuration();
