@@ -253,7 +253,7 @@ def get_triton_type(*, include_cpu: bool = True) -> str | None:
 
     return _get_triton_type(
         include_cpu=include_cpu,
-        triton_disable_device_detection=triton_disable_device_detection,
+        disable_device_detection=triton_disable_device_detection,
     )
 
 

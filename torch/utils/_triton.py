@@ -395,7 +395,7 @@ def devices_supporting_triton(*, include_cpu: bool = False) -> list[str]:
 
     return _devices_supporting_triton(
         include_cpu=include_cpu,
-        triton_disable_device_detection=triton_disable_device_detection,
+        disable_device_detection=triton_disable_device_detection,
     )
 
 
