@@ -219,8 +219,9 @@ class TunableOp {
       // Skipped once this shape is known to have nothing to borrow: the scan
       // below copies the op's map and parses every signature, and nothing
       // records the miss, so otherwise every call of this shape repeats it.
+      const bool wildcard_enabled = ctx->IsWildcardFallbackEnabled();
       const bool may_borrow = ctx->IsNearestMatchEnabled() &&
-          !mgr.BorrowUnavailable(op_sig, concrete_sig);
+          !mgr.BorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
       if (may_borrow) {
         borrowed = mgr.LookupNearest(op_sig, concrete_sig);
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
@@ -241,7 +242,7 @@ class TunableOp {
       }
       const bool will_validate = (borrowed != ResultEntry::Null());
       if (may_borrow && !will_validate) {
-        mgr.MarkBorrowUnavailable(op_sig, concrete_sig);
+        mgr.MarkBorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
       }
 
       // Only a validated donor persists this shape, leaving offline tuning
@@ -269,8 +270,7 @@ class TunableOp {
         // Tuning under stream capture is forbidden (see the tuning path
         // above): FindFastestAmong allocates, memcpys and synchronizes events,
         // any of which invalidates the capture. Returns Default unvalidated,
-        // the same answer the no-donor tail gives -- and deliberately not the
-        // one the catch below gives. See the note at the tail.
+        // the same answer every other exit that measures nothing gives.
         bool can_validate = true;
 #ifndef USE_ROCM
         can_validate =
@@ -310,38 +310,30 @@ class TunableOp {
           // copies, so it can throw. Nothing was measured, so the promise
           // above -- that RecordBorrowed would cover this shape -- does not
           // hold, and without this the shape reaches neither file and offline
-          // tuning can never find it. Report it untuned and serve what
-          // runtime will serve: runtime has nearest match off, so it takes
-          // the wildcard tail below, and Null becomes Default. The capture
-          // branch above answers this differently -- see the note at the
-          // tail.
+          // tuning can never find it. Report it untuned and return Default,
+          // the same answer the capture branch and the tail give: while the
+          // pass is on, a donor that was not measured is never served. That
+          // is also what lets the memo below skip the scan on a later call
+          // of this shape without changing what it resolves to.
           TUNABLE_LOG2(
               "borrow validation failed for ", op_sig, '(', concrete_sig,
               "), recording untuned: ", e.what());
           // The donor is registered but will not run this shape, which no
           // later call changes: without this the throw repeats, and with it
           // the allocation it threw out of leaks only once per signature.
-          mgr.MarkBorrowUnavailable(op_sig, concrete_sig);
+          mgr.MarkBorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
           report_untuned();
-          return ctx->IsWildcardFallbackEnabled()
-              ? mgr.LookupWildcardFallback(op_sig, concrete_sig)
-              : ResultEntry::Null();
+          return ResultEntry::Default();
         }
       }
       // Nearest match takes precedence: once it is on, a miss with no usable
       // donor of either kind (nearest or wildcard) is a miss rather than a
-      // reason to return an unvalidated wildcard hint. Memoized or not -- the
-      // memo records that there was nothing to borrow, which is the same
-      // answer the scan gave.
-      //
-      // Three exits leave without measuring a donor, and they do not agree.
-      // Here and under stream capture: never pass a guess off as a
-      // measurement, so Default. After a failed validation: report what
-      // runtime will actually run, which is the wildcard, since runtime has
-      // nearest match off. Both readings are defensible, so the split is
-      // recorded rather than resolved -- settling it would change what
-      // autotune ranks aten on under CUDA-graph capture, a path no test here
-      // reaches, since the capture check is compiled out on ROCm.
+      // reason to return an unvalidated wildcard hint. One rule for every
+      // exit that measures no donor -- no usable donor, stream capture, a
+      // failed validation -- so the memo can skip the scan without changing
+      // the answer. Runtime runs with nearest match off and does take the
+      // wildcard below; that is the difference between the two, not a split
+      // between these branches.
       if (ctx->IsNearestMatchEnabled()) {
         return ResultEntry::Default();
       }

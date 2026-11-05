@@ -27,6 +27,7 @@
 using at::cuda::tunable::Callable;
 using at::cuda::tunable::FAIL;
 using at::cuda::tunable::getTuningContext;
+using at::cuda::tunable::KernelMap;
 using at::cuda::tunable::OK;
 using at::cuda::tunable::OpParams;
 using at::cuda::tunable::ResultEntry;
@@ -577,12 +578,40 @@ TEST_F(TunableNearestTest, BorrowUnavailableIsClearedByANewEntry) {
   TempResultsFile results("tunableop-borrow-memo-");
   TuningResultsManager mgr;
   SeedDonor(mgr);
-  mgr.MarkBorrowUnavailable(kOp, kQSig);
-  EXPECT_TRUE(mgr.BorrowUnavailable(kOp, kQSig));
+  mgr.MarkBorrowUnavailable(kOp, kQSig, /*wildcard_enabled=*/true);
+  EXPECT_TRUE(mgr.BorrowUnavailable(kOp, kQSig, true));
   // Per signature, not per op.
-  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, "NN_16_512_256_ld_16_256_16"));
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, "NN_16_512_256_ld_16_256_16", true));
+  // The wildcard lookup is part of the scan, so a miss found without it says
+  // nothing about the answer with it.
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, kQSig, false));
   mgr.RecordBorrowed(kOp, "NN_64_512_256_ld_64_256_64", Donor("later"));
-  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, kQSig));
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, kQSig, true));
+}
+
+TEST_F(TunableNearestTest, BorrowUnavailableIsDroppedPerOpAndByAFileRead) {
+  // Two properties the first version got wrong. Clearing the whole map on
+  // every Add meant one shape's borrow resurrected another shape's failed
+  // validation, so "at most one throw per signature" was not true; and a
+  // results file read added donors without invalidating anything, so a shape
+  // memoized before the read could never borrow from it.
+  FlagGuard g;
+  TempResultsFile results("tunableop-borrow-memo-scope-");
+  TuningResultsManager mgr;
+  constexpr const char* kOtherOp = "gemm_nt_f32";
+  mgr.MarkBorrowUnavailable(kOp, kQSig, true);
+  mgr.MarkBorrowUnavailable(kOtherOp, kQSig, true);
+
+  // An entry under one op leaves the other op's memo alone.
+  mgr.Add(kOp, kCSig, Donor("k64"));
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, kQSig, true));
+  EXPECT_TRUE(mgr.BorrowUnavailable(kOtherOp, kQSig, true));
+
+  // A file read is a source of donors like any other.
+  KernelMap loaded;
+  loaded.emplace(kCSig, Donor("from_file"));
+  mgr.Load({{kOtherOp, loaded}});
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOtherOp, kQSig, true));
 }
 
 TEST_F(TunableNearestTest, EnvKillSwitchVetoesLookupAndRecord) {
