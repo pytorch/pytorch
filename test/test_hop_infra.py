@@ -1,9 +1,19 @@
 # Owner(s): ["module: higher order operators"]
+import collections
 import copy
+import dataclasses
 import importlib
+import logging
 import pkgutil
+import types
 
 import torch
+from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+from torch._higher_order_ops.user_kernel_hop import (
+    _snapshot,
+    constant_key,
+    KernelSideTable,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -197,6 +207,366 @@ class TestHOPInfra(TestCase):
         self.assertIs(a.get_kernel(0), k0)
         with self.assertRaises(AssertionError):
             b.get_kernel(0)
+
+
+@skipIfTorchDynamo("not applicable")
+class TestCuteDSLHOPHelpers(TestCase):
+    """The parts of CuTeDSL kernel support that need neither CUDA nor
+    nvidia-cutlass-dsl: how a side table with CuTeDSL's constant rules keys and
+    stores constants."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_side_table_dedupes_constant_args(self):
+        # Interchangeable constants share one entry (see constant_key), which holds a
+        # snapshot of the constants it was added with.
+        Tile = collections.namedtuple("Tile", ["m", "n"])
+
+        @dataclasses.dataclass(frozen=True)
+        class FrozenCfg:
+            alpha: float
+
+        class Cfg:  # a plain config object: compared and hashed by identity
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Numeric:  # keyed like a cutlass Numeric, such as cutlass.Float32(2.0)
+            __module__ = "cutlass.fake"
+
+            def __init__(self, value):
+                self.value = value
+
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        idx = table.add_constant_args({"alpha": 2, "k": None})
+        self.assertEqual(table.add_constant_args({"k": None, "alpha": 2}), idx)
+        self.assertNotEqual(table.add_constant_args({"alpha": 2.0, "k": None}), idx)
+        self.assertNotEqual(table.add_constant_args({"alpha": True, "k": None}), idx)
+
+        def add(c):
+            return table.add_constant_args({"c": c})
+
+        # By type and content all the way down: inside containers and dataclasses
+        # too, equal values of other types, and floats that differ only in sign, are
+        # other constants. Every NaN is the same one.
+        for a, b in (
+            ([1, 2], (1, 2)),
+            (Tile(1, 2), Tile(1.0, 2)),
+            (Tile(1, 2), Tile(True, 2)),
+            (Tile(0.0, 1), Tile(-0.0, 1)),
+            (FrozenCfg(0.0), FrozenCfg(-0.0)),
+            (Numeric(0.0), Numeric(-0.0)),
+        ):
+            self.assertNotEqual(add(a), add(b))
+        self.assertEqual(add(float("nan")), add(float("nan")))
+        # Mutable values too (a namedtuple holding a list, a plain object, a DSL
+        # scalar), stored as they were when added: mutating the caller's value
+        # changes neither the entry nor the entry its old contents map to.
+        tile, cfg, numeric = Tile([128], 64), Cfg(1.0), Numeric(2.0)
+        indices = add(tile), add(cfg), add(numeric)
+
+        def add_equal_values():
+            return add(Tile([128], 64)), add(Cfg(1.0)), add(Numeric(2.0))
+
+        self.assertEqual(add_equal_values(), indices)
+        tile.m.append(32)
+        cfg.alpha = 2.0
+        numeric.value = 5.0
+        t, c, n = (table.get_constant_args(i)["c"] for i in indices)
+        self.assertEqual((t, c.alpha, n.value), (Tile([128], 64), 1.0, 2.0))
+        self.assertEqual(add_equal_values(), indices)
+        for changed, idx in zip((tile, cfg, numeric), indices):
+            self.assertNotEqual(add(changed), idx)
+
+        # An object with __slots__ attributes, even one with a __dict__ too, is keyed
+        # as itself (keyed by its __dict__, objects differing only in a slot would
+        # share one entry), so an unhashable one is refused with that reason.
+        class SlotBase:
+            __slots__ = ("alpha",)
+
+        class SlotCfg(SlotBase):
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class EqSlotCfg(SlotCfg):  # compared by value, so unhashable
+            def __eq__(self, other):
+                return self.alpha == other.alpha
+
+        slot_cfgs = [table.get_constant_args(add(SlotCfg(a)))["c"] for a in (1.0, 2.0)]
+        self.assertEqual([c.alpha for c in slot_cfgs], [1.0, 2.0])
+        msg = "^a constant kernel argument of type {} is unhashable: {}"
+        with self.assertRaisesRegex(TypeError, msg.format("set", "pass a hashable")):
+            add({1, 2})
+        with self.assertRaisesRegex(TypeError, msg.format("EqSlotCfg", "it has state")):
+            add(EqSlotCfg(1.0))
+
+    def test_numpy_and_complex_constants_are_keyed_by_their_bits(self):
+        # A numpy floating scalar that is not a Python float (np.float32, ...) and a
+        # complex value, Python or numpy, are keyed as a float is, by type and the
+        # hex() of each float component: signed zeros apart, equal values of other
+        # types apart, and every NaN of one type the same constant, in the side
+        # table too. Where long double is wider than double (unlike on Windows or
+        # macOS arm64), a long double that no float holds is keyed by its exact value.
+        import numpy as np
+
+        def distinct_keys(*values):
+            return len({constant_key(v, CUTEDSL_CONSTANT_RULES) for v in values})
+
+        for a, b in (
+            (np.float32(-0.0), np.float32(0.0)),
+            (np.float16(-0.0), np.float16(0.0)),
+            (np.longdouble(-0.0), np.longdouble(0.0)),
+            (complex(-0.0, 0.0), complex(0.0, 0.0)),
+            (complex(0.0, -0.0), complex(0.0, 0.0)),
+            (np.complex64(complex(-0.0, 0.0)), np.complex64(0.0)),
+            (np.float32(1.0), np.float16(1.0)),
+            (np.float32(1.0), 1.0),
+            (np.complex64(1.0), np.complex128(1.0)),
+            (np.complex128(1.0), complex(1.0)),
+        ):
+            self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
+        if np.finfo(np.longdouble).nmant > np.finfo(np.float64).nmant:
+            # The long double nearest 0.1, and the float nearest 0.1 as a long double.
+            a, b = np.longdouble("0.1"), np.longdouble(0.1)
+            self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
+        nan = float("nan")
+        for make in (np.float32, np.float16, np.longdouble, complex, np.complex64):
+            self.assertEqual(distinct_keys(make(nan), make(nan)), 1, make.__name__)
+        self.assertEqual(distinct_keys(-np.float32(nan), np.float32(nan)), 1)
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        values = (np.float32(-0.0), np.float32(0.0), np.float32(nan), np.float32(nan))
+        indices = [table.add_constant_args({"alpha": v}) for v in values]
+        self.assertEqual(indices, [0, 1, 2, 2])
+
+    def test_side_table_reset_clears_the_dedupe_index(self):
+        # Without the index, a reset table would hand out the index of an entry that
+        # no longer exists. The table also keeps each entry's keys.
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        table.add_constant_args({"a": 1})
+        self.assertEqual(table.add_constant_args({"a": 2.0}), 1)
+        self.assertEqual(table.get_constant_args_keys(1), {"a": (float, (2.0).hex())})
+        table.reset_table()
+        self.assertEqual(table.add_constant_args({"a": 2.0}), 0)
+        self.assertEqual(table.get_constant_args(0), {"a": 2.0})
+        plain = KernelSideTable()
+        self.assertEqual(plain.get_constant_args_keys(plain.add_constant_args({})), {})
+
+    def test_constants_from_cutlass_named_modules_are_keyed_by_content(self):
+        # Only the cutlass package's own values are the DSL's: an object of a class
+        # from a module merely named like it (cutlass_configs, cutlass_library), even
+        # one with a numeric .value like a cutlass Numeric's, is keyed by its
+        # attributes and stored as a snapshot.
+        class Cfg:
+            __module__ = "cutlass_configs"
+
+            def __init__(self, **attrs):
+                vars(self).update(attrs)
+
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+
+        def add(cfg):
+            return table.add_constant_args({"cfg": cfg})
+
+        cfg = Cfg(value=1, alpha=2.0)
+        idx = add(cfg)
+        self.assertEqual(add(Cfg(value=1, alpha=2.0)), idx)
+        self.assertNotEqual(add(Cfg(value=1, alpha=3.0)), idx)
+        self.assertEqual(add(Cfg(alpha=2.0)), add(Cfg(alpha=2.0)))
+        cfg.alpha = 3.0
+        snapshot = table.get_constant_args(idx)["cfg"]
+        self.assertEqual(vars(snapshot), {"value": 1, "alpha": 2.0})
+
+    def test_constants_from_the_cutlass_package_are_keyed_as_themselves(self):
+        # A value of a class from the cutlass package is the DSL's own, never keyed
+        # or copied by its attributes: equal ones get their own entries, which hold
+        # the objects themselves.
+        class DslCfg:
+            __module__ = "cutlass.cute.fake"
+
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        cfg = DslCfg(2.0)
+        idx = table.add_constant_args({"cfg": cfg})
+        self.assertNotEqual(table.add_constant_args({"cfg": DslCfg(2.0)}), idx)
+        self.assertIs(table.get_constant_args(idx)["cfg"], cfg)
+
+    def test_dataclass_constants_are_keyed_by_all_their_attributes(self):
+        # A dataclass instance is keyed and stored as a snapshot by its fields and the
+        # other attributes in its __dict__ (set in __post_init__ or ad hoc), frozen or
+        # not. One with __slots__ attributes that are not fields is keyed as itself:
+        # by identity (eq=False), by its own equality, which compares its fields alone
+        # (frozen), or not at all (eq=True and not frozen, so unhashable).
+        @dataclasses.dataclass
+        class Cfg:
+            alpha: float
+
+            def __post_init__(self):
+                self.tiles = [self.alpha]
+
+        @dataclasses.dataclass(frozen=True)
+        class FrozenCfg:
+            alpha: float
+
+            def __post_init__(self):
+                object.__setattr__(self, "tiles", [self.alpha])
+
+        @dataclasses.dataclass(slots=True)
+        class SlotsCfg:
+            alpha: float
+
+        class SlotBase:
+            __slots__ = ("beta",)
+
+        @dataclasses.dataclass(eq=False)
+        class SlotBaseCfg(SlotBase):
+            alpha: float
+
+        @dataclasses.dataclass(frozen=True)
+        class FrozenSlotBaseCfg(SlotBase):
+            alpha: float
+
+        @dataclasses.dataclass
+        class EqSlotBaseCfg(SlotBase):
+            alpha: float
+
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+
+        def add(c):
+            return table.add_constant_args({"c": c})
+
+        for cls in (Cfg, FrozenCfg):
+            a, b, c = cls(1.0), cls(1.0), cls(1.0)
+            b.tiles.append(2.0)
+            object.__setattr__(c, "mode", "fast")
+            self.assertEqual(len({add(a), add(b), add(c)}), 3)
+            self.assertEqual(add(cls(1.0)), add(a))
+            stored = table.get_constant_args(add(c))["c"]
+            c.tiles.append(3.0)
+            object.__setattr__(c, "mode", "slow")
+            self.assertEqual((stored.tiles, stored.mode), ([1.0], "fast"))
+            self.assertEqual(table.get_constant_args(add(cls(1.0)))["c"].tiles, [1.0])
+        slots = SlotsCfg(1.0)
+        self.assertEqual(add(slots), add(SlotsCfg(1.0)))
+        self.assertIsNot(table.get_constant_args(add(slots))["c"], slots)
+        s1, s2 = SlotBaseCfg(1.0), SlotBaseCfg(1.0)
+        s1.beta, s2.beta = 1, 2
+        self.assertNotEqual(add(s1), add(s2))
+        self.assertIs(table.get_constant_args(add(s1))["c"], s1)
+        f1, f2 = FrozenSlotBaseCfg(1.0), FrozenSlotBaseCfg(1.0)
+        object.__setattr__(f1, "beta", 1)
+        object.__setattr__(f2, "beta", 2)
+        self.assertEqual(add(f1), add(f2))
+        self.assertIs(table.get_constant_args(add(f2))["c"], f1)
+        msg = (
+            "^a constant kernel argument of type EqSlotBaseCfg is unhashable: it has "
+            "state in __slots__ attributes that are not dataclass fields, so it is "
+            "keyed as itself, not by content; make it hashable, or keep that state in "
+            "dataclass fields or its __dict__$"
+        )
+        with self.assertRaisesRegex(TypeError, msg):
+            add(EqSlotBaseCfg(1.0))
+
+    def test_cyclic_constants_are_refused(self):
+        # constant_key and _snapshot walk a constant's contents, so a constant that
+        # refers to itself is refused with a ValueError naming the cycle, instead of
+        # recursing until a RecursionError. An object, dict or list reached twice on
+        # different paths is no cycle.
+        class Cfg:
+            def __init__(self, alpha, **attrs):
+                self.alpha = alpha
+                vars(self).update(attrs)
+
+        @dataclasses.dataclass
+        class Node:
+            next: object = None
+
+        cfg = Cfg(2.0, parent=Cfg(1.0))
+        cfg.parent.child = cfg
+        node = Node()
+        node.next = Node(node)
+        items = [1.0]
+        items.append(items)
+        table = {}
+        table["self"] = table
+        keyed = Cfg(1.0)
+        keyed.lookup = {keyed: 1}
+        # A logger of its own manager: its manager's loggerDict holds it.
+        log = logging.Manager(logging.RootLogger(logging.WARNING)).getLogger("cfg")
+        cycles = (
+            (cfg, "Cfg", r"\.parent\.child"),
+            (node, "Node", r"\.next\.next"),
+            ((0, Cfg(1.0, items=items)), "list", r"\[1\]"),
+            (table, "dict", r"\['self'\]"),
+            (keyed, "Cfg", r"\.lookup\.keys\(\)\[0\]"),
+            (Cfg(1.0, log=log), "Logger", r"\.manager\.loggerDict\['cfg'\]"),
+        )
+        rules = CUTEDSL_CONSTANT_RULES
+        side_table = KernelSideTable(constant_rules=rules)
+        for value, name, path in cycles:
+            msg = f"^a constant kernel argument of type {name} refers to itself "
+            msg += f"through {path}$"
+            for walk in (constant_key, _snapshot):
+                with self.assertRaisesRegex(ValueError, msg):
+                    walk(value, rules)
+            with self.assertRaisesRegex(ValueError, msg):
+                side_table.add_constant_args({"cfg": value})
+        # A logger of the process: which cycle its walk meets first depends on the
+        # process.
+        msg = r"^a constant kernel argument of type \w+ refers to itself through .+$"
+        with self.assertRaisesRegex(ValueError, msg):
+            constant_key(Cfg(1.0, log=logging.getLogger(__name__)), rules)
+
+        shared = Cfg(1.0, lookup={"k": [0.5]})
+        twice = Cfg(2.0, a=shared, b=[shared], c=shared.lookup)
+        snapshot = _snapshot(twice, rules)
+        self.assertEqual(constant_key(snapshot, rules), constant_key(twice, rules))
+        self.assertTrue(all(c is not shared for c in (snapshot.a, snapshot.b[0])))
+        self.assertIsNot(snapshot.c, shared.lookup)
+
+    def test_constants_holding_tensors_are_refused(self):
+        # Keyed by identity, a tensor inside a constant would stay alive with its
+        # side-table entry, and it would reach the DSL without from_dlpack:
+        # constant_key refuses one as a constant or in a list, tuple, dict, dataclass
+        # attribute or plain-object attribute, naming where.
+        @dataclasses.dataclass
+        class Cfg:
+            alpha: float
+            weight: object = None
+
+        t = torch.randn(4)
+        with_extra = Cfg(2.0)
+        with_extra.extra = t
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        msg = "^a constant kernel argument holds a tensor{}: pass each tensor as its "
+        msg += "own argument$"
+        for value, where in (
+            ([t], r" at \[0\]"),
+            ((1.0, {"w": t}), r" at \[1\]\['w'\]"),
+            ({t: 1.0}, r" at \.keys\(\)\[0\]"),
+            (Cfg(2.0, weight=t), r" at \.weight"),
+            (with_extra, r" at \.extra"),
+            (types.SimpleNamespace(w=t), r" at \.w"),
+            (t, ""),
+        ):
+            with self.assertRaisesRegex(TypeError, msg.format(where)):
+                table.add_constant_args({"cfg": value})
+
+    def test_dict_subclasses_are_rebuilt_with_their_items(self):
+        # _snapshot rebuilds a dict, of a subclass too, with each item assigned: a
+        # Counter's update() would count the (key, value) pairs
+        # (Counter({('a', 3): 1})), and dict.update() would leave an OrderedDict
+        # empty to iterate.
+        rules = CUTEDSL_CONSTANT_RULES
+        for value in (
+            collections.Counter({"a": 3}),
+            collections.OrderedDict([("b", 1), ("a", 2)]),
+        ):
+            with self.subTest(type=type(value).__name__):
+                snapshot = _snapshot(value, rules)
+                self.assertIsNot(snapshot, value)
+                self.assertIs(type(snapshot), type(value))
+                self.assertEqual(list(snapshot.items()), list(value.items()))
 
 
 if __name__ == "__main__":
