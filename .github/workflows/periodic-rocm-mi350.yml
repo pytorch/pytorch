@@ -56,11 +56,11 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       rocm-arch-list: gfx950
       # distributed_4gpu selects only the >2-GPU distributed tests, so it must
-      # run on the gfx950.4 (4-GPU) runner labels.
+      # run on the mi350.4 (4-GPU) runner labels.
       test-matrix: |
         { include: [
-          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.mi350.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.mi350.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
