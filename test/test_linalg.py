@@ -8904,6 +8904,28 @@ class TestLinalg(TestCase):
         check_correctness(torch.dot, torch.bfloat16, a, b)
         check_correctness(torch.dot, torch.half, a, b)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    @parametrize("transpose_a", [False, True])
+    @parametrize("transpose_b", [False, True])
+    @parametrize("alpha,beta", [(1, 0), (0.5, 2)])
+    def test_addmm_reduced_precision_without_mkldnn(self, device, dtype, transpose_a, transpose_b, alpha, beta):
+        # With oneDNN unavailable (ISA gate or disabled), bf16/fp16 gemm goes to MKL's
+        # bf16/f16 gemm when the build has it, otherwise to the ATen kernel, depending
+        # on column size and problem size
+        def make(rows, cols, transpose):
+            if transpose:
+                return make_tensor((cols, rows), dtype=dtype, device=device, low=-1, high=1).t()
+            return make_tensor((rows, cols), dtype=dtype, device=device, low=-1, high=1)
+
+        tol = 1e-2 if dtype == torch.bfloat16 else 2e-3
+        with torch.backends.mkldnn.flags(enabled=False):
+            for m, n, k in [(1, 65, 33), (7, 65, 33), (64, 33, 300), (129, 65, 33), (200, 1, 33), (129, 130, 1)]:
+                a, b, c = make(m, k, transpose_a), make(k, n, transpose_b), make(m, n, False)
+                ref = torch.addmm(c.float(), a.float(), b.float(), beta=beta, alpha=alpha)
+                out = torch.addmm(c, a, b, beta=beta, alpha=alpha)
+                self.assertEqual(out.float(), ref, atol=tol, rtol=tol)
+
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize("transpose_a", [True, False])
     @parametrize("transpose_b", [True, False])
