@@ -212,9 +212,7 @@
 # from op_db, so OpInfo changes are included. Compile stack changes are not, and
 # are only covered after merge.
 "ciflow/periodic-strict":
-- aten/src/ATen/NestedTensorImpl.*
 - aten/src/ATen/native/nested/**
-- torch/csrc/utils/nested.*
 - torch/nested/**
 - torch/testing/_internal/common_methods_invocations.py
 - torch/testing/_internal/opinfo/**
