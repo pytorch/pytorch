@@ -8475,57 +8475,6 @@ torch.cuda.synchronize()
         output = torch.compile(f, fullgraph=True)(values, offsets)
         self.assertEqual(output, expected)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @skipIfTorchDynamo(
-        "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
-    )
-    def test_nested_tensor_non_contiguous_mutation(self):
-        def fn(x, x0):
-            x[0, 0, 0] = 2
-            return x
-
-        def _inp():
-            base = torch.zeros(32, 3)
-            v = base.t()
-            return torch.nested.nested_tensor_from_jagged(
-                v,
-                offsets=torch.tensor([0, 2, 3]),
-            ), torch.ones(2, 32)
-
-        ref_x, ref_x0 = _inp()
-        ref_y = fn(ref_x, ref_x0)
-
-        self.assertEqual(ref_y[0][0][0].item(), 2)
-
-        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
-        self.assertEqual(y[0][0][0], 2)
-
-    @xfailIfTorchDynamo
-    def test_nested_tensor_input_mutation_backward(self):
-        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
-        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
-        # This test checks that AOTD correctly guess NJT tangent as NJT.
-        def fn(x):
-            x.mul_(2)
-            return x + 1
-
-        def _inp():
-            v = torch.zeros(32, 3, requires_grad=True)
-            return torch.nested.nested_tensor_from_jagged(
-                v,
-                offsets=torch.tensor([0, 2, 3]),
-            ).clone()
-
-        ref_x = _inp()
-        ref_y = fn(ref_x)
-        ref_y.sum().backward()
-
-        x = _inp()
-        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
-        y.sum().backward()
-
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that
 # these are attempted to be matched from top to bottom and only one at most will
@@ -9304,6 +9253,56 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # needed to avoid "data dependent operator: aten._local_scalar_dense.default"
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfTorchDynamo(
+        "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
+    )
+    def test_nested_tensor_non_contiguous_mutation(self):
+        def fn(x, x0):
+            x[0, 0, 0] = 2
+            return x
+
+        def _inp():
+            base = torch.zeros(32, 3)
+            v = base.t()
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ), torch.ones(2, 32)
+
+        ref_x, ref_x0 = _inp()
+        ref_y = fn(ref_x, ref_x0)
+
+        self.assertEqual(ref_y[0][0][0].item(), 2)
+
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
+        self.assertEqual(y[0][0][0], 2)
+
+    def test_nested_tensor_input_mutation_backward(self):
+        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+        # This test checks that AOTD correctly guess NJT tangent as NJT.
+        def fn(x):
+            x.mul_(2)
+            return x + 1
+
+        def _inp():
+            v = torch.zeros(32, 3, requires_grad=True)
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ).clone()
+
+        ref_x = _inp()
+        ref_y = fn(ref_x)
+        ref_y.sum().backward()
+
+        x = _inp()
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+        y.sum().backward()
 
 
 from torch.nested._internal.nested_int import NestedIntNode
