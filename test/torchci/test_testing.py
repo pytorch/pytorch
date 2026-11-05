@@ -601,6 +601,31 @@ class TestReportEnablement(TestCase):
 
 
 @skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
+class TestShardHeadStart(TestCase):
+    def shard_tests(self, *args):
+        run_test_module = importlib.import_module("run_test")
+        argv = ["run_test.py", "--shard-head-start", *args]
+        file_times = {"test_a": 10.0, "test_b": 10.0}
+        tests = [run_test_module.TestRun(name) for name in file_times]
+        out = []
+        for shard in (1, 2):
+            with unittest.mock.patch.object(
+                sys, "argv", [*argv, "--shard", str(shard), "2"]
+            ):
+                options = run_test_module.parse_args()
+            _, pieces = run_test_module.do_sharding(options, tests, file_times, {})
+            out.append(sorted(piece.name for piece in pieces))
+        return out
+
+    def test_head_start_moves_tests_off_the_shard(self):
+        self.assertEqual(self.shard_tests("2=30"), [["test_a", "test_b"], []])
+
+    def test_rejects_unknown_shard(self):
+        with self.assertRaisesRegex(AssertionError, "shard 3 is not in 1..2"):
+            self.shard_tests("3=30")
+
+
+@skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
 class TestSerialFileXdistWorkers(TestCase):
     """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
     only where each worker keeps the per-process isolation it needs, and
