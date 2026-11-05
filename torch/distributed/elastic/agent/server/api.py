@@ -504,7 +504,9 @@ class SimpleElasticAgent(ElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         r"""Check on the workers for the ``worker_group``.
 
-        This function also returns the new state of the worker group.
+        This function also returns the new state of the worker group. An
+        ``UNHEALTHY`` or ``FAILED`` result must fill ``failures``, keyed by
+        global rank, since ``launch_agent`` raises ``ChildFailedError`` from it.
         """
         raise NotImplementedError
 

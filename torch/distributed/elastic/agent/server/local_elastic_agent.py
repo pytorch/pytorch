@@ -555,9 +555,9 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _check_uninterruptible_state_timeout(
         self, worker_group: WorkerGroup, timeout: float
     ) -> RunResult | None:
-        """Return UNHEALTHY when any worker has been in Linux uninterruptible
-        sleep (D-state) for at least ``timeout`` seconds; otherwise update
-        bookkeeping and return None.
+        """Return UNHEALTHY, with a failure per stuck global rank, when any
+        worker has been in Linux uninterruptible sleep (D-state) for at least
+        ``timeout`` seconds; otherwise update bookkeeping and return None.
         """
         if self._pcontext is None:
             return None
@@ -588,12 +588,20 @@ class LocalElasticAgent(SimpleElasticAgent):
                 elapsed,
                 timeout,
             )
-            failures[worker_group.workers[local_rank].global_rank] = ProcessFailure(
-                local_rank=local_rank,
-                pid=pid,
-                exitcode=1,
-                error_file=self._pcontext.error_files[local_rank],
+            # The worker is still alive: exitcode 1 is a placeholder, and its
+            # error file may be half written or on the mount it is hung on.
+            failure = ProcessFailure(
+                local_rank=local_rank, pid=pid, exitcode=1, error_file=""
             )
+            failure.message = (
+                "Worker stuck in uninterruptible sleep (D-state)"
+                f" for {elapsed:.1f}s (>= {timeout:.1f}s)"
+            )
+            failure.error_file_data = {
+                **failure.error_file_data,
+                "message": failure.message,
+            }
+            failures[worker_group.workers[local_rank].global_rank] = failure
         # Disable restarts: a wedged worker is holding a kernel resource
         # (GPU, NIC) that a fresh worker on the same host would conflict
         # with. Force the supervising loop into the _stop_workers branch
