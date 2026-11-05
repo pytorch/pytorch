@@ -1742,6 +1742,10 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
             if raise_exc is not None:
                 raise raise_exc
 
+    raised = type(raise_exc).__name__ if raise_exc is not None else "none"
+    _FakeInterface.__name__ = (
+        f"_FakeInterface(available={available}, capable={capable}, raised={raised})"
+    )
     return _FakeInterface
 
 
@@ -1828,6 +1832,328 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
+
+    def test_has_triton_accepts_zero_arg_override(self):
+        # The process-wide gate calls the probes with no arguments, so an
+        # override that takes none keeps working through it.
+        class _ZeroArg(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable() -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable() -> None:
+                return None
+
+        self.assertTrue(self._run([("fake", _ZeroArg)]))
+
+    def _run_for_device(
+        self,
+        device,
+        interface,
+        *,
+        has_package=True,
+        detection_disabled=False,
+    ):
+        # has_triton_for_device resolves the interface by device type and reads
+        # the package/config gates live; a mock lookup keeps the global device
+        # interface registry untouched.
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
+            mock.patch.object(di, "get_interface_for_device", return_value=interface),
+        ):
+            return triton_utils.has_triton_for_device(device)
+
+    def test_has_triton_for_device_registry_contract(self):
+        # The scoped conjunction: device available + per-device capable +
+        # backend built; package/config gates re-read per call; cpu, names
+        # torch.device cannot parse, and unregistered types are False.
+        ready = _make_triton_interface()
+        _TOO_OLD = _GPUTooOldForTriton()
+        self.assertFalse(self._run_for_device("hpu", ready, has_package=False))
+        self.assertTrue(self._run_for_device("hpu", ready))
+        for iface, expected in (
+            (_make_triton_interface(available=False), False),
+            (_make_triton_interface(capable=False), False),
+            (
+                _make_triton_interface(
+                    raise_exc=TritonUnavailableError("backend not built")
+                ),
+                False,
+            ),
+            # The capability gate answers before the backend probe runs, so a
+            # non-TritonUnavailableError from the probe never escapes.
+            (_make_triton_interface(capable=False, raise_exc=_TOO_OLD), False),
+            (ready, True),
+        ):
+            with self.subTest(interface=iface.__name__):
+                self.assertEqual(self._run_for_device("hpu", iface), expected)
+        self.assertFalse(self._run_for_device("hpu", ready, detection_disabled=True))
+        self.assertTrue(self._run_for_device("hpu", ready))
+        self.assertFalse(self._run_for_device("cpu", ready))
+        self.assertFalse(self._run_for_device("nosuchdevice", ready))
+        # A parseable type no backend registers resolves to no interface.
+        with mock.patch.object(triton_utils, "has_triton_package", return_value=True):
+            self.assertFalse(triton_utils.has_triton_for_device("vulkan:0"))
+
+    def test_has_triton_for_device_is_index_aware(self):
+        # The probes receive the operand's full device, index included: :0 and
+        # :1 get different answers and nothing is asked about the current device.
+        received = []
+
+        class _PerIndex(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                received.append(device)
+                index = device.index if isinstance(device, torch.device) else None
+                return index == 1
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        self.assertFalse(self._run_for_device("hpu:0", _PerIndex))
+        self.assertTrue(self._run_for_device("hpu:1", _PerIndex))
+        self.assertEqual(received, [torch.device("hpu:0"), torch.device("hpu:1")])
+
+    def test_has_triton_for_device_rejects_out_of_range_index(self):
+        # An operand naming a device this host doesn't have (a fake or
+        # exported graph on cuda:3 with two GPUs) is resolved against
+        # device_count before any probe runs: the answer is False, not the
+        # IndexError from indexing that host's per-index properties list.
+        probed = []
+
+        class _TwoGpu(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 2
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                probed.append(device)
+                return [True, True][device.index]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        # In range: the full device reaches the probe, index preserved.
+        self.assertTrue(self._run_for_device("hpu:1", _TwoGpu))
+        self.assertEqual(probed, [torch.device("hpu:1")])
+        # Out of range: device_count answers it before the probe runs.
+        probed.clear()
+        self.assertFalse(self._run_for_device("hpu:3", _TwoGpu))
+        self.assertEqual(probed, [])
+
+    def test_has_triton_for_device_propagates_probe_errors_after_validation(
+        self,
+    ):
+        # Once device_count has validated the index, an error a probe still
+        # raises (e.g. the device vanished mid-decision) is a real fault and
+        # propagates: only the out-of-range answer may come without a probe.
+        class _CapableFaulty(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 100
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                raise IndexError("no such device")
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        class _BackendFaulty(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 100
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                raise RuntimeError("driver is on fire")
+
+        for iface, exc in (
+            (_CapableFaulty, IndexError),
+            (_BackendFaulty, RuntimeError),
+        ):
+            with self.subTest(interface=iface.__name__, exc=exc.__name__):
+                with self.assertRaises(exc):
+                    self._run_for_device("hpu:5", iface)
+
+    def test_has_triton_for_device_falls_through_without_device_count(self):
+        # An interface declaring no count (base DeviceInterface.device_count
+        # raises NotImplementedError) gets no pre-check: the full device,
+        # index included, reaches the probes and they answer.
+        received = []
+
+        class _NoCount(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                received.append(device)
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        self.assertTrue(self._run_for_device("hpu:7", _NoCount))
+        self.assertEqual(received, [torch.device("hpu:7")])
+
+    def test_has_triton_for_device_propagates_body_typeerror(self):
+        # A TypeError raised inside a device-taking probe's body is a real bug
+        # in the backend and must surface to the caller.
+        class _DeviceTakingBodyBug(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                if device is not None:
+                    raise TypeError("bad index arithmetic inside the probe body")
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _DeviceTakingBodyBug)
+
+    def test_has_triton_for_device_kwargs_interface_fails_loudly(self):
+        # The probes are called positionally, per the DeviceInterface contract;
+        # an override that only takes **kwargs ignores it and must raise rather
+        # than silently answer about the current device.
+        class _VarKeyword(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(**kwargs) -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(**kwargs) -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _VarKeyword)
+
+    def test_has_triton_for_device_zero_arg_override_fails_loudly(self):
+        # The asymmetry is the contract: has_triton() calls the probes with no
+        # arguments, a concrete device is passed positionally. An override
+        # taking no arguments therefore fails loudly for one device instead of
+        # silently answering about the process's current device.
+        class _ZeroArg(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable() -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable() -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _ZeroArg)
+
+    def test_has_triton_cache_clear_reprobes_every_interface(self):
+        # has_triton() holds the only cache on its path: clearing it alone
+        # re-evaluates every interface through the uncached per-interface rule.
+        class _Toggling(DeviceInterface):
+            answers = {"capable": True}
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return _Toggling.answers["capable"]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=[("fake", _Toggling)],
+            ),
+        ):
+            triton_utils.has_triton.cache_clear()
+            self.assertTrue(triton_utils.has_triton())
+            _Toggling.answers["capable"] = False
+            # The outer cache keeps answering...
+            self.assertTrue(triton_utils.has_triton())
+            # ...and clearing only that cache re-reads the interface.
+            triton_utils.has_triton.cache_clear()
+            self.assertFalse(triton_utils.has_triton())
+
+    def test_has_triton_for_device_memoizes_per_interface_and_device(self):
+        # The (interface, device) memo: a new index probes fresh, the same
+        # pairing keeps the old answer until the memo itself is cleared.
+        class _Memoized(DeviceInterface):
+            answers = {"capable": True}
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return _Memoized.answers["capable"]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        memo = triton_utils._has_triton_for_interface_on_device
+        memo.cache_clear()
+        self.addCleanup(memo.cache_clear)
+        self.assertTrue(self._run_for_device("hpu:0", _Memoized))
+        _Memoized.answers["capable"] = False
+        self.assertFalse(self._run_for_device("hpu:1", _Memoized))
+        self.assertTrue(self._run_for_device("hpu:0", _Memoized))
+        memo.cache_clear()
+        self.assertFalse(self._run_for_device("hpu:0", _Memoized))
 
 
 class _GpuWithStream(DeviceInterface):
