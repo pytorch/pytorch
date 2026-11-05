@@ -516,6 +516,8 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const T va
 
 template <typename Container, typename = std::enable_if_t<detail::has_size_type_v<Container>>>
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Container& values, unsigned idx) {
+  // Zero-length setBytes leaves the buffer unbound, which Metal rejects
+  TORCH_INTERNAL_ASSERT(!values.empty(), "Can not bind empty container to buffer ", idx);
   [encoder setBytes:values.data() length:sizeof(typename Container::value_type) * values.size() atIndex:idx];
 }
 

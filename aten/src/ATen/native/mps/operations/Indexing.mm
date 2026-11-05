@@ -128,16 +128,32 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
     }
     [computeEncoder setComputePipelineState:indexSelectPSO];
     bind_iter_tensors(computeEncoder, iter, 2);
-    mtl_setArgs<2>(computeEncoder,
-                   indexAB,
-                   iter.shape(),
-                   iter.strides(0),
-                   iter.strides(1),
-                   iter.strides(2),
-                   index_size,
-                   index_stride,
-                   ndim_nindiees,
-                   mpsStream->getErrorBuffer());
+    if (iter.ndim() == 0) {
+      // 0-dim iterator has no shape/strides to bind, so describe it as a 1-element 1-D one
+      constexpr std::array<int64_t, 1> one = {1}, zero = {0};
+      ndim_nindiees[0] = 1;
+      mtl_setArgs<2>(computeEncoder,
+                     indexAB,
+                     one,
+                     zero,
+                     zero,
+                     zero,
+                     index_size,
+                     index_stride,
+                     ndim_nindiees,
+                     mpsStream->getErrorBuffer());
+    } else {
+      mtl_setArgs<2>(computeEncoder,
+                     indexAB,
+                     iter.shape(),
+                     iter.strides(0),
+                     iter.strides(1),
+                     iter.strides(2),
+                     index_size,
+                     index_stride,
+                     ndim_nindiees,
+                     mpsStream->getErrorBuffer());
+    }
     mtl_dispatch1DJob(computeEncoder, indexSelectPSO, serial ? 1 : iter.numel());
   });
 }
