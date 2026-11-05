@@ -4054,7 +4054,7 @@ class SubgraphTracer(fx.Tracer):
         # each retraced GraphModule code object, so returning to its forward
         # from an inlined call does not walk the graph again.
         self._orig_gm_cache: dict[
-            types.CodeType, tuple[list[Any], dict[int, int | None], int]
+            types.CodeType, tuple[list[Any], dict[int, int | None] | None, int]
         ] = {}
         # Each SubgraphTracer is associated with a source target, which indicates
         # which operator this subgraph is attached to. We compute a source_fn_stack
