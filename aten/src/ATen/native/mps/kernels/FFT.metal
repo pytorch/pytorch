@@ -11,11 +11,36 @@ inline float2 mul_i(float2 a) {
   return float2(-a.y, a.x);
 }
 
-constant float W16[] = { // W_16^m for m < 10, as (re, im) pairs
-    1.0f,          0.0f,          0.923879533f,  -0.382683432f, 0.707106781f,
-    -0.707106781f, 0.382683432f,  -0.923879533f, 0.0f,          -1.0f,
-    -0.382683432f, -0.923879533f, -0.707106781f, -0.707106781f, -0.923879533f,
-    -0.382683432f, -1.0f,         0.0f,          -0.923879533f, 0.382683432f};
+// cos and sin of 2 pi k / R for the radix-3, -5 and -7 butterflies, whose
+// twiddles are W_R^k = (cos, -sin); inverse transforms flip the sign of sin
+constexpr constant float kSin2Pi_3 = 0.86602540378443865f;
+constexpr constant float kCos2Pi_5 = 0.30901699437494742f;
+constexpr constant float kCos4Pi_5 = -0.80901699437494742f;
+constexpr constant float kSin2Pi_5 = 0.95105651629515357f;
+constexpr constant float kSin4Pi_5 = 0.58778525229247313f;
+constexpr constant float kCos2Pi_7 = 0.62348980185873353f;
+constexpr constant float kCos4Pi_7 = -0.22252093395631440f;
+constexpr constant float kCos6Pi_7 = -0.90096886790241913f;
+constexpr constant float kSin2Pi_7 = 0.78183148246802980f;
+constexpr constant float kSin4Pi_7 = 0.97492791218182360f;
+constexpr constant float kSin6Pi_7 = 0.43388373911755812f;
+
+// W_16^m = exp(-i pi m / 8) = (cos(pi m / 8), -sin(pi m / 8)) for m < 10: the
+// twiddles of the radix-8 and -16 composites (W_8^m = W_16^(2 m))
+constexpr constant float kCosPi_8 = 0.92387953251128676f;
+constexpr constant float kSinPi_8 = 0.38268343236508977f;
+constexpr constant float kCosPi_4 = 0.70710678118654752f;
+constant float2 kW16[] = {
+    float2(1.0f, 0.0f),
+    float2(kCosPi_8, -kSinPi_8),
+    float2(kCosPi_4, -kCosPi_4),
+    float2(kSinPi_8, -kCosPi_8),
+    float2(0.0f, -1.0f),
+    float2(-kSinPi_8, -kCosPi_8),
+    float2(-kCosPi_4, -kCosPi_4),
+    float2(-kCosPi_8, -kSinPi_8),
+    float2(-1.0f, 0.0f),
+    float2(-kCosPi_8, kSinPi_8)};
 
 template <uint R> // First factor of a composite radix; 1 if prime
 constexpr uint comp_r1() {
@@ -32,9 +57,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[S] = a - b;
   } else if (R == 3) {
     const float2 s = v[S] + v[2 * S], d = v[S] - v[2 * S], t = v[0] - 0.5f * s;
-    // +-sin(2 pi / 3)
-    const float2 u =
-        (inv ? 0.86602540378443865f : -0.86602540378443865f) * mul_i(d);
+    const float2 u = (inv ? kSin2Pi_3 : -kSin2Pi_3) * mul_i(d);
     v[0] = v[0] + s;
     v[S] = t + u;
     v[2 * S] = t - u;
@@ -49,11 +72,10 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
   } else if (R == 5) {
     const float2 s1 = v[S] + v[4 * S], d1 = v[S] - v[4 * S],
                  s2 = v[2 * S] + v[3 * S], d2 = v[2 * S] - v[3 * S];
-    // cos(2 pi k / 5) and sin(2 pi k / 5) for k = 1, 2
-    const float c1 = 0.30901699437494742f, c2 = -0.80901699437494742f,
-                s = inv ? 1.0f : -1.0f;
-    const float sn1 = s * 0.95105651629515357f, sn2 = s * 0.58778525229247313f;
-    const float2 t1 = v[0] + c1 * s1 + c2 * s2, t2 = v[0] + c2 * s1 + c1 * s2;
+    const float sg = inv ? 1.0f : -1.0f;
+    const float sn1 = sg * kSin2Pi_5, sn2 = sg * kSin4Pi_5;
+    const float2 t1 = v[0] + kCos2Pi_5 * s1 + kCos4Pi_5 * s2,
+                 t2 = v[0] + kCos4Pi_5 * s1 + kCos2Pi_5 * s2;
     const float2 u1 = mul_i(sn1 * d1 + sn2 * d2),
                  u2 = mul_i(sn2 * d1 - sn1 * d2);
     v[0] = v[0] + s1 + s2;
@@ -65,14 +87,11 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     const float2 s1 = v[S] + v[6 * S], d1 = v[S] - v[6 * S],
                  s2 = v[2 * S] + v[5 * S], d2 = v[2 * S] - v[5 * S];
     const float2 s3 = v[3 * S] + v[4 * S], d3 = v[3 * S] - v[4 * S];
-    // cos(2 pi k / 7) and sin(2 pi k / 7) for k = 1, 2, 3
-    const float c1 = 0.62348980185873353f, c2 = -0.22252093395631440f,
-                c3 = -0.90096886790241913f, sg = inv ? 1.0f : -1.0f;
-    const float n1 = sg * 0.78183148246802980f, n2 = sg * 0.97492791218182360f,
-                n3 = sg * 0.43388373911755812f;
-    const float2 t1 = v[0] + c1 * s1 + c2 * s2 + c3 * s3,
-                 t2 = v[0] + c2 * s1 + c3 * s2 + c1 * s3,
-                 t3 = v[0] + c3 * s1 + c1 * s2 + c2 * s3;
+    const float sg = inv ? 1.0f : -1.0f;
+    const float n1 = sg * kSin2Pi_7, n2 = sg * kSin4Pi_7, n3 = sg * kSin6Pi_7;
+    const float2 t1 = v[0] + kCos2Pi_7 * s1 + kCos4Pi_7 * s2 + kCos6Pi_7 * s3,
+                 t2 = v[0] + kCos4Pi_7 * s1 + kCos6Pi_7 * s2 + kCos2Pi_7 * s3,
+                 t3 = v[0] + kCos6Pi_7 * s1 + kCos2Pi_7 * s2 + kCos4Pi_7 * s3;
     const float2 u1 = mul_i(n1 * d1 + n2 * d2 + n3 * d3),
                  u2 = mul_i(n2 * d1 - n3 * d2 - n1 * d3),
                  u3 = mul_i(n3 * d1 - n1 * d2 + n2 * d3);
@@ -92,9 +111,8 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
 
     for (uint n2 = 1; n2 < R2; n2++) {
       for (uint k1 = 1; k1 < R1; k1++) {
-        // W_R^m = W_16^(16 m / R), and W16 holds two floats per root
-        const uint m = n2 * k1, i = 32 / R * m;
-        const float2 w = R % 8 == 0 ? float2(W16[i], W16[i + 1]) : tw[m * ts];
+        const uint m = n2 * k1; // W_R^m = W_16^(16 m / R)
+        const float2 w = R % 8 == 0 ? kW16[16 / R * m] : tw[m * ts];
         v[(n2 + R2 * k1) * S] = mul(v[(n2 + R2 * k1) * S], inv ? conj(w) : w);
       }
     }
