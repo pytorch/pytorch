@@ -31,10 +31,13 @@ namespace torch::fake_tensor {
 //
 // A rebuilt wrapper is equivalent for fake dispatch because everything
 // dispatch reads is owned by the C++ mode: the ShapeEnv, the fake tensor
-// converter and the mode's flags. It is still a new object: Python identity,
-// attributes set on the old wrapper instance and its creation stack trace are
-// not preserved, and it is always a plain CppFakeTensorMode, so subclasses are
-// not supported.
+// converter, the epoch and the mode's flags. Retracing code bumps
+// fake_mode.epoch on the wrapper, so the wrapper must expose epoch as a
+// property forwarding to _cpp_mode.epoch (FakeTensorMode.epoch is a class
+// attribute, so assigning it on an instance would not reach the C++ mode). It
+// is still a new object: Python identity, attributes set on the old wrapper
+// instance and its creation stack trace are not preserved, and it is always a
+// plain CppFakeTensorMode, so subclasses are not supported.
 py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
   if (mode == nullptr) {
