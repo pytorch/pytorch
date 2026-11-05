@@ -6276,8 +6276,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False])
-    @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("enable_gqa,n_heads", [(True, [16, 8]), (True, [10, 2]), (False, [4, 4])])
     @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     @skipIfXpu(msg="Flash backend variants (aotriton/ck) and head_dim>=192 paths not supported on XPU; tracked in torch-xpu-ops")
@@ -6305,10 +6304,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
-        num_heads_q = num_heads_kv = 4
-        if enable_gqa:
-            num_heads_q = n_heads[0]
-            num_heads_kv = n_heads[1]
+        num_heads_q, num_heads_kv = n_heads
 
         query = torch.rand(batch_size, num_heads_q, seq_len_q, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
