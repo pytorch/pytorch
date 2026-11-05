@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from typing import NamedTuple
 from unittest import mock
@@ -1422,6 +1423,65 @@ def forward(self, x_1, output_1):
         with self.assertRaisesRegex(error, msg):
             register_user_kernel_hop(info)
         self.assertEqual(_user_kernel_hops, registry)
+
+    def test_user_kernel_hop_registry_lock(self):
+        registry = "torch._higher_order_ops.user_kernel_hop._user_kernel_hops"
+        # Two threads register equal copies of the scale pair. Each registry lookup
+        # waits for the other thread after reading, so without the lock both would
+        # pass the ownership checks before either writes, and both would register.
+        barrier = threading.Barrier(2, timeout=0.5)
+
+        class WaitingRegistry(dict):
+            def get(self, key, default=None):
+                value = super().get(key, default)
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    barrier.wait()
+                return value
+
+        infos = [dataclasses.replace(scale_kernel_hop_info) for _ in range(2)]
+        refused = []
+
+        def register(info):
+            try:
+                register_user_kernel_hop(info)
+            except RuntimeError:
+                refused.append(info)
+
+        with mock.patch(registry, WaitingRegistry()):
+            threads = [threading.Thread(target=register, args=(i,)) for i in infos]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(len(refused), 1)
+            self.assertEqual(
+                user_kernel_hop_infos(), [i for i in infos if i not in refused]
+            )
+
+        # A lookup made between a registration's two writes waits for the lock
+        # instead of finding the pair half registered.
+        info = scale_kernel_hop_info
+        first_written, looked_up = threading.Event(), threading.Event()
+        found = []
+
+        class PausingRegistry(dict):
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value)
+                if len(self) == 1:
+                    first_written.set()
+                    looked_up.wait(timeout=0.5)
+
+        def look_up():
+            first_written.wait(timeout=5)
+            found.append(get_user_kernel_hop_info(info.functional))
+            looked_up.set()
+
+        with mock.patch(registry, PausingRegistry()):
+            reader = threading.Thread(target=look_up)
+            reader.start()
+            register_user_kernel_hop(info)
+            reader.join()
+        self.assertEqual(found, [info])
 
     @common_utils.parametrize("trigger", ["AUTO_FUNC_V1", "AUTO_FUNC_V2"])
     @mock.patch.dict(_user_kernel_hops)
