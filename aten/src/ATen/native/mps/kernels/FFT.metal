@@ -391,7 +391,7 @@ constexpr uint first_radix(uint n) {
 }
 
 template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
-kernel void fft_kernel(
+[[max_total_threads_per_threadgroup(kFFTMaxThreads)]] kernel void fft_kernel(
     device const I* in,
     device O* out,
     device const float2* cl,

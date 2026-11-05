@@ -21,6 +21,11 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaxPoints =
 // below factor any length under 2^31 in fewer
 C10_METAL_CONSTEXPR uint32_t kFFTMaxStages = 16;
 
+// Threads per group: the host never dispatches more, and the kernels are
+// compiled to fit it (register-heavy variants otherwise allow as few as 384 on
+// M1 and M2, and a larger group silently does nothing)
+C10_METAL_CONSTEXPR uint32_t kFFTMaxThreads = 512;
+
 // 8 points per thread; 16 only pay for plain 1024-point kernels (one stage
 // fewer at full occupancy)
 inline constexpr uint32_t fft_points_per_thread(uint32_t n, uint32_t flags) {
