@@ -2147,6 +2147,14 @@ class TritonTemplateKernel(TritonKernel):
             )
         ]
 
+    def codegen_kernel_benchmark(self, num_gb: float | None) -> IndentedBuffer:
+        result = super().codegen_kernel_benchmark(num_gb)
+        _, call_args, _, _ = self.args.python_argdefs()
+        result.writelines(
+            ["", "", f"arg_buffer_names = {tuple(map(str, call_args))!r}"]
+        )
+        return result
+
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
         """
         Get the stride of an input node for template code generation, with deferred
@@ -4429,7 +4437,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # corresponding ir.Buffer. if passed for a given
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
-        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None = None,
+        input_gen_fns: dict[int, Callable[[ir.IRNode], torch.Tensor]] | None = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
         best_config_future=None,
@@ -4451,11 +4459,22 @@ class AlgorithmSelectorCache(PersistentCache):
                 if bmreq is not None:
                     bmreq.benchmark_with_cudagraphs = True
 
-        # Templates selected with input_gen_fns require specific input data to avoid IMA
-        # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
+        # The pipelined autotuner benchmarks without input_gen_fns, which can IMA.
+        # input_gen_fns ignore multi_kernel_hints sizes. Fusion benchmarks pass
+        # generated inputs as whole buffers, while template kernels apply a view's
+        # offset and strides to the base buffer.
         # TODO(jgong5): support multi-template on CPU C++ backend
-        if input_gen_fns is not None or (
-            layout.device.type == "cpu" and config.cpu_backend != "triton"
+        if return_multi_template and (
+            (
+                input_gen_fns is not None
+                and (use_pipelined_autotuning() or config.multi_kernel_hints)
+            )
+            or any(
+                x.get_layout() != V.graph.get_buffer(x.get_name()).get_layout()
+                for i, x in enumerate(input_nodes)
+                if i in (input_gen_fns or {})
+            )
+            or (layout.device.type == "cpu" and config.cpu_backend != "triton")
         ):
             return_multi_template = False
 
@@ -4624,6 +4643,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         choices,
                         load_input_fusion_allowed_inputs,
                         store_output_fusion_allowed_inputs,
+                        input_gen_fns,
                     )
                 ),
                 None,
@@ -5351,7 +5371,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
-        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
+        input_gen_fns: dict[int, Callable[[ir.IRNode], torch.Tensor]] | None,
         hint_override: int | None = None,
     ) -> AutotuneArgs:
         """
@@ -5365,7 +5385,6 @@ class AlgorithmSelectorCache(PersistentCache):
             x.get_name(): input_gen_fns.get(
                 i,
                 lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
-                # pyrefly: ignore [bad-argument-type]
             )(x)
             for i, x in enumerate(input_nodes)
         }
@@ -5846,7 +5865,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
-        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
+        input_gen_fns: dict[int, Callable[[ir.IRNode], torch.Tensor]] | None,
         hint_override: int | None = None,
         is_collective=False,
     ) -> dict[ChoiceCaller, float]:
@@ -5865,7 +5884,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
-        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
+        input_gen_fns: dict[int, Callable[[ir.IRNode], torch.Tensor]] | None,
         hint_override: int | None = None,
     ):
         from . import autotune_process
@@ -5894,7 +5913,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
-        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
+        input_gen_fns: dict[int, Callable[[ir.IRNode], torch.Tensor]] | None,
         hint_override: int | None = None,
         is_collective=False,
     ):
@@ -6592,8 +6611,10 @@ def get_algorithm_selector_cache() -> AlgorithmSelectorCache:
 def autotune_select_algorithm(*args, **kwargs):
     cache = get_algorithm_selector_cache()
 
+    # Fusion benchmarks pass each input_gen_fns tensor as the kernel arg for that
+    # input's buffer, so callers opt in only when the tensor fits that buffer.
     if "return_multi_template" not in kwargs:
-        kwargs["return_multi_template"] = (
+        kwargs["return_multi_template"] = kwargs.get("input_gen_fns") is None and (
             torch._inductor.config.benchmark_template_fusion
             or torch._inductor.config.pipeline_max_autotune_gemm
         )

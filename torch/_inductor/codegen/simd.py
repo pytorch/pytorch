@@ -3656,6 +3656,7 @@ class SIMDScheduling(BaseScheduling):
         n_spills_threshold=8,
         node_names: OrderedSet[str] | None = None,
         skip_perf_cache: bool = False,
+        input_overrides: dict[str, torch.Tensor] | None = None,
     ) -> tuple[float, str]:
         raise NotImplementedError
 

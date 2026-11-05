@@ -338,6 +338,9 @@ def _render_nvgemm_benchmark_helpers(
 
         args_code.writeline("return args")
 
+    buffer_names = tuple(argument.buffer_name for argument in arguments)
+    args_code.writeline("")
+    args_code.writeline(f"arg_buffer_names = {buffer_names!r}")
     args_code.writeline("")
     args_code.writeline("def call(args):")
     with args_code.indent():

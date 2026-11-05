@@ -7327,7 +7327,10 @@ class Scheduler:
             )
 
     def benchmark_codegened_module(
-        self, module: ModuleType, device: torch.device
+        self,
+        module: ModuleType,
+        device: torch.device,
+        input_overrides: dict[str, torch.Tensor] | None = None,
     ) -> tuple[float, str]:
         """
         Benchmark a compiled module and return the execution time
@@ -7336,7 +7339,12 @@ class Scheduler:
         self.current_device = device
         backend = self.get_backend(device)
         with dynamo_timed("benchmark_codegened_module"):
-            return backend.benchmark_codegened_module(module)
+            # Out-of-tree backends may not accept input_overrides
+            if not input_overrides:
+                return backend.benchmark_codegened_module(module)
+            return backend.benchmark_codegened_module(
+                module, input_overrides=input_overrides
+            )
 
     def _has_layout_conflict_for_template(
         self, multi_node: ir.MultiTemplateBuffer
@@ -7917,6 +7925,8 @@ class Scheduler:
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
 
+            benchmark_inputs = multi_node.benchmark_inputs()
+
             def benchmark_when_ready() -> bool:
                 nonlocal choice_timings, future_choices, ms1, min_choice, multi_node
                 min_ms_fused = float("inf")
@@ -7983,6 +7993,7 @@ class Scheduler:
                                 mod_fused,
                                 # pyrefly: ignore [bad-argument-type]
                                 device,
+                                benchmark_inputs,
                             )
                             new_timings[choice] = ms_fused
                             if ms_fused < min_ms_fused:
@@ -13455,7 +13466,11 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
-    def benchmark_codegened_module(self, module: ModuleType) -> tuple[float, str]:
+    def benchmark_codegened_module(
+        self,
+        module: ModuleType,
+        input_overrides: dict[str, torch.Tensor] | None = None,
+    ) -> tuple[float, str]:
         """
         Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
