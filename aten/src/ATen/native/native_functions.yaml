@@ -9528,11 +9528,11 @@
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: cholesky_inverse
+    CPU, CUDA, MPS, XPU: cholesky_inverse
 
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, MPS: cholesky_inverse_out
+    CPU, CUDA, MPS, XPU: cholesky_inverse_out
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
