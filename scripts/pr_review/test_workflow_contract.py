@@ -790,6 +790,7 @@ def run_corroboration(
     event_head_branch: str = "b",
     labels: tuple[str, ...] = ("in progress",),
     trigger_event: str = "labeled",
+    trigger_label: str = "in progress",
 ):
     """Execute `prepare`'s corroboration step against a stubbed `gh`.
 
@@ -838,6 +839,7 @@ def run_corroboration(
             "PR_NUMBER": "1",
             "HEAD_SHA": STUB_API_HEAD,
             "TRIGGER_EVENT": trigger_event,
+            "TRIGGER_LABEL": trigger_label,
             "REPO": "o/r",
             "EVENT_HEAD_REPO": event_head_repo,
             "EVENT_HEAD_BRANCH": event_head_branch,
@@ -1441,7 +1443,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         text = STAGE2.read_text()
         offenders = []
-        for job in ("prepare", "announce", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish", "withdraw"):
             lines = job_block(text, job).splitlines()
             starts = [
                 i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)
@@ -1504,9 +1506,9 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
         self.assertEqual(
             jobs,
-            ["prepare", "announce", "review", "publish"],
+            ["prepare", "announce", "review", "publish", "withdraw"],
             f"Stage 2's jobs are {jobs}. Every role, environment and "
-            "checkout assertion in this file names one of these four; a fifth "
+            "checkout assertion in this file names one of these five; a sixth "
             "is covered by none of them.",
         )
 
@@ -2726,6 +2728,98 @@ class TestOptOutLabel(unittest.TestCase):
     def test_pr_without_the_label_stays_eligible(self):
         self.assertEqual(self._eligible(("in progress",)), "true")
 
+    def test_a_run_the_opt_out_label_triggered_never_reviews(self):
+        """Even once the label is removed again: that run only withdraws."""
+        with tempfile.TemporaryDirectory() as td:
+            proc, out, _argv = run_corroboration(
+                "c" * 40, td, trigger_label="no automated review"
+            )
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(sole_outputs(self, written).get("eligible"), "false")
+
+    def test_the_withdraw_job_literal_matches_stage2_label(self):
+        """A job `if:` cannot read `env`, so the literal is hand-copied."""
+        text = strip_comments(STAGE2.read_text())
+        label = env_values(text.split("\njobs:", 1)[0], "OPT_OUT_LABEL")
+        self.assertEqual(
+            job_if(job_block(text, "withdraw")),
+            f"needs.prepare.outputs.trigger_label == '{label[0].strip(chr(34))}'",
+        )
+
+
+def stage1_admits(*, action, label=None, draft=False, labels=()) -> bool:
+    """Whether Stage 1's `capture` gate runs for this event."""
+    tree = parse_bool_expr(
+        job_if(strip_comments(job_block(STAGE1.read_text(), "capture")))
+    )
+    truth = {}
+    for atom in expr_atoms(tree):
+        if m := re.fullmatch(r"github\.event\.action (==|!=) '(\w+)'", atom):
+            truth[atom] = (action == m.group(2)) == (m.group(1) == "==")
+        elif m := re.fullmatch(r"github\.event\.label\.name == '([^']*)'", atom):
+            truth[atom] = label == m.group(1)
+        elif m := re.fullmatch(
+            r"contains \( github\.event\.pull_request\.labels\.\*\.name , '([^']*)' \)",
+            atom,
+        ):
+            truth[atom] = m.group(1) in labels
+        elif atom == "github.event.pull_request.draft":
+            truth[atom] = draft
+        elif atom == "github.repository == 'pytorch/pytorch'":
+            truth[atom] = True
+        else:
+            raise AssertionError(f"Stage 1's gate has an unmodelled condition {atom!r}")
+    return eval_expr(tree, truth)
+
+
+class TestStage1Gate(unittest.TestCase):
+    """Which pull-request events start a run, evaluated from the `if:`."""
+
+    def test_adding_the_review_label_starts_a_review(self):
+        self.assertTrue(
+            stage1_admits(
+                action="labeled", label="in progress", labels=("in progress",)
+            )
+        )
+
+    def test_an_opted_out_pr_is_not_reviewed(self):
+        both = ("in progress", "no automated review")
+        self.assertFalse(
+            stage1_admits(action="labeled", label="in progress", labels=both)
+        )
+        self.assertFalse(stage1_admits(action="synchronize", labels=both))
+
+    def test_adding_the_opt_out_label_starts_a_withdrawal_even_on_a_draft(self):
+        for draft in (False, True):
+            with self.subTest(draft=draft):
+                self.assertTrue(
+                    stage1_admits(
+                        action="labeled",
+                        label="no automated review",
+                        draft=draft,
+                        labels=("in progress", "no automated review"),
+                    )
+                )
+
+    def test_other_labels_and_drafts_start_nothing(self):
+        self.assertFalse(
+            stage1_admits(action="labeled", label="cla signed", labels=("in progress",))
+        )
+        self.assertFalse(
+            stage1_admits(
+                action="labeled",
+                label="in progress",
+                draft=True,
+                labels=("in progress",),
+            )
+        )
+        self.assertFalse(
+            stage1_admits(
+                action="synchronize", labels=("in progress", "ready for review")
+            )
+        )
+
 
 class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
     """`base_sha` and `is_fork` must reach a row only from the trusted API.
@@ -3177,12 +3271,13 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         ("review", "pr"): "${{ needs.prepare.outputs.head_sha }}",
         ("announce", None): "${{ github.sha }}",
         ("publish", None): "${{ github.sha }}",
+        ("withdraw", None): "${{ github.sha }}",
     }
 
     def test_no_job_checks_out_pull_request_code_it_is_not_allowed_to(self):
         text = STAGE2.read_text()
         seen = {}
-        for job in ("prepare", "announce", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish", "withdraw"):
             for step in steps_using(job_block(text, job), "actions/checkout"):
                 inputs = mapping_items(with_block(step))
                 key = (job, inputs.get("path"))
@@ -3254,7 +3349,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         self.assertEqual(
             {
                 job: mapping_items(indented_block(job_block(text, job), "permissions:"))
-                for job in ("prepare", "announce", "review", "publish")
+                for job in ("prepare", "announce", "review", "publish", "withdraw")
             },
             {
                 "prepare": {
@@ -3270,6 +3365,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
                     "id-token": "write",
                     "pull-requests": "write",
                 },
+                "withdraw": {"contents": "read", "pull-requests": "write"},
             },
             "a Stage 2 job's token scopes are not the ones this design was "
             "reviewed with. Widening one is a deliberate edit to this literal.",
@@ -3822,7 +3918,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
     # Update these deliberately when you change the shell, which is the whole
     # point: in this file that has to be an act, not an edit.
     # Over the RAW body, comments included — see the test for why.
-    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "d37176225e66e4c4"}
+    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "579ddf242c61ad23"}
     # The exact action each step may use. "Pinned to a SHA" is not enough on
     # its own: `actions/github-script` at a real pinned SHA, with a
     # `with.script: |` body, executes JavaScript that can read the PR payload
@@ -4146,10 +4242,12 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
     # a file — or run a command substitution — BEFORE the pinned script, so it
     # executes arbitrary code while leaving every `run:` digest untouched.
     # `LD_PRELOAD`, `PYTHONSTARTUP`, `GIT_*_PAGER` and `ENV` are the same
-    # shape. Six values, all GitHub-generated, plus the trusted label.
+    # shape. Seven values, all GitHub-generated, plus the two trusted labels.
     ALLOWED_ENV_KEYS = frozenset(
         (
             "REVIEW_LABEL",
+            "OPT_OUT_LABEL",
+            "OPT_OUT_ADDED",
             "PR_NUM",
             "HEAD_SHA",
             "BASE_SHA",
@@ -4459,6 +4557,9 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "a comparison: the result is a boolean, never the repo name"
             ),
             "github.event.action": "one of the four declared trigger types",
+            "github.event.label.name == 'no automated review'": (
+                "a comparison: the result is a boolean, never the label name"
+            ),
             "github.event_name": "the trigger's own name, GitHub-set; reaches "
             "the capture job's concurrency group and nothing else — see "
             "test_the_capture_group_is_keyed_by_event",
@@ -4506,6 +4607,8 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "IS_FORK": "true",
             "TRIGGER_EVENT": "labeled",
             "REVIEW_LABEL": "in progress",
+            "OPT_OUT_LABEL": "no automated review",
+            "OPT_OUT_ADDED": "false",
         }
         env.update(overrides)
         with tempfile.TemporaryDirectory() as td:
@@ -4586,6 +4689,26 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                     self.assertIsNotNone(doc, f"{field} produced no artifact")
                     # Carried as a JSON string value, not as anything else.
                     self.assertIn(payload, doc.values())
+
+    def test_adding_the_opt_out_label_records_it_as_the_trigger(self):
+        """Stage 2 withdraws instead of reviewing on this label."""
+        rc, doc, _ = self._execute(OPT_OUT_ADDED="true")
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["trigger_label"], "no automated review")
+
+    def test_a_payload_in_the_opt_out_inputs_never_runs(self):
+        payload = 'x"; touch INJECTED; #'
+        for env in (
+            {"OPT_OUT_ADDED": payload},
+            {"OPT_OUT_ADDED": "true", "OPT_OUT_LABEL": payload},
+        ):
+            with self.subTest(env=env):
+                rc, doc, injected = self._execute(**env)
+                self.assertFalse(injected)
+                self.assertEqual(rc, 0)
+                self.assertIn(
+                    doc["trigger_label"], ("in progress", payload), "not data"
+                )
 
     def test_a_substitution_in_a_field_is_data_not_a_command(self):
         """`$(...)` specifically: the form that needs no quote to escape."""
@@ -4728,6 +4851,8 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                     "IS_FORK": "true",
                     "TRIGGER_EVENT": "labeled",
                     "REVIEW_LABEL": "in progress",
+                    "OPT_OUT_LABEL": "no automated review",
+                    "OPT_OUT_ADDED": "false",
                 },
             )
             written = sorted(
@@ -5355,6 +5480,40 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         step = publish.split("- name: Put back the previous review", 1)[1]
         self.assertIn("if: always()", step.split("run:", 1)[0])
         self.assertIn("post_review.py --restore-pending", step)
+
+
+class TestWithdrawHoldsOnlyTheToken(unittest.TestCase):
+    """`withdraw` dismisses change requests with GITHUB_TOKEN and nothing else.
+
+    Same shape as `announce`: no environment, no AWS step, no direct API
+    call, and only post_review.py's `--withdraw-opted-out` mode.
+    """
+
+    def setUp(self):
+        self.job = strip_comments(job_block(STAGE2.read_text(), "withdraw"))
+
+    def test_it_names_no_environment_and_assumes_no_role(self):
+        self.assertNotIn("environment:", self.job)
+        self.assertNotIn("configure-aws-credentials", self.job)
+        self.assertNotIn("id-token", self.job)
+
+    def test_it_only_withdraws(self):
+        runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
+        self.assertEqual(
+            runs, ["python3 scripts/pr_review/post_review.py --withdraw-opted-out"]
+        )
+        for needle in ("gh api", "gh pr", "/labels"):
+            self.assertNotIn(needle, self.job)
+
+    def test_it_gets_the_inputs_main_reads(self):
+        step = self.job.split("- name: Withdraw the automated change requests", 1)[1]
+        self.assertEqual(
+            env_values(step, "PR_NUMBER"), ["${{ needs.prepare.outputs.pr_number }}"]
+        )
+        self.assertEqual(
+            env_values(step, "OPT_OUT_LABEL"), ["${{ env.OPT_OUT_LABEL }}"]
+        )
+        self.assertEqual(env_values(step, "GH_TOKEN"), ["${{ secrets.GITHUB_TOKEN }}"])
 
 
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
@@ -6817,6 +6976,7 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
         "base_sha": STUB_API_BASE,
         "is_fork": "false",
         "trigger_event": "labeled",
+        "trigger_label": "in progress",
     }
 
     def _run_coords(self, td: str, *, artifact=None, event_head_sha=STUB_API_HEAD):
@@ -6830,7 +6990,11 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
             STAGE2.read_text(),
             "Validate and authenticate the request",
             td,
-            {"EVENT_HEAD_SHA": event_head_sha},
+            {
+                "EVENT_HEAD_SHA": event_head_sha,
+                "REVIEW_LABEL": "in progress",
+                "OPT_OUT_LABEL": "no automated review",
+            },
             {},
         )
 
@@ -6851,9 +7015,26 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
                 "pr_number": "7",
                 "head_sha": STUB_API_HEAD,
                 "trigger_event": "labeled",
+                "trigger_label": "in progress",
             },
             f"the authenticated coordinates are {written!r}",
         )
+
+    def test_the_trigger_label_is_one_of_the_two_trusted_labels(self):
+        for label, ok in (
+            ("no automated review", True),
+            ("cla signed", False),
+            ("", False),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td:
+                proc, out = self._run_coords(td, artifact={"trigger_label": label})
+                written = out.read_text()
+            if ok:
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn(f"trigger_label={label}", written)
+            else:
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertNotIn("trigger_label=", written)
 
     def test_an_artifact_naming_another_commit_is_refused(self):
         """A forged artifact could otherwise name any commit in the repo."""
