@@ -120,7 +120,7 @@ class _BlockscaledTma:
         scale_group_size = cutlass.const_expr(self.quant_block_size[1])
         qdata_storage_element_type = cutlass.Float8E4M3FN
         qdata_storage_elements_per_group = scale_group_size
-        # Dim-m stages 32 rows at a time, independently of the quantization block.
+        # Dim-m stages 32 rows; the quantization block size must divide this stage.
         qdata_storage_elements_per_32 = 32
         do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
         do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
@@ -415,13 +415,18 @@ class _BlockscaledTma:
             # * read input data from smem and quantize in registers
             # * keep scale to registers
             # * store qdata in smem, overwriting the first half of input data (to save smem)
+            if cutlass.const_expr(scale_group_size != 32):
+                raise AssertionError("dim-k quantization supports only block size 32")
             groups_per_row_k = tile_k_size // scale_group_size
+            rows_per_stage_k = _MIN_CTA_THREADS_128 // groups_per_row_k
             row_owned_k = tile_m_size == _DIM_K_TILE_M_SIZE_128
             if cutlass.const_expr(row_owned_k):
                 threads_per_row_k = _MIN_CTA_THREADS_128 // tile_m_size
                 iters = groups_per_row_k // threads_per_row_k
             else:
-                iters = tile_m_size // (scale_group_size if is_square_scaling else 32)
+                iters = tile_m_size // (
+                    scale_group_size if is_square_scaling else rows_per_stage_k
+                )
             tidfrgInputK = cute.composition(sInput, data_k_tv_layout)
             # pyrefly: ignore[unbound-name]
             tidfrgOutputK = cute.composition(sOutputK, output_k_tv_layout)
@@ -575,7 +580,7 @@ class _BlockscaledTma:
                                         0
                                     )
             else:
-                # Short tiles distribute (row, 1x32 group) pairs across all threads. The fused 1D path
+                # Short tiles distribute (row, quantization group) pairs across all threads. The fused 1D path
                 # is group-major; square scaling is warp/block-major. Both need individual scale stores
                 # because their slots are strided across rows.
                 if cutlass.const_expr(is_square_scaling):
@@ -586,7 +591,8 @@ class _BlockscaledTma:
                     # pyrefly: ignore[unbound-name]
                     local_group_k = tidx % groups_per_row_k
                     local_row_k = tidx // groups_per_row_k
-                    row_step_k = 32
+                    # pyrefly: ignore[unbound-name]
+                    row_step_k = rows_per_stage_k
                 # pyrefly: ignore[unbound-name]
                 for it in cutlass.range_constexpr(iters):
                     input_row_k = (

@@ -313,6 +313,9 @@ def _blockscaled_tma_impl(
 
     Quantize an N-D tensor to MXFP8 with block scaling along ``dim[-1]``.
 
+    Only ``quant_block_size=(1, 32)`` is supported. The block sizes and scale
+    shapes described below refer to this configuration.
+
     ``dim`` defines a logical 2D matrix plane; all other axes are batch axes.
     Layouts admitting a 2D or 4D TMA view can avoid copying. Other layouts,
     including trailing batch axes that prevent such a view, are made
@@ -335,12 +338,13 @@ def _blockscaled_tma_impl(
             selects the block-scaled axis and must have size divisible by 32.
             For 2D input, ``(0, 1)`` or ``(-2, -1)`` quantizes columns, while
             ``(1, 0)`` or ``(-1, -2)`` quantizes rows. Lists are not accepted.
-        quant_block_size (tuple[int, int], optional): Base quantization block
-            dimensions. Only ``(1, 32)`` is supported. Default: ``(1, 32)``.
         is_square_scaling (bool): Use 32x32 instead of 1x32 scale blocks.
             Requires swizzled scales and both selected axes divisible by 32.
         is_scale_swizzled (bool): Return swizzled scales if ``True``; compact
             scales otherwise.
+        quant_block_size (tuple[int, int], optional): Keyword-only base
+            quantization block dimensions. Only ``(1, 32)`` is supported.
+            Default: ``(1, 32)``.
         **kwargs: No additional keyword arguments are accepted.
 
     Returns:
@@ -388,7 +392,9 @@ def _blockscaled_tma_impl_dual(
 
     Quantize both matrix axes of an N-D tensor in one kernel launch.
 
-    Uses 1x32 scaling blocks and swizzled scales.
+    Only ``quant_block_size=(1, 32)`` is supported, giving 1x32 scaling blocks
+    and swizzled scales. The scale shapes described below refer to this
+    configuration.
 
     Args:
         input (Tensor): CUDA tensor with the layout and dtypes described by

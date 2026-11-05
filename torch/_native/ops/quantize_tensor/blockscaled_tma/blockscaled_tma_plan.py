@@ -42,6 +42,8 @@ def select_blockscaled_tma_plan(
     quant_block_size: tuple[int, int],
 ) -> BlockscaledTmaPlan:
     """Select the existing B200-tuned tile, cluster, masking, and grid policy."""
+    if quant_block_size != (1, 32):
+        raise AssertionError(f"unsupported quantization block size: {quant_block_size}")
     if quant_orientation_id not in (
         _QUANT_ORIENTATION_DIM_K,
         _QUANT_ORIENTATION_DIM_M,
@@ -53,6 +55,7 @@ def select_blockscaled_tma_plan(
     do_dim_k = quant_orientation_id != _QUANT_ORIENTATION_DIM_M
     do_dim_m = quant_orientation_id != _QUANT_ORIENTATION_DIM_K
     scale_group_size = quant_block_size[1]
+    scale_col_block_size = 4 * scale_group_size
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
@@ -104,7 +107,7 @@ def select_blockscaled_tma_plan(
             )
         )
         needs_boundary_masking = (
-            M != s_num_row_blk_k * 128 or K != s_num_col_blk_k * 128
+            M != s_num_row_blk_k * 128 or K != s_num_col_blk_k * scale_col_block_size
         )
     elif do_dim_m and not do_dim_k:
         if s_num_row_blk_m is None:
@@ -120,7 +123,7 @@ def select_blockscaled_tma_plan(
                 else _DIM_M_LARGE_TILE_64_256
             )
         )
-        padded_M = s_num_col_blk_m * 128
+        padded_M = s_num_col_blk_m * scale_col_block_size
         padded_K = _ceil_div(K, tile_k_size) * tile_k_size
         grid_m = padded_M // tile_m_size
         grid_k = padded_K // tile_k_size
@@ -142,7 +145,7 @@ def select_blockscaled_tma_plan(
         )
         cluster_k = 1
         needs_boundary_masking = (
-            M != s_num_col_blk_m * 128 or K != s_num_row_blk_m * 128
+            M != s_num_col_blk_m * scale_col_block_size or K != s_num_row_blk_m * 128
         )
 
     grid_k = _ceil_div(K, tile_k_size)
