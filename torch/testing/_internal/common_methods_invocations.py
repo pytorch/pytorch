@@ -3807,7 +3807,7 @@ class _TestParamsMaxPoolBase:
         self.shapes = [
             [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -5925,10 +5925,11 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (),),
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
+        ((), (),),
         ((), (0,),),
         ((), (0, True,),),
-        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
-        ((2049,), ()),
+        # Non-fused mode kernel on CUDA
+        ((3000,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
@@ -7405,9 +7406,12 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                  weight="<to be initialized>", reduction="sum"),
         ]
 
-    # (input, linear_weight) shapes: unbatched, 1-D batch, and N-D linear_weight (K-dim loss).
+    # (input, linear_weight) shapes: unbatched and 1-D batch.
     # Keep them non-empty: gradcheck's forward AD uses zero tolerance for empty inputs (#190436).
-    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 1, 5, 4, 3)))
+    shapes = [((3,), (4, 3)), ((8, 3), (4, 3))]
+    if not chunked:
+        # N-D linear_weight (K-dim loss) always falls back from the chunked path
+        shapes.append(((4, 3), (2, 1, 5, 6, 3)))
     make_linear_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-2, high=2)
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
         # ignore_index is not supported for probabilities target
@@ -10486,7 +10490,7 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # windows (stride == kernel_size) always give unique indices.
         # gradcheck is expensive, so only the smallest input shape is kept.
         stride = sample.kwargs['stride']
-        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.input.shape[2] == 3:
+        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.kwargs['output_size'][2] == 3:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -15344,14 +15348,6 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
                 "TestConsistency", "test_output_match", device_type="mps",
             ),
-            # Same fp16 atomic-order spread as the unchunked variant: N-D
-            # linear weights fall back to the reference nll_loss2d path.
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
-                "TestTorchFunctionRedispatchOpsDevice",
-                "test_redispatch",
-                device_type="cuda",
-            ),
         ),
         skips=_lce_chunked_op_skips + (
             DecorateInfo(unittest.skip("chunked op falls back to reference under "
@@ -18031,7 +18027,10 @@ op_db: list[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # FIXME: indices can differ between CPU and GPU on tied values
+               # FIXME:
+               # Expected 2114 but got 1123.
+               # Absolute difference: 991 (up to 0.001 allowed)
+               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    "TestCommon",
