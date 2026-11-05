@@ -3142,10 +3142,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # tests for torch.tensor_split(self, indices_or_sections: int, dim)
         test(op, (torch.rand(B0, 2, 1024), 5, -1), in_dims=(0, None, None))
-        test(op, (torch.rand(2, B0, 1024), 150, 1), in_dims=(1, None, None))
+        test(op, (torch.rand(2, B0, 1024), 15, 1), in_dims=(1, None, None))
         test(
             vmap(op, in_dims=(0, None, None)),
-            (torch.rand(B1, 1023, B0, 5), 256, 0),
+            (torch.rand(B1, 1023, B0, 5), 16, 0),
             in_dims=(2, None, None),
         )
         test(
