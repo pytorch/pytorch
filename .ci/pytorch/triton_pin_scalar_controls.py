@@ -1,6 +1,7 @@
 """Verify the current scalar-subtraction correction across ROCm targets."""
 
 import hashlib
+from email.parser import Parser
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,14 @@ REPORT = ROOT / "test/test-reports/pin-scalar-controls"
 DEBUG = ROOT / "test/debug/pin-scalar-controls"
 NATIVE_SHA = "dd736768a3680bf63410e798da1a08b4f9d9a37a"
 PINS = {"old": "b7ddcf86", "candidate": "1b9ee7ae"}
+WHEEL_SHA256 = {
+    "old": "15bcd44e373b53f00761f9c16a290f3fc6c3ddb13793b14380a0a74766586919",
+    "candidate": "bfddef1d6e04cc10b74b5d922a4fe82edfed654caf5773cdbea49ae9d5c26114",
+}
+NATIVE_SHA256 = {
+    "old": "5da449c87e4c6b45b849cd1dd693fbf9981cf7dd99a5039dc2a521e16924bb2b",
+    "candidate": "1cf61553a4cdd9cf2d72af7ea2f4960a735deb9c18ad60c0ee2d9a004789986f",
+}
 
 
 def child():
@@ -28,7 +37,8 @@ def child():
     assert torch.version.hip, torch.version.hip
     device = torch.cuda.get_device_properties(0)
     assert any(arch in device.gcnArchName for arch in ("gfx90a", "gfx942")), str(device)
-    assert os.environ["PIN_TRITON_SHORT"] in importlib.metadata.version("triton")
+    distribution = os.environ["PIN_TRITON_DIST"]
+    assert os.environ["PIN_TRITON_SHORT"] in importlib.metadata.version(distribution)
     assert Path(triton.__file__).resolve().is_relative_to(os.environ["PIN_TRITON_SITE"])
     phase = Path(os.environ["PIN_SCALAR_PHASE_DIR"])
     (phase / "environment.json").write_text(json.dumps({
@@ -36,7 +46,8 @@ def child():
         "hip": torch.version.hip,
         "gpu": device.name,
         "gcn_arch": device.gcnArchName,
-        "triton_version": importlib.metadata.version("triton"),
+        "triton_distribution": distribution,
+        "triton_version": importlib.metadata.version(distribution),
         "triton_path": triton.__file__,
     }, indent=2) + "\n")
     values = []
@@ -114,9 +125,15 @@ for label, short in PINS.items():
     matches = [wheel for wheel in wheels if short in wheel.name]
     assert len(matches) == 1, (label, matches)
     wheel = matches[0]
+    assert hashlib.file_digest(wheel.open("rb"), "sha256").hexdigest() == WHEEL_SHA256[label]
     site = DEBUG / label / "site"
     site.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(wheel) as archive:
+        metadata_files = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+        assert len(metadata_files) == 1
+        metadata = Parser().parsestr(archive.read(metadata_files[0]).decode())
+        distribution = metadata['Name']
+        assert short in metadata['Version']
         archive.extractall(site)
     for mode, code, suite in (("original", source, tests), ("patched", patched, patched_tests)):
         phase = DEBUG / f"{label}-{mode}"
@@ -132,7 +149,7 @@ for label, short in PINS.items():
             "import hashlib, importlib.util, importlib.metadata, json, os, pathlib, sys\n"
             "import torch, torch._inductor, triton\n"
             f"assert torch.version.git_version == {NATIVE_SHA!r}\n"
-            f"assert {short!r} in importlib.metadata.version('triton')\n"
+            f"assert {short!r} in importlib.metadata.version({distribution!r})\n"
             f"assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r})\n"
             f"spec = importlib.util.spec_from_file_location('torch._inductor.lowering', {str(lowering)!r})\n"
             "module = importlib.util.module_from_spec(spec)\n"
@@ -153,7 +170,7 @@ for label, short in PINS.items():
             "compiler.compile = triton.compiler.compile = triton.compile = traced_compile\n"
             f"pathlib.Path({str(trace)!r}, str(os.getpid()) + '.json').write_text(json.dumps(dict("
             "torch_sha=torch.version.git_version, triton=triton.__file__, "
-            "version=importlib.metadata.version('triton'), lowering=module.__file__, "
+            f"version=importlib.metadata.version({distribution!r}), lowering=module.__file__, "
             "lowering_sha256=hashlib.sha256(pathlib.Path(module.__file__).read_bytes()).hexdigest())))\n"
         )
         env = os.environ.copy()
@@ -162,7 +179,7 @@ for label, short in PINS.items():
                 env.pop(key)
         env.update({"PYTHONPATH": os.pathsep.join((str(site), str(overlay))),
                     "TORCH_CUSTOM_PYTHONPATH": os.pathsep.join((str(site), str(overlay))),
-                    "PIN_TRITON_SHORT": short, "PIN_TRITON_SITE": str(site),
+                    "PIN_TRITON_SHORT": short, "PIN_TRITON_SITE": str(site), "PIN_TRITON_DIST": distribution,
                     "PIN_SCALAR_MODE": mode, "PIN_SCALAR_PHASE_DIR": str(phase),
                     "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
                     "TRITON_CACHE_DIR": str(phase / "triton-cache"),
@@ -172,7 +189,7 @@ for label, short in PINS.items():
             completed = subprocess.run([sys.executable, __file__, "child"], cwd=ROOT / "test",
                                        env=env, stdout=output, stderr=subprocess.STDOUT, timeout=1800)
         item = {"pin": label, "mode": mode, "exit": completed.returncode,
-                "wheel": wheel.name,
+                "wheel": wheel.name, "distribution": distribution,
                 "wheel_sha256": hashlib.file_digest(wheel.open("rb"), "sha256").hexdigest(),
                 "lowering_sha256": hashlib.sha256(code.encode()).hexdigest(),
                 "log": str(log), "log_sha256": hashlib.file_digest(log.open("rb"), "sha256").hexdigest()}
@@ -180,6 +197,7 @@ for label, short in PINS.items():
         compile_traces = [json.loads(path.read_text()) for path in trace.glob('*-compile.json')]
         assert compile_traces, ('No actual compiler worker provenance', label, mode)
         assert all(Path(item['native']).is_relative_to(site) and
+                   item['native_sha256'] == NATIVE_SHA256[label] and
                    item['lowering_sha256'] == hashlib.sha256(code.encode()).hexdigest()
                    for item in compile_traces), compile_traces
         (REPORT / "results.json").write_text(json.dumps(results, indent=2) + "\n")

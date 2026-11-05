@@ -156,13 +156,21 @@ jobs:
           unzip -o artifacts.zip
           rm artifacts.zip
 
-      - name: Download complete verified native old and candidate Triton packages
+      - name: Download complete manylinux old Triton ROCm package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: triton-pin-native-property-evidence-40963137741-123760929645
-          run-id: '40963137741'
+          name: triton-wheel-3.11-rocm-manylinux_2_28_x86_64
+          run-id: '40454125718'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: build/pin-scalar-native-packages
+          path: build/pin-scalar-native-packages/old
+
+      - name: Download complete manylinux candidate Triton ROCm package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: triton-wheel-3.11-rocm-manylinux_2_28_x86_64
+          run-id: '42111682053'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pin-scalar-native-packages/candidate
 
       - name: Download TD artifacts
         continue-on-error: true

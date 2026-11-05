@@ -1,5 +1,5 @@
 # Owner(s): ["module: rocm"]
-# Temporary current-head scalar subtraction controls for draft #202417.
+# Temporary MI200 scalar subtraction controls for draft #202417.
 name: inductor-rocm-mi350
 
 on:
@@ -36,19 +36,5 @@ jobs:
       test-matrix: |
         { include: [
           { config: "triton_pin_scalar_controls", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi210.1" },
-        ]}
-    secrets: inherit
-
-  mi300-scalar-controls:
-    needs: get-label-type
-    uses: ./.github/workflows/_rocm-test.yml
-    with:
-      build-environment: linux-noble-rocm-py3.11-mi300
-      pin-control-build-run: "42088852503"
-      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-noble-rocm-n-py3.11-c3702f0a877b3a11803c36cd75a39a8cdf31865d
-      timeout-minutes: 120
-      test-matrix: |
-        { include: [
-          { config: "triton_pin_scalar_controls", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi300.1" },
         ]}
     secrets: inherit
