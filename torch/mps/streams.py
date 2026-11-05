@@ -80,3 +80,9 @@ def set_stream(stream: Stream | None) -> None:
     if stream is None:
         return
     torch._C._mps_setStream(stream)
+
+
+for _name in __all__:
+    # APIs defined in this file are public directly under torch.mps
+    globals()[_name].__module__ = "torch.mps"
+del _name
