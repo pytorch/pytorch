@@ -2831,9 +2831,34 @@ def unfold(x, dimension, size, step):
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
+    if _unsqueeze_only_read_by_cat(V.graph.current_node):
+        # Keep the view lazy so the cat can place the buffer instead of copying
+        # it; nothing else sees the view, so freezing it would be premature.
+        if (lazy := ir.CatUnsqueezeView.try_create(x, dim)) is not None:
+            return TensorBox(lazy)
     new_shape = list(x.get_size())
     new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
+
+
+def _unsqueeze_only_read_by_cat(node) -> bool:
+    """Whether ``node`` is an unsqueeze a cat alone reads, of a value it alone reads.
+
+    The target check keeps this to the node being lowered, since other lowerings
+    also reach ``unsqueeze``. Requiring the source to have one user is a
+    profitability choice, not a correctness one: placing a buffer that others read
+    is just as correct, but it makes their reads strided, so we leave those on the
+    copy path (``test_stack_realized_input_twice``).
+    """
+    if node is None or node.target is not aten.unsqueeze.default or not node.args:
+        return False
+    source = node.args[0]
+    return (
+        len(node.users) == 1
+        and next(iter(node.users)).target is aten.cat.default
+        and isinstance(source, torch.fx.Node)
+        and len(source.users) == 1
+    )
 
 
 @register_lowering(aten.unsqueeze_, type_promotion_kind=None)
