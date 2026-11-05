@@ -4257,6 +4257,9 @@ class CatUnsqueezeView(GenericView):
             and isinstance(x.data, ComputedBuffer)
             and isinstance(x.data.layout, FlexibleLayout)
             and not V.graph.sizevars.statically_known_equals(x.get_numel(), 0)
+            # A 0-d graph output keeps its flexible layout, so placing it would
+            # alias it into the cat's buffer; an N-d output is frozen by then.
+            and len(x.get_size()) > 0
         ):
             return None
         size = [*x.get_size()]
