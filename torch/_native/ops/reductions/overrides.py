@@ -2,6 +2,12 @@
 
 Conditions check capability and fall through to ATen for unsupported calls.
 Supported layouts use a fast path or the general TensorIterator decode.
+
+PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
+order gets it, and serving an unordered request in that order is fine. The condition
+ignores the order, so with the variable set to "strict" a served call whose layout
+cannot take the inner tree raises (with "1" it warns and runs unordered). Calls the
+condition declines go to ATen, which does not follow the order.
 """
 
 from __future__ import annotations
@@ -126,13 +132,11 @@ def _make_impl(trait_type: Callable[[], Any], key: str) -> Callable[..., torch.T
         # Lazy: importing cutlass at module import would pull the DSL into `import torch`.
         import cutlass
 
-        trait = trait_type()(acc=cutlass.Float32)
+        trait = lambda: trait_type()(acc=cutlass.Float32)  # noqa: E731
         out_dtype = self.dtype if dtype is None else dtype
         red = _normalize_dims(dim, self.dim())
-        if red is None:
-            out = kg.reduce_all(trait, key, self, out_dtype)
-        else:
-            out = kg.reduce_dim(trait, key, self, sorted(red), out_dtype)
+        dims = None if red is None else sorted(red)
+        out = kg.replay_reduce(trait, key, self, dims, out_dtype)
         return _keepdim_reshape(out, self.shape, red, keepdim)
 
     return impl

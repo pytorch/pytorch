@@ -27,6 +27,10 @@ import cutlass
 from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
 
+# Welford outputs of the traits the test keys name.
+_WELFORD_OUTS = {"var0": 1, "var1": 1, "varmean0": 2}
+
+
 class TestColumnConfig(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -44,9 +48,9 @@ class TestColumnConfig(TestCase):
             acc_bits=32,
             nouts=1,
             alignment=16,
-            contiguous=True,
         )
         args.update(kwargs)
+        args.setdefault("welford_outs", _WELFORD_OUTS.get(args["trait_key"], 0))
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
@@ -81,12 +85,108 @@ class TestColumnConfig(TestCase):
             self.select(rows=1 << 20, columns=2, npar=65536)
 
     @parametrize(
-        "dtype,size,columns,key,fields,rule",
+        "dtype,size,columns,key,fields,rule,expected",
         [
-            (torch.float32, 256, 256, "sum", 1, "rubin_c256"),
-            (torch.bfloat16, 2048, 1024, "argmaxi32", 2, "rubin_c1024"),
-            (torch.float32, 256, 4096, "mean", 1, "rubin_mean_c4096_tiled"),
-            (torch.bfloat16, 2048, 4096, "var0", 3, "rubin_var_c4096"),
+            (
+                torch.float32,
+                256,
+                256,
+                "sum",
+                1,
+                "rubin_c256",
+                (4096, 4, "column", 0, "linear"),
+            ),
+            (
+                torch.bfloat16,
+                2048,
+                1024,
+                "argmaxi32",
+                2,
+                "rubin_c1024",
+                (4096, 8, "column", 0, "inner_tree"),
+            ),
+            (
+                torch.float32,
+                256,
+                1024,
+                "sum",
+                1,
+                "rubin_c1024",
+                (1024, 8, "column", 0, "linear"),
+            ),
+            (
+                torch.float32,
+                256,
+                4096,
+                "mean",
+                1,
+                "rubin_mean_c4096_tiled",
+                (256, 8, "partition", 16, "linear"),
+            ),
+            (
+                torch.bfloat16,
+                256,
+                4096,
+                "sum",
+                1,
+                "rubin_sum_c4096_tiled",
+                (256, 8, "partition", 16, "linear"),
+            ),
+            (
+                torch.float32,
+                2048,
+                4096,
+                "sum",
+                1,
+                "rubin_sum_c4096_tiled",
+                (1024, 4, "partition", 8, "linear"),
+            ),
+            (
+                torch.bfloat16,
+                2048,
+                4096,
+                "mean",
+                1,
+                "rubin_mean_c4096_tiled",
+                (2048, 8, "partition", 8, "linear"),
+            ),
+            (
+                torch.bfloat16,
+                2048,
+                4096,
+                "var0",
+                3,
+                "rubin_var_c4096",
+                (2048, 8, "column", 0, "inner_tree"),
+            ),
+            (
+                torch.float32,
+                256,
+                4096,
+                "var0",
+                3,
+                "rubin_var_c4096",
+                (256, 8, "column", 0, "linear"),
+            ),
+            # rubin_var_c4096 runs the ordered kernel for bf16 or 2 GiB views.
+            (
+                torch.bfloat16,
+                256,
+                4096,
+                "var0",
+                3,
+                "rubin_var_c4096",
+                (256, 8, "column", 0, "inner_tree"),
+            ),
+            (
+                torch.float32,
+                2048,
+                4096,
+                "var0",
+                3,
+                "rubin_var_c4096",
+                (1024, 8, "column", 0, "inner_tree"),
+            ),
             (
                 torch.bfloat16,
                 2048,
@@ -94,20 +194,35 @@ class TestColumnConfig(TestCase):
                 "argmaxi32",
                 2,
                 "rubin_argmax_c4096_tree",
+                (2048, 4, "partition", 8, "inner_tree"),
             ),
-            (torch.float32, 2048, 4096, "argmaxi32", 2, "rubin_argmax_c4096_tiled"),
+            (
+                torch.float32,
+                2048,
+                4096,
+                "argmaxi32",
+                2,
+                "rubin_argmax_c4096_tiled",
+                (1024, 4, "partition", 8, "linear"),
+            ),
+            (
+                torch.bfloat16,
+                256,
+                4096,
+                "argmaxi32",
+                2,
+                "rubin_argmax_c4096_tiled",
+                (512, 4, "partition", 8, "linear"),
+            ),
         ],
+        name_fn=lambda dtype, size, columns, key, fields, rule, expected: (
+            f"{rule}_{str(dtype)[6:]}_{size}mib"
+        ),
     )
-    def test_sm107_unordered_profiles(self, dtype, size, columns, key, fields, rule):
-        """Pin each distinct SM107 unordered-column launch family."""
-        expected = {
-            "rubin_c256": (4096, 4, "column", 0, "linear"),
-            "rubin_c1024": (4096, 8, "column", 0, "inner_tree"),
-            "rubin_mean_c4096_tiled": (256, 8, "partition", 16, "linear"),
-            "rubin_var_c4096": (2048, 8, "column", 0, "inner_tree"),
-            "rubin_argmax_c4096_tree": (2048, 4, "partition", 8, "inner_tree"),
-            "rubin_argmax_c4096_tiled": (1024, 4, "partition", 8, "linear"),
-        }
+    def test_sm107_unordered_profiles(
+        self, dtype, size, columns, key, fields, rule, expected
+    ):
+        """Pin each SM107 unordered-column launch family at its measured size anchors."""
         cfg = self.select(
             dtype,
             size,
@@ -116,16 +231,8 @@ class TestColumnConfig(TestCase):
             trait_key=key,
             nfields=fields,
         )
-        self.assertEqual(
-            (
-                cfg.npar,
-                cfg.vec,
-                cfg.partial_layout,
-                cfg.combine_columns,
-                cfg.kernel_order,
-            ),
-            expected[rule],
-        )
+        got = (cfg.npar, cfg.vec, cfg.partial_layout, cfg.combine_columns)
+        self.assertEqual(got + (cfg.kernel_order,), expected)
         self.assertEqual(cfg.rule, rule)
         self.assertEqual(cfg.threads_per_block, 64)
 
@@ -143,16 +250,6 @@ class TestColumnConfig(TestCase):
                 (16, 16),
             ),
             (
-                torch.float32,
-                "var0",
-                16384,
-                1024,
-                2,
-                3,
-                (torch.float32,),
-                (0, 16),
-            ),
-            (
                 torch.bfloat16,
                 "argmaxi32",
                 262144,
@@ -162,19 +259,21 @@ class TestColumnConfig(TestCase):
                 (torch.int64,),
                 (64, 32),
             ),
-            # full_column_anchor, the 65536 x 1024 rule, the c256 Welford and bf16
-            # minimums, and a column_anchor seed for a simple trait.
+            # The 256 MiB mean_anchor arm, the 65536 x 1024 rule, the c256 Welford and
+            # bf16 minimums, and a column_anchor seed for a simple trait.
             (torch.float32, "mean", 262144, 256, 32, 1, (torch.float32,), (32, 16)),
             (torch.float32, "var0", 65536, 1024, 8, 3, (torch.float32,), (64, 16)),
+            # One-output Welford traits share the var0 entry.
+            (torch.float32, "var1", 65536, 1024, 8, 3, (torch.float32,), (64, 16)),
             (torch.float32, "var0", 65536, 256, 8, 3, (torch.float32,), (0, 16)),
             (torch.bfloat16, "sum", 131072, 256, 16, 1, (torch.float32,), (8, 16)),
             (torch.float32, "mean", 524288, 1024, 64, 1, (torch.float32,), (32, 32)),
-            # The 65536 x 1024 rule skips argmax; Welford anchors; full_column_anchor's
-            # 2 GiB and bf16 64 MiB arms.
+            # The 65536 x 1024 rule skips argmax; Welford anchors; mean_anchor's 2 GiB and
+            # bf16 64 MiB arms.
             (torch.float32, "argmaxi32", 65536, 1024, 8, 2, (torch.int64,), (64, 32)),
-            (torch.bfloat16, "var0", 8192, 4096, 4, 3, (torch.bfloat16,), (0, 32)),
-            (torch.bfloat16, "var0", 8192, 1024, 2, 3, (torch.bfloat16,), (0, 16)),
-            (torch.float32, "mean", 2097152, 256, 64, 1, (torch.float32,), (32, 32)),
+            (torch.bfloat16, "var0", 8192, 4096, 1, 3, (torch.bfloat16,), (0, 32)),
+            (torch.bfloat16, "var0", 8192, 1024, 1, 3, (torch.bfloat16,), (0, 16)),
+            (torch.float32, "mean", 2097152, 256, 256, 1, (torch.float32,), (32, 32)),
             (torch.bfloat16, "amax", 131072, 256, 16, 1, (torch.bfloat16,), (32, 32)),
             (torch.bfloat16, "mean", 32768, 1024, 4, 1, (torch.float32,), (32, 32)),
         ],
@@ -183,20 +282,42 @@ class TestColumnConfig(TestCase):
         self, dtype, key, rows, columns, partials, fields, outputs, expected
     ):
         """Pin SM107 ordered mappings."""
-        cfg = ct.select_ordered_col_config(
+        cfg = self._sm107_ordered(dtype, key, rows, columns, partials, fields, outputs)
+        self.assertEqual((cfg.min_blocks, cfg.tile_columns), expected)
+        self.assertEqual((cfg.worker_warps, cfg.full_tiles), (16, True))
+
+    @parametrize(
+        "dtype,key,rows,columns,partials,fields,outputs",
+        [
+            (torch.float32, "sum", 65536, 256, 8, 1, (torch.bfloat16,)),
+            (torch.bfloat16, "argmaxi32", 262144, 4096, 32, 2, (torch.int32,)),
+            (torch.bfloat16, "amax", 131072, 256, 16, 1, (torch.float32,)),
+            (torch.bfloat16, "var0", 8192, 4096, 1, 3, (torch.float32,)),
+        ],
+    )
+    def test_sm107_ordered_needs_measured_outputs(
+        self, dtype, key, rows, columns, partials, fields, outputs
+    ):
+        """Map no SM107 ordered view whose outputs differ from _sm107_outputs."""
+        cfg = self._sm107_ordered(dtype, key, rows, columns, partials, fields, outputs)
+        self.assertIsNone(cfg)
+
+    def _sm107_ordered(self, dtype, key, rows, columns, partials, fields, outputs):
+        return ct.select_ordered_col_config(
             (10, 7),
             dtype,
             key,
             columns,
             1,
             partials,
-            field_bits=(32,) * fields,
+            nfields=fields,
+            nouts=len(outputs),
+            welford_outs=_WELFORD_OUTS.get(key, 0),
+            acc_bits=32,
             out_dtypes=outputs,
             rows=rows,
             full_tiles=True,
         )
-        self.assertEqual((cfg.min_blocks, cfg.tile_columns), expected)
-        self.assertEqual((cfg.worker_warps, cfg.full_tiles), (16, True))
 
     @parametrize(
         "dtype,size,columns,key,fields,order",
@@ -206,15 +327,41 @@ class TestColumnConfig(TestCase):
             (torch.float32, 16, 4096, "sum", 1, "inner_tree"),
             (torch.bfloat16, 64, 4096, "mean", 1, "inner_tree"),
             (torch.bfloat16, 64, 4096, "amax", 1, "linear"),
-            (torch.float32, 64, 1024, "var0", 3, "inner_tree"),
+            (torch.float32, 2048, 1024, "sum", 1, "inner_tree"),
+            # 8192-row bf16 Welford views.
+            (torch.bfloat16, 16, 1024, "var0", 3, "inner_tree"),
+            (torch.bfloat16, 64, 4096, "var0", 3, "inner_tree"),
+            # 16384-row fp32 plans exceed reduce_ordered_col's unroll cap.
+            (torch.float32, 16, 256, "var0", 3, "linear"),
+            (torch.float32, 64, 1024, "var0", 3, "linear"),
+            (torch.float32, 256, 4096, "var0", 3, "linear"),
         ],
     )
-    def test_sm107_small_hand_offs(self, dtype, size, columns, key, fields, order):
-        """Pin which 16 and 64 MiB SM107 columns hand off to the ordered kernel."""
+    def test_sm107_hand_offs(self, dtype, size, columns, key, fields, order):
+        """Pin which SM107 columns hand off to the ordered kernel."""
         cfg = self.select(
             dtype, size, columns, cc=(10, 7), trait_key=key, nfields=fields
         )
         self.assertEqual(cfg.kernel_order, order)
+
+    @parametrize(
+        "dtype,size,columns,key,fields,out",
+        [
+            (torch.bfloat16, 64, 256, "sum", 1, torch.bfloat16),
+            (torch.bfloat16, 64, 1024, "mean", 1, torch.bfloat16),
+            (torch.bfloat16, 2048, 4096, "var0", 3, torch.float32),
+        ],
+    )
+    def test_sm107_hand_offs_need_ordered_outputs(
+        self, dtype, size, columns, key, fields, out
+    ):
+        """Outputs the ordered kernel cannot store keep SM107 columns on the linear kernel."""
+        args = dict(cc=(10, 7), trait_key=key, nfields=fields)
+        natural = torch.float32 if fields == 1 else dtype
+        cfg = self.select(dtype, size, columns, out_dtypes=(natural,), **args)
+        self.assertEqual(cfg.kernel_order, "inner_tree")
+        cfg = self.select(dtype, size, columns, out_dtypes=(out,), **args)
+        self.assertEqual(cfg.kernel_order, "linear")
 
     @parametrize(
         "updates",
@@ -225,7 +372,6 @@ class TestColumnConfig(TestCase):
             {"nouts": 2},
             {"nfields": 2},
             {"batches": 2},
-            {"contiguous": False},
             {"alignment": 8},
         ],
     )
@@ -234,28 +380,52 @@ class TestColumnConfig(TestCase):
         self.assertEqual(self.select(cc=(10, 7)).rule, "rubin_sum_c4096_tiled")
         self.assertEqual(self.select(cc=(10, 7), **updates), self.select(**updates))
 
-    @parametrize("bits", [32, 64])
-    def test_sm107_ordered_field_guard(self, bits):
-        """Decline SM107 ordered mappings for 64-bit fields."""
+    def test_sm107_ordered_acc_bits_guard(self):
+        """Decline SM107 ordered mappings for 64-bit accumulators."""
+        cfg = ct.select_ordered_col_config(
+            (10, 7),
+            torch.float32,
+            "mean",
+            1024,
+            1,
+            64,
+            nfields=1,
+            nouts=1,
+            welford_outs=0,
+            acc_bits=64,
+            out_dtypes=(torch.float32,),
+            rows=524288,
+            full_tiles=True,
+        )
+        self.assertIsNone(cfg)
+
+    @parametrize("key,nouts", [("var0", 1), ("varmean0", 2)])
+    def test_sm107_ordered_welford_outputs(self, key, nouts):
+        """Map only one-output Welford columns at the SM107 Welford anchors."""
         cfg = ct.select_ordered_col_config(
             (10, 7),
             torch.bfloat16,
-            "mean",
+            key,
             4096,
             1,
-            32,
-            field_bits=(bits,),
-            out_dtypes=(torch.float32,),
-            rows=262144,
+            1,
+            nfields=3,
+            nouts=nouts,
+            welford_outs=nouts,
+            acc_bits=32,
+            out_dtypes=(torch.bfloat16,) * nouts,
+            rows=8192,
             full_tiles=True,
         )
-        selected = ct.OrderedColConfig(32, full_tiles=True)
-        self.assertEqual(cfg, selected if bits == 32 else None)
+        selected = ct.OrderedColConfig(0, full_tiles=True, out_dtypes=(torch.bfloat16,))
+        self.assertEqual(cfg, selected if nouts == 1 else None)
 
     @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
-    def test_explicit_geometry_disables_policy(self, kwargs):
-        """Honor explicit column geometry without rewriting it through policy."""
-        cfg = self.select(**kwargs)
+    @parametrize("cc", [(10, 3), (10, 7)])
+    def test_explicit_geometry_disables_policy(self, cc, kwargs):
+        """Honor explicit column geometry without rewriting it through policy, even at
+        SM107's rubin_sum_c4096_tiled anchor."""
+        cfg = self.select(cc=cc, **kwargs)
         self.assertEqual(cfg.rule, "explicit")
         for key, value in kwargs.items():
             self.assertEqual(getattr(cfg, key), value)
@@ -265,11 +435,10 @@ class TestColumnConfig(TestCase):
     @parametrize(
         "dtype,key,rows,columns,partials,full_tiles,expected",
         [
+            # Looped views keep the default mapping, with or without full tiles.
             (torch.float32, "sum", 8192, 4096, 1, False, None),
-            (torch.float16, "sum", 8192, 4096, 1, True, (0, 32)),
+            (torch.float16, "sum", 8192, 4096, 1, True, None),
             (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
-            # Views without full tiles keep the default width and their clamps.
-            (torch.float32, "sum", 65536, 1024, 8, False, (0, 32)),
             (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
             (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
             (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
@@ -280,9 +449,8 @@ class TestColumnConfig(TestCase):
     def test_b200_ordered_column_mappings(
         self, dtype, key, rows, columns, partials, full_tiles, expected
     ):
-        """Pin B200 ordered column widths, independent of SM107 guards."""
-        # amax and amin store the input dtype; other single fields may store fp32 too.
-        same_dtype = key in ("amax", "amin")
+        """Pin B200 ordered column widths, which apply to any outputs, independent of
+        SM107 guards."""
         for output in {dtype, torch.float32}:
             with self.subTest(output=output):
                 cfg = ct.select_ordered_col_config(
@@ -292,17 +460,46 @@ class TestColumnConfig(TestCase):
                     columns,
                     1,
                     partials,
-                    field_bits=(32,),
+                    nfields=1,
+                    nouts=1,
+                    welford_outs=0,
+                    acc_bits=32,
                     out_dtypes=(output,),
                     rows=rows,
                     full_tiles=full_tiles,
                 )
-                if expected is None or same_dtype and output != dtype:
+                if expected is None:
                     self.assertIsNone(cfg)
                     continue
                 min_blocks, tile_columns = expected
                 want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
                 self.assertEqual(cfg, want._replace(full_tiles=full_tiles))
+
+    def test_b200_ordered_column_mapping_guards(self):
+        """Split views the fallback does not serve get None; multi-field split views keep
+        full-warp tiles."""
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float32,
+            trait_key="sum",
+            columns=1024,
+            batches=1,
+            partials=8,
+            nfields=1,
+            nouts=1,
+            welford_outs=0,
+            acc_bits=32,
+            out_dtypes=(torch.float32,),
+            rows=65536,
+            full_tiles=True,
+        )
+        for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}):
+            with self.subTest(**updates):
+                self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
+        index = {"trait_key": "argmaxi32", "nfields": 2, "out_dtypes": (torch.int32,)}
+        cfg = ct.select_ordered_col_config(**(args | index))
+        want = ct.OrderedColConfig(0, tile_columns=ct.WARP, full_tiles=True)
+        self.assertEqual(cfg, want)
 
 
 class TestColumnCombine(TestCase):

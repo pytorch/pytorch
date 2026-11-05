@@ -4,6 +4,7 @@
 # for the dtypes, dimension forms, and layouts the overrides serve.
 
 import functools
+import os
 import unittest
 
 import torch
@@ -12,8 +13,6 @@ from torch._native.ops.reductions import overrides as ov
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    tol,
-    toleranceOverride,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -56,22 +55,12 @@ class TestCuTeDSLReductionWiring(TestCase):
 
     def _run(self, call):
         """Return call's result and how many override calls served it."""
-        # Count the impl's single dims normalization: the kernel entries re-enter each
-        # other (one-element outputs route reduce_dim through reduce_all).
-        orig = ov._normalize_dims
-        fires = 0
+        from torch._native.ops.reductions import kernel_general as kg
 
-        def counting(*args):
-            nonlocal fires
-            fires += 1
-            return orig(*args)
-
-        ov._normalize_dims = counting
-        try:
-            out = call()
-        finally:
-            ov._normalize_dims = orig
-        return out, fires
+        # A served call adds one replay entry for its metadata, so start from none.
+        kg._REPLAYS.clear()
+        out = call()
+        return out, len(kg._REPLAYS)
 
     def _check(self, call, fired=1, **tol):
         got, fires = self._run(call)
@@ -177,15 +166,19 @@ class TestCuTeDSLReductionWiring(TestCase):
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):
         """Serve tensors on a non-current device under that device's guard."""
+        if torch.cuda.get_device_capability(1)[0] not in ov._ARCH_MAJORS:
+            self.skipTest("the overrides do not serve cuda:1's architecture")
         x = torch.randn(128, 512, device="cuda:1")
         self._check(lambda: torch.sum(x, dim=-1), **_TOL[torch.float32])
 
     @parametrize("op", ["sum", "mean", "prod", "amax", "amin"])
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @toleranceOverride({dt: tol(**t) for dt, t in _TOL.items()})
     def test_matches_aten(self, device, dtype, op):
-        """Match ATen across input dtypes, multi-dimension keepdim, and full reductions."""
+        """Match ATen across input dtypes, multi-dimension keepdim, and full reductions;
+        amax and amin exactly."""
         x = torch.rand(6, 33, 40, device=device, dtype=dtype) + 0.5
+        exact = op in ("amax", "amin")
+        tolerance = {"atol": 0, "rtol": 0} if exact else _TOL[dtype]
         fn = getattr(torch, op)
         calls = [lambda: fn(x, dim=1), lambda: fn(x, dim=1, keepdim=True)]
         if op != "prod":
@@ -197,7 +190,7 @@ class TestCuTeDSLReductionWiring(TestCase):
                 lambda: fn(x, dim=all_dims, keepdim=True),
             ]
         for call in calls:
-            self._check(call)
+            self._check(call, **tolerance)
 
     @parametrize("op", ["amax", "amin"])
     def test_nan_propagates(self, device, op):
@@ -207,7 +200,7 @@ class TestCuTeDSLReductionWiring(TestCase):
         x[100, 500] = float("nan")
         fn = getattr(torch, op)
         for call in (lambda: fn(x, dim=-1), lambda: fn(x, dim=0), lambda: fn(x)):
-            self._check(call)
+            self._check(call, atol=0, rtol=0)
 
     @parametrize("op", ["sum", "mean", "prod"])
     def test_out_dtype_contract(self, device, op):
@@ -225,11 +218,51 @@ class TestCuTeDSLReductionWiring(TestCase):
         for x, out_dtype in ((x32, torch.float64), (big, torch.float16)):
             self._check(functools.partial(fn, x, dim=1, dtype=out_dtype), fired=0)
 
+    def test_reduce_all_widening(self, device):
+        """Serve reduce-all requests that widen fp16 and bf16 to fp32, with keepdim."""
+        x16 = torch.rand(64, 96, device=device, dtype=torch.float16) + 0.5
+        xb = x16.bfloat16()
+        f32 = torch.float32
+        calls = (
+            lambda: torch.sum(x16, dtype=f32),
+            lambda: torch.mean(xb, dim=None, dtype=f32),
+            lambda: torch.sum(xb, dim=None, keepdim=True, dtype=f32),
+            lambda: torch.mean(x16, dim=None, keepdim=True, dtype=f32),
+        )
+        for call in calls:
+            self._check(call, **_TOL[f32])
+
+    def test_inner_tree_env_orders_served_calls(self, device):
+        """Serve calls under PYTORCH_NATIVE_INNER_TREE in the inner-tree order."""
+        import cutlass
+
+        from torch._native.ops.reductions import (
+            kernel_general as kg,
+            kernel_rowtile as rt,
+            traits as T,
+        )
+
+        x = torch.randn(128, 512, device=device)
+        prev = os.environ.get(rt._INNER_TREE_ENV)
+        os.environ[rt._INNER_TREE_ENV] = "1"
+        try:
+            got, fires = self._run(lambda: torch.sum(x, dim=-1))
+        finally:
+            if prev is None:
+                os.environ.pop(rt._INNER_TREE_ENV, None)
+            else:
+                os.environ[rt._INNER_TREE_ENV] = prev
+        self.assertEqual(fires, 1)
+        trait = T.SumOps(acc=cutlass.Float32)
+        want = kg.reduce_dim(trait, "ref", x, [1], torch.float32, order="inner_tree")
+        self.assertEqual(got, want, atol=0, rtol=0)
+
     def test_graph_capturable(self, device):
         """Keep core reduction overrides capture-safe and reading live input on replay."""
         x = torch.randn(8192, 1024, device=device)
         f = lambda: torch.sum(x, dim=-1)  # noqa: E731
-        for _ in range(3):
+        self.assertEqual(self._run(f)[1], 1)
+        for _ in range(2):
             f()
         torch.cuda.synchronize()
         s = torch.cuda.Stream()
@@ -240,15 +273,25 @@ class TestCuTeDSLReductionWiring(TestCase):
         torch.cuda.current_stream().wait_stream(s)
         torch.cuda.synchronize()
         g = torch.cuda.CUDAGraph()
+        # Capture replays the launches the first call recorded.
         with torch.cuda.graph(g):
-            out, fires = self._run(f)
-        self.assertEqual(fires, 1)
+            out = f()
         for _ in range(2):
             with _disabled():
                 ref = f()
             g.replay()
             self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
             x.copy_(torch.randn_like(x))
+        # A shape first seen inside capture records its launches there.
+        y = torch.randn(4096, 768, device=device)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = torch.sum(y, dim=-1)
+        y.copy_(torch.randn_like(y))
+        g.replay()
+        with _disabled():
+            ref = torch.sum(y, dim=-1)
+        self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
 
 
 instantiate_device_type_tests(TestCuTeDSLReductionWiring, globals(), only_for="cuda")
