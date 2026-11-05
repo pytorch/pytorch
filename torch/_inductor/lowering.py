@@ -8377,9 +8377,35 @@ def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     return collapsible
 
 
+fallback_sum = fallback_handler(aten.sum.dim_IntList, add_to_fallback_set=False)
+
+
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
     strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
+    if (
+        config.strict_reduction
+        and not strict_reduction
+        and x.get_device().type == "cuda"
+        and torch.version.hip is None
+        and (x.get_dtype().is_floating_point or x.get_dtype().is_complex)
+    ):
+        # Broadcast gradients also reduce outer and multiple dimensions. Until
+        # their eager reduction order is implemented, preserve it with ATen.
+        node = V.graph.current_node
+        if (
+            node is not None
+            and node.target
+            in (
+                aten.sum.default,
+                aten.sum.dim_IntList,
+                prims.sum.default,
+            )
+            and isinstance(node.args[0], torch.fx.Node)
+        ):
+            x = constrain_to_fake_tensor(x, node.args[0].meta.get("val"))
+        dims = [axis] if isinstance(axis, int) else axis
+        return fallback_sum(x, dims, keepdims, dtype=dtype)
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
