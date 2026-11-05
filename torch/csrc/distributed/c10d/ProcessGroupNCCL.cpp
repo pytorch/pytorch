@@ -1617,11 +1617,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -2005,7 +2006,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2984,7 +2985,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3023,7 +3024,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,
@@ -3323,11 +3324,37 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
-    // Unregistered in ~ProcessGroupNCCL.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT. Only the
+    // collective comm is published: a lazily created 2-rank send/recv comm
+    // would otherwise replace it under the same group uid. On CUDA,
+    // ~ProcessGroupNCCL unregisters it unless it was already aborted or
+    // destroyed.
+    if (!singleP2POp) {
+#ifdef USE_ROCM
+      // Register and install the retire hook as one step under the comm's own
+      // lock, which abort() and destroy() also take, so an invalidation cannot
+      // land in between. The pair is captured because abort() nulls the
+      // handle, and the generation tells our entry apart from a successor's at
+      // the same address.
+      NCCLComm::LockType commLock(ncclComm->mutex_);
+      if (!ncclComm->aborted_) {
+        auto& devCommManager =
+            c10d::symmetric_memory::NCCLDevCommManager::get(device);
+        ncclComm_t registeredComm = ncclComm->getNcclComm();
+        devCommManager.register_comm(getGroupUid(), registeredComm);
+        const uint64_t generation =
+            devCommManager.get_comm_generation(getGroupUid(), registeredComm);
+        ncclComm->preInvalidateHook_ =
+            [device, groupUid = getGroupUid(), registeredComm, generation]() {
+              c10d::symmetric_memory::NCCLDevCommManager::get(device)
+                  .unregister_comm(groupUid, registeredComm, generation);
+            };
+      }
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+          getGroupUid(), ncclComm->getNcclComm());
+#endif
+    }
 #endif
   }
 
