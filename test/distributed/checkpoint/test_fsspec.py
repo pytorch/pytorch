@@ -8,8 +8,8 @@ import threading
 from unittest.mock import patch
 
 import fsspec
+import fsspec.asyn
 import fsspec.implementations.memory
-from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
 from fsspec.implementations.cached import (
     SimpleCacheFileSystem,
     WholeFileCacheFileSystem,
@@ -56,14 +56,28 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 BACKEND = torch.distributed.get_default_backend_for_device(device_type)
 
 
-def _async_reader(path: str, **kwargs) -> FsspecReader:
-    """FsspecReader whose memory:// filesystem is wrapped as an AsyncFileSystem.
+class _AsyncMemoryFileSystem(fsspec.asyn.AsyncFileSystem):
+    """Natively async view of the memory:// store."""
 
-    Plain MemoryFileSystem is sync, so without the wrapper every load would
-    take the FileSystemReader fallback instead of the batched cat_ranges path.
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._mem = fsspec.implementations.memory.MemoryFileSystem()
+
+    async def _cat_file(self, path, start=None, end=None, **kwargs):
+        return self._mem.cat_file(path, start=start, end=end)
+
+    def _open(self, path, mode="rb", **kwargs):
+        return self._mem._open(path, mode, **kwargs)
+
+
+def _async_reader(path: str, **kwargs) -> FsspecReader:
+    """FsspecReader whose memory:// filesystem is replaced by an async view.
+
+    Plain MemoryFileSystem is sync, so without this every load would take the
+    FileSystemReader fallback instead of the batched cat_ranges path.
     """
     reader = FsspecReader(path, **kwargs)
-    reader.fs.fs = AsyncFileSystemWrapper(reader.fs.fs)
+    reader.fs.fs = _AsyncMemoryFileSystem()
     if not reader._supports_batched_cat_ranges():
         raise AssertionError("expected the batched cat_ranges path")
     return reader
@@ -389,6 +403,31 @@ class TestFileSystem(TestCase):
             planner=dcp.DefaultLoadPlanner(),
             no_dist=True,
         )
+        self.assertEqual(state_dict["t1"], load_dict["t1"])
+        self.assertEqual(state_dict["t2"], load_dict["t2"])
+
+    def test_fsspec_reader_batched_opt_out(self):
+        checkpoint_dir = "memory://test_fsspec_batched_opt_out"
+        state_dict = {"t1": torch.randn(10), "t2": torch.randn(5)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        load_dict = {"t1": torch.zeros(10), "t2": torch.zeros(5)}
+        reader = _async_reader(checkpoint_dir, batched=False)
+        with patch.object(
+            reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+        ) as mock_cat_ranges:
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+            mock_cat_ranges.assert_not_called()
         self.assertEqual(state_dict["t1"], load_dict["t1"])
         self.assertEqual(state_dict["t2"], load_dict["t2"])
 
@@ -861,7 +900,10 @@ class TestFileSystem(TestCase):
         reader_nested.fs.fs = nested_dfs
         self.assertFalse(reader_nested._supports_batched_cat_ranges())
 
-        scfs = SimpleCacheFileSystem(fs=mem)
+        # Caching layers over an async filesystem still report async_impl, so
+        # only the CachingFileSystem check rejects them.
+        async_mem = _AsyncMemoryFileSystem()
+        scfs = SimpleCacheFileSystem(fs=async_mem)
         dfs_cache = DirFileSystem(path="test_dir", fs=scfs)
         reader_dfs_cache = FsspecReader("memory://test_dfs_cache")
         reader_dfs_cache.fs.fs = dfs_cache
@@ -871,9 +913,9 @@ class TestFileSystem(TestCase):
         reader_scfs.fs.fs = scfs
         self.assertFalse(reader_scfs._supports_batched_cat_ranges())
 
-        wfc = WholeFileCacheFileSystem(fs=mem)
+        wfc = WholeFileCacheFileSystem(fs=async_mem)
         reader_wfc = FsspecReader("memory://test_wfc")
-        reader_wfc.fs.fs = wfc
+        reader_wfc.fs.fs = DirFileSystem(path="test_dir", fs=wfc)
         self.assertFalse(reader_wfc._supports_batched_cat_ranges())
 
         class DummyAsyncFS(fsspec.asyn.AsyncFileSystem):
@@ -963,9 +1005,14 @@ class TestFileSystem(TestCase):
             def cat_ranges(self, *args, **kwargs):
                 return []
 
+        class AsyncParentFS(fsspec.asyn.AsyncFileSystem):
+            def __init__(self):
+                super().__init__(skip_instance_cache=True)
+                self.fs = MockChildFS()
+
         reader_mock_fs = FsspecReader("memory://test_mock_fs")
-        reader_mock_fs.fs.fs = MockChildFS()
-        self.assertFalse(reader_mock_fs._supports_batched_cat_ranges())
+        reader_mock_fs.fs.fs = AsyncParentFS()
+        self.assertTrue(reader_mock_fs._supports_batched_cat_ranges())
 
     def test_supports_batched_cat_ranges_rejects_sync_override(self):
         # A sync filesystem gets two concurrent cat_ranges calls on the batched
@@ -976,6 +1023,12 @@ class TestFileSystem(TestCase):
 
         reader = FsspecReader("memory://test_sync_override")
         reader.fs.fs = SyncCatRangesFS()
+        self.assertFalse(reader._supports_batched_cat_ranges())
+
+        # AsyncFileSystemWrapper only runs the sync filesystem on threads.
+        from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
+
+        reader.fs.fs = AsyncFileSystemWrapper(SyncCatRangesFS())
         self.assertFalse(reader._supports_batched_cat_ranges())
 
     def test_load_aliased_type_error_and_foreign_byteorder(self):

@@ -253,6 +253,7 @@ class FsspecReader(FileSystemReader):
         self,
         path: str | os.PathLike,
         *,
+        batched: bool = True,
         max_batch_size: int = 1024,
         max_batch_bytes: int = 256 * 1024 * 1024,
         cpu_workers: int | None = None,
@@ -264,6 +265,9 @@ class FsspecReader(FileSystemReader):
 
         Args:
             path: directory or URL where the checkpoint will be read from.
+            batched: Whether to read through batched cat_ranges calls when the
+                filesystem is async. Set to False to always read with
+                FileSystemReader.read_data. Defaults to True.
             max_batch_size: Maximum number of read items per batched cat_ranges call.
                 Defaults to 1024, so batches are normally bounded by bytes. Small
                 items, such as per-parameter optimizer steps spread over every
@@ -281,6 +285,7 @@ class FsspecReader(FileSystemReader):
             **kwargs: Additional storage options passed to fsspec url_to_fs.
         """
         super().__init__(path)
+        self.batched = batched
         self.max_batch_size = max(1, max_batch_size)
         self.max_batch_bytes = max(1, max_batch_bytes)
         if cpu_workers is None:
@@ -299,8 +304,9 @@ class FsspecReader(FileSystemReader):
 
         # read_data may run multiple cat_ranges calls at once, which only an
         # AsyncFileSystem is guaranteed to handle. Wrappers such as
-        # DirFileSystem are async even over a sync or caching filesystem, so
-        # every wrapped layer must also be async and uncached.
+        # DirFileSystem and AsyncFileSystemWrapper are async even over a sync
+        # or caching filesystem, so every wrapped layer must also be async and
+        # uncached.
         curr_fs = getattr(self.fs, "fs", None)
         if not isinstance(curr_fs, fsspec.asyn.AsyncFileSystem):
             return False
@@ -312,6 +318,9 @@ class FsspecReader(FileSystemReader):
                 return False
             seen.add(id(curr_fs))
             inner = getattr(curr_fs, "fs", None)
+            if inner is None:
+                # AsyncFileSystemWrapper keeps the filesystem it wraps here.
+                inner = getattr(curr_fs, "sync_fs", None)
             if not isinstance(inner, fsspec.AbstractFileSystem):
                 break
             if id(inner) in seen:
@@ -320,7 +329,7 @@ class FsspecReader(FileSystemReader):
         return True
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        if not plan.items or not self._supports_batched_cat_ranges():
+        if not (self.batched and plan.items and self._supports_batched_cat_ranges()):
             return super().read_data(plan, planner)
 
         reqs = sorted(
@@ -387,6 +396,32 @@ class FsspecReader(FileSystemReader):
         # overwrite that buffer across batched resolve_tensor calls).
         parallel_copy = bool(getattr(planner, "supports_batched_resolve", False))
 
+        def apply_batch(cpu_executor, b_reqs, loaded):
+            # Every planner hook runs on this thread, so planners need not be
+            # thread safe. Loaded items alias the batch's chunk bytes, and
+            # keeping them local here frees them before the next batch arrives.
+            pending: list[tuple[ReadItem, Tensor, Tensor]] = []
+            for req, item in zip(b_reqs, loaded, strict=True):
+                if req.type == LoadItemType.BYTE_IO:
+                    planner.load_bytes(req, item)
+                elif parallel_copy:
+                    pending.append((req, self._resolve_item(req, item, planner), item))
+                else:
+                    dst = self._resolve_item(req, item, planner)
+                    _copy(dst, item)
+                    planner.commit_tensor(req, dst)
+
+            dsts = [dst for _, dst, _ in pending]
+            srcs = [src for _, _, src in pending]
+            if len(pending) > 1 and _destinations_disjoint(dsts):
+                # list() waits for every copy and re-raises the first error.
+                list(cpu_executor.map(_copy, dsts, srcs))
+            else:
+                for dst, src in zip(dsts, srcs):
+                    _copy(dst, src)
+            for req, dst, _ in pending:
+                planner.commit_tensor(req, dst)
+
         with (
             concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.cpu_workers, thread_name_prefix="FsspecReader-cpu"
@@ -404,33 +439,7 @@ class FsspecReader(FileSystemReader):
                     # in request order, dropping each one once it is consumed.
                     loaded = cpu_executor.map(load_item, b_reqs, chunks)
                     del chunks
-
-                    # Every planner hook runs on this thread, so planners need
-                    # not be thread safe. Only loading above and the copies
-                    # below go to the pool.
-                    pending: list[tuple[ReadItem, Tensor, Tensor]] = []
-                    for req, item in zip(b_reqs, loaded, strict=True):
-                        if req.type == LoadItemType.BYTE_IO:
-                            planner.load_bytes(req, item)
-                        elif parallel_copy:
-                            pending.append(
-                                (req, self._resolve_item(req, item, planner), item)
-                            )
-                        else:
-                            dst = self._resolve_item(req, item, planner)
-                            _copy(dst, item)
-                            planner.commit_tensor(req, dst)
-
-                    dsts = [dst for _, dst, _ in pending]
-                    srcs = [src for _, _, src in pending]
-                    if len(pending) > 1 and _destinations_disjoint(dsts):
-                        # list() waits for every copy and re-raises the first error.
-                        list(cpu_executor.map(_copy, dsts, srcs))
-                    else:
-                        for dst, src in zip(dsts, srcs):
-                            _copy(dst, src)
-                    for req, dst, _ in pending:
-                        planner.commit_tensor(req, dst)
+                    apply_batch(cpu_executor, b_reqs, loaded)
             finally:
                 fetched.close()
                 cpu_executor.shutdown(wait=False, cancel_futures=True)
