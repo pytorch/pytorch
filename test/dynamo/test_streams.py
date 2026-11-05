@@ -2834,9 +2834,6 @@ class <lambda>(torch.nn.Module):
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
         expected = fn(*inp)
-        # Reading a global that is first bound during tracing is unsupported, so
-        # bind it before compiling; the delete then replays against the module.
-        # patch.dict unbinds it again even if an assertion below fails.
         with patch.dict(globals(), {"_stream_del_global": inp[0]}):
             (
                 actual,
@@ -2851,13 +2848,6 @@ class <lambda>(torch.nn.Module):
             self.assertIn("record_event", graph_str)
 
     def test_del_global_created_in_trace_multi_stream_sync_dealloc(self, device):
-        # The name is absent from the module: the store binds it during tracing
-        # and the delete cancels that store, so nothing is replayed and the
-        # module never gets the name. The value is dropped while the side stream
-        # is still using it, so the dealloc sync is emitted all the same. The
-        # stored value cannot be read back -- reading a global that is first
-        # bound during tracing is itself a graph break -- so the tensor is used
-        # directly.
         def fn(x, y):
             global _stream_del_global_created
             s = torch.Stream(device=device)
@@ -2890,11 +2880,6 @@ class <lambda>(torch.nn.Module):
         self.assertNotIn("_stream_del_global_created", globals())
 
     def test_del_global_preexisting_tensor_no_sync_dealloc(self, device):
-        # `_check_global_delete` emits the dealloc sync only for a value a
-        # STORE_GLOBAL made earlier in the same trace; a tensor that is already
-        # in the module when the trace starts is not covered, so deleting it
-        # here emits no `sync_dealloc`. Pin that gap so closing it has to update
-        # this test on purpose.
         def fn(x, y):
             global _stream_del_global_preexisting
             s = torch.Stream(device=device)
@@ -2911,8 +2896,6 @@ class <lambda>(torch.nn.Module):
         with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
             expected = fn(*inp)
             self.assertNotIn("_stream_del_global_preexisting", globals())
-            # The name has to be present when the trace starts, so bind it again
-            # and let the compiled run delete it.
             globals()["_stream_del_global_preexisting"] = inp[0]
 
             (
@@ -2965,8 +2948,6 @@ class <lambda>(torch.nn.Module):
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
         expected = fn(*inp)
-        # See test_del_global_multi_stream_sync_dealloc: the inlined callee must
-        # see the name present at trace time for the delete to be recorded.
         with patch.dict(
             mod.__dict__, {"store_then_delete_multi_stream_tensor_value": inp[0]}
         ):

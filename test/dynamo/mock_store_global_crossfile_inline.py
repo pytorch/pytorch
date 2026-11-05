@@ -16,8 +16,6 @@ def set_flag_false():
 
 
 def delete_value_fn():
-    # Used for both the present-at-trace and absent-at-trace cases; the test
-    # chooses by setting `delete_value` or removing it.
     global delete_value
     del delete_value
 
@@ -57,8 +55,6 @@ delete_then_store_multi = 1
 def delete_then_store_multi_fn():
     global delete_then_store_multi, delete_then_store_multi_new
     del delete_then_store_multi
-    # The frame inserts this name, which the module does not have yet, between
-    # the delete and the re-store below.
     delete_then_store_multi_new = 2
     delete_then_store_multi = 3  # noqa: F841
 

@@ -344,11 +344,6 @@ _ABSENT = object()
 
 @contextlib.contextmanager
 def temp_globals(namespace, **updates):
-    """Install `updates` into `namespace` (a module `__dict__`) temporarily.
-
-    A value of `_ABSENT` removes the name for the duration of the block, which
-    is how the DELETE_GLOBAL tests set up "this global does not exist".
-    """
     saved = {name: namespace.get(name, _ABSENT) for name in updates}
     for name, value in updates.items():
         if value is _ABSENT:
@@ -367,7 +362,6 @@ def temp_globals(namespace, **updates):
 
 @contextlib.contextmanager
 def crossfile_globals(**updates):
-    """Set the cross-file mock's globals for the test body, then restore them."""
     try:
         from . import mock_store_global_crossfile_inline
     except ImportError:
@@ -378,16 +372,6 @@ def crossfile_globals(**updates):
 
 
 class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
-    """`DELETE_GLOBAL` semantics, with eager CPython as the specification.
-
-    Unguarded deletes are exercised under both compile modes because the two
-    differ. `fullgraph=True` traces to completion, so an exception observed while
-    tracing is reported through the observed-exception convention --
-    `Unsupported: Observed exception` -- which is what `LOAD_GLOBAL` of a missing
-    name already does. Without `fullgraph` a graph break lets the frame fall back
-    to eager, and the user sees the real exception type.
-    """
-
     hw_classification = HardwareClassification.GENERIC
 
     def _assert_delete_missing_global(self, fn, name, args=()):
@@ -396,10 +380,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         with self.assertRaisesRegex(NameError, f"name '{name}' is not defined"):
             torch.compile(fn, backend="eager")(*args)
-
-    # ------------------------------------------------------------------
-    # Existence and ordering within a single frame
-    # ------------------------------------------------------------------
 
     def test_delete_global(self):
         with temp_globals(globals(), _dg_a=10):
@@ -425,7 +405,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
 
     def test_delete_missing_global_caught_by_caller(self):
-        # The handler lives in the caller, not in the frame doing the delete.
         with temp_globals(globals(), _dg_a=_ABSENT):
 
             def inner():
@@ -440,10 +419,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x + 1
 
             x = torch.ones(2, 2)
-            # The caller's handler catches the observed exception while tracing,
-            # so the frame completes with no graph break under either mode; it is
-            # only an uncaught one that breaks the graph and falls back to eager
-            # (see _assert_delete_missing_global).
             for fullgraph in (True, False):
                 with self.subTest(fullgraph=fullgraph):
                     torch._dynamo.reset()
@@ -454,8 +429,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     def test_delete_global_created_then_deleted(self):
         with temp_globals(globals(), _dg_a=_ABSENT):
-            # The pending store is cancelled by the delete, so nothing must be
-            # reported as a replayed side effect.
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
                 def fn(x):
@@ -470,29 +443,23 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_global_created_then_deleted_twice(self):
-        # `_dg_a = 1; del _dg_a; del _dg_a`: the sentinel in `symbolic_globals`
-        # outlives the store the first delete cancelled, so the second delete
-        # must not read that sentinel as "the name is still bound".
         with temp_globals(globals(), _dg_a=_ABSENT):
 
             def fn(x):
                 global _dg_a
                 _dg_a = 1
                 del _dg_a
-                # Deleting an already-deleted global raises NameError.
                 del _dg_a  # noqa: F821
                 return x + 1
 
             self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
 
     def test_delete_global_twice(self):
-        # The second delete must see the name as gone.
         with temp_globals(globals(), _dg_a=1):
 
             def fn(x):
                 global _dg_a
                 del _dg_a
-                # Deleting an already-deleted global raises NameError.
                 del _dg_a  # noqa: F821
                 return x + 1
 
@@ -512,19 +479,12 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             position = list(globals()).index("_dg_a")
             self.assertLess(position, list(globals()).index("_dg_pad"))
 
-            # Compiled replays the store alone: store_attr keys mutations by
-            # name, so the store overwrites the recorded delete and the name
-            # keeps its position. That matches how Dynamo already replays
-            # `del obj.a; obj.a = 5` for instance attributes.
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(_dg_a, 7)
             compiled_position = list(globals()).index("_dg_a")
             self.assertEqual(compiled_position, position)
 
-            # Eager is the spec: the delete drops the entry and the store
-            # re-inserts it, so the name moves past `_dg_pad` to the end of the
-            # module __dict__, unlike the compiled order above.
             fn(x)
             self.assertEqual(_dg_a, 7)
             self.assertGreater(
@@ -533,9 +493,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotEqual(list(globals()).index("_dg_a"), compiled_position)
 
     def test_delete_global_read_write_chain(self):
-        # Store, read, delete and re-store one name inside a single frame: the
-        # delete and the second store reuse the first store's mutation slot, and
-        # the store replayed last reproduces the final value.
         with temp_globals(globals(), _dg_a=1):
 
             def fn(x):
@@ -557,8 +514,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(globals()["_dg_a"], expected_global)
 
     def test_delete_global_created_then_deleted_read(self):
-        # The cancelled store leaves the name out of the real globals, so a
-        # later read is the observed NameError, which the frame can catch.
         with temp_globals(globals(), _dg_a=_ABSENT):
 
             def fn(x):
@@ -577,11 +532,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_tensor_global(self):
-        # A pre-existing tensor global is the "record a delete" branch: the
-        # replay drops the module's reference, so the tensor dies with it. The
-        # "cancel a pending store" branch is covered by
-        # test_delete_global_created_then_deleted, and deleting a tensor bound
-        # during the trace by the `del_global` tests in test_streams.py.
         with temp_globals(globals(), _dg_a=_ABSENT):
 
             def fn(x):
@@ -600,11 +550,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
             self.assertIsNone(ref(), "deleting the global kept the tensor alive")
 
-    # ------------------------------------------------------------------
-    # Cross-module deletes: the inlined callee's globals dict is a real module
-    # `__dict__`, so the delete is replayed against the module.
-    # ------------------------------------------------------------------
-
     def test_delete_global_crossfile_inline(self):
         with crossfile_globals(delete_value=True) as mod:
 
@@ -619,8 +564,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     def test_delete_global_crossfile_created_then_deleted(self):
         with crossfile_globals(store_then_delete_missing_value=_ABSENT) as mod:
-            # The pending store is cancelled by the delete, so nothing may be
-            # reported as a replayed side effect.
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
                 @torch.compile(backend="eager", fullgraph=True)
@@ -633,9 +576,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("store_then_delete_missing_value", mod.__dict__)
 
     def test_delete_global_crossfile_read_write_chain(self):
-        # The same store/read/delete/re-store chain in an inlined callee: the
-        # delete and the re-store share the module's mutation slot, and the
-        # replay leaves the callee module holding the re-bound value.
         with crossfile_globals(store_read_delete_store_read_value=1) as mod:
 
             def fn(x):
@@ -651,11 +591,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(mod.store_read_delete_store_read_value, expected_value)
 
     def test_delete_global_crossfile_then_store(self):
-        # `del g; g = 7` in an inlined callee. As in the root frame (see
-        # test_delete_global_then_store), store_attr keys mutations by name, so
-        # the store overwrites the recorded delete and the store alone is
-        # replayed: the value lands and the name keeps its position in the
-        # callee module __dict__, where eager moves it to the end.
         with crossfile_globals(delete_then_store_value=1) as mod:
             position = list(mod.__dict__).index("delete_then_store_value")
             successor = list(mod.__dict__).index("delete_then_store_value_fn")
@@ -674,8 +609,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             )
 
     def test_delete_global_crossfile_then_store_multi(self):
-        # The re-store follows an insert of a second name, so the two recorded
-        # mutations replay in insertion order and both values have to land.
         with crossfile_globals(
             delete_then_store_multi=1, delete_then_store_multi_new=_ABSENT
         ) as mod:
@@ -691,11 +624,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(mod.delete_then_store_multi_new, 2)
 
     def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
-        # `test_delete_global_crossfile_created_then_deleted` covers the
-        # cancelled store on a normal module. This covers the stdlib case: the
-        # frame has to drop the source the store registered in mutated_sources
-        # when the delete cancels it, or the module reads as mutated for the
-        # lifetime of the compiled artifact.
         import collections.abc
 
         from torch._dynamo.side_effects import SideEffects
@@ -752,8 +680,6 @@ def fn():
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
 
-        # The cancelled store registered a source for the stdlib module, and the
-        # cancel has to remove exactly that source from every frame.
         self.assertEqual(len(removed), 1)
         self.assertEqual(len(removed[0]), 1)
         (mutated_source,) = removed[0]
@@ -761,10 +687,6 @@ def fn():
         for sources in mutated_sources:
             self.assertNotIn(mutated_source, sources)
         self.assertNotIn(name, stdlib_globals)
-
-    # ------------------------------------------------------------------
-    # Recompilation when the global's presence changes between calls
-    # ------------------------------------------------------------------
 
     def test_delete_global_presence_flip(self):
         with temp_globals(globals(), _dg_a=1):
@@ -785,9 +707,6 @@ def fn():
             self.assertNotIn("_dg_a", globals())
             self.assertEqual(cnt.frame_count, 1)
 
-            # The name is gone, so the DICT_CONTAINS membership guard fails and
-            # forces a retrace. The delete of an absent global is an observed
-            # exception, which the frame's own handler turns into `y = y + 1`.
             self.assertEqual(opt_fn(x), x + 2)
             self.assertEqual(cnt.frame_count, 2)
 
@@ -810,15 +729,9 @@ def fn():
             self.assertEqual(cnt.frame_count, 1)
 
             globals()["_dg_a"] = 1
-            # The DICT_NOT_CONTAINS guard fails and the retrace records a real
-            # delete, which the recompiled artifact replays.
             self.assertEqual(opt_fn(x), x + 1)
             self.assertNotIn("_dg_a", globals())
             self.assertEqual(cnt.frame_count, 2)
-
-    # ------------------------------------------------------------------
-    # Graph break when the inlined callee's globals are not a module `__dict__`
-    # ------------------------------------------------------------------
 
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"
@@ -857,8 +770,6 @@ fn = functools.partial(my_fn)
                 Unsupported, "DELETE_GLOBAL in non-module globals"
             ):
                 torch.compile(mod.fn, backend="eager", fullgraph=True)(x)
-            # The tracing failure above happened before `del flag` ran, so the
-            # module dict is untouched.
             self.assertEqual(mod.flag, 1)
 
             compiled = torch.compile(mod.fn, backend="eager")
