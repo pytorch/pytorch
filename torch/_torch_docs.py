@@ -9952,6 +9952,62 @@ Example::
 """.format(**common_args),
 )
 
+
+add_docstr(
+    torch.round_to,
+    r"""
+round_to(input, dtype, mode, *, memory_format=torch.preserve_format, out=None) -> Tensor
+
+Converts :attr:`input` to the narrower floating-point :attr:`dtype`, rounding
+values that it cannot represent in the given direction. ``input.to(dtype,
+round=mode)`` is equivalent and also accepts a target device.
+
+This is only allowed when converting a ``float64``, ``float32``, ``float16`` or
+``bfloat16`` tensor to a dtype that cannot represent all its values exactly
+(``float32``, ``float16``, ``bfloat16`` or a float8 dtype), and raises an error
+otherwise. The modes are the IEEE 754 rounding directions:
+
+* ``"to_nearest_even"``: to the nearest value, ties to the one with an even
+  last digit. This is how :meth:`~Tensor.to` rounds.
+* ``"toward_zero"``: to the nearest value whose magnitude is not larger.
+* ``"toward_positive"``: to the nearest value that is not smaller.
+* ``"toward_negative"``: to the nearest value that is not larger.
+
+The exact value is rounded once, even for ``float64`` inputs. On overflow,
+values whose magnitude is rounded down (toward zero) become the largest finite
+value of their sign, e.g. ``"toward_negative"`` turns ``1e6`` into ``65504`` in
+``torch.float16``; the others become infinity, or, for dtypes without infinity,
+the value that :meth:`~Tensor.to` produces (the largest finite value for ``torch.float8_e4m3fn`` and
+``torch.float8_e5m3fnu``, NaN for the ``fnuz`` dtypes and
+``torch.float8_e8m0fnu``). The unsigned dtypes ``torch.float8_e8m0fnu`` and
+``torch.float8_e5m3fnu`` round the magnitude of the input, so
+``"toward_negative"`` behaves like ``"toward_zero"``. ``torch.float8_e8m0fnu``
+only has powers of two: values below :math:`2^{{-127}}` become
+:math:`2^{{-127}}`, and ties of ``"to_nearest_even"`` round up.
+
+The result is always a new tensor. Like a plain dtype conversion, its gradient
+is the identity (cast back to the dtype of :attr:`input`), unlike that of
+:func:`torch.round`, which is zero.
+
+Args:
+    {input}
+    dtype (:class:`torch.dtype`): the desired floating-point dtype.
+    mode (str): the rounding direction, one of ``"to_nearest_even"``,
+        ``"toward_zero"``, ``"toward_positive"`` and ``"toward_negative"``.
+
+Keyword args:
+    {memory_format}
+    {out}
+
+Example::
+
+    >>> torch.round_to(torch.tensor([0.1, 0.75, -0.75]), torch.bfloat16, "toward_positive")
+    tensor([ 0.1001,  0.7500, -0.7500], dtype=torch.bfloat16)
+    >>> torch.tensor([0.75, 3.0, 5.0]).round_to(torch.float8_e8m0fnu, "toward_positive")
+    tensor([1., 4., 8.], dtype=torch.float8_e8m0fnu)
+""".format(**common_args),
+)
+
 add_docstr(
     torch.round_,
     r"""

@@ -463,6 +463,12 @@
   # (If dtype IS nullopt, we rely on the regular check that any input requires grad).
   output_differentiability: ["!dtype || isDifferentiableType(*dtype)"]
 
+# Rounding is treated as the identity, like a plain dtype conversion.
+- name: round_to(Tensor self, ScalarType dtype, str mode, *, MemoryFormat? memory_format=None) -> Tensor
+  self: grad.to(self.scalar_type())
+  result: at::round_to(self_t, dtype, mode, memory_format)
+  output_differentiability: ["isDifferentiableType(dtype)"]
+
 - name: _coalesce(Tensor self) -> Tensor
   self: grad
 

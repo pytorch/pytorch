@@ -1161,6 +1161,8 @@ aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
 aten::resize_as_sparse_
+aten::round_to
+aten::round_to.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out

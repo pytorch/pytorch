@@ -195,6 +195,48 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+# The C++ meta kernel uses TensorIterator, which does not support symbolic
+# shapes. The checks mirror check_round_to in
+# aten/src/ATen/native/RoundedConversion.cpp, in the same order.
+@register_meta([aten.round_to.default, aten.round_to.out])
+@out_wrapper(exact_dtype=True)
+def meta_round_to(self, dtype, mode, *, memory_format=None):
+    torch._check(
+        self.layout == torch.strided,
+        lambda: f"rounding is only supported for strided tensors, but got {self.layout}",
+    )
+    float8 = {
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+        torch.float8_e5m3fnu,
+        torch.float8_e8m0fnu,
+    }
+    narrower = {
+        torch.float64: {torch.float32, torch.float16, torch.bfloat16, *float8},
+        torch.float32: {torch.float16, torch.bfloat16, *float8},
+        torch.float16: {torch.bfloat16, *float8},
+        torch.bfloat16: {torch.float16, *float8},
+    }
+    torch._check(
+        dtype in narrower.get(self.dtype, ()),
+        lambda: "rounding is only supported when converting a float64, float32, "
+        "float16 or bfloat16 tensor to a narrower floating-point dtype (one that "
+        "cannot represent all its values exactly), but got a conversion from "
+        f"{self.dtype} to {dtype}",
+    )
+    modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
+    torch._check_value(
+        mode in modes,
+        lambda: "the rounding mode must be one of 'to_nearest_even', 'toward_zero', "
+        f"'toward_positive' or 'toward_negative', but got '{mode}'",
+    )
+    return torch.empty_like(
+        self, dtype=dtype, memory_format=memory_format or torch.preserve_format
+    )
+
+
 @register_meta(
     [
         aten._transformer_encoder_layer_fwd.default,

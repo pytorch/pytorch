@@ -1114,6 +1114,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
+        torch.round_to: lambda input, dtype, mode, *, memory_format=None, out=None: -1,
         torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
         torch._rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1.0 / 8, upper=1.0 / 3, training=False, inplace=False: -1,
@@ -1515,7 +1516,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.storage_type: lambda self: -1,
         Tensor.sum_to_size: lambda self, size: -1,
         Tensor.tile: lambda self, *reps: -1,
-        Tensor.to: lambda self, dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format: -1,
+        Tensor.to: lambda self, dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format, round=None: -1,
         Tensor.to_dense: lambda self, dtype=None, *, masked_grad=None: -1,
         Tensor._to_dense: lambda self, dtype=None, masked_grad=None: -1,
         Tensor.to_sparse: lambda self: -1,

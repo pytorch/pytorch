@@ -5147,13 +5147,15 @@ transfers and reusing CPU buffers.
 
 Here are the ways to call ``to``:
 
-.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`dtype`
 
     Args:
         {memory_format}
+        round (str, optional): if given, converts with
+            :func:`torch.round_to` in this rounding mode.
 
 .. note::
 
@@ -5162,7 +5164,7 @@ Here are the ways to call ``to``:
     If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
     the behavior is undefined and the result may vary across platforms.
 
-.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
@@ -5177,8 +5179,10 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+        round (str, optional): if given, converts with
+            :func:`torch.round_to` in this rounding mode.
 
-.. method:: to(other, non_blocking=False, copy=False) -> Tensor
+.. method:: to(other, non_blocking=False, copy=False, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
@@ -5191,12 +5195,22 @@ Here are the ways to call ``to``:
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
+    Args:
+        round (str, optional): if given, converts with
+            :func:`torch.round_to` in this rounding mode.
+
 .. note::
 
     When :attr:`non_blocking` is ``True`` and the conversion is issued on
     a non-default CUDA stream, the caller is responsible for proper
     cross-stream synchronization. See :ref:`cuda-stream-semantics` for
     the required pattern.
+
+.. note::
+
+    With :attr:`round`, the dtype conversion is done by :func:`torch.round_to`,
+    which only supports conversions to a narrower floating-point dtype. A device
+    change, if any, is a separate transfer, and the result is never ``self``.
 
 Example::
 
@@ -5218,7 +5232,19 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
+
+    >>> torch.tensor([0.1, 0.75, -0.75]).to(torch.bfloat16, round="toward_positive")
+    tensor([ 0.1001,  0.7500, -0.7500], dtype=torch.bfloat16)
 """.format(**common_args),
+)
+
+add_docstr_all(
+    "round_to",
+    r"""
+round_to(dtype, mode, *, memory_format=torch.preserve_format) -> Tensor
+
+See :func:`torch.round_to`
+""",
 )
 
 add_docstr_all(

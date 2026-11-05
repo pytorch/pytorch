@@ -2306,6 +2306,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.rot90",
         "torch.round_",
         "torch.round",
+        "torch.round_to",
         "torch.row_indices_copy",
         "torch.row_stack",
         "torch.rrelu_",

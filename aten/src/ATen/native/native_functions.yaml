@@ -7877,6 +7877,18 @@
   device_check: NoCheck
   device_guard: False
 
+# Converts to a narrower floating-point dtype with an explicit IEEE 754
+# rounding direction; backs Tensor.to(..., round=...).
+- func: round_to(Tensor self, ScalarType dtype, str mode, *, MemoryFormat? memory_format=None) -> Tensor
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: round_to
+
+# memory_format only affects how the functional variant allocates its output.
+- func: round_to.out(Tensor self, ScalarType dtype, str mode, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA, Meta: round_to_out
+
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
 # TODO: Two weeks after this lands, combine these two overloads,

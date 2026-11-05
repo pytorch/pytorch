@@ -5602,6 +5602,28 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((S, S, S, S)), args=(other, nb, cp), kwargs=kwargs)
 
 
+def sample_inputs_round_to(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # The narrower destinations of each source; float8 destinations are left out,
+    # as these tests do not support them.
+    targets = {
+        torch.float64: (torch.float32, torch.float16, torch.bfloat16),
+        torch.float32: (torch.float16, torch.bfloat16),
+        torch.float16: (torch.bfloat16,),
+        torch.bfloat16: (torch.float16,),
+    }[dtype]
+    modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
+    for target, mode in product(targets, modes):
+        yield SampleInput(make_arg((S, S)), args=(target, mode))
+    # channels_last is left out, as vmap cannot batch it.
+    transposed = make_tensor((S, M), device=device, dtype=dtype).mT
+    yield SampleInput(
+        transposed.requires_grad_(requires_grad),
+        args=(targets[0], "toward_zero"),
+        kwargs={"memory_format": torch.contiguous_format},
+    )
+
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -17796,6 +17818,17 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
         ),
+    ),
+    OpInfo(
+        "round_to",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        # Only CPU and CUDA have kernels.
+        dtypesIfMPS=empty_types(),
+        dtypesIfXPU=empty_types(),
+        supports_out=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_round_to,
     ),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
