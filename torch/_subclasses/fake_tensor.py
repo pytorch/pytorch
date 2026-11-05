@@ -403,8 +403,8 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
-        # change. A SymFloat's hint is never filled in later, so this can be
-        # decided now.
+        # change. No code currently fills in a SymFloat's hint later, so this
+        # can be decided now.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
@@ -831,11 +831,19 @@ class CppFakeTensorMode:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        # Otherwise an exit on another thread would pop this mode's enter state
-        # and take that thread's own fake mode out of its FAKE slot
+        # Exiting a no-op re-entry installed nothing. It may run on a thread
+        # that inherited the C++ mode through ThreadLocalState, whose
+        # entered_cpp_fake_modes does not hold this wrapper.
+        if self.enter_stack and not self.enter_stack[-1][0]:
+            _exit_fake_mode(self, self._uninstall)
+            return
+        # Otherwise an exit with no matching enter on this thread (the mode was
+        # never entered, was already exited, or was entered on another thread)
+        # would pop this mode's enter state and take this thread's own fake
+        # mode out of its FAKE slot
         if self not in fake_tensor_tls.entered_cpp_fake_modes:
             raise RuntimeError(
-                "CppFakeTensorMode exited on a thread that did not enter it"
+                "CppFakeTensorMode exited without a matching enter on this thread"
             )
         _exit_fake_mode(self, self._uninstall)
 
