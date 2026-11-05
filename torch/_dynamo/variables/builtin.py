@@ -3139,6 +3139,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, value, source)
         if ConstantVariable.is_literal(value):
             return VariableTracker.build(tx, value, source)
+        if self.fn in (object, type) and isinstance(
+            value, (types.WrapperDescriptorType, types.MethodDescriptorType)
+        ):
+            # Unbound slot wrapper or method read off object / type, e.g.
+            # object.__eq__: bind it to its owner so a call runs that slot on args[0].
+            from .builder import VariableBuilder
+
+            owner = self
+            if value.__objclass__ is not self.fn:
+                owner = VariableTracker.build(tx, value.__objclass__)
+            create: Callable[..., VariableTracker] = (
+                VariableBuilder.create_internal_wrapper_descriptor
+                if isinstance(value, types.WrapperDescriptorType)
+                else VariableBuilder.create_internal_method_descriptor
+            )
+            return create(value, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
 
     def call_delattr(
