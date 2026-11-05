@@ -664,7 +664,7 @@ def foreach_reduce(
     *,
     prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
 ) -> tuple[
-    torch.Tensor,
+    torch.Tensor | list[torch.Tensor],
     torch.Event,
     torch.Stream,
     torch.Event,
@@ -674,7 +674,10 @@ def foreach_reduce(
 ]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
-    autograd, so clearing the list frees the gradients.
+    autograd, so clearing the list frees the gradients. A single-rank group
+    with no all-reduce, no all-reduce hook, the default reduce-scatter input fn,
+    and no CPU offload skips the reduce-scatter buffers. It returns the gradients in place of the reduce-scatter input, so
+    they stay alive until the reduce-scatter stream has read them.
     """
 
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
@@ -699,6 +702,26 @@ def foreach_reduce(
         world_size = 1
     else:
         world_size = reduce_scatter_group.size()
+    if (
+        world_size == 1
+        and all_reduce_group is None
+        and all_reduce_hook is None
+        and prepare_reduce_scatter_inputs is _default_reduce_scatter_input_fn
+        and not any(fsdp_param.offload_to_cpu for fsdp_param in fsdp_params)
+    ):
+        div_factors = [
+            factor
+            for factor in (predivide_factor, single_rank_factor, postdivide_factor)
+            if factor is not None and factor != 1
+        ]
+        return _reduce_single_rank(
+            fsdp_params,
+            unsharded_grads,
+            reduce_scatter_stream,
+            reduce_dtype,
+            device,
+            div_factors,
+        )
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
@@ -873,22 +896,8 @@ def foreach_reduce(
                     # Record an event on which to block the CPU thread to
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
-            if to_accumulate_grad:
-                if not isinstance(fsdp_param.sharded_param.grad, DTensor):
-                    raise AssertionError(
-                        f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
-                    )
-                fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
-            else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
-                    new_sharded_grad
-                )
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            for hook in (
-                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
-                or {}
-            ).values():
-                hook(fsdp_param.sharded_param)
+            _accumulate_sharded_grad(fsdp_param, new_sharded_grad)
+            _run_post_accumulate_grad_hooks(fsdp_param)
         post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer); the sharded parameters hold refs through the end
@@ -907,6 +916,90 @@ def foreach_reduce(
         all_reduce_event,
         None,
     )
+
+
+def _reduce_single_rank(
+    fsdp_params: list[FSDPParam],
+    unsharded_grads: list[torch.Tensor],
+    reduce_scatter_stream: torch.Stream,
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+    div_factors: list[float],
+) -> tuple[
+    list[torch.Tensor], torch.Event, torch.Stream, torch.Event, None, None, None
+]:
+    """
+    Accumulates the gradients of a single-rank group into the sharded gradients
+    without the reduce-scatter buffers. Each gradient takes the casts and
+    divisions of the buffered path, so the results match it bitwise. Returns the
+    gradients, which the reduce-scatter stream reads, in place of the
+    reduce-scatter input.
+    """
+    device_handle = _get_device_handle(device.type)
+    current_stream = device_handle.current_stream()
+    reduce_scatter_stream.wait_stream(current_stream)
+    grads = list(unsharded_grads)
+    unsharded_grads.clear()
+    with device_handle.stream(reduce_scatter_stream):
+        for fsdp_param, grad in zip(fsdp_params, grads):
+            # Cast first, then add. On GB300 this is faster than a mixed-dtype
+            # add, which runs through the unvectorized dynamic-casting kernel. On
+            # H100 the mixed add is faster.
+            new_sharded_grad = grad.to(reduce_dtype)
+            for factor in div_factors:
+                if new_sharded_grad is grad:
+                    new_sharded_grad = grad / factor
+                else:
+                    _div_if_needed(new_sharded_grad, factor)
+            new_sharded_grad = _to_dtype_if_needed(
+                new_sharded_grad, fsdp_param.sharded_grad_dtype
+            )
+            if fsdp_param.sharded_param.grad is None:
+                # Do not alias autograd's gradient. The contiguous layout of the
+                # buffered path is only a guard, since autograd gives gradients
+                # the contiguous strides of their parameters.
+                if new_sharded_grad is grad:
+                    new_sharded_grad = grad.clone(memory_format=torch.contiguous_format)
+                else:
+                    new_sharded_grad = new_sharded_grad.contiguous()
+                record_grad_output_stream(new_sharded_grad, current_stream)
+            _accumulate_sharded_grad(fsdp_param, new_sharded_grad)
+        # Release the gradients before the hooks run, which may be slow, e.g.
+        # an optimizer step in backward
+        keepalive_event = reduce_scatter_stream.record_event()
+        for fsdp_param in fsdp_params:
+            _run_post_accumulate_grad_hooks(fsdp_param)
+        post_reduce_event = reduce_scatter_stream.record_event()
+    return (
+        grads,
+        keepalive_event,
+        reduce_scatter_stream,
+        post_reduce_event,
+        None,
+        None,
+        None,
+    )
+
+
+def _accumulate_sharded_grad(fsdp_param: FSDPParam, grad: torch.Tensor) -> None:
+    """Adds ``grad`` to the sharded gradient, or sets it."""
+    sharded_param = fsdp_param.sharded_param
+    if sharded_param.grad is not None:
+        if not isinstance(sharded_param.grad, DTensor):
+            raise AssertionError(
+                f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(sharded_param.grad)}"
+            )
+        sharded_param.grad._local_tensor += grad
+    else:
+        sharded_param.grad = fsdp_param.to_sharded_dtensor(grad)
+
+
+def _run_post_accumulate_grad_hooks(fsdp_param: FSDPParam) -> None:
+    sharded_param = fsdp_param.sharded_param
+    for hook in (
+        getattr(sharded_param, "_post_accumulate_grad_hooks", {}) or {}
+    ).values():
+        hook(sharded_param)
 
 
 def _cast_and_view_sharded_grads(
