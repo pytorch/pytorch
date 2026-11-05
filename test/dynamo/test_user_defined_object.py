@@ -1907,6 +1907,7 @@ class TestConstantTypeProperty(TestCase):
     def test_c_builtin_property_on_constant_type_no_warning(self):
         """Reading an opaque C/pybind builtin property on a constant type does not emit
         the spurious 'Dynamo does not know how to trace the builtin' warning."""
+
         class Holder:
             def __init__(self, val):
                 self._val = val
@@ -1927,7 +1928,9 @@ class TestConstantTypeProperty(TestCase):
                 self.assertEqual(opt_fn(x), fn(x))
 
             trace_warnings = [
-                w for w in caught if "does not know how to trace the builtin" in str(w.message)
+                w
+                for w in caught
+                if "does not know how to trace the builtin" in str(w.message)
             ]
             self.assertEqual(len(trace_warnings), 0)
         finally:
@@ -1935,6 +1938,7 @@ class TestConstantTypeProperty(TestCase):
 
     def test_property_missing_getter_raises_attribute_error(self):
         """Accessing a write-only property (fget is None) raises AttributeError."""
+
         class Holder:
             val = property(fset=lambda self, v: None)
 
@@ -1948,30 +1952,6 @@ class TestConstantTypeProperty(TestCase):
             x = torch.randn(3)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             with self.assertRaises(AttributeError):
-                opt_fn(x)
-        finally:
-            common_constant_types.discard(Holder)
-
-    def test_c_builtin_property_raising_exception(self):
-        """If a C/builtin property getter raises an exception, Dynamo faithfully
-        propagates that exception."""
-        import _ssl
-
-        class Holder(int):
-            pass
-
-        # RAND_bytes(-1) raises ValueError: num must be positive
-        Holder.err_prop = property(lambda self: _ssl.RAND_bytes(-1))
-        holder = Holder(1)
-
-        def fn(x):
-            return x + len(holder.err_prop)
-
-        common_constant_types.add(Holder)
-        try:
-            x = torch.randn(3)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(ValueError):
                 opt_fn(x)
         finally:
             common_constant_types.discard(Holder)

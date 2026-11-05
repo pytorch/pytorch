@@ -1507,6 +1507,8 @@ class PropertyVariable(VariableTracker):
                 if obj.source and attr_name is not None
                 else None
             )
+            if ConstantVariable.is_literal(res):
+                return ConstantVariable.create(res, source=result_source)
             return VariableTracker.build(tx, res, source=result_source)
 
         fget_source = AttrSource(self.source, "fget") if self.source else None
