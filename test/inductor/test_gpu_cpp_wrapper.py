@@ -456,6 +456,9 @@ class TestGpuWrapper(InductorTestCase):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
+    @unittest.skipIf(
+        not config.is_fbcode(), "fbcode-only cpp_wrapper symbol visibility test"
+    )
     @config.patch(implicit_fallbacks=True)
     def test_fbcode_custom_op_fallback_python_arg_helpers(self):
         if not RUN_GPU:
@@ -551,6 +554,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @unittest.skipIf(torch.version.hip is not None, "requires CUDA TMA helpers")
     @skipIfXpu(msg="tests CUDA TMA helper codegen")
     def test_tma_descriptor_separates_global_and_kernel_shapes(self):
         if torch.version.hip is not None:
@@ -1258,6 +1262,9 @@ run()
 class TestLazyTmaGlobalScratch(InductorTestCase):
     device = GPU_TYPE
 
+    @unittest.skipIf(
+        GPU_TYPE not in ("cuda", "xpu") or torch.version.hip, "requires CUDA or XPU"
+    )
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")

@@ -18,6 +18,7 @@ from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     TestCase,
     skipIfCrossRef,
@@ -83,6 +84,8 @@ u16 = torch.uint16
 u32 = torch.uint32
 u64 = torch.uint64
 f8e4m3fn = torch.float8_e4m3fn
+
+inplace_op_db = [op for op in itertools.chain(op_db, foreach_op_db) if op.get_inplace()]
 
 class TestMetaConverter(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1141,6 +1144,20 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 
         return expected
 
+dispatch_meta_ops = [
+    op for op in itertools.chain(op_db, foreach_op_db)
+    if "_scaled_mm" not in op.name and op.get_op() not in meta_dispatch_early_skips
+]
+dispatch_meta_inplace_ops = [
+    op for op in inplace_op_db
+    if "_scaled_mm" not in op.name and op.get_inplace() not in meta_dispatch_early_skips
+]
+skip_inplace_promotion = decorateIf(
+    unittest.skip("Op promotes to float, which is impossible for inplace with non-float input"),
+    lambda p: p["op"].promotes_int_to_float and not p["dtype"].is_floating_point,
+)
+
+
 class _TestMetaBase(TestCase):
 
     # Copies inputs to inplace operations to avoid inplace modifications
@@ -1156,19 +1173,7 @@ class _TestMetaBase(TestCase):
         return _fn
 
     def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
-        if "_scaled_mm" in op.name:
-            raise unittest.SkipTest("_scaled_mm dose not support meta device")
-        if inplace:
-            func = op.get_inplace()
-            if not func:
-                self.skipTest("No inplace variable for this op")
-            if op.promotes_int_to_float and not dtype.is_floating_point:
-                self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
-        else:
-            func = op.get_op()
-
-        if func in meta_dispatch_early_skips:
-            self.skipTest("Function is in dispatch early skips")
+        func = op.get_inplace() if inplace else op.get_op()
 
         if inplace:
             func = self._get_safe_inplace(func)
@@ -1231,7 +1236,11 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm', dtypes=integral_types_and(b8)),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops([op for op in itertools.chain(op_db, foreach_op_db) if "_scaled_mm" not in op.name])
+    @decorateIf(
+        unittest.skip("flaky"),
+        lambda p: TEST_WITH_TORCHDYNAMO and p["op"].name in ("fft.ihfft", "fft.ihfft2", "linalg.lu_solve"),
+    )
     def test_meta_outplace(self, device, dtype, op):
         if "_scaled_mm" in op.name:
             raise unittest.SkipTest("_scaled_mm dose not support meta device")
@@ -1328,7 +1337,8 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm'),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops([op for op in inplace_op_db if op.get_inplace() not in meta_inplace_skips])
+    @skip_inplace_promotion
     def test_meta_inplace(self, device, dtype, op):
         func = op.get_inplace()
         if not func:
@@ -1376,7 +1386,7 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm', dtypes=integral_types_and(b8)),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops(dispatch_meta_ops)
     def test_dispatch_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=False)
 
@@ -1430,7 +1440,8 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm'),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops(dispatch_meta_inplace_ops)
+    @skip_inplace_promotion
     def test_dispatch_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=True)
 
@@ -1463,7 +1474,7 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm', dtypes=integral_types_and(b8)),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops(dispatch_meta_ops)
     def test_dispatch_symbolic_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
@@ -1519,7 +1530,8 @@ class TestMeta(_TestMetaBase):
         xfail('_foreach_norm'),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db))
+    @ops(dispatch_meta_inplace_ops)
+    @skip_inplace_promotion
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
@@ -1616,7 +1628,7 @@ class TestMetaCudaRef(_TestMetaBase):
         xfail('_foreach_addcdiv', dtypes=integral_types() + complex_types_and(b8)),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @ops(dispatch_meta_ops, dtypes=OpDTypes.any_common_cpu_cuda_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
     def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
@@ -1640,7 +1652,8 @@ class TestMetaCudaRef(_TestMetaBase):
         xfail('_foreach_norm'),
         xfail('_foreach_lerp', dtypes=integral_types_and(b8)),
     ))
-    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @ops(dispatch_meta_inplace_ops, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @skip_inplace_promotion
     # Only test on CUDA, as CUDA kernel's stride is the reference
     def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
@@ -1659,7 +1672,10 @@ class TestMetaCudaRef(_TestMetaBase):
         xfail('_refs._conversions.complex'),
         xfail('_refs._conversions.polar'),
     ))
-    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    @ops(
+        [op for op in binary_ufuncs if "_scaled_mm" not in op.name and op.get_op() not in meta_dispatch_early_skips],
+        allowed_dtypes=(torch.float32,),
+    )
     # Only test on CUDA, as CUDA kernel's stride is the reference
     def test_binary_ufuncs_mixed_dtype(self, device, dtype, op):
         make_arg = partial(
@@ -2186,6 +2202,10 @@ class TestMetaCore(TestCase):
 
     @parametrize("in_dtype", [torch.float32, torch.float16])
     @parametrize("bias_dtype", [torch.float32, torch.float16, None])
+    @decorateIf(
+        unittest.skip("not supported input dtype is torch.float16 and bias dtype is torch.float32"),
+        lambda p: p["in_dtype"] == torch.float16 and p["bias_dtype"] == torch.float32,
+    )
     def test_mixed_dtype_for_native_layer_norm_backward(self, in_dtype, bias_dtype):
         if in_dtype == torch.float16 and bias_dtype == torch.float32:
             self.skipTest(f"not supported input dtype is {in_dtype} and bias dtype is {bias_dtype}")
@@ -2873,6 +2893,11 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertTrue(meta_result.is_contiguous())
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    @unittest.skipIf(
+        torch.backends.mkldnn.is_available() and not torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+        "MKLDNN bf16 not supported on this CPU",
+    )
     def test_mkldnn_rnn_backward_dtype(self):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN not available")

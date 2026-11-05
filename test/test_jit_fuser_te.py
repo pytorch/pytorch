@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
     IS_FBCODE,
@@ -127,6 +128,22 @@ def inline_fusion_groups():
         yield
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
+
+
+def skipIfDynamicShapes(fn):
+    add_skip_condition(
+        fn, lambda cls: cls is TestTEFuserDynamic, "TODO: chunk dynamic shapes"
+    )
+    return fn
+
+
+def skipConvIfDynamicShapes(fn):
+    add_skip_condition(
+        fn,
+        lambda cls: cls is TestTEFuserDynamic and cls.dynamic_shapes,
+        "don't run conv with dynamic shapes",
+    )
+    return fn
 
 
 class TestTEFuser(JitTestCase):
@@ -317,6 +334,7 @@ class TestTEFuser(JitTestCase):
             inputs = [sin, cos]
             ge = self.checkScript(decode, inputs)
 
+    @skipIfDynamicShapes
     def test_arg_configurations_smoke(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -410,6 +428,7 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(scripted(x, y).shape, (3, 4))
                 self.assertAllFused(scripted.graph_for(x, y))
 
+    @skipIfDynamicShapes
     def test_chunk(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -425,6 +444,7 @@ class TestTEFuser(JitTestCase):
             self.checkScript(fn, inputs)
             self.assertLastGraphAllFused()
 
+    @skipIfDynamicShapes
     def test_chunk_correctness(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -460,6 +480,7 @@ class TestTEFuser(JitTestCase):
                     self.checkScript(fn, [tensor])
                     self.assertLastGraphAllFused()
 
+    @skipIfDynamicShapes
     def test_chunk_distributes(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -485,6 +506,7 @@ class TestTEFuser(JitTestCase):
                 "ConstantChunk", 1, exactly=True
             ).run(str(graph))
 
+    @skipIfDynamicShapes
     def test_chunk_motion_deduplicates_inputs(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -506,6 +528,7 @@ class TestTEFuser(JitTestCase):
                 self.checkScript(func, inputs)
                 self.assertLastGraphAllFused()
 
+    @skipIfDynamicShapes
     def test_chunk_multiple(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -1063,6 +1086,7 @@ class TestTEFuser(JitTestCase):
                 str(fusion_groups[0 if not self.dynamic_shapes else 1])
             )
 
+    @skipConvIfDynamicShapes
     def test_milstm(self):
         if self.dynamic_shapes:
             self.skipTest("don't run conv with dynamic shapes")
@@ -1714,6 +1738,7 @@ class TestTEFuser(JitTestCase):
                         " ".join(["Failed at runtime:", str(x), str(y), str(code)])
                     ) from e
 
+    @skipConvIfDynamicShapes
     def test_matmul(self):
         if self.dynamic_shapes:
             self.skipTest("don't run conv with dynamic shapes")
@@ -2106,6 +2131,7 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
     @skipIfTorchDynamo("too slow")
+    @skipIfDynamicShapes
     def test_chunk_mul_one(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -2155,6 +2181,7 @@ class TestTEFuser(JitTestCase):
         # self.assertAllFused(script.graph_for(s, b))
 
     @unittest.skipIf(not LLVM_ENABLED, "Too slow to run with the TE interpreter")
+    @skipConvIfDynamicShapes
     def test_conv2d_depthwise(self):
         if self.dynamic_shapes:
             self.skipTest("don't run conv with dynamic shapes")
@@ -2169,6 +2196,7 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager, (input, weight, bias))
         self.assertAllFused(script.graph_for(input, weight, bias))
 
+    @skipConvIfDynamicShapes
     def test_conv2d(self):
         if self.dynamic_shapes:
             self.skipTest("don't run conv with dynamic shapes")
@@ -2648,6 +2676,7 @@ class TestTEFuser(JitTestCase):
         f = FileCheck().check("Found multiple fusions")
         f.run(str(error_out.exception))
 
+    @skipIfDynamicShapes
     def test_constant_chunk_shapes(self):
         # We had an issue where buildShapeExpressions would fail as show below:
         #

@@ -19539,6 +19539,7 @@ instantiate_device_type_tests(TestExportDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestExportCustomClass(TorchTestCase):
     hw_classification = HardwareClassification.GENERIC
 

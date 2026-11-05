@@ -9,7 +9,10 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    preserves_device_selection,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     MI350_ARCH,
@@ -687,6 +690,10 @@ if not TEST_WITH_ASAN:
     ):
         hw_classification = HardwareClassification.ACCELERATOR
         maxDiff = None
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(
+            preserves_device_selection(DynamicShapesCodegenTestCase.setUpClass.__func__)
+        )
 
         def common(
             self,
@@ -756,6 +763,9 @@ if not TEST_WITH_ASAN:
         if not _name.startswith("DynamicShapesCodegenGPUTests"):
             continue
         _cls = globals()[_name]
+        _device = vars(_cls).get("_device_type_at_collection")
+        if _device is not None:
+            _cls._device_at_collection = _device
         if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
             # gfx950 shows a deterministic randint64 distribution mismatch
             # for high bounds.

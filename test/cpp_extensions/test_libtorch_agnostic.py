@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -75,6 +76,7 @@ class TestLibtorchAgnostic(TestCase):
     """
 
     @classmethod
+    @preserves_device_selection
     def setUpClass(cls):
         # Build versioned extensions
         base_dir = Path(__file__).parent

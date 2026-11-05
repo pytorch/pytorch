@@ -279,6 +279,9 @@ class TestModels(JitTestCase):
                 export_import=check_export_import,
             )
 
+    @unittest.skipIf(
+        GRAPH_EXECUTOR == ProfilingMode.LEGACY, "Bug found in deprecated executor"
+    )
     def test_mnist(self):
         self._test_mnist(self, device="cpu")
 

@@ -96,6 +96,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     compare_equal_outs_and_grads,
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -376,6 +377,7 @@ class TestPythonKey(AOTTestCase):
         )
         self.assertTrue(includes_aten_relu)
 
+    @unittest.skip("error: maximum recursion reached")
     def test_make_fx_no_decompose(self):
         # FIXME
         return self.skipTest("error: maximum recursion reached")
@@ -489,6 +491,11 @@ def skipIfDynamoInput(reason):
             else:
                 func(self, *args, **kwargs)
 
+        add_skip_condition(
+            wrapper,
+            lambda cls: issubclass(cls, TestAOTAutogradWithDynamo),
+            f"Skipping in TestAOTAutogradWithDynamo because {reason}",
+        )
         return wrapper
 
     return decorator
@@ -13122,6 +13129,9 @@ symbolic_aot_autograd_failures = {
 }
 
 
+_aot_autograd_ops = [op for op in op_db + hop_db if op.supports_autograd]
+
+
 def _test_aot_autograd_helper(
     self,
     device,
@@ -13130,9 +13140,6 @@ def _test_aot_autograd_helper(
     dynamic=False,
     disable_functionalization=False,
 ):
-    if not op.supports_autograd:
-        self.skipTest("Op does not support autograd")
-
     # aot_autograd_check is able to check data specialization by
     # randomizing the inputs. Here's a list of ops that really do not
     # like random inputs for which we want to disable that.
@@ -13246,12 +13253,12 @@ def _test_aot_autograd_module_helper(
 class TestEagerFusionOpInfo(AOTTestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(_aot_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(_aot_autograd_ops, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
         aot_autograd_failures | symbolic_aot_autograd_failures,
@@ -13259,7 +13266,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
 
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(_aot_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         aot_autograd_failures,
     )
@@ -13268,7 +13275,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
             self, device, dtype, op, disable_functionalization=True
         )
 
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @ops(_aot_autograd_ops, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
         aot_autograd_failures | symbolic_aot_autograd_failures,
@@ -13725,6 +13732,8 @@ class TestAOTAutogradWithCache(_AOTAutogradCacheMixin, TestAOTAutogradWithDynamo
 
     hw_classification = HardwareClassification.GENERIC
 
+    # Cannot be xfailed because it causes undefined behavior under ASAN.
+    @unittest.skip("Skipping because it fails in strict cache mode")
     def test_input_mutation_false_aliasing(self):
         # This test is disabled because it fails in strict cache mode
         # But also can't be xfailed because it causes undefined behavior for

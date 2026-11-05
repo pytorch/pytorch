@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     xfailIfS390X,
@@ -111,6 +112,7 @@ class _ConverterTestMixin:
                 self.assertEqual(x, y)
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestConverter(_ConverterTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 

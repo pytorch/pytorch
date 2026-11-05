@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
@@ -176,6 +176,7 @@ class TestFFT(TestCase):
         torch.chalf : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
         skip_helper_for_fft(device, dtype)
         # Test that round trip through ifft(fft(x)) is the identity
@@ -270,6 +271,7 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.int8, torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -344,7 +346,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.bfloat16])
     def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
@@ -422,6 +424,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -494,6 +497,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_fftn_noop_transform(self, device, dtype):
         skip_helper_for_fft(device, dtype)
         RESULT_TYPE = {
@@ -522,6 +526,7 @@ class TestFFT(TestCase):
         torch.half : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double)
+    @dtypesIfCPU(torch.float, torch.double)
     def test_hfftn(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -562,6 +567,7 @@ class TestFFT(TestCase):
         torch.half : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double)
+    @dtypesIfCPU(torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -965,6 +971,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
+    @unittest.skipIf(not TEST_LIBROSA, 'librosa not found')
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')
@@ -1039,6 +1046,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
+    @unittest.skipIf(not TEST_LIBROSA, 'librosa not found')
     def test_istft_against_librosa(self, device, dtype):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')

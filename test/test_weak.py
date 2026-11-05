@@ -560,6 +560,7 @@ class WeakKeyDictionaryTestCase(TestCase):
 
 
 # Adapted from cpython/Lib/test/mapping_tests.py
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class WeakKeyDictionaryScriptObjectTestCase(TestCase):
     def _reference(self):
         self.__ref = {
@@ -581,17 +582,12 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
             x[key] = value
         return x
 
-    def setUp(self):
-        super().setUp()
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-
     def __init__(self, *args, **kw):
         unittest.TestCase.__init__(self, *args, **kw)
         try:
             load_torchbind_test_lib()
         except unittest.SkipTest:
-            return  # Skip in setup
+            return
 
         self.reference = self._reference().copy()
 

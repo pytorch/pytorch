@@ -38,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    preserves_device_selection,
     skipCUDAIfNotRocm,
     tol as xtol,
     toleranceOverride,
@@ -194,6 +195,9 @@ def _float32_matrix_from_bits(bits, device):
 
 
 class TestMatmulCuda(InductorTestCase):
+    setUpClass = classmethod(preserves_device_selection(InductorTestCase.setUpClass.__func__))
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
         # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
@@ -628,6 +632,7 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(output, a.expand_as(output), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    @unittest.skipIf(torch.version.cuda is None or not IS_SM90, "cublasSetSmCountTarget requires CUDA and sm90")
     def test_legacy_cublas_honors_sm_carveout(self, device):
         if torch.version.cuda is None or not IS_SM90:
             raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
@@ -670,6 +675,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(no_carveout, no_carveout_again)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    @unittest.skipIf(torch.version.cuda is None or not IS_SM90, "cublasSetSmCountTarget requires CUDA and sm90")
     def test_sm_carveout_invalid_value_throws(self, device):
         if torch.version.cuda is None or not IS_SM90:
             raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")

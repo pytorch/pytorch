@@ -5,7 +5,8 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Iterator
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -29,6 +30,14 @@ except ImportError:
     # have this function.
     def parse_cmd_line_args():
         pass
+
+
+try:
+    # Absent when torch is not importable (the tools tests load this conftest)
+    # or when tests run against an older nightly; pruning is then simply off.
+    from torch.testing._internal.common_utils import skip_reason_at_collection
+except ImportError:
+    skip_reason_at_collection = None
 
 
 if TYPE_CHECKING:
@@ -217,6 +226,8 @@ def pytest_configure(config: Config) -> None:
             MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
             "multigpu_min_filter_plugin",
         )
+    if skip_reason_at_collection is not None and not _RERUN_DISABLED_TESTS:
+        config.pluginmanager.register(PruneSkipsPlugin(), "prune_skips_plugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -518,6 +529,70 @@ class MultiGpuMinFilterPlugin:
                 fp.write(f"{selected}\n")
 
 
+# Rerun-disabled mode runs only disabled tests, which the pruning hook never
+# decides on, and its own trylast hook below already drops everything else.
+_RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+
+
+def _pytest_mark_skip_reason(item: Any) -> tuple[str | None, bool]:
+    for mark in item.iter_markers(name="skipif"):
+        conditions = mark.args
+        if "condition" in mark.kwargs:
+            conditions = (mark.kwargs["condition"],)
+        # Strings and objects with __bool__ can depend on earlier tests or setup.
+        if any(not isinstance(condition, bool) for condition in conditions):
+            return None, False
+    try:
+        from _pytest.skipping import evaluate_skip_marks
+
+        skipped = evaluate_skip_marks(item)
+    except (Exception, pytest.fail.Exception):
+        return None, False
+    if skipped:
+        return skipped.reason, True
+    return None, item.get_closest_marker("xfail") is None
+
+
+class PruneSkipsPlugin:
+    """Deselect tests whose skip is decided before the body runs: pytest skip
+    marks, static unittest marks, decorators that recorded their condition
+    (common_utils.add_skip_condition), the slow-tests list and
+    PYTORCH_TEST_SKIP_FAST. They then cost nothing per test and never reach
+    TestCase.run, which under PYTORCH_TEST_WITH_DYNAMO wraps every test in
+    Dynamo. The decision is common_utils.skip_reason_at_collection, which
+    keeps anything it cannot decide. Always on; a run that needs skipped tests
+    reported, such as the junit and torchci report harnesses, opts out with
+    `-p no:prune_skips_plugin`. Runs after ordinary filters and mark additions,
+    before the sharding wrapper assigns the remaining tests to shards."""
+
+    def __init__(self) -> None:
+        self.reasons: Counter[str] = Counter()
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        kept, pruned = [], []
+        for item in items:
+            cls, fn = getattr(item, "cls", None), getattr(item, "obj", None)
+            reason, check_test_conditions = _pytest_mark_skip_reason(item)
+            if reason is None and check_test_conditions:
+                reason = skip_reason_at_collection(cls, fn, item.name)
+            if reason is None:
+                kept.append(item)
+            else:
+                pruned.append(item)
+                self.reasons[reason] += 1
+        if pruned:
+            config.hook.pytest_deselected(items=pruned)
+            items[:] = kept
+
+    def pytest_report_collectionfinish(self, config: Config) -> str | None:
+        if not self.reasons:
+            return None
+        total = sum(self.reasons.values())
+        top = "; ".join(f"{n} x {r[:70]}" for r, n in self.reasons.most_common(3))
+        return f"Pruned {total} tests whose skip was decided at collection: {top}"
+
+
 class StepcurrentPlugin:
     # Modified fromo _pytest/stepwise.py in order to save the currently running
     # test instead of the last failed test
@@ -537,7 +612,14 @@ class StepcurrentPlugin:
         self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
 
-    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_collection_modifyitems(
+        self, config: Config, items: list[Any]
+    ) -> Iterator[None]:
+        # Resume within the selected shard after pruning and shard assignment.
+        outcome = yield
+        if outcome.excinfo is not None:
+            return
         if not self.lastrun:
             self.report_status = "Cannot find last run test, not skipping"
             return

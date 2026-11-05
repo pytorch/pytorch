@@ -115,6 +115,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    preserves_device_selection,
     skipCUDAIf,
     skipMPS,
     skipXPUIf,
@@ -1345,6 +1346,8 @@ class DistributionsTestCase(TestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
+    setUp = preserves_device_selection(DistributionsTestCase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_default_device(self, device):

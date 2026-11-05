@@ -649,9 +649,11 @@ class TestMkldnn(TestCase):
                                    msg,
                                    lambda: fn(x_bf16.to_mkldnn()))
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_relu_bf16(self):
         self._test_relu_bf16_base("relu")
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_relu_inplace_bf16(self):
         self._test_relu_bf16_base("relu_")
 
@@ -1995,6 +1997,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(wbn_c))
         self.assertEqual(wbn_c, wbn_copy)
 
+    @unittest.skipIf(not torch.cpu.get_capabilities().get("amx_int8", False), "AMX is not supported on this machine")
     def test_mkldnn_scaled_mm_cow_input(self):
         if not torch.cpu.get_capabilities().get("amx_int8", False):
             self.skipTest("AMX is not supported on this machine")
@@ -2021,6 +2024,11 @@ class TestMkldnn(TestCase):
         self.assertEqual(bsc, bsc_copy)
         self.assertEqual(bias_sc, bias_sc_copy)
 
+    @unittest.skipIf(
+        not (torch.cpu.get_capabilities().get("avx512_vnni", False)
+             or torch.cpu.get_capabilities().get("architecture") == "aarch64"),
+        "VNNI is not supported on this machine",
+    )
     def test_mkldnn_int_mm_cow_input(self):
         if not (
             torch.cpu.get_capabilities().get("avx512_vnni", False)

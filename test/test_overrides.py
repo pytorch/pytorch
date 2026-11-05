@@ -2066,7 +2066,7 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOpsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @ops(op_db)
+    @ops([op for op in op_db if not op.has_nondeterministic_output])
     @skipOps({
         # Disabled due to CI failures; see #190241
         skip("nn.functional.conv_transpose3d", dtypes=(torch.float16, torch.bfloat16, torch.complex32)),

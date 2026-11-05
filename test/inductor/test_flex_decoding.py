@@ -39,6 +39,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipXPUIf,
@@ -354,14 +355,15 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 
 class TestFlexDecoding(InductorTestCase):
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
         self.test_inference_only = False
         if self.device_type == "cpu":
-            if LONG_COMPILATION_ON_CPU:
-                self.skipTest(
-                    "skip UT for CPU due to long compilation time found in CI"
-                )
             self.test_inference_only = True
 
     def _check_equal(
@@ -2554,6 +2556,10 @@ class TestGetSplitKDeviceRouting(common_utils.TestCase):
 instantiate_device_type_tests(
     TestFlexDecoding, globals(), only_for=test_device, allow_xpu=True
 )
+if LONG_COMPILATION_ON_CPU and "TestFlexDecodingCPU" in globals():
+    unittest.skip("skip UT for CPU due to long compilation time found in CI")(
+        globals()["TestFlexDecodingCPU"]
+    )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

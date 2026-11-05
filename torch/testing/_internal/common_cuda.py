@@ -619,6 +619,7 @@ def with_tf32_off(f):
         with tf32_off():
             return f(*args, **kwargs)
 
+    wrapped._preserves_device_arguments = wrapped
     return wrapped
 
 def _get_magma_version():

@@ -41,6 +41,7 @@ from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1331,6 +1332,11 @@ class TestForeachDevice(TestCase):
         + foreach_other_op_db,
         dtypes=(torch.float,),
     )
+    @decorateIf(
+        unittest.skip("no in-place op available"),
+        lambda p: torch.device(p["device"]).type in ("cpu", "cuda")
+        and p["op"].inplace_variant is None,
+    )
     def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
         inplace_op = op.inplace_variant
         if inplace_op is None:
@@ -1814,6 +1820,11 @@ class TestForeachDevice(TestCase):
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    @decorateIf(
+        unittest.skip("Complex dtype not supported"),
+        lambda p: torch.device(p["device"]).type in ("cpu", "cuda")
+        and p["dtype"] in (torch.complex128, torch.complex64),
+    )
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):
             self.skipTest("Complex dtype not supported")
@@ -1862,6 +1873,27 @@ class TestForeachDevice(TestCase):
     )
     @parametrize(
         "inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace"
+    )
+    @decorateIf(
+        unittest.skip("out-of-place not implemented"),
+        lambda p: torch.device(p["device"]).type in ("cpu", "cuda")
+        and not p["inplace"]
+        and not p["op"].supports_out,
+    )
+    @decorateIf(
+        unittest.skip("in-place not implemented"),
+        lambda p: torch.device(p["device"]).type in ("cpu", "cuda")
+        and p["inplace"]
+        and p["op"].has_no_in_place,
+    )
+    @decorateIf(
+        unittest.skip("neither reverse mode nor forward mode supported"),
+        lambda p: torch.device(p["device"]).type in ("cpu", "cuda")
+        and not (
+            p["op"].supports_autograd
+            or p["op"].supports_inplace_autograd
+            or p["op"].supports_forward_ad
+        ),
     )
     def test_autodiff(self, device, dtype, op, inplace):
         if (not inplace) and not op.supports_out:

@@ -16,6 +16,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
@@ -2725,6 +2726,42 @@ class _NestedReductionBase:
         self.assertEqual(torch.compile(f)(x), f(x), atol=0, rtol=0)
         self.check_fusion(expected_kernels=None)
 
+    add_skip_condition(
+        test_looped_standalone_sub_parent_large_group,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_internal_source_uses_second_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_internal_source_uses_reduced_output,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_internal_source_reuses_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_internal_source_closes_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_before_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_chain_used_by_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
@@ -3796,6 +3833,12 @@ class _InternalsBase:
             meta_num_load=self.looped_or_persistent(4, 3),
             min_rblock=16,
         )
+
+    add_skip_condition(
+        test_nested_kernel_disables_cooperative_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is False,
+        "cooperative reduction only applies to persistent kernels",
+    )
 
 
 class NestedReductionInternalsPersistentTest(_InternalsBase, TestCase):

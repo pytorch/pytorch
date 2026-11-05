@@ -1211,6 +1211,7 @@
 # [infra_test]
 # /test/benchmark_utils/
 # /test/junit_xml_testdata/
+# /test/prune_skips_testdata/
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/

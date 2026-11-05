@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -376,6 +377,7 @@ def _sequential_split_inline_tests():
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestPasses(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1557,6 +1559,7 @@ class TestMoveToDevicePassCuda(TestCase):
         self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
         self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
 
+    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
     def test_move_to_device_pass_interpreter_only_graph(self):
         init_torchbind_implementations()
         with _scoped_library("test_move_to_device_pass", "DEF") as lib:

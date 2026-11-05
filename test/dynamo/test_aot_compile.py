@@ -76,6 +76,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
+    decorateIf,
     disable_gc,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -9360,6 +9361,11 @@ from user code:
         )
         _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
+    @decorateIf(
+        unittest.skip("inlined comprehensions are 3.12+"),
+        lambda params: params["mint_site"] == "comprehension"
+        and sys.version_info < (3, 12),
+    )
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:

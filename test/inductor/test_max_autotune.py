@@ -89,6 +89,7 @@ from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    _static_skip_if,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -8289,6 +8290,31 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
         with mock.patch.object(AsyncAutotuner, "start", mock_start):
             test_aten_chosen()
+
+
+for _async_test_name in unittest.defaultTestLoader.getTestCaseNames(
+    TestMaxAutotuneAsyncPipelined
+):
+    _async_test = getattr(TestMaxAutotuneAsyncPipelined, _async_test_name)
+    if getattr(_async_test, "__unittest_skip__", False):
+        continue
+    for _skip_name, _skip_reason in TestMaxAutotuneAsyncPipelined.SKIP_TESTS.items():
+        if _skip_name in _async_test_name or TEST_XPU:
+            setattr(
+                TestMaxAutotuneAsyncPipelined,
+                _async_test_name,
+                _static_skip_if(lambda: True, _skip_reason)(_async_test),
+            )
+            break
+    else:
+        setattr(
+            TestMaxAutotuneAsyncPipelined,
+            _async_test_name,
+            _static_skip_if(
+                lambda: config.cpp_wrapper,
+                next(iter(TestMaxAutotuneAsyncPipelined.SKIP_TESTS.values())),
+            )(_async_test),
+        )
 
 
 @unittest.skipUnless(

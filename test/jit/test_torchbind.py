@@ -5,10 +5,12 @@ import copy
 import io
 import os
 import sys
+import unittest
 from typing import Optional
 
 import torch
 from torch.testing._internal.common_utils import (
+    IS_MACOS,
     raise_on_run_directly,
     skipIfTorchDynamo,
 )
@@ -23,6 +25,7 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 @skipIfTorchDynamo("skipping as a precaution")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestTorchbind(JitTestCase):
     def setUp(self):
         # Don't call super().setUp() — JitTestCase.setUp installs JIT emit

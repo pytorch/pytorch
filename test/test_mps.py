@@ -23,7 +23,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (decorateIf, parametrize, preserves_unittest_skip_marks, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -370,6 +370,7 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 # Expand TestCase class with Memory Leak Detection on MPS device
+@preserves_unittest_skip_marks("wrap_with_mps_policy")
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
 
@@ -7271,11 +7272,22 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
+    skip_sort_k_frac = decorateIf(
+        unittest.skip("k_frac only applies to kth/topk"),
+        lambda p: p["mode"] == "sort" and p["k_frac"] != "lo",
+    )
+    skip_kth_descending = decorateIf(
+        unittest.skip("kthvalue has no descending parameter"),
+        lambda p: p["mode"] == "kth" and p["descending"],
+    )
+
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_single_block(self, dtype, descending, dup, mode, k_frac):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
@@ -7350,6 +7362,8 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_multi_block(self, dtype, descending, dup, mode, k_frac):
         # shapes chosen to hit the metal multi block merge path
         if mode == "sort" and k_frac != "lo":
@@ -7403,6 +7417,12 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
+    @decorateIf(
+        unittest.skip("kthvalue/topk not supported for bool"),
+        lambda p: p["mode"] in ("kth", "topk") and p["dtype"] == torch.bool,
+    )
     def test_sort_radix(self, dtype, descending, dup, mode, k_frac):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
@@ -12475,6 +12495,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
@@ -12495,6 +12519,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention_2pass(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):

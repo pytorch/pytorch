@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import add_skip_condition, IS_MACOS
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -1055,6 +1055,11 @@ class OptimizeForInferenceTemplate(TestCase):
             num_diff_stride == 1,
             lambda msg: f"{msg}\nnum_diff_stride is {num_diff_stride}",
         )
+
+    add_skip_condition(test_autocast, lambda cls: cls.device == "cpu", "MLKDNN Bug")
+    add_skip_condition(
+        test_param_deallocated, lambda cls: cls.device == "cpu", "NYI CPU"
+    )
 
 
 if TEST_WITH_ROCM:
