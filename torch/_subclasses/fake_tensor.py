@@ -253,7 +253,9 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 
 
 @contextlib.contextmanager
-def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
+def unset_fake_temporarily() -> Generator[
+    TorchDispatchMode | CppFakeTensorMode | None, None, None
+]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
@@ -365,6 +367,9 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, Tensor):
+        # TODO: annotate the CppFakeTensorMode this can return, with the callers
+        return torch._C._maybe_get_fake_mode(t)
     return None
 
 
@@ -762,11 +767,18 @@ class CppFakeTensorMode:
     # which the Python parts of fake dispatch run against. The mode's state
     # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
     # equivalent, except for the enter state (enter_stack,
-    # old_dispatch_mode_flags), which is why an entered wrapper is kept in
+    # old_dispatch_mode_flags) and the stack it was created at. The enter
+    # state is why an entered wrapper is kept in
     # fake_tensor_tls.entered_cpp_fake_modes. See
     # Note [C++ FakeTensorMode Python wrapper lifetime] in
     # torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ("_cpp_mode", "enter_stack", "old_dispatch_mode_flags", "__weakref__")
+    __slots__ = (
+        "_cpp_mode",
+        "enter_stack",
+        "old_dispatch_mode_flags",
+        "_stack_trace",
+        "__weakref__",
+    )
 
     def __init__(
         self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
@@ -777,6 +789,7 @@ class CppFakeTensorMode:
         # Like TorchDispatchMode.old_dispatch_mode_flags, a stack of earlier
         # is_in_torch_dispatch_mode() values
         self.old_dispatch_mode_flags: list[bool] = []
+        self._stack_trace: traceback.StackSummary | None = traceback.extract_stack()
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         converter = FakeTensorConverter(copy_data=copy_data)
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
@@ -789,6 +802,7 @@ class CppFakeTensorMode:
         self = cls.__new__(cls)
         self.enter_stack = []
         self.old_dispatch_mode_flags = []
+        self._stack_trace = None
         self._cpp_mode = cpp_mode
         return self
 
@@ -799,6 +813,14 @@ class CppFakeTensorMode:
     @property
     def shape_env(self) -> ShapeEnv | None:
         return self._cpp_mode.shape_env
+
+    # Like FakeTensorMode.stack, where the mode was created, except that a
+    # rebuilt wrapper does not know it
+    @property
+    def stack(self) -> str:
+        if self._stack_trace is None:
+            return "<unknown: the original wrapper was collected and rebuilt>\n"
+        return "".join(traceback.format_list(self._stack_trace))
 
     @property
     def epoch(self) -> int:
