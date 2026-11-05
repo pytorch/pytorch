@@ -20,6 +20,10 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      pin-control-build-run:
+        required: true
+        type: string
+        description: Exact source native build for the scalar correction controls.
       sync-tag:
         required: false
         type: string
@@ -148,7 +152,7 @@ jobs:
       - name: Download exact current failed-job native build
         shell: bash
         run: |
-          curl --fail --retry 2 --output artifacts.zip https://gha-artifacts.s3.amazonaws.com/pytorch/pytorch/42088832820/linux-noble-rocm-py3.11-mi350/artifacts.zip
+          curl --fail --retry 2 --output artifacts.zip https://gha-artifacts.s3.amazonaws.com/pytorch/pytorch/${{ inputs.pin-control-build-run }}/${{ inputs.build-environment }}/artifacts.zip
           unzip -o artifacts.zip
           rm artifacts.zip
 
@@ -364,7 +368,7 @@ jobs:
         if: always() && steps.test.conclusion
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: triton-pin-scalar-controls-${{ github.run_id }}
+          name: triton-pin-scalar-controls-${{ inputs.build-environment }}-${{ github.run_id }}
           retention-days: 14
           if-no-files-found: error
           path: |
