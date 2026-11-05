@@ -11,6 +11,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ReduceOps.h>
 #include <c10/util/irange.h>
+#include <c10/util/strides.h>
 #include <algorithm>
 #include <bit>
 #include <numeric>
@@ -579,6 +580,16 @@ static void encode_reduction(MPSStream* stream,
   getMPSProfiler().endProfileKernel(pipeline, stream);
 }
 
+// The reduction kernels index in 32 bits
+static constexpr int64_t MAX_32BIT_INDEX_ELEMS = std::numeric_limits<uint32_t>::max();
+
+static void reduction_dispatch_split_mps(const Tensor& input,
+                                         const Tensor& output,
+                                         const ReductionOp& op,
+                                         const MetalType& partial_type,
+                                         const std::string& combine_prefix,
+                                         const std::string& profile_name);
+
 static void reduction_dispatch_mps(Tensor input,
                                    Tensor output,
                                    const ReductionOp& op,
@@ -587,11 +598,10 @@ static void reduction_dispatch_mps(Tensor input,
                                    const std::string& profile_name = {}) {
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
-                              op.is_arg ? profile_name : "MPS " + op.prefix + "reduction",
-                              ": tensors requiring 64-bit indexing are not supported (numel=",
-                              input.numel(),
-                              ")");
+  if (!canUse32BitIndexMath(input, MAX_32BIT_INDEX_ELEMS)) {
+    reduction_dispatch_split_mps(input, output, op, partial_type, combine_prefix, profile_name);
+    return;
+  }
   // most fast kernels need a contiguous input. Transposed or permuted inputs
   // are contiguous in memory but have reordered dims. This restores the memory
   // order by sorting dims by stride and permute the output to match. Example:
@@ -649,6 +659,95 @@ static void reduction_dispatch_mps(Tensor input,
       encode_reduction(stream, partials.values, output, combine_plan, combine_op, profile_name, partials);
     }
   });
+}
+
+// The reduction kernels index in 32 bits, so larger inputs are split along their outermost dim into chunks that fit.
+// Splitting a kept dim reduces each chunk into its slice of the output. Splitting a reduced dim reduces each chunk
+// to unfinalized partials (param 0 skips the mean divide and the l2 sqrt), then combines them like pass 2 does.
+static void reduction_dispatch_split_mps(const Tensor& input,
+                                         const Tensor& output,
+                                         const ReductionOp& op,
+                                         const MetalType& partial_type,
+                                         const std::string& combine_prefix,
+                                         const std::string& profile_name) {
+  int64_t d = -1;
+  for (const auto i : c10::irange(input.dim())) {
+    if (input.size(i) > 1 && (d < 0 || input.stride(i) > input.stride(d))) {
+      d = i;
+    }
+  }
+  int64_t slice_extent = 1;
+  for (const auto i : c10::irange(input.dim())) {
+    slice_extent += i == d ? 0 : (input.size(i) - 1) * input.stride(i);
+  }
+  const auto size = input.size(d), stride = input.stride(d);
+  // Largest chunk whose numel and max offset fit in 32 bits; a slice that does not fit is split again by recursion.
+  // Power-of-two chunks keep every chunk's base aligned for the vectorized loads of the flat kernels.
+  auto chunk = (MAX_32BIT_INDEX_ELEMS - 1) / (input.numel() / size);
+  if (stride > 0) {
+    chunk = std::min(chunk, (MAX_32BIT_INDEX_ELEMS - slice_extent) / stride + 1);
+  }
+  chunk = static_cast<int64_t>(std::bit_floor(static_cast<uint64_t>(std::clamp<int64_t>(chunk, 1, size))));
+  const auto num_chunks = at::ceil_div(size, chunk);
+  auto chunk_of = [&](const Tensor& t, int64_t k) { return t.narrow(d, k * chunk, std::min(chunk, size - k * chunk)); };
+
+  if (output.size(d) == size) {
+    for (const auto k : c10::irange(num_chunks)) {
+      auto chunk_op = op;
+      if (op.mean) {
+        chunk_op.mean = chunk_of(*op.mean, k);
+      }
+      reduction_dispatch_mps(
+          chunk_of(input, k), chunk_of(output, k), chunk_op, partial_type, combine_prefix, profile_name);
+    }
+    return;
+  }
+  auto chunk_sizes = output.sizes().vec();
+  chunk_sizes[d] = 1;
+  if (op.is_arg) {
+    // Chunk indices are local, so offset them and keep the one from the chunk whose value wins. Ties go to the
+    // lowest chunk, preserving first-occurrence semantics.
+    auto partial_sizes = chunk_sizes;
+    partial_sizes.erase(partial_sizes.begin() + d);
+    partial_sizes.insert(partial_sizes.begin(), num_chunks);
+    auto indices = at::empty(partial_sizes, output.options()).movedim(0, d);
+    auto values = at::empty(partial_sizes, input.options()).movedim(0, d);
+    for (const auto k : c10::irange(num_chunks)) {
+      auto chunk_indices = indices.narrow(d, k, 1);
+      reduction_dispatch_mps(chunk_of(input, k), chunk_indices, op, partial_type, combine_prefix, profile_name);
+      values.narrow(d, k, 1).copy_(chunk_of(input, k).gather(d, chunk_indices));
+      chunk_indices.add_(k * chunk);
+    }
+    const auto winner = op.prefix == "argmax_" ? values.argmax(d, true) : values.argmin(d, true);
+    output.copy_(indices.gather(d, winner));
+    return;
+  }
+  // Like the two-pass path, partials live in raw bytes (std/var accumulate float3) and are viewed in partial_type
+  // elements: [num_chunks, output.numel()] with the chunk index along d.
+  const auto out_numel = output.numel();
+  const auto partial_size = static_cast<int64_t>(partial_type.size);
+  const auto storage = at::empty({num_chunks * out_numel * partial_size}, output.options().dtype(kByte));
+  const auto chunk_strides = c10::contiguous_strides(chunk_sizes);
+  const ReductionOp chunk_op{/*is_arg=*/false, op.prefix, op.input_type, partial_type};
+  for (const auto k : c10::irange(num_chunks)) {
+    reduction_dispatch_mps(chunk_of(input, k),
+                           storage.as_strided(chunk_sizes, chunk_strides, k * out_numel * partial_size),
+                           chunk_op,
+                           partial_type,
+                           combine_prefix,
+                           profile_name);
+  }
+  auto partial_sizes = chunk_sizes;
+  auto partial_strides = chunk_strides;
+  partial_sizes[d] = num_chunks;
+  partial_strides[d] = out_numel;
+  const ReductionOp combine_op{/*is_arg=*/false, combine_prefix, partial_type, op.output_type, op.param, op.mean};
+  reduction_dispatch_mps(storage.as_strided(partial_sizes, partial_strides),
+                         output,
+                         combine_op,
+                         partial_type,
+                         combine_prefix,
+                         profile_name);
 }
 
 static void argmax_argmin_out_mps(const Tensor& input_t,

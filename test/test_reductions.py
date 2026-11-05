@@ -2573,7 +2573,6 @@ class TestReductionsDevice(TestCase):
         subtest((lambda x: x.min(), 0), name="min"),
         subtest((lambda x: x.argmin(), 0), name="argmin"),
         # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA and XPU.
-        # Keep explicit CUDA/XPU guards so MPS still exercises the 64-bit-indexing assertion.
         subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
         subtest((lambda x: x.any(), True), name="any"),
         subtest((lambda x: x.all(), False), name="all"),
@@ -2582,11 +2581,21 @@ class TestReductionsDevice(TestCase):
     def test_reductions_above_uint32(self, device, fn, expected):
         x = torch.zeros((1 << 32) + 4096, device=device, dtype=torch.int8)
         x[-1] = 1
-        # MPS reduction kernels index in 32 bits and should raise
-        if self.device_type == "mps":
-            self.assertRaisesRegex(NotImplementedError, "64-bit indexing", fn, x)
-        else:
-            self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected)
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("9GB")
+    @largeTensorTest("9GB")
+    def test_var_mean_above_uint32(self, device):
+        rows = (1 << 20) + 1
+        x = torch.zeros(rows, 4096, device=device, dtype=torch.half)
+        x[::2] = 1
+        p = (rows // 2 + 1) / rows
+        for dim, n in ((0, rows), (None, x.numel())):
+            var, mean = torch.var_mean(x, dim)
+            self.assertEqual(mean, torch.full_like(mean, p))
+            self.assertEqual(var, torch.full_like(var, p * (1 - p) * n / (n - 1)))
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
