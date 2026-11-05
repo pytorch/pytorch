@@ -416,6 +416,8 @@ class PythonStore : public ::c10d::Store {
   }
 
   bool deleteKey(const std::string& key) override {
+    // pybind11's pure-virtual error path also needs the GIL in debug builds.
+    pybind11::gil_scoped_acquire gil;
     PYBIND11_OVERRIDE_PURE(bool, ::c10d::Store, deleteKey, key);
   }
 
