@@ -1693,6 +1693,16 @@
       ]
     }
   ],
+  "GB3179": [
+    {
+      "Gb_type": "Unsupported OrderedDict.__reduce__ state",
+      "Context": "{py_type.__qualname__}.__reduce__()",
+      "Explanation": "Dynamo models neither the instance attributes of a plain OrderedDict nor the __slots__ of an OrderedDict subclass, so it cannot build their pickle state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0103": [
     {
       "Gb_type": "Tensor subclass overridden method call",
