@@ -230,9 +230,10 @@ def fully_shard(
               use cases like Mixture of Experts where expert params use a
               different mesh than regular params.
 
-            If sharding on a nonzero dim, we currently require even sharding,
-            i.e. the tensor dim size on that dim must be divisible by the FSDP
-            shard mesh size.
+            If sharding a parameter with an all-gather extension on a nonzero
+            dim, we currently require even sharding, i.e. the tensor dim size on
+            that dim must be divisible by the FSDP shard mesh size. Other
+            parameters may shard any dim unevenly.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
