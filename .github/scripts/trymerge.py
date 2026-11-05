@@ -523,6 +523,10 @@ REVIEW_PAGE_LIMIT = 10
 # #190927 / #186302 land race).
 DOCKER_CI_PATH = ".ci/docker"
 DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+# GitHub's GraphQL API can report a workflow by its file path instead of its
+# `name:` (for example after a run of the workflow file failed to start), which
+# prefixes its check names with the path.
+DOCKER_BUILDS_WORKFLOW_PATH = ".github/workflows/docker-builds.yml"
 
 
 def iter_issue_timeline_until_comment(
@@ -652,11 +656,14 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
     """Return the subset of checks that belong to the docker-builds workflow."""
+    workflow_names = (DOCKER_BUILDS_WORKFLOW_NAME, DOCKER_BUILDS_WORKFLOW_PATH)
     return {
         name: check
         for name, check in checks.items()
-        if name == DOCKER_BUILDS_WORKFLOW_NAME
-        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+        if any(
+            name == workflow_name or name.startswith(f"{workflow_name} / ")
+            for workflow_name in workflow_names
+        )
     }
 
 
