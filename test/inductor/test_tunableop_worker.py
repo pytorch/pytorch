@@ -960,6 +960,26 @@ class ExternRoutingTest(TestCase):
 
         return sa.ExternKernelCaller.benchmark(caller, out=out)
 
+    def _assert_inline_ran_with_tuning_off(self, tunable):
+        # The gates below decide only whether the worker is used. Whatever
+        # they decide, an inline timing taken while a mode is set must have
+        # tuning off, or hipBLASLt tunes in the compiling process -- the abort
+        # or hang routing exists to contain -- and be restored afterwards.
+        self.assertEqual(
+            [c.args for c in tunable.enable.call_args_list], [(False,), (True,)]
+        )
+        self.assertEqual(
+            [c.args for c in tunable.tuning_enable.call_args_list],
+            [(False,), (True,)],
+        )
+
+    @staticmethod
+    def _live_tunable():
+        tunable = mock.Mock()
+        tunable.is_enabled.return_value = True
+        tunable.tuning_is_enabled.return_value = True
+        return tunable
+
     def test_gemm_candidate_is_submitted_with_flags(self):
         from torch._inductor import tunableop as _top
 
@@ -1017,14 +1037,17 @@ class ExternRoutingTest(TestCase):
         # exactly that -- a guaranteed kill for a candidate the inline path
         # handles, since inline passes a real out.
         caller, out = _extern_caller("mm", metas=False)
+        tunable = self._live_tunable()
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
             mock.patch(
                 "torch._inductor.tunableop.submit",
                 side_effect=AssertionError("must not submit"),
             ),
+            mock.patch("torch.cuda.tunable", tunable),
         ):
             self.assertEqual(self._benchmark(caller, out), 2.0)
+        self._assert_inline_ran_with_tuning_off(tunable)
 
     def test_verify_mode_stays_inline(self):
         # VERIFY benchmarks choices[0] for its output, not its time. The
@@ -1033,6 +1056,7 @@ class ExternRoutingTest(TestCase):
         from torch._inductor import select_algorithm as sa
 
         caller, out = _extern_caller("mm")
+        tunable = self._live_tunable()
         with (
             mock.patch.object(sa, "VERIFY", {"atol": 1e-2}),
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
@@ -1040,8 +1064,10 @@ class ExternRoutingTest(TestCase):
                 "torch._inductor.tunableop.submit",
                 side_effect=AssertionError("must not submit"),
             ),
+            mock.patch("torch.cuda.tunable", tunable),
         ):
             self.assertEqual(self._benchmark(caller, out), 2.0)
+        self._assert_inline_ran_with_tuning_off(tunable)
 
     def test_routing_gives_up_after_three_consecutive_faults(self):
         from torch._inductor import tunableop as _top
@@ -1052,10 +1078,11 @@ class ExternRoutingTest(TestCase):
             calls.append(job)
             return _top.Outcome(None, "crash")
 
+        tunable = self._live_tunable()
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
             mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
-            mock.patch("torch.cuda.tunable", mock.Mock()),
+            mock.patch("torch.cuda.tunable", tunable),
         ):
             for _ in range(5):
                 caller, out = _extern_caller("mm")
@@ -1063,6 +1090,13 @@ class ExternRoutingTest(TestCase):
         # Three faults trip it; the fourth and fifth never reach the worker.
         self.assertEqual(len(calls), _top._TUNABLEOP_MAX_ROUTING_FAULTS)
         self.assertFalse(_top.routing_is_open())
+        # Five inline timings, every one of them with tuning off. The two
+        # after the trip are the regression: giving up on the worker must not
+        # also give up on keeping hipBLASLt out of this process.
+        self.assertEqual(
+            [c.args for c in tunable.tuning_enable.call_args_list],
+            [(False,), (True,)] * 5,
+        )
 
     def test_a_routing_success_clears_the_fault_count(self):
         # Consecutive, not cumulative: an isolated fault between successes

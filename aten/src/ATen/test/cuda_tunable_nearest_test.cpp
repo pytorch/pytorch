@@ -216,6 +216,18 @@ class FakeOp : public TunableOp<FakeParams> {
   }
   std::string Signature() override { return kOp; }
 
+#ifndef USE_ROCM
+  // DonorIsUsable asks this before GetOp on non-ROCm builds, and the base
+  // returns false, so without it every fake donor is rejected: the three
+  // tests below that need a usable donor fail, and the one that needs an
+  // unusable donor passes for the wrong reason. Registration here is static,
+  // so "can this build run it" is exactly "is it registered".
+  bool RegisterOpForResult(
+      const ResultEntry& result, const FakeParams* /*params*/) override {
+    return HasOp(result.GetKey());
+  }
+#endif
+
   FakeCallable* default_op() const { return default_; }
   FakeCallable* donor_op() const { return donor_; }
 
