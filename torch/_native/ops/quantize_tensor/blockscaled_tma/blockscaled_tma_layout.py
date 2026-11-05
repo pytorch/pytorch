@@ -121,7 +121,9 @@ def _validate_blockscaled_tma_input(
     r"""Validate caller-visible input metadata before materializing the tensor."""
 
     if quant_block_size != (1, 32):
-        raise AssertionError(f"unsupported quantization block size: {quant_block_size}")
+        raise NotImplementedError(
+            f"unsupported quantization block size: {quant_block_size}"
+        )
     outer_block_size, inner_block_size = quant_block_size
     if is_square_scaling:
         outer_block_size = inner_block_size

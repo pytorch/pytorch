@@ -55,7 +55,6 @@ def select_blockscaled_tma_plan(
     do_dim_k = quant_orientation_id != _QUANT_ORIENTATION_DIM_M
     do_dim_m = quant_orientation_id != _QUANT_ORIENTATION_DIM_K
     scale_group_size = quant_block_size[1]
-    scale_col_block_size = 4 * scale_group_size
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
@@ -67,6 +66,7 @@ def select_blockscaled_tma_plan(
         s_num_row_blk_m = _ceil_div(K, 128)
         s_num_col_blk_m = _ceil_div(M // scale_group_size, 4)
 
+    # Preserve the original 128-element kernel padding independently of scale-column blocks.
     if do_dim_k and not do_dim_m:
         if s_num_row_blk_k is None:
             raise AssertionError(f"expected s_num_row_blk_k, got {s_num_row_blk_k}")
@@ -107,7 +107,7 @@ def select_blockscaled_tma_plan(
             )
         )
         needs_boundary_masking = (
-            M != s_num_row_blk_k * 128 or K != s_num_col_blk_k * scale_col_block_size
+            M != s_num_row_blk_k * 128 or K != _ceil_div(K, 128) * 128
         )
     elif do_dim_m and not do_dim_k:
         if s_num_row_blk_m is None:
@@ -123,7 +123,7 @@ def select_blockscaled_tma_plan(
                 else _DIM_M_LARGE_TILE_64_256
             )
         )
-        padded_M = s_num_col_blk_m * scale_col_block_size
+        padded_M = _ceil_div(M, 128) * 128
         padded_K = _ceil_div(K, tile_k_size) * tile_k_size
         grid_m = padded_M // tile_m_size
         grid_k = padded_K // tile_k_size
@@ -145,7 +145,7 @@ def select_blockscaled_tma_plan(
         )
         cluster_k = 1
         needs_boundary_masking = (
-            M != s_num_col_blk_m * scale_col_block_size or K != s_num_row_blk_m * 128
+            M != _ceil_div(M, 128) * 128 or K != s_num_row_blk_m * 128
         )
 
     grid_k = _ceil_div(K, tile_k_size)
