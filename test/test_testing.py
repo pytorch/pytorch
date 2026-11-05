@@ -2834,7 +2834,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -2857,7 +2858,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -3137,21 +3139,23 @@ class TestTestParametrizationDeviceType(TestCase):
             ],
         )
 
-    def test_skipped_device_type_tests_are_kept_by_default(self, device):
+    def test_skipped_device_type_tests_are_kept_when_omit_disabled(self, device):
         device = self.device_type
 
-        class TestDeviceKept(TestCase):
-            @unittest.skip("never runs here")
-            def test_skipped(self, device):
-                pass
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
 
-            @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
-            @dtypes(torch.float32, torch.float64)
-            def test_dtype_partly_skipped(self, device, dtype):
-                pass
+            class TestDeviceKept(TestCase):
+                @unittest.skip("never runs here")
+                def test_skipped(self, device):
+                    pass
 
-        locals_dict = dict(locals())
-        instantiate_device_type_tests(TestDeviceKept, locals_dict, only_for=device)
+                @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
+                @dtypes(torch.float32, torch.float64)
+                def test_dtype_partly_skipped(self, device, dtype):
+                    pass
+
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestDeviceKept, locals_dict, only_for=device)
 
         device_cls = locals_dict[f"TestDeviceKept{device.upper()}"]
         self.assertEqual(
