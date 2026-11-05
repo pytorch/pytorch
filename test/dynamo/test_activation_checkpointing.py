@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_CUDA,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -59,7 +59,7 @@ from torch.utils.checkpoint import (
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
-if HAS_GPU_AND_TRITON:
+if HAS_TRITON:
     import triton
     from triton import language as tl
 
@@ -284,7 +284,7 @@ class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
                     msg="Gradient mismatch between the original version and the checkpointed version of the same function",
                 )
 
-        if HAS_GPU_AND_TRITON:
+        if HAS_TRITON:
             run(functools.partial(torch.compile, fullgraph=fullgraph))
         if fullgraph:
 
@@ -720,7 +720,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         )
         self._validate(fn, backend, x)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_recomputed_rand(self, device):
         def gn(x, y):
@@ -744,7 +744,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self, device):
         def gn(x, y):
@@ -771,7 +771,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self, device):
         # Figure out a way to test the number of inductor_random calls
@@ -1127,7 +1127,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1485,7 +1485,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
     )
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1538,7 +1537,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
     @parametrize(
@@ -1630,7 +1629,7 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "This platform doesn't support efficient attention",
