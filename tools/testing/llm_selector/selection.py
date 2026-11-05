@@ -102,6 +102,14 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
     "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
+    # They build these extensions.
+    "cpp_extensions/test_libtorch_agnostic": [r"^test/cpp_extensions/libtorch_agn_"],
+    "cpp_extensions/python_agnostic_extension/test/test_python_agnostic": [
+        r"^test/cpp_extensions/python_agnostic_extension/"
+    ],
+    "cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility": [
+        r"^test/cpp_extensions/libtorch_agn_2_(9|10)_extension/"
+    ],
     "test_ao_sparsity": [r"^test/ao/"],
     # It checks every CPython test .diff against its .py, with these tools.
     "test_cpython_diff_sync": [
@@ -118,6 +126,8 @@ DRIVER_MAPPINGS = {
     },
     # It parses the tracker at import.
     "test_cpp_api_parity": [r"^test/cpp_api_parity/parity-tracker\.md$"],
+    # It runs mypy on every file in these directories.
+    "test_typing": [r"^test/typing/(pass|fail|reveal)/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
     # test_jit imports jit/test_backend_nnapi.py, which imports test_nnapi.py.
@@ -164,11 +174,13 @@ EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
 # so always run (importers still finds the Python tests importing a .py file);
 # the files of custom_backend, inductor/cpp, jit_hooks and mobile, which no
 # candidate reads and run_test.py never runs, and the non-.py files of
-# custom_operator, which only CI scripts build; and run_doctests.sh, which
-# nothing under test/ runs.
+# custom_operator, which only CI scripts build; and run_doctests.sh and the
+# scripts below, which nothing under test/ runs.
 NO_READER_RE = re.compile(
     r"\.(md|rst)$|^test/cpp/.*(\.(c|cc|cpp|cu|h|hpp|py|sh)|/CMakeLists\.txt)$"
-    r"|^test/run_doctests\.sh$"
+    r"|^test/run_doctests\.sh$|^test/forward_backward_compatibility/"
+    r"|^test/((create_dummy|load)_torchscript_model|bench_mps_ops|simulate_nccl_errors)\.py$"
+    r"|^test/scripts/(cuda_memcheck_common|run_cuda_memcheck)\.py$"
     r"|^test/(custom_backend|inductor/cpp|jit_hooks|mobile)/"
     r"|^test/custom_operator/.*(?<!\.py)$"
 )
@@ -207,6 +219,8 @@ RUN_ALL_PATTERNS = [
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # The workflows that call those test workflows; they set each job's build, image and test matrix.
     r"^\.github/workflows/(pull|trunk(-rocm-sandbox)?|periodic(-strict|-rocm-mi\d+)?|slow(-rocm-mi200)?|unstable|tsan|xpu|mac-mps|native-aot|dtensor|torchtitan|dynamo-unittest|td-holdout-unstable|s390x-periodic|rocm-[\w-]+|inductor[\w-]*|(b200|h100)-[\w-]+|test-(b200|gb300|h100)|better-benchmark-b200|attention_op_microbenchmark|operator_(benchmark|microbenchmark(_compare)?))\.yml$",
+    # pull.yml and trunk.yml call these from the PR; they decide which tests TD drops.
+    r"^\.github/workflows/(target_determination|llm_td_retrieval)\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
     r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl)/",
     r"^\.github/scripts/(filter_test_configs|parse_ref)\.py$",
@@ -323,13 +337,13 @@ def import_pattern(modules: Iterable[str]) -> str:
     end = "([^[:alnum:]_]|$)"
     names_of = rf"import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
     forms = [
-        rf"(from|import)[[:space:]]+{names}{end}",
+        rf"(from[[:space:]]+|import[[:space:]]+(.*[^[:alnum:]_.])?){names}{end}",
         rf"from[[:space:]]+(\.+|test)[[:space:]]+{names_of}",
     ]
     if parents:
         forms.append(rf"from[[:space:]]+{dotted(parents)}[[:space:]]+{names_of}")
     quoted = rf"""load_test_module\(["']({paths})["']\)"""
-    quoted += rf"""|import_module\(["']{names}["']\)"""
+    quoted += rf"""|import_module\(["']{names}["'][,)[:space:]]"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
@@ -441,12 +455,13 @@ def failure_list_sources(
     a CPython entry of the dynamo lists, which the dynamo_cpython config runs)
     naming a class that is not looked up (no `grep`, see importers, or more
     than MAX_FAILURE_LIST_CLASSES classes) or that `grep` does not find in a
-    .py file. Also the list ("dynamo", "inductor" or "compiled_autograd", even
-    for a CPython entry) holding an entry it does not look up: one in a
-    subdirectory or, for the dynamo and inductor lists, one without exactly one
-    "." (dynamo_test_failures.py rejects both at import, except in
-    compiled_autograd_skips) or one edited in both the expected failures and
-    the skips (a clash it rejects at import, or a move)."""
+    .py file. Also the list ("dynamo", "inductor" or "compiled_autograd", and
+    "dynamo_cpython" for a CPython entry of the dynamo lists) holding an entry
+    it does not look up: one in a subdirectory or, for the dynamo and inductor
+    lists, one without exactly one "." (dynamo_test_failures.py rejects both
+    at import, except in compiled_autograd_skips) or one edited in both the
+    expected failures and the skips (a clash it rejects at import, or a
+    move)."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
@@ -454,13 +469,15 @@ def failure_list_sources(
             continue
         name = f[d.end() :]
         both = {f"test/{d[1]}_{k}/{name}" for k in ("expected_failures", "skips")}
+        cpython = d[1] == "dynamo" and re.match(r"CPython\d+-", name)
         if "/" in name or (
             d[1] != "compiled_autograd"
             and (name.count(".") != 1 or both <= set(changed_files))
         ):
             unparsed.add(d[1])
+            if cpython:
+                unparsed.add("dynamo_cpython")
         elif m := FAILURE_LIST_RE.match(f):
-            cpython = d[1] == "dynamo" and re.match(r"CPython\d+-", name)
             classes.setdefault(m[2], set()).add("dynamo_cpython" if cpython else m[1])
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
         return [], unparsed.union(*classes.values())
@@ -623,7 +640,9 @@ class Selection:
                 error=f"malformed model output: {e}",
             )
         except GREP_ERRORS as e:
-            return grep_failure(e)
+            if not needs_run_all(changed_files):
+                return grep_failure(e)
+            files, sweeps = set(), set()
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         # Before any grep, so that a failed one cannot turn it into an error.
@@ -676,10 +695,8 @@ class Selection:
                 except GREP_ERRORS as e:
                     return grep_failure(e)
                 if found is None:
-                    return cls(
-                        run_all=True,
-                        reason=f"test modules import the change through too many hops; model: {out['reason']}",
-                    )
+                    reason = "test modules import the change through too many hops"
+                    return cls(run_all=True, reason=reason)
                 if f is not None and not found:
                     return cls(run_all=True, reason=f"nothing found that reads {f}")
                 files |= found
