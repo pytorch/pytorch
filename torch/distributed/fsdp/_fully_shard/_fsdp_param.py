@@ -201,8 +201,9 @@ class FSDPParam:
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
-    # Whether this rank's shard is shorter than the padded shard on a nonzero dim
-    pads_all_gather_input: bool
+    # Whether this rank's Shard(i), i > 0, shard is shorter than the padded shard,
+    # so collectives pad it (Shard(0) shards are stored padded)
+    needs_nonzero_dim_padding: bool
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -360,7 +361,7 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
-        self.pads_all_gather_input = (
+        self.needs_nonzero_dim_padding = (
             shard_dim != 0 and self.sharded_size != padded_sharded_size
         )
         self._default_all_gather_output_layouts = (
@@ -1225,7 +1226,7 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
-            if self.pads_all_gather_input:
+            if self.needs_nonzero_dim_padding:
                 dim = self.fsdp_placement.dim
                 padded = sharded_param_data.new_zeros(
                     self.padded_sharded_param_size, dtype=self.param_dtype
