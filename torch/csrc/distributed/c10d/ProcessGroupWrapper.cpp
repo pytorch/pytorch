@@ -693,6 +693,10 @@ void ProcessGroupWrapper::enableCollectivesTiming() {
   backend_->enableCollectivesTiming();
 }
 
+bool ProcessGroupWrapper::collectivesTimingEnabled() const {
+  return backend_->collectivesTimingEnabled();
+}
+
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::split(
     const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,

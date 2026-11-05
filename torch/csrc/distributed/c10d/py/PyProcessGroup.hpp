@@ -147,6 +147,10 @@ class PyProcessGroup : public ProcessGroup {
       return work_->getFutureResult();
     }
 
+    bool hasFutureResult() const override {
+      return work_->hasFutureResult();
+    }
+
     float getDuration() const override {
       return work_->getDuration();
     }
@@ -157,10 +161,6 @@ class PyProcessGroup : public ProcessGroup {
 
     std::chrono::milliseconds getTimeout() const override {
       return work_->getTimeout();
-    }
-
-    uint64_t getCompletionKey() const override {
-      return work_->getCompletionKey();
     }
 
    private:

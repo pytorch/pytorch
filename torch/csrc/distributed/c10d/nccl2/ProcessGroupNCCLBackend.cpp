@@ -287,52 +287,6 @@ void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
   abortHooks_.erase(hook_id);
 }
 
-bool ProcessGroupNCCL::hasCompletionHooks() {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  return !completionHooks_.empty();
-}
-
-void ProcessGroupNCCL::runCompletionHooks(
-    uint64_t completion_key,
-    std::optional<float> duration_ms) {
-  // Snapshot rather than hold the lock across the hooks, and for a harder
-  // reason than runAbortHooks has: a hook's owner unregisters with its own lock
-  // held (c10d::FlightRecorderHook::remove does), so calling into a hook while
-  // holding completion_hooks_mutex_ would be the reverse order and deadlock.
-  std::vector<::c10d::CompletionHook> hooks;
-  {
-    std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-    hooks.reserve(completionHooks_.size());
-    for (const auto& [_, hook] : completionHooks_) {
-      hooks.push_back(hook);
-    }
-  }
-  ::c10d::CompletionHookArgs args;
-  args.completionKey = completion_key;
-  args.duration_ms = duration_ms;
-  for (const auto& hook : hooks) {
-    try {
-      hook(args);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "[TC] Completion hook threw exception: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "[TC] Completion hook threw unknown exception.";
-    }
-  }
-}
-
-void ProcessGroupNCCL::registerCompletionHook(
-    int64_t hook_id,
-    ::c10d::CompletionHook hook) {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  completionHooks_.emplace(hook_id, std::move(hook));
-}
-
-void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  completionHooks_.erase(hook_id);
-}
-
 void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
   // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
@@ -1018,8 +972,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   // off the current stream (async or on a side stream), so the current stream
   // is not made to wait, and waits for every op issued on another stream, so
   // it completes after every op in the window. It is enqueued so the watchdog
-  // completes its future; no flight recorder entry maps to its completion key,
-  // so its completion is not recorded twice.
+  // completes its result future.
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t current = at::cuda::getCurrentCUDAStream(device_.index());
   bool off_current =

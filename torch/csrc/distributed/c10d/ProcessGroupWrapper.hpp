@@ -134,6 +134,7 @@ class TORCH_API ProcessGroupWrapper : public Backend {
 
   void waitForPendingWorks() override;
   void enableCollectivesTiming() override;
+  bool collectivesTimingEnabled() const override;
 
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
