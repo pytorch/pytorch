@@ -3693,6 +3693,8 @@ class OutputGraph(OutputGraphCommon):
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
+        for tracer in self.tracers:
+            tracer.clear_orig_gm_cache()
         self._cached_replayed_side_effect_source_refs = tuple(
             self.get_replayed_side_effect_source_refs()
         )
@@ -4044,10 +4046,16 @@ class SubgraphTracer(fx.Tracer):
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
-        self._cur_code = None
+        self._cur_code: types.CodeType | None = None
         self._orig_gm_meta: list[Any] | None = None
         self._orig_gm_lineno_map: dict[int, int | None] | None = None
         self._orig_gm_firstlineno: int | None = None
+        # (meta list, lineno map, first line) of the original GraphModule for
+        # each retraced GraphModule code object, so returning to its forward
+        # from an inlined call does not walk the graph again.
+        self._orig_gm_cache: dict[
+            types.CodeType, tuple[list[Any], dict[int, int | None] | None, int]
+        ] = {}
         # Each SubgraphTracer is associated with a source target, which indicates
         # which operator this subgraph is attached to. We compute a source_fn_stack
         # based on the source target. For the root tracer, it's set to [].
@@ -4075,6 +4083,15 @@ class SubgraphTracer(fx.Tracer):
 
     def record_proxyable_vt(self, vt: VariableTracker) -> None:
         self.tracked_proxyable_vt.add(vt)
+
+    def clear_orig_gm_cache(self) -> None:
+        """Drop references to original GraphModule node metas (which hold
+        fake tensors) once tracing is done."""
+        self._cur_code = None
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
+        self._orig_gm_firstlineno = None
+        self._orig_gm_cache.clear()
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
@@ -4202,25 +4219,29 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
-        # update reference to original meta if we're tracing a new code object
-        is_retracing = False
+        # update reference to original meta if we're tracing a new code object;
+        # building it per proxy would be quadratic in the retraced graph's size
         if tx.f_code is not self._cur_code:
-            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
-                "orig_graphmodule", lambda: None
-            )()
-            if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
-                is_retracing = True
-                self._orig_gm_meta = [
-                    nd.meta for nd in orig_graphmodule_maybe.graph.nodes
-                ]
-                self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
-                self._orig_gm_firstlineno = (
-                    orig_graphmodule_maybe.forward.__code__.co_firstlineno
-                )
-            else:
-                self._orig_gm_meta = None
-                self._orig_gm_lineno_map = None
-                self._orig_gm_firstlineno = None
+            self._cur_code = tx.f_code
+            orig_gm_entry = self._orig_gm_cache.get(tx.f_code)
+            if orig_gm_entry is None:
+                # Look up uncached code each time: it may be registered later.
+                orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                    "orig_graphmodule", lambda: None
+                )()
+                if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                    orig_gm_entry = (
+                        [nd.meta for nd in orig_graphmodule_maybe.graph.nodes],
+                        orig_graphmodule_maybe._lineno_map,
+                        orig_graphmodule_maybe.forward.__code__.co_firstlineno,
+                    )
+                    self._orig_gm_cache[tx.f_code] = orig_gm_entry
+            (
+                self._orig_gm_meta,
+                self._orig_gm_lineno_map,
+                self._orig_gm_firstlineno,
+            ) = orig_gm_entry or (None, None, None)
+        is_retracing = self._orig_gm_meta is not None
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
