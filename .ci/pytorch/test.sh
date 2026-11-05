@@ -2805,6 +2805,8 @@ elif [[ "${TEST_CONFIG}" == inductor_avx2 ]]; then
   setup_torch_trace
   test_inductor_avx2_shard "${SHARD_NUMBER}"
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == triton_pin_scalar_controls ]]; then
+  python .ci/pytorch/triton_pin_scalar_controls.py
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   setup_torch_trace
