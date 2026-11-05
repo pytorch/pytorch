@@ -2132,8 +2132,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(MyClass.my_attr, 42)
 
     def test_class_delattr(self):
-        """delattr on a class works (graph breaks at the del, but replays)."""
-
         class MyClass:
             pass
 
@@ -2142,9 +2140,127 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             del MyClass.y
             return x + 1
 
-        result = torch.compile(fn, backend="eager")(torch.tensor(1))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
         self.assertEqual(result, torch.tensor(2))
         self.assertFalse(hasattr(MyClass, "y"))
+
+    def test_class_delattr_existing(self):
+        class MyClass:
+            y = 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            try:
+                del MyClass.y
+            except AttributeError as e:
+                return x - 1, str(e)
+            return x + 1, hasattr(MyClass, "y")
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(x), (x + 1, False))
+        self.assertNotIn("y", MyClass.__dict__)
+        # The deletion was replayed, so the guard fails and the recompile raises.
+        msg = "type object 'MyClass' has no attribute 'y'"
+        self.assertEqual(fn(x), (x - 1, msg))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_delattr_inherited(self):
+        class Base:
+            y = 1
+
+        class Child(Base):
+            y = 2
+
+        class NoOwn(Base):
+            pass
+
+        def fn(x):
+            del Child.y
+            NoOwn.y = 3
+            del NoOwn.y
+            try:
+                del NoOwn.y
+            except AttributeError:
+                return x + 1
+            return x
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1)
+        self.assertEqual((Child.y, NoOwn.y), (1, 1))
+        self.assertNotIn("y", Child.__dict__)
+
+    def test_class_delattr_then_hasattr_on_base(self):
+        class Base:
+            y = 1
+
+        class Child(Base):
+            y = 2
+
+        def fn(x):
+            del Child.y
+            return x + 1, hasattr(Child, "y")
+
+        x = torch.zeros(1)
+        # Base.y is still visible: Dynamo graph breaks at the hasattr instead of
+        # answering from the pending deletion.
+        self.assertEqual(torch.compile(fn, backend="eager")(x), (x + 1, True))
+        self.assertEqual(Child.y, 1)
+
+    def test_class_delattr_errors(self):
+        class MyClass:
+            pass
+
+        def fn(x):
+            msgs = []
+            for cls, name in ((MyClass, 1), (collections.OrderedDict, "move_to_end")):
+                try:
+                    delattr(cls, name)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return x + 1, msgs
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_torch_class_delattr_graph_breaks(self):
+        def fn(x):
+            del torch.nn.Linear.missing_attr
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
+    def test_metaclass_delattr(self):
+        calls = []
+
+        class Meta(type):
+            def __delattr__(cls, name):
+                calls.append(name)
+                if name == "locked":
+                    raise AttributeError(f"cannot delete {name}")
+                super().__delattr__(name)
+
+        class MyClass(metaclass=Meta):
+            locked = 1
+            free = 2
+
+        def fn(x):
+            del MyClass.free
+            try:
+                del MyClass.locked
+            except AttributeError as e:
+                return x + 1, hasattr(MyClass, "free"), str(e)
+            return x, True, ""
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, (x + 1, False, "cannot delete locked"))
+        # The replay uses type.__delattr__, so the hook ran once per del.
+        self.assertEqual(calls, ["free", "locked"])
+        self.assertEqual(MyClass.locked, 1)
+        self.assertFalse(hasattr(MyClass, "free"))
 
     def test_property_get_explicit_via_class_dict(self):
         # VariableTracker has no tp_descr_get_impl default (unlike
