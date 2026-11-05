@@ -160,6 +160,10 @@ c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Work::getFutureResult not implemented.")
 }
 
+bool Work::hasFutureResult() const {
+  return false;
+}
+
 void Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;

@@ -35,14 +35,13 @@ class _NcclWork(dist._Work):
     of ProcessGroupNCCL(nccl2)'s coalesceWorks)
     """
 
-    def __init__(
-        self, events, device, wd_handles=None, is_barrier=False, coalesced=False
-    ):
+    def __init__(self, events, device, wd_handles=None, is_barrier=False, result=None):
         super().__init__()
         self._events = list(events)
         # wait() clears _events; the result future still tracks the kernels.
         self._kernel_events = tuple(self._events)
-        self._coalesced = coalesced
+        # A coalesced op's result future, completed by end_coalescing.
+        self._result = result
         self._device = device
         self._wd_handles = list(wd_handles) if wd_handles else []
         self._is_barrier = is_barrier
@@ -65,13 +64,10 @@ class _NcclWork(dist._Work):
         )
 
     def get_future_result(self):
-        # An op inside a coalescing window has no events; its kernels are only
-        # enqueued by end_coalescing.
-        if self._coalesced:
-            raise NotImplementedError("coalesced op; use the end_coalescing work")
-        # A CPU future: device-aware ones are rejected, since they may complete
-        # at enqueue. Reads SUCCESS once the kernels finish, including kernels
-        # cut short by abort().
+        if self._result is not None:
+            return self._result
+        # A CPU future, so it completes when the kernels finish rather than at
+        # enqueue, including kernels cut short by abort().
         return self._complete_on_events(
             torch.futures.Future(), WorkResult.SUCCESS.value, self._kernel_events
         )
@@ -140,6 +136,7 @@ class NCCL4PyBackend(C10DBackend):
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
         self._coalescing = False
         self._coalesced_streams = set()
+        self._coalesced_results = []
         _get_watchdog()
 
     @property
@@ -191,7 +188,9 @@ class NCCL4PyBackend(C10DBackend):
         # the op used; end_coalescing records the events after group_end.
         if self._coalescing:
             self._coalesced_streams.update(streams)
-            return _NcclWork((), self._device, coalesced=True)
+            result = torch.futures.Future()
+            self._coalesced_results.append(result)
+            return _NcclWork((), self._device, result=result)
         events = []
         wd_handles = []
         for stream in streams:
@@ -233,6 +232,7 @@ class NCCL4PyBackend(C10DBackend):
     def start_coalescing(self):
         self._coalescing = True
         self._coalesced_streams = set()
+        self._coalesced_results = []
         nccl.group_start()
 
     def end_coalescing(self):
@@ -242,7 +242,16 @@ class NCCL4PyBackend(C10DBackend):
         self._coalesced_streams = set()
         if not streams:
             streams = {torch.cuda.current_stream(self._device)}
-        return self._make_work(*streams)
+        work = self._make_work(*streams)
+        results, self._coalesced_results = self._coalesced_results, []
+        if results:
+
+            def complete(fut):
+                for result in results:
+                    result.set_result(fut.value())
+
+            work.get_future_result().add_done_callback(complete)
+        return work
 
     def send(self, tensor_list, dst, tag=0):
         self._check_tensors(tensor_list)
