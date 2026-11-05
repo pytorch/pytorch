@@ -846,7 +846,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
             return torch.cumsum(x, -1)
 
         x = torch.ones(10 * 3 * 352 * 352, device=device)
-        self.assertEqual(torch.compile(fn, dynamic=True)(x), fn(x))
+        actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        lookback = "exclusive_scan_decoupled_lookback("
+        FileCheck().check("'r0_numel': 'i64'").check(lookback).run(code)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
