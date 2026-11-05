@@ -185,6 +185,7 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:

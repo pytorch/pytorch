@@ -5399,6 +5399,9 @@ class DefaultDictVariable(ConstDictVariable):
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
 
+    def python_type(self) -> type:
+        return collections.defaultdict
+
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:
         """Check if arg is a valid default_factory (callable or None).
@@ -5414,7 +5417,7 @@ class DefaultDictVariable(ConstDictVariable):
         return isinstance(
             arg,
             (
-                variables.BaseBuiltinVariable,
+                variables.TypeVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
                 variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
