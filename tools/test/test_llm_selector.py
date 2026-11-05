@@ -188,9 +188,8 @@ class TestSelection(unittest.TestCase):
             selection.TEST_SH_GLOBS,
             "update selection.TEST_SH_GLOBS to match test.sh's dispatch",
         )
-        self.assertFalse(
-            [b for b in branches if not b.startswith("*") and "inductor" in b]
-        )
+        # An exact branch such as inductor_avx2 runs no --inductor function (checked
+        # below), so the ALWAYS_COVERED set of a glob it contains only over-covers it.
         # Each function that runs files with --inductor is called by exactly one branch of the chain, on a glob.
         includes = inductor_includes(sh)
         callers: dict[str, set[str]] = {f: set() for f in includes}

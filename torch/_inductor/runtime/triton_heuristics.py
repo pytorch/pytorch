@@ -3864,9 +3864,14 @@ def cached_autotune(
     if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
         kernel = thunk()
         return lambda fn: kernel
-    if size_hints is not None and heuristic_type in (
-        HeuristicType.REDUCTION,
-        HeuristicType.PERSISTENT_REDUCTION,
+    if (
+        size_hints is not None
+        and heuristic_type
+        in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+        )
+        and not triton_meta.get("native_matmul")
     ):
         configs = _enforce_reduction_config_block_minimums(
             configs, size_hints, inductor_meta
@@ -4110,6 +4115,45 @@ def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Con
             capped_configs.append(cfg)
 
     return unique_configs(capped_configs)
+
+
+def _enforce_native_matmul_config_min_xblock(
+    configs: list[Config],
+    min_xblock: int | None,
+    *,
+    r0_block: int | None = None,
+) -> list[Config]:
+    if min_xblock is None:
+        return configs
+    min_xblock = next_power_of_2(min_xblock)
+
+    adjusted_configs: list[Config] = []
+    for original in configs:
+        cfg = copy.deepcopy(original)
+        original_numel = native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], min_xblock)
+
+        def shrink(field: str, floor: int) -> None:
+            while (
+                native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+                > original_numel
+                and cfg.kwargs.get(field, floor) > floor
+            ):
+                cfg.kwargs[field] //= 2
+
+        # Native matmul requires at least 16 elements in the dot tile.
+        # Prefer shrinking the independent output-row tile when raising X.
+        shrink("YBLOCK", 1)
+        if r0_block is None:
+            shrink("R0_BLOCK", 16)
+
+        if not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            continue
+        if cfg.kwargs.get("R0_BLOCK", r0_block or 16) < 16:
+            continue
+        adjusted_configs.append(cfg)
+
+    return unique_configs(adjusted_configs)
 
 
 def _enforce_reduction_config_block_minimums(
