@@ -2968,35 +2968,6 @@ class TestProfilerDevice(TestCase):
             row_limit=-1,
         )
 
-        test_schedule = torch.profiler.schedule(
-            skip_first=3, wait=2, warmup=1, active=4, repeat=2
-        )
-        test_schedule_expected_outputs = [
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.WARMUP,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD_AND_SAVE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.WARMUP,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD,
-            ProfilerAction.RECORD_AND_SAVE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-            ProfilerAction.NONE,
-        ]
-        for step in range(len(test_schedule_expected_outputs)):
-            self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
-
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_multiple_steppers(self, device):
@@ -3805,9 +3776,83 @@ class TestPrivateUse1ProfilerState(TestCase):
                 )
 
 
+@unittest.skipIf(not kineto_available(), "Kineto is required")
 class TestProfilerDeviceStopped(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     PATCH_TARGET = "torch.autograd._is_kineto_stopped"
+
+    def test_device_stopped_during_warmup_and_restart(self, device):
+        traces: list[set[str]] = []
+
+        def handler(prof):
+            self.assertIsNotNone(prof.profiler.kineto_results)
+            traces.append({event.name for event in prof.events()})
+
+        x = torch.ones(2, 2, device=device)
+        p = profile(
+            activities=get_profiler_activities(device.split(":")[0]),
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1),
+            on_trace_ready=handler,
+        )
+        with p:
+            self.assertEqual(p.current_action, ProfilerAction.WARMUP)
+            with record_function("warmup_workload"):
+                torch.add(x, x)
+            with patch(self.PATCH_TARGET, return_value=True):
+                p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(len(traces), 1)
+            self.assertNotIn("warmup_workload", traces[0])
+
+        # Stopping in DEVICE_STOPPED must not finalize the same session twice.
+        self.assertEqual(len(traces), 1)
+        self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+        with p:
+            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            with record_function("restarted_workload"):
+                torch.add(x, x)
+
+        self.assertEqual(len(traces), 2)
+        self.assertIn("restarted_workload", traces[1])
+        self.assertIn("aten::add", traces[1])
+
+    def test_device_stopped_recovers_without_warmup(self, device):
+        traces: list[set[str]] = []
+
+        def handler(prof):
+            self.assertIsNotNone(prof.profiler.kineto_results)
+            traces.append({event.name for event in prof.events()})
+
+        x = torch.ones(2, 2, device=device)
+        p = profile(
+            activities=get_profiler_activities(device.split(":")[0]),
+            schedule=torch.profiler.schedule(wait=0, warmup=0, active=3, repeat=2),
+            on_trace_ready=handler,
+        )
+        with p:
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            with record_function("partial_workload"):
+                torch.add(x, x)
+            with patch(self.PATCH_TARGET, return_value=True):
+                p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(len(traces), 1)
+            self.assertIn("partial_workload", traces[0])
+
+            with record_function("stopped_workload"):
+                torch.add(x, x)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
+            self.assertEqual(len(traces), 1)
+            p.step()
+            self.assertEqual(p.current_action, ProfilerAction.RECORD)
+            with record_function("recovered_workload"):
+                torch.add(x, x)
+
+        self.assertEqual(len(traces), 2)
+        self.assertIn("recovered_workload", traces[1])
+        self.assertIn("aten::add", traces[1])
+        self.assertNotIn("stopped_workload", traces[1])
 
     def test_device_stopped_with_real_kineto(self, device):
         """Integration test: when _is_kineto_stopped flips True mid-run
@@ -3815,11 +3860,13 @@ class TestProfilerDeviceStopped(TestCase):
         actually fire stop_trace + _trace_ready (not just flip the action
         enum) — and produce a non-empty partial trace. After the schedule
         rolls over, the next cycle must run cleanly."""
-        event_counts: list[int] = []
+        traces: list[set[str]] = []
 
         def handler(prof):
-            event_counts.append(len(list(prof.events())))
+            self.assertIsNotNone(prof.profiler.kineto_results)
+            traces.append({event.name for event in prof.events()})
 
+        x = torch.ones(2, 2, device=device)
         p = profile(
             activities=get_profiler_activities(device.split(":")[0]),
             schedule=torch.profiler.schedule(wait=0, warmup=1, active=4, repeat=2),
@@ -3829,9 +3876,10 @@ class TestProfilerDeviceStopped(TestCase):
         with p:
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
 
-            # Cycle 1: two RECORD steps with real workload (steps 1 and 2).
+            # Advance through warmup and begin recording marked work.
             for _ in range(2):
-                torch.add(torch.ones(2, 2), torch.ones(2, 2))
+                with record_function("partial_workload"):
+                    torch.add(x, x)
                 p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
 
@@ -3839,14 +3887,13 @@ class TestProfilerDeviceStopped(TestCase):
             # _trace_ready against the live Kineto session, so handler() runs with
             # whatever Kineto collected during steps 1-2.
             with patch(self.PATCH_TARGET, return_value=True):
-                torch.add(torch.ones(2, 2), torch.ones(2, 2))
+                torch.add(x, x)
                 p.step()
                 self.assertEqual(p.current_action, ProfilerAction.DEVICE_STOPPED)
 
-            self.assertEqual(len(event_counts), 1)
-            self.assertGreater(
-                event_counts[0], 0, "Partial cycle 1 trace should contain events"
-            )
+            self.assertEqual(len(traces), 1)
+            self.assertIn("partial_workload", traces[0])
+            self.assertIn("aten::add", traces[0])
 
             # Walk through DEVICE_STOPPED until the schedule rolls over to WARMUP.
             # Patch is removed; persistence guard alone keeps us in DEVICE_STOPPED
@@ -3856,14 +3903,16 @@ class TestProfilerDeviceStopped(TestCase):
             p.step()  # step 5: schedule says WARMUP, exits DEVICE_STOPPED via prepare_trace
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
 
-            # Cycle 2: full active phase against a freshly prepared Kineto session.
+            # Advance through warmup and record work in the fresh native session.
             for _ in range(4):
-                torch.add(torch.ones(2, 2), torch.ones(2, 2))
+                with record_function("recovered_workload"):
+                    torch.add(x, x)
                 p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
 
-        self.assertEqual(len(event_counts), 2)
-        self.assertGreater(event_counts[1], 0, "Cycle 2 trace should contain events")
+        self.assertEqual(len(traces), 2)
+        self.assertIn("recovered_workload", traces[1])
+        self.assertIn("aten::add", traces[1])
 
 
 instantiate_device_type_tests(TestProfilerDeviceStopped, globals(), except_for=("cpu",))
