@@ -991,10 +991,6 @@ def xor_words(pairs, maximum, outputs):
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @unittest.skipIf(not has_triton(), "Requires Triton")
 class TestInlineAsmConcat(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.enterContext(config.patch(cat_fuse_computed_input_copies=True))
-
     @parametrize("multiple_outputs", [False, True])
     @config.patch(
         {

@@ -9663,14 +9663,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
 
-    @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_realized_inputs(self):
-        # Each input reads x eight times, so it is realized before stack, and
-        # its unsqueeze view freezes it. The copy into the stack output should
-        # fuse into the producer instead of a separate pointwise cat.
-        if self.device == "cpu":
-            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
-
+        # Each input reads x eight times, so it is realized before stack. Its only
+        # reader is the stack, so the cat places it in the output, with no copy.
         def fn(x):
             return torch.stack(
                 [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
@@ -9678,22 +9673,57 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         torch._inductor.metrics.reset()
         self.common(fn, (torch.randn([4096, 16]),))
-        assertGeneratedKernelCountEqual(self, 1)
+        if self.device != "cpu":
+            # CPU's realize thresholds are higher, so the inputs stay unrealized
+            # and the placement never applies.
+            assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(cat_fuse_computed_input_copies=True)
     def test_stack_realized_input_twice(self):
-        # One realized buffer copied into two slices, plus another reader; both
-        # copies fuse into the producer (two kernels with the flag off).
-        if self.device == "cpu":
-            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
-
+        # One realized buffer in two slices, plus another reader: it has more than
+        # one reader, so its unsqueeze freezes it and the cat copies it.
         def fn(x):
             y = sum(x[:, j] * (j + 1) for j in range(8))
             return torch.stack([y, y], -1), y[None, :] + 1
 
         torch._inductor.metrics.reset()
         self.common(fn, (torch.randn([4096, 16]),))
-        assertGeneratedKernelCountEqual(self, 1)
+        if self.device != "cpu":
+            # The copy is a second kernel; CPU always lowers cat as ConcatKernel.
+            assertGeneratedKernelCountEqual(self, 2)
+
+    def test_stack_realized_input_mutated(self):
+        # Functionalization gives the mutated input a second user, so it fails
+        # the single-user gate and is copied; only the other input is placed.
+        def fn(x):
+            a, b = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2))
+            out = torch.stack([a, b], -1)
+            a.add_(1)
+            return out, a
+
+        self.common(fn, (torch.randn([4096, 16]),))
+
+    def test_stack_realized_input_strided_readers(self):
+        # Both unsqueezes have a second reader that needs eager strides, so
+        # neither is placed; the cat copies both, as it did before this rule.
+        def fn(x, w):
+            a, b = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2))
+            ub = b.unsqueeze(-1)
+            out = torch.cat([a.unsqueeze(-1), ub], -1)
+            return out, a[None] @ w, torch.as_strided(ub, (64, 2), (2, 1))
+
+        self.common(fn, (torch.randn([256, 16]), torch.randn([256, 8])))
+
+    def test_cat_realized_unit_dim_views(self):
+        # unsqueeze on dim 0; the squeezed input freezes and is copied, as before
+        def fn(x):
+            a, b, c = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2, 3))
+            d = sum(x[:, j : j + 1] * (j + 4) for j in range(8))
+            return torch.cat([a[None], b[None]]), torch.stack([c, d.squeeze(-1)], -1)
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        if self.device != "cpu":
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_stack_cat_rule_exclusions(self):
         # The cat rule only reroutes whole computed buffers; a slice of one and a
@@ -9720,7 +9750,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 codes.append(re.sub(r"# AOT ID: .*", "", code))
             self.assertEqual(codes[0], codes[1], fn.__name__)
 
-    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_channels_last_inputs(self):
+        def fn(x):
+            a = (x.sin() + x.cos() + x.exp() + x).sum(1)
+            b = (x * 2).sum(1)
+            return torch.stack([a, b], -1), x.sin() * 2
+
+        x = torch.randn([2, 8, 16, 16]).to(memory_format=torch.channels_last)
+        self.common(fn, (x,), exact_stride=True)
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_view_of_computed_with_gpu_tensor(self):
+        def fn(a, b):
+            return a + (b * 2).sum(0, keepdim=True).squeeze(0)
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+        self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
+
     def test_stack_pad_cheap_inputs(self):
         # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
         if self.device == "cpu":

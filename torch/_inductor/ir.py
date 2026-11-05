@@ -4227,6 +4227,51 @@ class View(GenericView):
 
 
 @ir_dataclass
+class CatUnsqueezeView(GenericView):
+    """
+    A lazy unsqueeze of a buffer whose only consumer is a cat.
+
+    ``View.create`` would build a ReinterpretView and freeze the buffer, so
+    ConcatKernel could no longer place it and would copy it instead. This stays
+    lazy, so the cat places the buffer in its output slot, as a plain cat of the
+    buffer would. Only valid when nothing else can observe the view, which the
+    caller establishes; see ``lowering.unsqueeze``.
+    """
+
+    dim: int
+
+    @classmethod
+    def try_create(cls, x: IRNode, dim: int) -> CatUnsqueezeView | None:
+        """The view, or None if ``x`` is not a buffer the cat could place.
+
+        That covers an unrealized Pointwise, a ReinterpretView and a frozen
+        layout. Empty buffers are declined too: there is no copy to save.
+        """
+        if isinstance(x, TensorBox):
+            return cls.try_create(x.data, dim)
+        # _validate_dim resolves through the shape env, so this can be a sympy
+        # Integer; SqueezeView.create requires a plain int.
+        dim = int(dim)
+        if not (
+            isinstance(x, StorageBox)
+            and isinstance(x.data, ComputedBuffer)
+            and isinstance(x.data.layout, FlexibleLayout)
+            and not V.graph.sizevars.statically_known_equals(x.get_numel(), 0)
+            # A 0-d graph output keeps its flexible layout, so placing it would
+            # alias it into the cat's buffer; an N-d output is frozen by then.
+            and len(x.get_size()) > 0
+        ):
+            return None
+        size = [*x.get_size()]
+        size.insert(dim, sympy.S.One)
+
+        def reindex(index: Sequence[Expr]) -> Sequence[Expr]:
+            return [*index[:dim], *index[dim + 1 :]]
+
+        return cls(data=x, size=size, reindex=reindex, dim=dim)
+
+
+@ir_dataclass
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
@@ -7252,6 +7297,11 @@ class ConcatKernel(NopKernel):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst, allow_alias)
+
+        if isinstance(src, CatUnsqueezeView) and allow_alias:
+            # place the buffer itself, in the slot with the size-1 dim dropped
+            slot = SqueezeView.create(dst, dim=src.dim)
+            return cls.realize_into(src.data, slot, allow_alias)
 
         if isinstance(src, StorageBox) and allow_alias:
             src.realize()

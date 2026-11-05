@@ -172,7 +172,6 @@ def layer_norm_inputs(device, rows, width=1056):
 
 NESTED_CONFIG = {
     "triton.nested_reduction": True,
-    "cat_fuse_computed_input_copies": True,
     "loop_ordering_after_fusion": True,
     "emulate_precision_casts": True,
     "triton.multi_kernel": 0,
@@ -200,7 +199,6 @@ class NestedLaneTestCase(TestCase):
             "loop_ordering_after_fusion": loop_ordering,
             "split_reductions": False,
             "emulate_precision_casts": True,
-            "cat_fuse_computed_input_copies": True,
             "force_disable_caches": True,
         }
         # Tests define fn with the same code object, so drop earlier compiles.
@@ -392,7 +390,6 @@ class TestNestedAsmLaneInputs(NestedLaneTestCase):
             "triton.nested_reduction": True,
             "loop_ordering_after_fusion": True,
             "emulate_precision_casts": True,
-            "cat_fuse_computed_input_copies": True,
             "triton.multi_kernel": 0,
             "force_disable_caches": True,
         }
