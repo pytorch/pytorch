@@ -2586,6 +2586,22 @@ class TestReductionsDevice(TestCase):
 
     @onlyAccelerator
     @serialTest()
+    @largeMPSBufferTest("7GB")
+    @largeTensorTest("7GB")
+    def test_large_reductions_of_views(self, device):
+        # Expanded and strided views whose sizes or strides need 64-bit indexing over small storages
+        base = torch.arange(1 << 17, device=device).view(2, 1 << 16, 1)
+        self.assertEqual(base.expand(-1, -1, 1 << 16).sum((0, 2)), (base[0, :, 0] + base[1, :, 0]) * (1 << 16))
+        r = torch.tensor([[7], [3]], dtype=torch.int8, device=device).expand(2, 1 << 31).amax(0)
+        self.assertEqual((r.amin().item(), r.amax().item()), (7, 7))
+        del r
+        self.assertEqual(tuple(torch.zeros(1, dtype=torch.bool, device=device).expand((1 << 32) + 4096).max(0)), (False, 0))
+        out = torch.zeros((1 << 32) + 4096, dtype=torch.int8, device=device)[:: 1 << 20]
+        torch.amax(torch.full((2, out.numel()), 9, dtype=torch.int8, device=device), 0, out=out)
+        self.assertEqual(out, torch.full_like(out, 9))
+
+    @onlyAccelerator
+    @serialTest()
     @largeMPSBufferTest("9GB")
     @largeTensorTest("9GB")
     def test_var_mean_above_uint32(self, device):

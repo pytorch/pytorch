@@ -595,6 +595,21 @@ static void reduction_dispatch_mps(Tensor input,
                                    const std::string& profile_name = {}) {
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
+  // Strided output views needing 64-bit offsets (e.g. out= a slice of a huge tensor) go through contiguous temporaries
+  auto needs_temp = [](const Tensor& t) { return !t.is_contiguous() && !canUse32BitIndexMath(t); };
+  if (needs_temp(output) || (op.mean && needs_temp(*op.mean))) {
+    auto temp_op = op;
+    if (op.mean) {
+      temp_op.mean = at::empty(op.mean->sizes(), op.mean->options());
+    }
+    const auto temp = at::empty(output.sizes(), output.options());
+    reduction_dispatch_mps(input, temp, temp_op, partial_type, combine_prefix, profile_name);
+    output.copy_(temp);
+    if (op.mean) {
+      op.mean->copy_(*temp_op.mean);
+    }
+    return;
+  }
   if (!canUse32BitIndexMath(input)) {
     reduction_dispatch_split_mps(input, output, op, partial_type, combine_prefix, profile_name);
     return;
@@ -668,22 +683,36 @@ static void reduction_dispatch_split_mps(const Tensor& input,
                                          const std::string& combine_prefix,
                                          const std::string& profile_name) {
   constexpr int64_t max_elems = std::numeric_limits<int32_t>::max();
-  int64_t d = -1, extent = 1;
+  const auto out_numel = output.numel();
+  int64_t extent = 1, outer_kept = -1, outer_reduced = -1;
   for (const auto i : c10::irange(input.dim())) {
     extent += (input.size(i) - 1) * input.stride(i);
-    if (input.size(i) > 1 && (d < 0 || input.stride(i) > input.stride(d))) {
-      d = i;
+    auto& outer = output.size(i) == input.size(i) ? outer_kept : outer_reduced;
+    if (input.size(i) > 1 && (outer < 0 || input.stride(i) > input.stride(outer))) {
+      outer = i;
     }
   }
-  const auto size = input.size(d), stride = input.stride(d);
-  const auto slice_extent = extent - (size - 1) * stride;
-  // Largest chunk whose numel and max offset fit; a slice that does not fit is split again by recursion
-  auto chunk = (max_elems - 1) / (input.numel() / size);
-  if (stride > 0) {
-    chunk = std::min(chunk, (max_elems - slice_extent) / stride + 1);
+  // Largest chunk along dim i whose numel and max offset fit, or 0 if a single slice does not
+  auto max_chunk = [&](int64_t i) {
+    const auto size = input.size(i), stride = input.stride(i);
+    const auto slice_extent = extent - (size - 1) * stride;
+    auto n = (max_elems - 1) / (input.numel() / size);
+    if (stride > 0) {
+      n = std::min(n, slice_extent > max_elems ? 0 : (max_elems - slice_extent) / stride + 1);
+    }
+    return n;
+  };
+  // Split the outermost dim. A reduced one only when its slices and the [num_chunks, output.numel()] partials both
+  // fit, so the raw-byte partial views below are never split again; otherwise the outermost kept one.
+  int64_t d = outer_reduced;
+  if (outer_kept >= 0 &&
+      (d < 0 || input.stride(outer_kept) > input.stride(d) || max_chunk(d) == 0 ||
+       at::ceil_div(input.size(d), max_chunk(d)) * out_numel >= max_elems)) {
+    d = outer_kept;
   }
+  const auto size = input.size(d);
   // Balanced chunks instead of full ones plus a tail, so power-of-two sizes split into power-of-two chunks
-  chunk = at::ceil_div(size, at::ceil_div(size, std::clamp<int64_t>(chunk, 1, size)));
+  const auto chunk = at::ceil_div(size, at::ceil_div(size, std::clamp<int64_t>(max_chunk(d), 1, size)));
   const auto num_chunks = at::ceil_div(size, chunk);
   auto chunk_of = [&](const Tensor& t, int64_t k) { return t.narrow(d, k * chunk, std::min(chunk, size - k * chunk)); };
   auto dispatch = [&](const Tensor& in, const Tensor& out, const ReductionOp& chunk_op) {
@@ -701,8 +730,7 @@ static void reduction_dispatch_split_mps(const Tensor& input,
     return;
   }
   // Partials are [num_chunks, output.numel()] with the chunk index along d; elem_size scales offsets for raw bytes
-  const auto out_numel = output.numel();
-  auto chunk_sizes = output.sizes().vec();
+  DimVector chunk_sizes(output.sizes());
   chunk_sizes[d] = 1;
   const auto chunk_strides = c10::contiguous_strides(chunk_sizes);
   auto partial_sizes = chunk_sizes;
@@ -718,7 +746,9 @@ static void reduction_dispatch_split_mps(const Tensor& input,
     // Chunk indices are local, so offset them and keep the one from the chunk whose value wins. Ties go to the
     // lowest chunk, preserving first-occurrence semantics.
     const auto indices = at::empty({num_chunks * out_numel}, output.options());
-    const auto values = at::empty({num_chunks * out_numel}, input.options());
+    // argmax/argmin reject bool, so the winning chunk is picked on char values
+    const auto value_dtype = input.scalar_type() == kBool ? kChar : input.scalar_type();
+    const auto values = at::empty({num_chunks * out_numel}, input.options().dtype(value_dtype));
     for (const auto k : c10::irange(num_chunks)) {
       const auto in = chunk_of(input, k);
       auto idx = chunk_partial(indices, k);
