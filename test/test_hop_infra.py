@@ -8,7 +8,11 @@ import pkgutil
 import types
 
 import torch
-from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+from torch._higher_order_ops.cutedsl_kernel_wrap import (
+    CUTEDSL_CONSTANT_RULES,
+    CuteDSLHostFnInfo,
+    python_scalar,
+)
 from torch._higher_order_ops.user_kernel_hop import (
     _snapshot,
     constant_key,
@@ -213,7 +217,8 @@ class TestHOPInfra(TestCase):
 class TestCuteDSLHOPHelpers(TestCase):
     """The parts of CuTeDSL kernel support that need neither CUDA nor
     nvidia-cutlass-dsl: how a side table with CuTeDSL's constant rules keys and
-    stores constants."""
+    stores constants, and how a call is split. The tests that compile and launch
+    host functions are in test/inductor/test_cutedsl_kernels.py."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -567,6 +572,74 @@ class TestCuteDSLHOPHelpers(TestCase):
                 self.assertIsNot(snapshot, value)
                 self.assertIs(type(snapshot), type(value))
                 self.assertEqual(list(snapshot.items()), list(value.items()))
+
+    def test_host_fn_info_checks_and_splits_a_call(self):
+        # check_call and split_args need only a parsed signature, written out here: a
+        # tensor x, a cutlass Numeric n (int stands for its type), the stream, an
+        # unannotated k with a default, a Constexpr alpha and an unannotated cfg that
+        # defaults to None.
+        import numpy as np
+
+        info = CuteDSLHostFnInfo(
+            params=("x", "n", "stream", "k", "alpha", "cfg"),
+            stream_param="stream",
+            constexpr_params=frozenset({"alpha"}),
+            numeric_params={"n": int},
+            defaults={"k": 0.5, "cfg": None},
+        )
+        for names, msg in (
+            (["x", "alpha"], r"missing arguments \['n'\]"),
+            (["x", "n", "alpha", "kk"], r"got an unexpected argument 'kk'; its param"),
+            (["x", "n", "alpha", "stream"], "got a value for its stream parameter"),
+        ):
+            with self.assertRaisesRegex(TypeError, f"^CuTeDSL kernel f: {msg}"):
+                info.check_call("f", names)
+        info.check_call("f", ["x", "n", "alpha"])
+
+        x = torch.zeros(4)
+        runtime, constants = info.split_args("f", {"x": x, "n": 3, "alpha": 2})
+        self.assertEqual(list(runtime), ["x", "n", "k"])
+        self.assertEqual(constants, {"alpha": 2, "cfg": None})
+        # None is never a runtime scalar, not even for a cutlass Numeric parameter.
+        _, constants = info.split_args("f", {"x": x, "n": None, "alpha": 2})
+        self.assertEqual(constants, {"n": None, "alpha": 2, "cfg": None})
+        # numpy scalars of bool, integer and floating types for an unannotated
+        # parameter are runtime scalars, a complex one is not.
+        for k in (np.float32(1.5), np.float16(1.5), np.int64(3), np.bool_(True)):
+            runtime, _ = info.split_args("f", {"x": x, "n": 3, "alpha": 2, "k": k})
+            self.assertIs(runtime["k"], k)
+        _, constants = info.split_args("f", {"x": x, "n": 3, "alpha": 2, "k": 1j})
+        self.assertEqual(constants["k"], 1j)
+        _, constants = info.split_args(
+            "f", {"x": x, "n": 3, "alpha": 2, "k": np.complex64(1j)}
+        )
+        self.assertIn("k", constants)
+        tensor_for_scalar = {"n": {"n": x, "alpha": 2}, "alpha": {"n": 3, "alpha": x}}
+        for param, args in tensor_for_scalar.items():
+            msg = f"^CuTeDSL kernel f: parameter '{param}' takes a scalar .*, not a "
+            with self.assertRaisesRegex(TypeError, msg + "tensor$"):
+                info.split_args("f", {"x": x, **args})
+        info = dataclasses.replace(info, defaults={"x": x, "k": 0.5, "cfg": None})
+        msg = "^CuTeDSL kernel f: parameter 'x' defaults to a tensor; pass the tensor$"
+        with self.assertRaisesRegex(ValueError, msg):
+            info.split_args("f", {"n": 3, "alpha": 2})
+
+    def test_python_scalar_converts_numpy_scalars(self):
+        # The DSL takes only an exact bool, int or float for a runtime scalar of an
+        # unannotated parameter.
+        import numpy as np
+
+        for value, expected in (
+            (np.float32(1.5), 1.5),
+            (np.float16(1.5), 1.5),
+            (np.float64(1.5), 1.5),
+            (np.int64(-3), -3),
+            (np.uint64(2**64 - 1), 2**64 - 1),
+            (np.bool_(True), True),
+        ):
+            converted = python_scalar(value)
+            self.assertIs(type(converted), type(expected))
+            self.assertEqual(converted, expected)
 
 
 if __name__ == "__main__":

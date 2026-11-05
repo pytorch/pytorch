@@ -118,11 +118,13 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     fields, or a callable object other than a dataclass instance (a functor), is
     keyed as itself, by identity unless its class defines equality and hashing (a
     dataclass's compares its fields alone), and refused if it is unhashable (as a
-    dataclass with eq=True that is not frozen is): a mutation of it leaves its key
-    as it was, and a new object with the same contents gets a key of its own. Such an
-    object also stays in memory, with anything it holds, a tensor included
-    (constant_key does not look inside it): a side-table entry holds it for the life
-    of the process (see KernelSideTable)."""
+    dataclass with eq=True that is not frozen is): mutating it between launches
+    reuses the kernel compiled for its old contents, and a new object with the same
+    contents is compiled again. Such an object also stays in memory, with anything it
+    holds, a tensor included (constant_key does not look inside it): a side-table
+    entry holds it for the life of the process (see KernelSideTable), and the eager
+    compile cache as long as the host function lives (see
+    torch/_native/cutedsl/user_kernel.py)."""
     cls = type(value)
     if rules.is_dsl_value(value) or _has_slot_state(value):
         return None
