@@ -1963,9 +1963,7 @@ def forward(self, primals, tangents):
                 register_custom_class(Bad1, typ="symbolic")
         finally:
             # Clean up pytree registration to avoid leaking state to other tests
-            pytree.SUPPORTED_NODES.pop(Bad1, None)
-            pytree.SUPPORTED_SERIALIZED_TYPES.pop(Bad1, None)
-            pytree.CONSTANT_NODES.discard(Bad1)
+            pytree._deregister_pytree_node(Bad1)
 
         @dataclass
         class Bad2(CustomClassBase):
