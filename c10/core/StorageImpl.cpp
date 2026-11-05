@@ -44,12 +44,12 @@ void throwNullDataPtrError() {
 //   In the future we can consider extending to more wrapper Tensor subclasses.
 void warnDeprecatedDataPtr() {
   TORCH_WARN_ONCE(
-      "Accessing the data pointer of FakeTensor is deprecated and will error in "
-      "PyTorch 2.5. This is almost definitely a bug in your code and will "
-      "cause undefined behavior with subsystems like torch.compile. "
+      "Accessing the data pointer of FakeTensor is deprecated. This is almost "
+      "definitely a bug in your code and will cause undefined behavior with "
+      "subsystems like torch.compile. "
       "Please wrap calls to tensor.data_ptr() in an opaque custom op; "
       "If all else fails, you can guard accesses to tensor.data_ptr() on "
-      "isinstance(tensor, FakeTensor).")
+      "torch._subclasses.fake_tensor.is_fake_tensor(tensor).")
 }
 
 [[noreturn]] void StorageImpl::throw_data_ptr_access_error() const {
