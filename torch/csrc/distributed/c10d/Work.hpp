@@ -136,6 +136,12 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Throws c10::NotImplementedError if unsupported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
 
+  // Whether getFutureResult() is implemented. False means it throws; true
+  // doesn't guarantee it won't. Override it along with getFutureResult(), or
+  // FlightRecorderHook retires the Work's ops at issue. Called for every op
+  // FlightRecorderHook records, so it must be cheap.
+  virtual bool hasFutureResult() const;
+
   virtual float getDuration() const;
 
   virtual uint64_t getSequencenumber() const;
