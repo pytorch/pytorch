@@ -193,6 +193,13 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
   ENDIF()
 
+  # Temporary until oneDNN pins ZenDNN v6.1.3: v6.1.2 switches to its installed
+  # package when CMake re-runs after a build, which rebuilds all of oneDNN.
+  # ZENDNNROOT or zendnnl_DIR still selects a prebuilt package.
+  IF(USE_MKLDNN_ZENDNN AND NOT ZENDNNROOT AND NOT DEFINED ENV{ZENDNNROOT}
+     AND NOT zendnnl_DIR AND NOT DEFINED ENV{zendnnl_DIR})
+    SET(CMAKE_DISABLE_FIND_PACKAGE_zendnnl ON)
+  ENDIF()
   SET(ONEDNN_X64_USE_ZEN ${USE_MKLDNN_ZENDNN} CACHE BOOL "" FORCE)
 
   ADD_SUBDIRECTORY(${MKLDNN_ROOT})
