@@ -268,10 +268,12 @@ struct C10_API FakeTensorMode {
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -2723,7 +2725,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else

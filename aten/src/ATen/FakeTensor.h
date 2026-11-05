@@ -21,8 +21,14 @@ TORCH_API void set_and_normalize_fake_device(
 // pointer access, as Python's FakeTensor.__new__ does for every fake it makes,
 // a view op's output included. Views made within a kernel's implementation
 // (maybe_copy_fake_tensor_metadata), which Python never wraps, share their
-// base's marked storage and do not mark it again. Like the elem of Python's
-// FakeTensor, impl must read as meta: a meta tensor, or a fake inside a kernel.
+// base's marked storage and do not mark it again.
+//
+// impl must read as meta: a meta tensor, or, inside a kernel, a fake. The
+// latter is how the fake fallback (later in this stack) makes a new fake of a
+// kernel's output that inherited a fake input's Fake key and ExtraMeta, such as
+// a view op's output; its fake device and mode are replaced. A rejected impl is
+// left unchanged, unless another thread sets allow_meta to False during the
+// call.
 TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
