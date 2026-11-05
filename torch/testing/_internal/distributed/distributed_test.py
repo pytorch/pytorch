@@ -2672,6 +2672,9 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
+                self.assertEqual(
+                    tensor, _build_tensor(src + 1, expected_value, dtype=dtype)
+                )
                 # Gloo and NCCL are the only backends that reach here; every other
                 # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
