@@ -33,11 +33,17 @@ class TestColumnConfig(TestCase):
     def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
         itemsize = dtype.itemsize
         args = dict(
+            cc=(10, 3),
+            dtype=dtype,
             rows=(size << 20) // (columns * itemsize),
             columns=columns,
             batches=1,
             nfields=1,
+            trait_key="sum",
             itemsize=itemsize,
+            acc_bits=32,
+            nouts=1,
+            welford_outs=0,
         )
         args.update(kwargs)
         return ct.select_col_config(**args)
@@ -82,6 +88,70 @@ class TestColumnConfig(TestCase):
             self.assertEqual(getattr(cfg, key), value)
         self.assertEqual(cfg.partial_layout, "column")
         self.assertEqual(cfg.combine_columns, 0)
+
+    @parametrize(
+        "dtype,key,rows,columns,partials,full_tiles,expected",
+        [
+            # Looped views keep the default mapping, with or without full tiles.
+            (torch.float32, "sum", 8192, 4096, 1, False, None),
+            (torch.float16, "sum", 8192, 4096, 1, True, None),
+            (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
+            (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
+            (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
+            (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
+            (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
+            (torch.bfloat16, "amin", 32768, 4096, 4, True, (0, 32)),
+        ],
+    )
+    def test_b200_ordered_column_mappings(
+        self, dtype, key, rows, columns, partials, full_tiles, expected
+    ):
+        """Pin B200 ordered column widths, which apply to any outputs."""
+        for output in {dtype, torch.float32}:
+            with self.subTest(output=output):
+                cfg = ct.select_ordered_col_config(
+                    (10, 0),
+                    dtype,
+                    key,
+                    columns,
+                    1,
+                    partials,
+                    nfields=1,
+                    acc_bits=32,
+                    out_dtypes=(output,),
+                    rows=rows,
+                    full_tiles=full_tiles,
+                )
+                if expected is None:
+                    self.assertIsNone(cfg)
+                    continue
+                min_blocks, tile_columns = expected
+                want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
+                self.assertEqual(cfg, want._replace(full_tiles=full_tiles))
+
+    def test_b200_ordered_column_mapping_guards(self):
+        """Split views the fallback does not serve get None; multi-field split views keep
+        full-warp tiles."""
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float32,
+            trait_key="sum",
+            columns=1024,
+            batches=1,
+            partials=8,
+            nfields=1,
+            acc_bits=32,
+            out_dtypes=(torch.float32,),
+            rows=65536,
+            full_tiles=True,
+        )
+        for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}):
+            with self.subTest(**updates):
+                self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
+        index = {"trait_key": "argmaxi32", "nfields": 2, "out_dtypes": (torch.int32,)}
+        cfg = ct.select_ordered_col_config(**(args | index))
+        want = ct.OrderedColConfig(0, tile_columns=ct.WARP, full_tiles=True)
+        self.assertEqual(cfg, want)
 
 
 class TestColumnCombine(TestCase):
@@ -184,6 +254,25 @@ class TestColumnCombine(TestCase):
         # Six key fields precede TileReduce.cache_sig, whose unroll is its seventh field.
         unrolls = {k[12] for k in ct._CACHE if k[:2] == ("coltile", "unroll")}
         self.assertEqual(unrolls, {2})
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            expected = x.sum(0)
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("columns,served", [(256, True), (4095, True), (16, False)])
+    def test_inner_tree_order_hands_off(self, device, columns, served):
+        """inner_tree configs use the ordered kernel and fall back when it declines."""
+        x = torch.randn((257, columns), device=device)
+        cfg = ct.ColConfig("test_order", 64, 7, 4, "column", kernel_order="inner_tree")
+        trait = T.SumOps(acc=cutlass.Float32)
+        key = f"order_{columns}"
+        args = (trait, key, x, [torch.float32], 1, None, None, None)
+        with patch.object(ct, "select_col_config", return_value=cfg):
+            got = ct._reduce_col_tile(*args)[0]
+        tags = {k[0] for k in ct._CACHE if k[1] == key} & {"ordered_col", "coltile"}
+        self.assertEqual(tags, {"ordered_col" if served else "coltile"})
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),

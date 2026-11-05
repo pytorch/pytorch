@@ -16,7 +16,7 @@ from cutlass import const_expr, Int32, Int64
 
 import torch
 
-from ...cutedsl import launch as _L
+from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
@@ -25,6 +25,7 @@ from . import (  # safe: kernel_general imports us only lazily
     kernel_rowtile as _rt,
     tile,
 )
+from .traits import welford_outputs
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
@@ -38,9 +39,33 @@ _DEFAULT_BLOCK = 256
 
 class _XctaConfig(NamedTuple):
     # Defaults for omitted knobs. _split_C snaps subrow_target to a nearby legal divisor.
-    # Wide accumulators can prefer shorter rows, but no nfields formula avoids regressions.
+    # Wide accumulators can prefer other sub-row lengths, but no nfields formula avoids
+    # regressions, so select_xcta_config keeps measured anchors only.
     block: int = _DEFAULT_BLOCK
     subrow_target: int = _SUBROW_TARGET
+
+
+def select_xcta_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    N: int,
+    M: int,
+    *,
+    nouts: int,
+    welford_outs: int,
+    acc_bits: int,
+) -> _XctaConfig:
+    # B200 single-row Welford at 256 MiB and 2 GiB takes longer sub-rows.
+    if (
+        cc == (10, 0)
+        and dtype in _RB._B200_DTYPES
+        and M == 1
+        and N * dtype.itemsize in (256 << 20, 2 << 30)
+        and welford_outs == nouts
+        and acc_bits == 32
+    ):
+        return _XctaConfig(subrow_target=16384)
+    return _XctaConfig()
 
 
 def _split_C(
@@ -192,7 +217,15 @@ def _reduce_row_xcta(
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
-    cfg = _XctaConfig()
+    cfg = select_xcta_config(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        N,
+        M,
+        nouts=nouts,
+        welford_outs=welford_outputs(trait),
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+    )
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 

@@ -798,6 +798,13 @@ class VarMeanOps(WelfordOps):
         return (result, mean)
 
 
+def welford_outputs(trait) -> int:
+    """Outputs of a variance-returning Welford trait, or 0 for any other trait."""
+    if not isinstance(trait, WelfordOps) or trait.return_mean:
+        return 0
+    return getattr(trait, "nouts", 1)
+
+
 class MaxDimOps(ArgMaxOps):
     # Reuse GreaterOrNan and project value plus index.
     nouts = 2

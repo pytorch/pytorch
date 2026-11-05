@@ -33,7 +33,8 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import Int32, Int64
 
-from torch._native.cutedsl import launch as _L
+from torch._native.cutedsl import hw_caps as _hw, launch as _L
+from torch._native.cutedsl.dtypes import cute2torch
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
     kernel_general as kg,
@@ -433,6 +434,91 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(
             len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 1
         )
+
+    @parametrize(
+        "op,dtype",
+        [
+            ("argmax", torch.float32),
+            ("argmax", torch.bfloat16),
+            ("argmax", torch.float16),
+            ("argmin", torch.float32),
+        ],
+    )
+    def test_reduce_all_wide_blocks_and_waves(self, op, dtype):
+        """Grid-stride full index reductions in B200's 512-thread, eight-wave launch."""
+        L = (1 << 22) + 3
+        x = torch.randn(L, device="cuda", dtype=dtype)
+        trait = {"argmax": T.ArgMaxOps, "argmin": T.ArgMinOps}[op](acc=cutlass.Float32)
+        out_dtypes = [torch.int32]
+        cfg = kg._AllConfig(block=512, grid_mult=8)
+        G = kg._grid_size(L, cfg.block, _hw.caps(x.device).sm_count, cfg.grid_mult)
+        chunk = -(-L // G)
+        self.assertGreater(chunk, cfg.block, "threads no longer stride their chunks")
+        parts = [x.new_empty(G, dtype=cute2torch[f]) for f in trait.fdtypes]
+        outs = [torch.empty(1, device="cuda", dtype=d) for d in out_dtypes]
+        # _reduce_all's two grid-striding stages, at the launch select_all_config picks.
+        s1 = kg.ReduceBlock(
+            trait,
+            count=chunk,
+            num_o=G,
+            red_pairs=[(chunk, 1)],
+            kept_pairs=[(G, chunk)],
+            limit=L,
+            flat_tail=True,
+            gidx_from="chunk",
+            nouts=trait.nfields,
+            final=False,
+            block=cfg.block,
+        )
+        key = f"all_wide_{op}"
+        kg._launch(s1, ("all1", key, dtype) + s1.cache_sig, [kg._flat(x)], parts)
+        s2 = kg.ReduceBlock(
+            trait,
+            count=G,
+            num_o=1,
+            red_pairs=[(G, 1)],
+            kept_pairs=[],
+            from_partials=True,
+            project_n=L,
+            nouts=len(outs),
+            block=cfg.block,
+        )
+        s2_key = ("all2", key, tuple(out_dtypes), tuple(p.dtype for p in parts))
+        kg._launch(s2, s2_key + s2.cache_sig, parts, outs)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = (x.argmax(),) if op == "argmax" else (x.argmin(),)
+        for got, ref in zip(outs, want, strict=True):
+            self.assertEqual(got, ref.to(got.dtype).view(1))
+
+    @parametrize(
+        "op,dtype,count",
+        [
+            ("sum", torch.float32, 4095),
+            ("sum", torch.bfloat16, 1024),
+            ("argmax", torch.float16, 1024),
+        ],
+    )
+    def test_single_stage_warp_blocks(self, op, dtype, count):
+        """Fold strided rows in one-warp general blocks, the geometry B200's strided rules
+        launch from 2048 outputs; test_reduction_config pins the selector."""
+        rows = 2048
+        x = torch.randn(rows, 2 * count, device="cuda", dtype=dtype)[:, ::2]
+        trait = {"sum": T.SumOps, "argmax": T.ArgMaxOps}[op](acc=cutlass.Float32)
+        out_dtype = torch.float32 if op == "sum" else torch.int32
+        out = torch.empty(rows, device="cuda", dtype=out_dtype)
+        block = kg.ReduceBlock(
+            trait,
+            count=count,
+            num_o=rows,
+            red_pairs=((count, 2),),
+            kept_pairs=((rows, 2 * count),),
+            block=32,
+        )
+        key = ("warp_blocks", f"warp_blocks_{op}", dtype) + block.cache_sig
+        kg._launch(block, key, [kg._flat(x)], [out])
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.double().sum(1) if op == "sum" else x.argmax(1)
+        self.assertEqual(out, want.to(out_dtype), atol=1e-4, rtol=1e-4)
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
