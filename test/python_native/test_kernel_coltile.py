@@ -674,8 +674,11 @@ class TestOrderedColDevice(TestCase):
         rows, columns = x.shape[-2:]
         batches = x.numel() // (rows * columns)
         kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
+        acc, out = cutlass.Float32, torch.float32
+        if in_dtype == torch.float64:
+            acc, out = cutlass.Float64, torch.float64
         trait, outputs = {
-            "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
+            "sum": (T.SumOps(acc=acc), [out]),
             "mean": (T.MeanOps(acc=cutlass.Float32), [torch.float32]),
             "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
@@ -698,8 +701,7 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(reference)
         for a, b in zip(got, reference, strict=True):
             self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
-        ran = {k[0] for k in ct._CACHE if k[1] == key}
-        self.assertEqual(ran, {"ordered_col1" if split else "ordered_col"})
+        self.assertEqual(_tags(key), {"ordered_col1" if split else "ordered_col"})
 
     def test_split_plans_can_be_declined(self, device):
         x = torch.randn(32768, 32, device=device)
@@ -710,7 +712,7 @@ class TestOrderedColDevice(TestCase):
         # The same view runs as a split plan once allowed.
         got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=True)
         self.assertIsNotNone(got)
-        self.assertIn("ordered_col1", {k[0] for k in ct._CACHE if k[1] == "decline"})
+        self.assertIn("ordered_col1", _tags("decline"))
 
     def test_split_partial_indices_stay_below_int32(self, device):
         """Split partials are indexed output * partitions + partition in Int32."""
@@ -718,6 +720,8 @@ class TestOrderedColDevice(TestCase):
         x = torch.randn(rows, columns, device=device)
         trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
         # 4 partitions: B * C + WARP = 64 clears both limits, B * C * 4 = 128 the second.
+        # R * C also exceeds the patched limit, so the passing half runs the wide-stride
+        # kernel.
         with mock.patch.object(ct, "_INT32_LIMIT", 128):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, allow_split=True)
         self.assertIsNone(got)
@@ -763,7 +767,7 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
 
     @parametrize("pattern", ["signed_zeros", "ties"])
-    @parametrize("rows", [2048, 32768])
+    @parametrize("rows", [2048, 32768, 33000])
     def test_special_values_match_the_indexed_tree(self, device, pattern, rows):
         """Keep signed-zero maxima and argmax ties bitwise equal to the indexed tree."""
         columns = 32
@@ -791,8 +795,7 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(got)
         self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
-        ran = {k[0] for k in ct._CACHE if k[1] == key}
-        self.assertEqual(ran, {"ordered_col1" if rows > 8192 else "ordered_col"})
+        self.assertEqual(_tags(key), {"ordered_col1" if rows > 8192 else "ordered_col"})
         if pattern == "ties":
             self.assertEqual(got[0], torch.zeros_like(got[0]))
         else:

@@ -47,7 +47,7 @@ _Q_MIN = 16
 _Q_VEC = 64
 _SHORT_R = 64
 _MIN_LANES = 64
-# Stage one launches chunks along grid y.
+# Stage one chunks and ordered split partitions launch along grid y.
 _MAX_NPAR = 65535
 # Use blocks per column below the measured 4096-16384 crossover, then threads per column.
 _C_THREAD_STAGE2 = 8192
@@ -374,9 +374,10 @@ class _OrderedColReduce:
                     op,
                 )
             tile._streaming_push(load_tree, load_root, load, plan.depth, op)
-        # Split plans always run 16 warps per row.
-        if const_expr(plan.wpr == 1 and plan.shape == "looped"):
+        if const_expr(plan.wpr == 1):
             # One warp replays the whole row, so its root needs no shared-memory merge.
+            # Only looped plans run one warp; like the indexed tree, seed the identity
+            # so -0 sums become +0.
             final = op(ident, load_tree[0])
         else:
             smem = cutlass.utils.SmemAllocator()
@@ -485,13 +486,13 @@ def reduce_ordered_col(
         return None
     split = plan.shape == "split"
     # Split is verified bitwise for floating inputs only. Partials are indexed in Int32
-    # and partitions ride grid y (at most 65535).
+    # and partitions ride grid y.
     floating = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
     if split and (
         not allow_split
         or x.dtype not in floating
         or B * C * plan.split[0] >= _INT32_LIMIT
-        or plan.split[0] > 65535
+        or plan.split[0] > _MAX_NPAR
     ):
         return None
     op = _OrderedColReduce(trait, plan, R, C, trait.nfields if split else nouts)
