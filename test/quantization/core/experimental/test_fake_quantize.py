@@ -83,7 +83,7 @@ class TestFakeQuantize(unittest.TestCase):
         apot_fake.enable_fake_quant()
 
         with self.assertRaises(AssertionError):
-            apot_fake.forward(torch.clone(X), False)
+            apot_fake.forward(torch.clone(X))
 
     r""" Tests fake quantize helper backward() method
          using torch.autograd.gradcheck function.

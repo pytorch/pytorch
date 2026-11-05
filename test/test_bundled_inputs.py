@@ -252,7 +252,6 @@ class TestBundledInputs(TestCase):
         # inputs not defined so should fail
         with self.assertRaises(RuntimeError):
             mm = torch.jit.script(MultipleMethodModel())
-            mm._generate_bundled_inputs_for_forward()
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
                 inputs={

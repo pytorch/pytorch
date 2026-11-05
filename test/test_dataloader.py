@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import ctypes
+import pickle
 import errno
 import faulthandler
 import functools
@@ -1965,7 +1966,8 @@ except RuntimeError as e:
             dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
         )
         with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
-            with self.assertRaises(RuntimeError):
+            # dataloader re-raises the original pickling failure from w.start()
+            with self.assertRaises((TypeError, AttributeError, pickle.PicklingError)):
                 next(iter(dataloader))
 
     def test_get_worker_info(self):

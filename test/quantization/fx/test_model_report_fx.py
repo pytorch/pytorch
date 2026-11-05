@@ -1093,9 +1093,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # make sure error when try to rerun report generation for full report but not single report
             with self.assertRaises(RuntimeError):
-                model_full_report = model_report_full.generate_model_report(
-                    prepared_for_callibrate_model_full, False
-                )
+                model_full_report = model_report_full.generate_model_report(False)
 
             # make sure we don't run into error for single report
             model_single_report = model_report_single.generate_model_report(False)

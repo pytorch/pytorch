@@ -18,7 +18,7 @@ class TestMetaKernel(TestCase):
 
         fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float32).to("lazy")
 
-        with self.assertRaises(Exception):  # noqa: B017 - lazy backend dtype validation, exception type depends on torch version
+        with self.assertRaises(Exception):  # noqa: B017 - TODO: pin the type the lazy TS backend raises (meta mm has no dtype check)
             fc_nobias(input)
 
     def test_addmm(self):
