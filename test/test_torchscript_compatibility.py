@@ -78,6 +78,15 @@ class TestTorchScriptCompatibility(TestCase):
 
     def test_legacy_archive_compatibility(self):
         archive = self._script_archive()
+        if not IS_FBCODE:
+            for weights_only in (True, False):
+                archive.seek(0)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "TorchScript archives are no longer supported by torch.load",
+                ):
+                    torch.load(archive, weights_only=weights_only)
+            return
         with self.assertRaisesRegex(RuntimeError, "weights_only=True"):
             torch.load(archive, weights_only=True)
         archive.seek(0)

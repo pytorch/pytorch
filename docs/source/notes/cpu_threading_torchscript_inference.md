@@ -4,9 +4,10 @@
 
 ```{versionchanged} 2.16
 The deprecated public TorchScript compilation, tracing, save/load, and fusion
-entrypoints have been removed. Shared runtime support remains available for
-existing consumers. Trusted legacy TorchScript archives can still be loaded
-through `torch.load(..., weights_only=False)`; use `torch.export` for new models.
+entrypoints have been removed. Shared native runtime support remains available
+for existing consumers, but `torch.load` no longer accepts TorchScript archives.
+Migrate the original Python model to `torch.export`; use an older PyTorch version
+if you need to load an existing legacy archive.
 ```
 
 ```{warning}

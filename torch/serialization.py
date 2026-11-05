@@ -1565,27 +1565,13 @@ def load(
 
     with _open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):
-            # The zipfile reader is going to advance the current file position.
-            # If we want to actually tail call to torch.jit.load, we need to
-            # reset back to the original position.
-            orig_position = opened_file.tell()
             overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
-                    warnings.warn(
-                        "'torch.load' received a zip file that looks like a TorchScript archive;"
-                        " using the legacy TorchScript compatibility loader",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                    if weights_only:
-                        raise RuntimeError(
-                            "Cannot use ``weights_only=True`` with TorchScript archives passed to "
-                            "``torch.load``. " + UNSAFE_MESSAGE
-                        )
-                    opened_file.seek(orig_position)
-                    return torch.jit._serialization.load(
-                        opened_file, map_location=map_location
+                    raise RuntimeError(
+                        "TorchScript archives are no longer supported by torch.load. "
+                        "Use an older PyTorch version to load a legacy archive, or migrate "
+                        "the original model to torch.export and use torch.export.load."
                     )
                 if mmap:
                     if not _is_path(f):
