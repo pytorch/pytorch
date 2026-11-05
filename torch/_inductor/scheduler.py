@@ -6352,6 +6352,7 @@ class Scheduler:
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
+            and V.graph.cudagraphs_per_partition
             # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
             # pyrefly: ignore[unbound-name]
