@@ -6458,6 +6458,21 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("use_pos_weight", [False, True])
+    @parametrize_test("create_graph", [False, True])
+    def test_bce_with_logits_numerical_stability(self, device, dtype, use_pos_weight, create_graph):
+        x = torch.tensor([37.42994775023705, -37.42994775023705], device=device, dtype=dtype, requires_grad=True)
+        target = torch.tensor([1.0, 0.0], device=device, dtype=dtype)
+        pos_weight = torch.tensor([2.0, 3.0], device=device, dtype=dtype) if use_pos_weight else None
+
+        loss = F.binary_cross_entropy_with_logits(x, target, pos_weight=pos_weight, reduction="sum")
+        (grad,) = torch.autograd.grad(loss, x, create_graph=create_graph)
+
+        scale = torch.tensor([-2.0 if use_pos_weight else -1.0, 1.0], device=device, dtype=dtype)
+        expected_grad = torch.sigmoid(-x.detach().abs()) * scale
+        self.assertEqual(grad, expected_grad)
+
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -10736,9 +10751,8 @@ class TestNNDeviceType(NNTestCase):
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
                 ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
-            # Neither MPS nor XPU has a 5-D bicubic sampler. XPU does not run this class
-            # (allow_xpu=False); its kernel lives in torch-xpu-ops.
-            if mode == 'bicubic' and torch.device(device).type in ('mps', 'xpu'):
+            # MPS has no 5-D bicubic sampler.
+            if mode == 'bicubic' and torch.device(device).type == 'mps':
                 continue
             a = F.grid_sample(
                 small_image, coords, mode=mode,
@@ -11499,7 +11513,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
 
     @parametrize_test("dual_inputs", ["grid", "input_and_grid"])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
     def test_grid_sample_3d_bicubic_forward_ad(self, device, dtype, dual_inputs):
@@ -11616,7 +11630,7 @@ class TestNNDeviceType(NNTestCase):
         grad_3d = torch.autograd.grad(out_3d.sum(), grid_3d)[0]
         self.assertEqual(grad_3d.squeeze(1)[..., :2], grad_2d)
 
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_grid_sample_3d_bicubic_double_backward_low_precision(self, device, dtype):
@@ -11639,7 +11653,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
 
     @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     def test_grid_sample_3d_bicubic_last_voxel_of_a_wide_axis(self, device, size):
         # Neither extent is exact in float32, and the second is not exact in double.
