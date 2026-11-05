@@ -4111,6 +4111,37 @@ class TestConvolutionNNCUDA(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("rank", [0, 1, 2])
+    def test_cudnn_convolution_invalid_rank(self, device, transpose, rank):
+        x = torch.rand((4,) * rank, device=device)
+        args = (x, x, [0])
+        if transpose:
+            args += ([0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* to have at least 3 dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1], [1], 1, False, False, False)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("weight_rank", [0, 1, 2, 3, 5])
+    def test_cudnn_convolution_mismatched_rank(self, device, transpose, weight_rank):
+        x = torch.rand(1, 1, 4, 4, device=device)
+        weight = torch.rand((1,) * weight_rank, device=device)
+        args = (x, weight, [0, 0])
+        if transpose:
+            args += ([0, 0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* and weight to have the same number of dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1, 1], [1, 1], 1, False, False, False)
+
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm
     def test_cudnn_sm120_engine_errata(self, device):
@@ -4565,6 +4596,43 @@ class TestConvolutionNNCUDA(NNTestCase):
             yref = m(x)
         y = m(x)
         self.assertEqual(yref, y)
+
+    @skipCUDAIfNoMiopen
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test("transposed", [False, True])
+    @parametrize_test("benchmark", [False, True])
+    def test_conv_cuda_graph_new_shape(self, device, dtype, transposed, benchmark):
+        conv = F.conv_transpose2d if transposed else F.conv2d
+        w = torch.randn(8, 8, 3, 3, device=device, dtype=dtype, requires_grad=True)
+
+        def step(x):
+            out = conv(x, w, stride=2, padding=1)
+            return (out, *torch.autograd.grad(out.sum(), (x, w)))
+
+        def make_input(n, size):
+            x = torch.randn(n, 8, size, size, device=device, dtype=dtype)
+            return x.requires_grad_()
+
+        # The MIOpen algorithm cache is per process and not keyed on benchmark,
+        # so give each variant its own capture shape to keep it a cache miss.
+        size = 9 + 2 * benchmark + 4 * transposed
+        # deterministic keeps MIOpen off its split-K weight-gradient kernels,
+        # whose results vary from run to run.
+        with cudnn.flags(
+            enabled=True, benchmark=benchmark, deterministic=True, allow_tf32=False
+        ):
+            for _ in range(2):
+                step(make_input(2, 7))
+            x = make_input(4, size)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = step(x)
+            graph.replay()
+            # Capture uses immediate mode for the new shape; eager Find may pick
+            # a solver that rounds differently, so compare against immediate mode.
+            with torch.backends.miopen.flags(immediate=True):
+                expected = step(x)
+        self.assertEqual(captured, expected)
 
     @skipCUDAIfRocm
     @largeTensorTest("96GB", "cuda")

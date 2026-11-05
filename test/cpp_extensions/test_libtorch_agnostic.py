@@ -4,6 +4,7 @@ import gc
 import math
 import sysconfig
 import unittest
+import warnings
 from pathlib import Path
 
 import torch
@@ -21,6 +22,7 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
+    set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
     TemporaryFileName,
@@ -1198,6 +1200,80 @@ class TestLibtorchAgnostic(TestCase):
         num_threads = libtorch_agnostic.ops.test_get_num_threads()
         expected_num_threads = torch.get_num_threads()
         self.assertEqual(num_threads, expected_num_threads)
+
+    @skipIfTorchVersionLessThan(2, 15)  # Requires 2.15 for C++ warnings to reach Python
+    @skipIfTorchDynamo("Dynamo also runs the op while tracing")
+    @onlyCPU
+    def test_stable_torch_warn(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        values = (3, 3, -7)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for value in values:
+                libtorch_agnostic.ops.test_stable_torch_warn(value)
+
+        self.assertEqual(len(w), len(values))
+        for value, warning in zip(values, w):
+            self.assertIs(warning.category, UserWarning)
+            expected = f"test_stable_torch_warn value={value} scale=0.5 1"
+            self.assertIn(expected, str(warning.message))
+
+    def _run_stable_torch_warn_once(self):
+        """Runs in a subprocess so neither STABLE_TORCH_WARN_ONCE call site has warned yet."""
+        import os
+        import subprocess
+        import sys
+
+        test_script = """
+import warnings
+
+import torch
+import libtorch_agn_2_16 as libtorch_agnostic
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    for warn_always in (False, True, False):
+        torch.set_warn_always(warn_always)
+        for value in (7, 8, -1):
+            libtorch_agnostic.ops.test_stable_torch_warn_once(value)
+
+for warning in w:
+    print(warning.category.__name__, warning.message)
+"""
+        env = os.environ.copy()
+        # Pass the current sys.path to subprocess so it can find the locally installed extension
+        env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_torch_warn_once(self, device):
+        emitted = self._run_stable_torch_warn_once()
+
+        expected = ("value=7", "negative value", "value=7", "value=8", "negative value")
+        self.assertEqual(len(emitted), len(expected))
+        for message, line in zip(expected, emitted):
+            self.assertIn(f"UserWarning test_stable_torch_warn_once {message}", line)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("warn_always", [False, True])
+    def test_is_warn_always_enabled(self, device, warn_always):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with set_warn_always_context(warn_always):
+            enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
+        self.assertEqual(enabled, warn_always)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
