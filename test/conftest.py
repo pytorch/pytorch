@@ -31,6 +31,17 @@ except ImportError:
         pass
 
 
+try:
+    from torch.testing._internal.common_utils import HW_CLASSIFICATION_EXCLUDE
+except ImportError:
+    # Same workaround as above, for nightlies without this setting.
+    HW_CLASSIFICATION_EXCLUDE = frozenset()
+    if os.environ.get("PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"):
+        print(
+            "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION is ignored: this torch predates it"
+        )
+
+
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
 
@@ -152,8 +163,11 @@ class NodeidFilePlugin:
 class HardwareClassificationPytestPlugin:
     """Pytest plugin to filter collected tests by hw_classification."""
 
-    def __init__(self, hw_classification):
+    def __init__(
+        self, hw_classification: list[str] | None, *, exclude: frozenset = frozenset()
+    ) -> None:
         self.hw_classification = self._resolve_hw_classification(hw_classification)
+        self.exclude = exclude
 
     @staticmethod
     def _resolve_hw_classification(hw_classification):
@@ -163,19 +177,23 @@ class HardwareClassificationPytestPlugin:
 
         return {HardwareClassification[name] for name in hw_classification}
 
-    def pytest_collection_modifyitems(self, items):
-        if self.hw_classification is None:
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        if self.hw_classification is None and not self.exclude:
             return
         import torch.testing._internal.common_utils as _cu
 
-        filtered = []
+        selected = []
         _cu.filter_by_hw_classification(
             items,
             self.hw_classification,
             get_class=lambda item: getattr(item, "cls", None),
-            on_match=filtered.append,
+            on_match=selected.append,
+            exclude=self.exclude,
         )
-        items[:] = filtered
+        if len(selected) < len(items):
+            kept = set(selected)
+            config.hook.pytest_deselected(items=[i for i in items if i not in kept])
+            items[:] = selected
 
 
 def pytest_configure(config: Config) -> None:
@@ -207,9 +225,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
         )
-    if config.getoption("hw_classification"):
+    if config.getoption("hw_classification") or HW_CLASSIFICATION_EXCLUDE:
         config.pluginmanager.register(
-            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            HardwareClassificationPytestPlugin(
+                config.getoption("hw_classification"), exclude=HW_CLASSIFICATION_EXCLUDE
+            ),
             "hw_classification_plugin",
         )
     if config.getoption("multigpu_min_gpus"):

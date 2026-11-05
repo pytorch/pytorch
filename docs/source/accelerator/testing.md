@@ -10,6 +10,12 @@ PyTorch has a large upstream test suite. OOT backends can reuse these tests dire
 
 Test classification labels each test class (`GENERIC` / `ACCELERATOR` / device-specific), enabling runtime filtering via `--hw-classification` (supported by both `unittest` and `pytest`).
 
+`--hw-classification` runs only the listed labels and drops unclassified classes. To drop the listed labels instead and keep everything else, including unclassified classes, set the `PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION` environment variable (there is no flag form) to a comma-separated, case-insensitive list of labels; an unknown label is an error. Dropped tests aren't reported as skipped and don't appear in JUnit XML: `unittest` doesn't load them, and `pytest` deselects them (which needs PyTorch's `test/conftest.py`). If both are set, a class must pass both.
+
+```bash
+PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC python test/run_test.py -i test_autograd
+```
+
 
 | Classification                 | Test scope                                                |
 | ------------------------------ | --------------------------------------------------------- |

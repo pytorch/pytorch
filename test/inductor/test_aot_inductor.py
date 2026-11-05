@@ -11708,7 +11708,7 @@ torch._inductor.aoti_load_package("{model_path}")
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
@@ -11759,7 +11759,7 @@ class KernelProfileNumelScopeTest(TestCase):
     no small model produces it.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def _wrapper(self):
         # A fully constructed wrapper over an empty graph. Hand-setting the
@@ -11876,7 +11876,7 @@ class KernelProfileScopeMemoryPlanningTest(TestCase):
     after the `}` that destroyed `old`.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     class _ProbeLine(MemoryPlanningLine):
         """Records which planning state it was planned against."""
@@ -11919,7 +11919,7 @@ class KernelProfileScopeMemoryPlanningTest(TestCase):
 
 
 class TestAOTInductorConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
@@ -12192,7 +12192,7 @@ copy_tests(
 
 
 class TestCheckLowerboundConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_aoti_check_lowerbound_codegen(self):
         """
@@ -12240,7 +12240,7 @@ class TestCheckLowerboundConfig(TestCase):
 
 
 class AOTInductorCompileTimeTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_fx_gm_return_tuple_validation(self):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -12287,7 +12287,7 @@ class AOTInductorCompileTimeTests(TestCase):
 
 
 class TestCheckUpperboundConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_aoti_check_upperbound_codegen(self):
         """
