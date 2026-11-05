@@ -347,6 +347,8 @@ std::unique_ptr<sycl::kernel> loadKernel(
       ".");
   const auto slmLimit =
       at::xpu::getDeviceLocalMemSize(static_cast<c10::DeviceIndex>(device_idx));
+  // Launching with more SLM than the device has hangs the GPU; fail the way
+  // cuda.cpp does so autotune drops the config.
   // Reject SLM overuse before module creation so autotune can drop the config;
   // local_mem_size is inclusive, so allow sharedMemBytes == slmLimit.
   if (sharedMemBytes > slmLimit) {
