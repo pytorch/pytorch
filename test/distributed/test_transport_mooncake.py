@@ -2,8 +2,10 @@
 
 import asyncio
 import ctypes
+import itertools
 import os
 from dataclasses import replace
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
@@ -37,7 +39,8 @@ class _Engine:
     registered tensors, so the shared conformance assertions observe real data
     movement without RDMA hardware. Like Mooncake, a transfer resolves ``peer``
     to that engine and fails unless the local range is registered here and the
-    remote range is registered on the peer.
+    remote range is registered on the peer. Mooncake batch ids are freed
+    BatchDesc addresses, so a settled batch id is handed out again.
     """
 
     _next_port = 20000
@@ -46,7 +49,7 @@ class _Engine:
     def __init__(self):
         self._regions: dict[int, int] = {}
         self._port = 0
-        self._next_batch = 0
+        self._batches: set[int] = set()
         self._failed: set[int] = set()
         self.options = None
 
@@ -77,24 +80,29 @@ class _Engine:
         )
 
     def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
-        self._next_batch += 1
+        batch_id = next(i for i in itertools.count(1) if i not in self._batches)
+        self._batches.add(batch_id)
         target = self._by_port.get(int(peer.rpartition(":")[2]))
         requests = list(zip(buffers, peer_buffers, lengths))
         if target is None or not all(
             self._covers(buffer, length) and target._covers(peer_buffer, length)
             for buffer, peer_buffer, length in requests
         ):
-            self._failed.add(self._next_batch)
-            return self._next_batch
+            self._failed.add(batch_id)
+            return batch_id
         for buffer, peer_buffer, length in requests:
             if opcode == _Opcode.Write:
                 ctypes.memmove(peer_buffer, buffer, length)
             else:
                 ctypes.memmove(buffer, peer_buffer, length)
-        return self._next_batch
+        return batch_id
 
     def transfer_check_status(self, batch_id):
-        return -1 if batch_id in self._failed else 1
+        self._batches.discard(batch_id)
+        if batch_id in self._failed:
+            self._failed.discard(batch_id)
+            return -1
+        return 1
 
 
 def _backend():
@@ -329,6 +337,31 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
                 first.connect(url)
         self.assertEqual(first._peers, peers)
         self.assertEqual(first.connect(b"[::1]:1234"), 0)
+
+    def test_reused_batch_id_is_not_dropped(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        check = _Engine.transfer_check_status
+        resubmitted = []
+
+        def check_then_submit(engine, batch_id):
+            # Submit while the poller is between the status check, which frees
+            # batch_id, and its bookkeeping, as a concurrent caller could.
+            status = check(engine, batch_id)
+            if not resubmitted:
+                work = first.write(source.to_view(), remote, async_op=True)
+                resubmitted.append((work, batch_id in first._batches))
+            return status
+
+        with patch.object(_Engine, "transfer_check_status", check_then_submit):
+            first.write(source.to_view(), remote)
+            work, reused = resubmitted[0]
+            self.assertTrue(reused)
+            work.wait(timedelta(seconds=5))
+        self.assertEqual(first._batches, {})
 
     def test_close_async_after_handled_failure_does_not_reraise(self):
         first, second = self.make_transport_pair()
