@@ -2981,7 +2981,9 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_property(
           "allow_meta",
-          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_.load(); },
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_meta_.load();
+          },
           [](c10::FakeTensorMode& mode, bool value) {
             mode.allow_meta_.store(value);
           })
