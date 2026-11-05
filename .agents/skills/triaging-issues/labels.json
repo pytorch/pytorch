@@ -1031,6 +1031,22 @@
       "description": "Add this issue/PR to distributed oncall triage queue"
     },
     {
+      "name": "oncall: distributed parallelisms",
+      "description": "Distributed parallelisms oncall (FSDP, DDP, DTensor, tensor parallel, context parallel, pipeline parallel)"
+    },
+    {
+      "name": "oncall: distributed infra",
+      "description": "Distributed infrastructure oncall (c10d, process groups, NCCL/Gloo/MPI backends, elastic, torchrun, stores, RPC, DeviceMesh, symmetric memory)"
+    },
+    {
+      "name": "oncall: distributed checkpointing",
+      "description": "Oncall label should be attached to any issues related to distributed checkpointing."
+    },
+    {
+      "name": "module: c10d",
+      "description": "Process groups, collectives, stores, and communication backends"
+    },
+    {
       "name": "oncall: export",
       "description": "Add this issue/PR to Export oncall triage queue"
     },
