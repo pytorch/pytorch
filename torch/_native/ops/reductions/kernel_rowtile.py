@@ -877,6 +877,8 @@ def reduce_row_tile(
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     if ragged_vector and order == "inner_tree":
         raise ValueError("ragged vectors require the linear order")
+    if ragged_vector and use_tma:
+        raise ValueError("ragged vectors cannot use TMA")
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
@@ -896,13 +898,12 @@ def reduce_row_tile(
         raise ValueError(
             "ragged vectors require a nonempty, contiguous 16-byte aligned input"
         )
-    cfg = row_config(N, x.element_size() * 8)
+    isz = x.element_size()
+    cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
     if unroll is None:
-        unroll = (
-            4 if ragged_vector else 16 if tile.vec_size(N, x.element_size()) == 1 else 4
-        )
+        unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (
         max(WARP, cfg.threads_per_row) if threads_per_row is None else threads_per_row
     )
@@ -914,7 +915,6 @@ def reduce_row_tile(
     threads_per_block -= (
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
-    isz = x.element_size()
     tma_base_aligned = full_align == tile.TRANSFER_ALIGNMENT
     tma_stride_bytes = x.stride(0) * isz
     tma_stride_aligned = tma_stride_bytes % tile.TRANSFER_ALIGNMENT == 0
@@ -945,7 +945,7 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
-        vec=128 // (isz * 8) if ragged_vector else None,
+        vec=tile.TRANSFER_ALIGNMENT // isz if ragged_vector else None,
         ragged_vector=ragged_vector,
     )
 
@@ -975,19 +975,10 @@ def reduce_row_tile(
                 ),
                 assumed_align=align,
             )
-        elif ragged_vector:
-            fake_in = _L.fake_compact(
-                dt,
-                (_L.sym(), N),
-                stride_order=(1, 0),
-                align=align,
-            )
         else:
+            cols = N if ragged_vector else _L.sym(op.vec)
             fake_in = _L.fake_compact(
-                dt,
-                (_L.sym(), _L.sym(op.vec)),
-                stride_order=(1, 0),
-                align=align,
+                dt, (_L.sym(), cols), stride_order=(1, 0), align=align
             )
         return _row_args(
             [fake_in],
