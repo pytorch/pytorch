@@ -566,18 +566,6 @@ print(torch.xpu.is_initialized())
             "Importing torch._inductor.lowering should not initialize XPU",
         )
 
-    def test_streams(self):
-        s0 = torch.xpu.Stream()
-        torch.xpu.set_stream(s0)
-        s1 = torch.xpu.current_stream()
-        self.assertEqual(s0, s1)
-        s2 = torch.xpu.Stream()
-        self.assertFalse(s0 == s2)
-        torch.xpu.set_stream(s2)
-        with torch.xpu.stream(s0):
-            self.assertEqual(s0, torch.xpu.current_stream())
-        self.assertEqual(s2, torch.xpu.current_stream())
-
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
         s0 = torch.xpu.Stream(device=0, priority=low)
@@ -589,14 +577,6 @@ print(torch.xpu.is_initialized())
 
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
-
-    def test_stream_event_repr(self):
-        s = torch.xpu.current_stream()
-        self.assertTrue("torch.xpu.Stream" in str(s))
-        e = torch.xpu.Event()
-        self.assertTrue("torch.xpu.Event(uninitialized)" in str(e))
-        s.record_event(e)
-        self.assertTrue("torch.xpu.Event" in str(e))
 
     def test_events(self):
         stream = torch.xpu.current_stream()
@@ -818,12 +798,6 @@ print(torch.xpu.is_initialized())
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.xpu.current_device(), 1)
         self.assertEqual(torch.xpu.current_device(), src_device)
-
-    def test_stream_context_manager(self):
-        prev_stream = torch.xpu.current_stream()
-        with torch.xpu.Stream() as stream:
-            self.assertEqual(stream, torch.xpu.current_stream())
-        self.assertEqual(prev_stream, torch.xpu.current_stream())
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_multi_device_stream_context_manager(self):

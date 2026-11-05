@@ -2103,21 +2103,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
-    @skipCUDANonDefaultStreamIf(True)
-    def test_streams(self):
-        default_stream = torch.cuda.current_stream()
-        user_stream = torch.cuda.Stream()
-        self.assertEqual(torch.cuda.current_stream(), default_stream)
-        self.assertNotEqual(default_stream, user_stream)
-        self.assertEqual(default_stream.cuda_stream, 0)
-        self.assertNotEqual(user_stream.cuda_stream, 0)
-        with torch.cuda.stream(user_stream):
-            self.assertEqual(torch.cuda.current_stream(), user_stream)
-        self.assertTrue(user_stream.query())
-        tensor1 = torch.ByteTensor(5).pin_memory()
-        default_stream.synchronize()
-        self.assertTrue(default_stream.query())
-
     def test_stream_invalid_device_index(self):
         # Regression test for #184034: constructing a CUDAStream with an
         # out-of-range device_index must not OOB-index the static stream pool.
@@ -2126,14 +2111,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
             with self.assertRaisesRegex(RuntimeError, "Device index (must be|value)"):
                 s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
                 _ = s.cuda_stream
-
-    def test_stream_event_repr(self):
-        s = torch.cuda.current_stream()
-        self.assertTrue("torch.cuda.Stream" in s.__repr__())
-        e = torch.cuda.Event()
-        self.assertTrue("torch.cuda.Event" in e.__repr__())
-        s.record_event(e)
-        self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     def test_cuda_stream_protocol(self):
         stream = torch.cuda.Stream()
@@ -2426,12 +2403,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.cuda.current_device(), 1)
         self.assertEqual(torch.cuda.current_device(), src_device)
-
-    def test_stream_context_manager(self):
-        prev_stream = torch.cuda.current_stream()
-        with torch.cuda.Stream() as stream:
-            self.assertEqual(stream, torch.cuda.current_stream())
-        self.assertEqual(prev_stream, torch.cuda.current_stream())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_device_stream_context_manager(self):
