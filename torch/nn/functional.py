@@ -3606,8 +3606,22 @@ def cross_entropy(
     out_shape: list[int] | None = None
     if dim is not None:
         if not torch.jit.is_scripting():
-            if isinstance(dim, bool) or not _is_integer(dim):
+            # The dims ATen takes: ints, NumPy ints and 0-d integer tensors, but not bools.
+            if isinstance(dim, Tensor):
+                if (
+                    dim.dim() != 0
+                    or dim.dtype == torch.bool
+                    or dim.is_floating_point()
+                    or dim.is_complex()
+                ):
+                    raise TypeError(
+                        f"dim must be an int or None, got a {dim.dtype} tensor of shape {tuple(dim.shape)}"
+                    )
+            elif isinstance(dim, bool) or not _is_integer(dim):
                 raise TypeError(f"dim must be an int or None, got {type(dim)}")
+            if not isinstance(dim, (int, torch.SymInt)):
+                # A Python int, so the arithmetic below can't change the caller's tensor.
+                dim = int(dim)
         ndim = input.dim()
         # As in maybe_wrap_dim, a 0-d input takes the dims of a 1-d one.
         wrap_ndim = max(ndim, 1)

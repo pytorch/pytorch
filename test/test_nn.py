@@ -5534,8 +5534,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # The integer types ATen takes for a dim.
         input, target = torch.randn(2, 4, 5), torch.randint(5, (2, 4))
         expected = F.cross_entropy(input, target, dim=-1)
-        for dim in (np.int64(-1), np.int32(2), torch.tensor(-1)):
+        for dim in (
+            np.int64(-1),
+            np.int32(2),
+            torch.tensor(-1),
+            torch.tensor(2, dtype=torch.uint8),
+        ):
             self.assertEqual(F.cross_entropy(input, target, dim=dim), expected)
+        # A tensor dim is read, not changed.
+        dim = torch.tensor(-1)
+        F.cross_entropy(input, target, dim=dim)
+        self.assertEqual(dim, torch.tensor(-1))
 
     def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
         """Pin the aspect_ratio heuristic's chunk size for representative shapes.
@@ -12543,6 +12552,15 @@ class TestNNDeviceType(NNTestCase):
                 F.cross_entropy(input, target, dim=dim)
             with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
                 nn.CrossEntropyLoss(dim=dim)
+        for dim in (
+            torch.tensor(True),
+            torch.tensor([-1]),
+            torch.tensor([1, 2]),
+            torch.tensor(1.0),
+            torch.tensor(1 + 0j),
+        ):
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                F.cross_entropy(input, target, dim=dim)
 
     def test_cross_entropy_loss_dim_log_softmax_input(self, device):
         class LogSoftmaxInput(TorchDispatchMode):
