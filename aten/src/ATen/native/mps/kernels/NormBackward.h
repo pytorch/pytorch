@@ -26,10 +26,11 @@ kernel void norm_backward_single_row(
     device T* grad_input [[buffer(4)]],
     constant uint& row_size [[buffer(5)]],
     device typename Op::extra_t* extra [[buffer(6)]],
-    uint row [[threadgroup_position_in_grid]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint lsize [[threads_per_threadgroup]]) {
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint2 pos [[thread_position_in_threadgroup]],
+    uint2 tsize [[threads_per_threadgroup]]) {
   using opmath = opmath_t<T>;
+  const uint row = tg.y, tid = pos.x, lsize = tsize.x;
   constexpr int reads = ILP_PER_THREAD;
   const uint base = tid * reads;
   const ulong row_offset = ulong(row) * row_size + base;
@@ -71,10 +72,11 @@ kernel void norm_backward_looped(
     device T* grad_input [[buffer(4)]],
     constant uint& row_size [[buffer(5)]],
     device typename Op::extra_t* extra [[buffer(6)]],
-    uint row [[threadgroup_position_in_grid]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint lsize [[threads_per_threadgroup]]) {
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint2 pos [[thread_position_in_threadgroup]],
+    uint2 tsize [[threads_per_threadgroup]]) {
   using opmath = opmath_t<T>;
+  const uint row = tg.y, tid = pos.x, lsize = tsize.x;
   constexpr int reads = ILP_PER_THREAD;
   const ulong row_offset = ulong(row) * row_size;
   device const T* dy = grad_out + row_offset;

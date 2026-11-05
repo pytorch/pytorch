@@ -51,7 +51,7 @@ kernel void weight_norm_backward_cols_sum(
   part[col] = acc;
 }
 
-template <typename T>
+template <typename T, typename Idx>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void weight_norm_backward_cols(
     device const T* grad_w [[buffer(0)]],
@@ -79,24 +79,28 @@ kernel void weight_norm_backward_cols(
     grad_g[col] = static_cast<T>(dots[col] * rnorm);
   }
   for (uint row = first; row < last; row += lsize.y) {
-    const uint idx = col + row * cols;
+    const Idx idx = col + Idx(row) * cols;
     grad_v[idx] =
         static_cast<T>(scale * (opmath(grad_w[idx]) - opmath(v[idx]) * slope));
   }
 }
 
-#define REGISTER_WEIGHT_NORM_BACKWARD(T)                                   \
-  template [[host_name("weight_norm_backward_single_row_" #T)]] [[kernel]] \
-  decltype(norm_backward_single_row<T, WeightNormOp<T>>)                   \
-      norm_backward_single_row<T, WeightNormOp<T>>;                        \
-  template [[host_name("weight_norm_backward_looped_" #T)]] [[kernel]]     \
-  decltype(norm_backward_looped<T, WeightNormOp<T>>)                       \
-      norm_backward_looped<T, WeightNormOp<T>>;                            \
-  template [[host_name("weight_norm_backward_cols_dot_" #T)]] [[kernel]]   \
-  decltype(norm_backward_column_partials<T, WeightNormOp<T>>)              \
-      norm_backward_column_partials<T, WeightNormOp<T>>;                   \
-  template [[host_name("weight_norm_backward_cols_" #T)]] [[kernel]]       \
-  decltype(weight_norm_backward_cols<T>) weight_norm_backward_cols<T>
+#define REGISTER_WEIGHT_NORM_BACKWARD(T)                                    \
+  template [[host_name("weight_norm_backward_single_row_" #T)]] [[kernel]]  \
+  decltype(norm_backward_single_row<T, WeightNormOp<T>>)                    \
+      norm_backward_single_row<T, WeightNormOp<T>>;                         \
+  template [[host_name("weight_norm_backward_looped_" #T)]] [[kernel]]      \
+  decltype(norm_backward_looped<T, WeightNormOp<T>>)                        \
+      norm_backward_looped<T, WeightNormOp<T>>;                             \
+  template [[host_name("weight_norm_backward_cols_dot_" #T)]] [[kernel]]    \
+  decltype(norm_backward_column_partials<T, WeightNormOp<T>>)               \
+      norm_backward_column_partials<T, WeightNormOp<T>>;                    \
+  template [[host_name("weight_norm_backward_cols_" #T "_u32")]] [[kernel]] \
+  decltype(weight_norm_backward_cols<T, uint>)                              \
+      weight_norm_backward_cols<T, uint>;                                   \
+  template [[host_name("weight_norm_backward_cols_" #T "_u64")]] [[kernel]] \
+  decltype(weight_norm_backward_cols<T, ulong>)                             \
+      weight_norm_backward_cols<T, ulong>
 
 REGISTER_WEIGHT_NORM_BACKWARD(float);
 REGISTER_WEIGHT_NORM_BACKWARD(half);
