@@ -210,9 +210,9 @@ def query_model(
         for d, dirs, files in os.walk(root):
             links = [p for n in dirs + files if os.path.islink(p := os.path.join(d, n))]
             for path in links:
-                top = os.path.relpath(os.path.realpath(path), root).split(os.sep)[0]
-                if top in ("..", ".git"):
-                    why = f"{path} links outside the checkout or into its .git"
+                rel = os.path.relpath(os.path.realpath(path), root)
+                if rel == "." or rel.split(os.sep)[0] in ("..", ".git"):
+                    why = f"{path} links outside the checkout, to its root or into .git"
                     return {"is_error": True, "result": why}
             dirs[:] = [n for n in dirs if n != ".git"]
         allowed, denied = f"Read(/{checkout}/**)", f"Read(/{checkout}/.git/**)"
