@@ -313,6 +313,15 @@ if sys.platform == "win32":
                 ).strip()
             )
 
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH instead of torch\lib. Preload the
+        # bundled ones so a missing or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(th_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
+
         kernel32.SetErrorMode(prev_error_mode)
 
     _load_dll_libraries()
