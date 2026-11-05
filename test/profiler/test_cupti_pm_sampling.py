@@ -15,7 +15,7 @@ import torch
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
-    TEST_CUPTI_V13_3,
+    TEST_CUPTI_V13_5,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -45,12 +45,12 @@ _TEST_METRICS = (
 )
 
 
-# Needs CUDA + libcupti >= 13.3 (cupti-python ships with PyTorch) AND the nvperf profiler-host
+# Needs CUDA >= 13.5 + libcupti >= 13.5 (cupti-python ships with PyTorch) AND the nvperf profiler-host
 # libraries (libnvperf_host/target): supported_metrics() returns empty (and logs) when they can't
 # load, so it doubles as the availability probe (@cache, so it runs once). Whether the HW can
 # actually engage a live session (perfmon access) is only known at start(), so the session tests
 # still skip at runtime when none comes up.
-TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_3 and bool(supported_metrics())
+TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_5 and bool(supported_metrics())
 
 
 @unittest.skipIf(
