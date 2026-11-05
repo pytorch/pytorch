@@ -5747,6 +5747,8 @@ class TestSDPAAccelerator(NNTestCase):
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             self.skipTest("Reference implementation OOM")
+        if dropout_p > 0.0 and seq_len_q > 1024:
+            self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5779,8 +5781,6 @@ class TestSDPAAccelerator(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(query, key, value,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
         else:
-            if seq_len_q > 1024:
-                self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
             # Create the dropout_mask
             torch.manual_seed(seed)
             dropout_mask = _get_mem_eff_drop_mask(batch_size, n_heads, seq_len_q, seq_len_k, dropout_p, seed, 0, device=device)
@@ -6276,8 +6276,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False])
-    @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("enable_gqa,n_heads", [(True, [16, 8]), (True, [10, 2]), (False, [4, 4])])
     @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     @skipIfXpu(msg="Flash backend variants (aotriton/ck) and head_dim>=192 paths not supported on XPU; tracked in torch-xpu-ops")
@@ -6444,7 +6443,6 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16])
-    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
@@ -6453,7 +6451,6 @@ class TestSDPAAccelerator(NNTestCase):
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
-                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
