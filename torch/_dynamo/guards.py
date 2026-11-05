@@ -43,8 +43,8 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
-from typing_extensions import LiteralString, TypeAliasType, TypeVar
+from typing import Any, cast, LiteralString, NamedTuple, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -2840,6 +2840,27 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and torch._C._is_fake_tensor(value) == metadata
+        ),
+    )
+    def FAKE_TENSOR_MATCH(self, guard: Guard, expected: bool | None = None) -> None:
+        # Whether the tensor is a C++ fake, which TENSOR_MATCH does not check.
+        # expected is bound into the guard rather than read from the value,
+        # which is a stand-in when the guard is rebuilt from saved state.
+        if expected is None:
+            raise AssertionError("expected must not be None for FAKE_TENSOR_MATCH")
+        code = [f"torch._C._is_fake_tensor({self.arg_ref(guard)}) == {expected!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_fake_tensor_match_guard(
+            expected, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is None,
     )
@@ -5260,16 +5281,21 @@ class GuardsStatePickler(FunctionPicklerBase):
             # Parameter without one carries the Parameter marker. Guards on a
             # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
+            is_param = isinstance(obj, torch.nn.Parameter)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                is_param = isinstance(obj, torch.nn.Parameter)
                 default = torch.nn.Parameter if is_param else torch.Tensor
                 pytype = obj.pytype or default
-            # A fake answers empty_like with another fake through its own
-            # __torch_dispatch__, whether or not its FakeTensorMode is active,
-            # and that fake would drag the mode and its converters into the
-            # pickle; no_dispatch makes the template a plain meta tensor.
+            elif is_fake and is_param and pytype is torch.Tensor:
+                # A C++ fake's own type is the real type, but a C++ fake
+                # Parameter can be a plain Tensor carrying the marker.
+                pytype = torch.nn.Parameter
+            # A fake answers empty_like with another fake (a Python fake through
+            # its own __torch_dispatch__, whether or not its FakeTensorMode is
+            # active), and that fake would drag the mode and its converters into
+            # the pickle; no_dispatch, which also excludes the Fake dispatch key,
+            # makes the template a plain meta tensor.
             with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
