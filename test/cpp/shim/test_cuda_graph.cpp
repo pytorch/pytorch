@@ -386,7 +386,7 @@ class AOTICudaGraphRAIITest : public ::testing::Test {
   }
 
   std::optional<torch::aot_inductor::AOTICudaMemPool> pool_;
-  std::optional<torch::aot_inductor::AOTICudaStream> stream_;
+  std::optional<torch::aot_inductor::AOTICudaStreamNonBlocking> stream_;
 };
 
 } // namespace
@@ -463,13 +463,13 @@ TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEvents) {
   for (int32_t device = 0;
        device < std::min<int32_t>(c10::cuda::device_count(), 2);
        ++device) {
-    torch::aot_inductor::AOTICudaStream stream(device);
+    torch::aot_inductor::AOTICudaStreamNonBlocking stream(device);
     unsigned int flags = 0;
     ASSERT_EQ(cudaStreamGetFlags(stream.get(), &flags), cudaSuccess);
     EXPECT_EQ(flags, cudaStreamNonBlocking);
     // With device 0 current, recording fails unless the event and the stream
     // share a device, so check each wrapper against one known to be on it.
-    torch::aot_inductor::AOTICudaEvent event(device);
+    torch::aot_inductor::AOTICudaEventDisableTiming event(device);
     auto known_stream = at::cuda::getStreamFromPool(false, device);
     EXPECT_EQ(cudaEventRecord(event.get(), known_stream.stream()), cudaSuccess);
     at::cuda::CUDAEvent known_event;
@@ -551,7 +551,7 @@ TEST_F(AOTICudaGraphRAIITest, EndsACaptureOnAnotherDevice) {
     GTEST_SKIP() << "Needs two GPUs";
   }
   torch::aot_inductor::AOTICudaMemPool pool(1);
-  torch::aot_inductor::AOTICudaStream stream(1);
+  torch::aot_inductor::AOTICudaStreamNonBlocking stream(1);
   auto graph = std::make_unique<torch::aot_inductor::AOTICudaGraph>();
   {
     c10::cuda::CUDAGuard device_guard(1);
