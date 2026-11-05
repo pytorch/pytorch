@@ -137,6 +137,18 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(message, " ".join(result.stderr.split()))
 
+    def edit_cache_value(self, build: str, option: str, value: str) -> None:
+        # what ccmake / cmake-gui do to CMakeCache.txt: rewrite the value
+        # line, keep the help-string comment above it
+        cache = self.tmp / build / "CMakeCache.txt"
+        text = cache.read_text()
+        patched, count = re.subn(
+            rf"^{option}:BOOL=\w+$", f"{option}:BOOL={value}", text,
+            flags=re.MULTILINE)
+        if count != 1:
+            self.fail(f"expected one {option}:BOOL entry, found {count}")
+        cache.write_text(patched)
+
     def skip_if_cuda_installed(self) -> None:
         if HAVE_CUDA:
             self.skipTest("CUDA is installed, so it cannot be missing")
@@ -163,11 +175,26 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         # set() in the caller's scope, so a wrapper that is a function
         # would eat it and leave the cached ON visible after the call.
         # USE_TSAN turns USE_CUDA off, USE_DISTRIBUTED=OFF turns USE_NCCL
-        # off, even with the ON value already in the cache
+        # off, even with the ON value already in the cache. the NCCL half
+        # has to be seeded with a real configure first: a fresh dir has
+        # no cached USE_NCCL for the force to beat, so the assertion
+        # would pass even if the wrapper dropped the forced value on the
+        # floor. the cached ON from the seed run is a declaration default
+        # (stable since the declaration last ran), so it must not read
+        # as an explicit request either.
         self.assert_ok("USE_CUDA", False, "-DUSE_CUDA=ON", "-DUSE_TSAN=ON",
                        build="force-cuda")
         self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
                        build="force-nccl")
+        # seed a real cache first: a fresh dir has no cached USE_NCCL for
+        # the force to beat, so the assertion would pass even if the
+        # wrapper dropped the forced value on the floor. what the seed
+        # holds depends on the box: ON where a backend is installed, the
+        # fallback OFF where none is
+        self.assert_ok("USE_NCCL", HAVE_CUDA or HAVE_ROCM,
+                       build="force-nccl-seed")
+        self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
+                       build="force-nccl-seed")
 
     def test_cuda_explicit_request_persists_in_cache(self) -> None:
         self.skip_if_cuda_installed()
@@ -237,9 +264,9 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
 
     def test_nccl_explicit_request(self) -> None:
         if IS_LINUX:
-            if HAVE_CUDA:
-                self.skipTest("CUDA is installed, so the no-backend fallback "
-                              "is not reachable")
+            if HAVE_CUDA or HAVE_ROCM:
+                self.skipTest("a backend is installed, so the no-backend "
+                              "fallback is not reachable")
             self.assert_fails(
                 "NCCL was explicitly requested (USE_NCCL=1) but requires a "
                 "CUDA or ROCm build.",
@@ -299,9 +326,59 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
 
     def test_cuda_fatal_does_not_poison_nccl(self) -> None:
         self.skip_if_cuda_installed()
+        if IS_LINUX and HAVE_ROCM:
+            self.skipTest("ROCm is installed, so NCCL stays available "
+                          "through rccl")
         self.assert_fails(CUDA_GUARD_MESSAGE, "-DUSE_CUDA=ON", build="poison-cuda")
         # following the CUDA error's advice must not trip the NCCL guard
         self.assert_ok("USE_NCCL", False, "-DUSE_CUDA=OFF", build="poison-cuda")
+
+    # --- cache edits: ccmake / cmake-gui / hand edits of CMakeCache.txt
+    # keep the entry's help string, so the help-string signal alone cannot
+    # see them. the _LAST_SEEN stamp the wrappers write after every
+    # declaration is what makes them visible: option() never rewrites the
+    # value of an entry it adopts and the fallbacks only ever write OFF
+    # after their guard had its chance, so a value that moved under the
+    # declaration's help string is the user's hand (gh-114388's symptom)
+
+    def test_cache_edit_to_on_records_request(self) -> None:
+        self.skip_if_cuda_installed()
+        # default run: the CUDA fallback writes USE_CUDA=OFF, keeping the
+        # declaration's help string on the entry
+        self.assert_ok("USE_CUDA", False, build="ccmake-on")
+        self.edit_cache_value("ccmake-on", "USE_CUDA", "ON")
+        # flipping it back ON in ccmake is a request: the guard has to
+        # fire instead of falling back silently again
+        self.assert_fails(CUDA_GUARD_MESSAGE, build="ccmake-on")
+        # and taking it back to OFF in the cache withdraws it again
+        self.edit_cache_value("ccmake-on", "USE_CUDA", "OFF")
+        self.assert_ok("USE_CUDA", False, build="ccmake-on")
+
+    def test_initial_cache_script_with_docstring_records_request(self) -> None:
+        self.skip_if_cuda_installed()
+        # a -C script that reuses the declaration's doc string is still a
+        # request: the entry exists before any declaration ran, so no
+        # _LAST_SEEN stamp can vouch for it as a declaration default
+        init = self.tmp / "init-uses-docstring.cmake"
+        init.write_text('set(USE_CUDA ON CACHE BOOL "Use CUDA")\n')
+        self.assert_fails(CUDA_GUARD_MESSAGE, "-C", str(init),
+                          build="c-script-docstring")
+
+    def test_poisoned_default_cache_falls_back(self) -> None:
+        self.skip_if_cuda_installed()
+        # the state a configure that died before its fallback leaves: the
+        # declaration default ON in the cache under the declaration's own
+        # help string, plus the _LAST_SEEN stamp a real declaration pass
+        # writes, and no request marker. a plain rerun must fall back,
+        # not read the leftover default as a request
+        build = self.tmp / "poisoned-cache"
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text(
+            "//Use CUDA\n"
+            "USE_CUDA:BOOL=ON\n"
+            "\n"
+            "_USE_CUDA_LAST_SEEN:INTERNAL=ON\n")
+        self.assert_ok("USE_CUDA", False, build="poisoned-cache")
 
 
 if __name__ == "__main__":

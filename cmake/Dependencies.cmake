@@ -1214,8 +1214,9 @@ if(USE_NCCL)
     # if the user explicitly asked for NCCL, error out instead of
     # falling back
     pytorch_guard_explicit_request(USE_NCCL NCCL "requires a CUDA or ROCm build"
-      "No CUDA or ROCm toolkit was found, so neither backend is on; "
-      "see the earlier fallback warnings.")
+      "neither backend ended up enabled, whether because no toolkit was "
+      "found or because it was turned off; see the earlier fallback "
+      "warnings.")
     message(WARNING
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
@@ -1247,6 +1248,9 @@ endif()
 # ---[ XCCL
 if(USE_XCCL)
   if(NOT USE_XPU)
+    pytorch_guard_explicit_request(USE_XCCL XCCL "requires an XPU build"
+      "USE_XPU ended up off, whether because no SYCL toolkit was found "
+      "or because it was turned off.")
     message(WARNING "Not using XPU, so disabling USE_XCCL. Suppress this warning with -DUSE_XCCL=OFF.")
     caffe2_update_option(USE_XCCL OFF)
   endif()
