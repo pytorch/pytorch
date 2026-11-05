@@ -3807,7 +3807,7 @@ class _TestParamsMaxPoolBase:
         self.shapes = [
             [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -5931,10 +5931,11 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (),),
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
+        ((), (),),
         ((), (0,),),
         ((), (0, True,),),
-        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
-        ((2049,), ()),
+        # Non-fused mode kernel on CUDA
+        ((3000,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
@@ -10520,7 +10521,7 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # windows (stride == kernel_size) always give unique indices.
         # gradcheck is expensive, so only the smallest input shape is kept.
         stride = sample.kwargs['stride']
-        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.input.shape[2] == 3:
+        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.kwargs['output_size'][2] == 3:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -18065,7 +18066,10 @@ op_db: list[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # FIXME: indices can differ between CPU and GPU on tied values
+               # FIXME:
+               # Expected 2114 but got 1123.
+               # Absolute difference: 991 (up to 0.001 allowed)
+               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    "TestCommon",
