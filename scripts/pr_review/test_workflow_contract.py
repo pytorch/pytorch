@@ -2771,12 +2771,16 @@ class TestStage1Gate(unittest.TestCase):
 
     def test_adding_the_review_label_starts_a_review(self):
         self.assertTrue(
-            stage1_admits(action="labeled", label="in progress", labels=("in progress",))
+            stage1_admits(
+                action="labeled", label="in progress", labels=("in progress",)
+            )
         )
 
     def test_an_opted_out_pr_is_not_reviewed(self):
         both = ("in progress", "no automated review")
-        self.assertFalse(stage1_admits(action="labeled", label="in progress", labels=both))
+        self.assertFalse(
+            stage1_admits(action="labeled", label="in progress", labels=both)
+        )
         self.assertFalse(stage1_admits(action="synchronize", labels=both))
 
     def test_adding_the_opt_out_label_starts_a_withdrawal_even_on_a_draft(self):
@@ -2797,7 +2801,10 @@ class TestStage1Gate(unittest.TestCase):
         )
         self.assertFalse(
             stage1_admits(
-                action="labeled", label="in progress", draft=True, labels=("in progress",)
+                action="labeled",
+                label="in progress",
+                draft=True,
+                labels=("in progress",),
             )
         )
         self.assertFalse(
@@ -5481,7 +5488,9 @@ class TestWithdrawHoldsOnlyTheToken(unittest.TestCase):
         self.assertEqual(
             env_values(step, "PR_NUMBER"), ["${{ needs.prepare.outputs.pr_number }}"]
         )
-        self.assertEqual(env_values(step, "OPT_OUT_LABEL"), ["${{ env.OPT_OUT_LABEL }}"])
+        self.assertEqual(
+            env_values(step, "OPT_OUT_LABEL"), ["${{ env.OPT_OUT_LABEL }}"]
+        )
         self.assertEqual(env_values(step, "GH_TOKEN"), ["${{ secrets.GITHUB_TOKEN }}"])
 
 

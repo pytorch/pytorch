@@ -700,10 +700,17 @@ class TestAddingTheOptOutLabelWithdrawsChangeRequests(unittest.TestCase):
             ],
         )
         self.withdraw(gh)
-        self.assertEqual([r["state"] for r in gh.reviews], ["CHANGES_REQUESTED", "DISMISSED"])
+        self.assertEqual(
+            [r["state"] for r in gh.reviews], ["CHANGES_REQUESTED", "DISMISSED"]
+        )
 
     def test_main_reads_its_inputs_and_an_api_error_only_warns(self):
-        env = {"GH_TOKEN": "t", "REPO": "o/r", "PR_NUMBER": "1", "OPT_OUT_LABEL": "skip me"}
+        env = {
+            "GH_TOKEN": "t",
+            "REPO": "o/r",
+            "PR_NUMBER": "1",
+            "OPT_OUT_LABEL": "skip me",
+        }
         with (
             mock.patch.dict(post_review.os.environ, env, clear=True),
             mock.patch.object(sys, "argv", ["post_review.py", "--withdraw-opted-out"]),
