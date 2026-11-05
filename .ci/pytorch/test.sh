@@ -443,11 +443,11 @@ test_python_legacy_jit() {
 }
 
 # Seconds of extra work the generic multi-shard dispatch at the bottom of this
-# file runs on shards 1 and 2 besides test_python_shard, measured on cuda13.2 L4
-# main runs; other builds are not calibrated yet. run_test.py gives those shards
-# fewer tests; every shard must pass the same values.
+# file runs on shards 1 and 2 besides test_python_shard. Measured only on the
+# cuda13.2 L4 default job, so other jobs pass none until calibrated. run_test.py
+# gives those shards fewer tests; every shard must pass the same values.
 DEFAULT_SHARD_HEAD_START=""
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == linux-jammy-cuda13.2-py3.11-gcc11 && "$TEST_CONFIG" == default ]]; then
   DEFAULT_SHARD_HEAD_START="1=660 2=480"
 fi
 
@@ -1989,11 +1989,11 @@ test_distributed() {
   if [[ -n "$multigpu_filter" ]]; then
     filter_arg=(--multigpu-filter "$multigpu_filter")
   fi
-  # Shard 1 also runs the C++ / mpiexec tests below (~3 min on T4; ROCm is not
-  # calibrated), so run_test.py gives it fewer Python tests. Same values on
-  # every shard.
+  # Shard 1 also runs the C++ / mpiexec tests below, so run_test.py gives it
+  # fewer Python tests. Measured (~3 min) only on the cuda13.2 T4 distributed
+  # job; other jobs pass none until calibrated. Same values on every shard.
   local head_start_arg=()
-  if [[ "$multigpu_filter" != "not-multigpu" && "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  if [[ "$multigpu_filter" != "not-multigpu" && "$BUILD_ENVIRONMENT" == linux-jammy-cuda13.2-py3.11-gcc11 && "$TEST_CONFIG" == distributed ]]; then
     head_start_arg=(--shard-head-start "1=190")
   fi
   echo "Testing distributed python tests (${multigpu_filter:-all})"
