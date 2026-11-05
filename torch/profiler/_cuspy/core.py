@@ -37,7 +37,7 @@ _PY_PROFILER = torch._C._profiler
 _cuspy_native = _PY_PROFILER._cuspy
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing import Self
 
 logger = logging.getLogger(__name__)
 
