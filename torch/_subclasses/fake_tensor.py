@@ -345,11 +345,23 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
+# Note [Fake mode lookups and CppFakeTensorMode]
+# maybe_get_fake_mode, detect_fake_mode and active_fake_mode can return a
+# CppFakeTensorMode, but stay annotated FakeTensorMode | None: widening the
+# annotation makes about 40 callers fail type checking, mostly ones that pass
+# the mode on to code typed for FakeTensorMode or call methods
+# CppFakeTensorMode does not have yet. Until those callers and the annotations
+# are updated together, such a caller fails on a C++ mode with AttributeError.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
+    """The fake mode of t, a Python FakeTensorMode or, for a C++ fake, a
+    CppFakeTensorMode (see Note [Fake mode lookups and CppFakeTensorMode])."""
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return t.fake_mode
+    if isinstance(t, Tensor) and torch._C._is_fake_tensor(t):
+        # pyrefly: ignore [bad-return]
+        return torch._C._maybe_get_fake_mode(t)
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
         mode: FakeTensorMode | None = None
@@ -377,9 +389,6 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
-    elif isinstance(t, Tensor):
-        # TODO: annotate the CppFakeTensorMode this can return, with the callers
-        return torch._C._maybe_get_fake_mode(t)
     return None
 
 
@@ -418,8 +427,8 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
-        # change. A SymFloat's hint is never filled in later, so this can be
-        # decided now.
+        # change. No code currently fills in a SymFloat's hint later, so this
+        # can be decided now.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
@@ -793,8 +802,7 @@ class CppFakeTensorMode:
     # which the Python parts of fake dispatch run against. The mode's state
     # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
     # equivalent, except for the enter state (enter_stack,
-    # old_dispatch_mode_flags) and the stack it was created at. The enter
-    # state is why an entered wrapper is kept in
+    # old_dispatch_mode_flags), which is why an entered wrapper is kept in
     # fake_tensor_tls.entered_cpp_fake_modes. See
     # Note [C++ FakeTensorMode Python wrapper lifetime] in
     # torch/csrc/FakeTensorMode.cpp.
@@ -802,7 +810,6 @@ class CppFakeTensorMode:
         "_cpp_mode",
         "enter_stack",
         "old_dispatch_mode_flags",
-        "_stack_trace",
         "__weakref__",
     )
 
@@ -819,10 +826,10 @@ class CppFakeTensorMode:
         # Like TorchDispatchMode.old_dispatch_mode_flags, a stack of earlier
         # is_in_torch_dispatch_mode() values
         self.old_dispatch_mode_flags: list[bool] = []
-        self._stack_trace: traceback.StackSummary | None = traceback.extract_stack()
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         converter = FakeTensorConverter(copy_data=copy_data)
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
+        self._cpp_mode._stack_trace = traceback.extract_stack()
         self.allow_non_fake_inputs = allow_non_fake_inputs
         if static_shapes is not None:
             self.static_shapes = static_shapes
@@ -834,7 +841,6 @@ class CppFakeTensorMode:
         self = cls.__new__(cls)
         self.enter_stack = []
         self.old_dispatch_mode_flags = []
-        self._stack_trace = None
         self._cpp_mode = cpp_mode
         return self
 
@@ -846,13 +852,10 @@ class CppFakeTensorMode:
     def shape_env(self) -> ShapeEnv | None:
         return self._cpp_mode.shape_env
 
-    # Like FakeTensorMode.stack, where the mode was created, except that a
-    # rebuilt wrapper does not know it
+    # Like FakeTensorMode.stack, where the mode was created
     @property
     def stack(self) -> str:
-        if self._stack_trace is None:
-            return "<unknown: the original wrapper was collected and rebuilt>\n"
-        return "".join(traceback.format_list(self._stack_trace))
+        return "".join(traceback.format_list(self._cpp_mode._stack_trace))
 
     @property
     def epoch(self) -> int:
@@ -920,11 +923,19 @@ class CppFakeTensorMode:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        # Otherwise an exit on another thread would pop this mode's enter state
-        # and take that thread's own fake mode out of its FAKE slot
+        # Exiting a no-op re-entry installed nothing. It may run on a thread
+        # that inherited the C++ mode through ThreadLocalState, whose
+        # entered_cpp_fake_modes does not hold this wrapper.
+        if self.enter_stack and not self.enter_stack[-1][0]:
+            _exit_fake_mode(self, self._uninstall)
+            return
+        # Otherwise an exit with no matching enter on this thread (the mode was
+        # never entered, was already exited, or was entered on another thread)
+        # would pop this mode's enter state and take this thread's own fake
+        # mode out of its FAKE slot
         if self not in fake_tensor_tls.entered_cpp_fake_modes:
             raise RuntimeError(
-                "CppFakeTensorMode exited on a thread that did not enter it"
+                "CppFakeTensorMode exited without a matching enter on this thread"
             )
         _exit_fake_mode(self, self._uninstall)
 
@@ -1327,11 +1338,11 @@ class FakeTensorConverter:
                             ),
                         )
         if make_constant:
-            if isinstance(fake_mode, CppFakeTensorMode):
+            if isinstance(out, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                self.add_constant_storage_mapping(out)
+            else:
                 # The C++ mode tracks the constant's storage aliases itself
                 torch._C._set_fake_constant(out, constant)
-            else:
-                self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
         return out
 
@@ -1403,16 +1414,17 @@ def in_kernel_invocation_manager(
 ) -> Generator[None, None, None]:
     # See: note [Fake Tensor Dispatch Keys]
     # A CppFakeTensorMode has no in_kernel_invocation flag: C++ fakes read the
-    # thread-local one _InKernelInvocation sets below
+    # thread-local one _InKernelInvocation sets below. That flag can be set
+    # without the Meta include (by a bare _InKernelInvocation), so for a C++
+    # mode only the Meta include implies the flag.
     python_mode = None if isinstance(fake_mode, CppFakeTensorMode) else fake_mode
-    prev_in_kernel = (
-        torch._C._in_kernel_invocation()
-        if python_mode is None
-        else python_mode.in_kernel_invocation
-    )
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    if meta_in_tls != prev_in_kernel:
-        raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    if python_mode is not None:
+        prev_in_kernel = python_mode.in_kernel_invocation
+        if meta_in_tls != prev_in_kernel:
+            raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    elif meta_in_tls and not torch._C._in_kernel_invocation():
+        raise AssertionError(f"{meta_in_tls}, False")
 
     # _InKernelInvocation makes C++ fakes report meta here too, see Note
     # [C++ in_kernel_invocation].

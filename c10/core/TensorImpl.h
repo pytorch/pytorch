@@ -249,6 +249,10 @@ struct C10_API FakeTensorMode {
   // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
   // only getCppFakeTensorModePyObj accesses it, under a lock.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  // Where the mode's Python wrapper was created (CppFakeTensorMode.stack, a
+  // traceback.StackSummary). Kept here rather than on the wrapper so that a
+  // rebuilt wrapper still reports it. Set once, when the wrapper is created.
+  std::shared_ptr<c10::SafePyObject> stack_trace_;
 
   // when false, disallow a fake tensor from having a 'meta' device. Atomic, as
   // Python can assign it while another thread reads it.
@@ -266,7 +270,7 @@ struct C10_API FakeTensorMode {
   // rebuilt wrapper sees it. The constructor sets it to shape_env_ == nullptr,
   // as FakeTensorMode.static_shapes defaults to shape_env is None. Atomic,
   // like allow_meta_.
-  std::atomic<bool> static_shapes_;
+  std::atomic<bool> static_shapes_{true};
 
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
