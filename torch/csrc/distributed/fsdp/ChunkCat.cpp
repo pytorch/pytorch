@@ -51,19 +51,49 @@ void chunk_cat_with_leading_dims(
     const auto dim = num_leading_dims[i];
     const auto sizes = tensor.sym_sizes();
     const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
-    const auto inner_size = (sizes[dim] + num_chunks - 1) / num_chunks *
-        c10::multiply_integers(sizes.slice(dim + 1));
+    const auto& dim_size = sizes[dim];
+    // Like torch.chunk, every rank's chunk spans ceil(dim_size / num_chunks)
+    // rows of the chunked dim; rows past the tensor are zero padding.
+    const auto chunk_rows = (dim_size + num_chunks - 1) / num_chunks;
+    const auto row_numel = c10::multiply_integers(sizes.slice(dim + 1));
+    const auto inner_size = chunk_rows * row_numel;
     auto chunk = chunks.narrow_symint(1, offset, outer_size * inner_size);
+    offset += outer_size * inner_size;
     // copy_ casts to out's dtype
     if (dim == 0) {
       chunk.copy_(at::_chunk_cat(tensor, 0, num_chunks));
-    } else {
-      // One strided copy per input keeps traced graphs linear in inputs.
-      chunk.view_symint({num_chunks, outer_size, inner_size})
-          .copy_(tensor.view_symint({outer_size, num_chunks, inner_size})
-                     .transpose(0, 1));
+      continue;
     }
-    offset += outer_size * inner_size;
+    // (num_chunks, outer_size, inner_size): each rank's rows of this input
+    auto rank_chunks = chunk.view_symint({num_chunks, outer_size, inner_size});
+    if (dim_size % num_chunks == 0) {
+      // One strided copy per input keeps traced graphs linear in inputs.
+      rank_chunks.copy_(tensor.view_symint({outer_size, num_chunks, inner_size})
+                            .transpose(0, 1));
+      continue;
+    }
+    // Uneven: the first num_full ranks get chunk_rows rows each, the next one
+    // gets the remaining tail_rows rows followed by padding, and any later
+    // ranks get only padding. dim_size > 0 here (an empty dim divides evenly),
+    // so chunk_rows > 0 and 1 <= num_full < num_chunks. A constant number of
+    // copies and fills per input keeps traced graphs linear in inputs.
+    const auto num_full = dim_size / chunk_rows;
+    const auto tail_rows = dim_size - num_full * chunk_rows;
+    const auto rows = tensor.view_symint({outer_size, dim_size * row_numel});
+    rank_chunks.narrow_symint(0, 0, num_full)
+        .copy_(rows.narrow_symint(1, 0, num_full * inner_size)
+                   .view_symint({outer_size, num_full, inner_size})
+                   .transpose(0, 1));
+    auto num_written = num_full;
+    if (tail_rows > 0) {
+      const auto tail_numel = tail_rows * row_numel;
+      auto tail_chunk = rank_chunks.select_symint(0, num_full);
+      tail_chunk.narrow_symint(1, 0, tail_numel)
+          .copy_(rows.narrow_symint(1, num_full * inner_size, tail_numel));
+      tail_chunk.narrow_symint(1, tail_numel, inner_size - tail_numel).zero_();
+      num_written += 1;
+    }
+    rank_chunks.narrow_symint(0, num_written, num_chunks - num_written).zero_();
   }
 }
 
@@ -131,16 +161,8 @@ void check_chunk_cat_leading_dims_inputs(
         tensor.device());
     const auto sizes = tensor.sym_sizes();
     const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
-    TORCH_CHECK_VALUE(
-        dim == 0 || sizes[dim] % num_chunks == 0,
-        "expected input ",
-        i,
-        " to have a size divisible by num_chunks ",
-        num_chunks,
-        " in dim ",
-        dim,
-        ", but got shape ",
-        sizes);
+    // A chunked dim need not divide by num_chunks: like dim 0, it pads every
+    // rank's chunk to ceil(sizes[dim] / num_chunks) rows.
     if (tensor.sym_numel() == 0) {
       TORCH_CHECK_VALUE(
           dim > 0 && outer_size == 0,
@@ -207,7 +229,9 @@ void chunk_cat_mixed_dtype(
 TORCH_LIBRARY_FRAGMENT(fsdp, m) {
   // Like fsdp::chunk_cat, but inputs may have different dtypes. With dim 0, a
   // nonzero num_leading_dims[i] chunks tensors[i] along that dim instead,
-  // keeping its leading dims in each chunk, as Shard(i) needs for i > 0.
+  // keeping its leading dims in each chunk, as Shard(i) needs for i > 0. As
+  // with dim 0, a dim that num_chunks does not divide is chunked like
+  // torch.chunk and each rank's chunk is zero-padded to the same size.
   m.def(
       "chunk_cat_mixed_dtype(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out, int[]? num_leading_dims=None) -> ()");
 }

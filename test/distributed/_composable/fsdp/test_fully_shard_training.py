@@ -1673,12 +1673,16 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
                 )
             )
         self.run_subtests(
-            {"mesh": meshes, "reshard_after_forward": [True, False, 2]},
+            {
+                "mesh": meshes,
+                "reshard_after_forward": [True, False, 2],
+                "native_copy": [False, True],
+            },
             self._test_train_parity_uneven_shard_dim1,
         )
 
     def _test_train_parity_uneven_shard_dim1(
-        self, mesh: DeviceMesh, reshard_after_forward: bool | int
+        self, mesh: DeviceMesh, reshard_after_forward: bool | int, native_copy: bool
     ):
         class FeedForward(nn.Module):
             # Stacked gate and up projections, sharded on F like w2
@@ -1705,7 +1709,13 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         )
         for layer in model:
             fully_shard_fn(layer)
+            if native_copy:
+                # FSDPModule has no setter for the all-gather copy-out yet
+                group = fully_shard.state(layer)._fsdp_param_group
+                group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         fully_shard_fn(model)
+        if native_copy:
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank)

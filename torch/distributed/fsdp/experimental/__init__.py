@@ -60,10 +60,8 @@ def all_gather_output_fn_with_native_copy(
     copy_outputs = outputs
     if all_gather_output.dtype == torch.uint8:
         copy_outputs = [output.view(torch.uint8) for output in outputs]
-    if any(
-        output.numel() != split_size * world_size
-        for output, split_size in zip(copy_outputs, split_sizes)
-    ):
+    numels = [split_size * world_size for split_size in split_sizes]
+    if any(output.numel() > numel for output, numel in zip(copy_outputs, numels)):
         _default_all_gather_output_fn(
             all_gather_output,
             outputs,
@@ -72,8 +70,21 @@ def all_gather_output_fn_with_native_copy(
             world_size=world_size,
         )
         return
+    output_inner_sizes = None
+    if any(output.numel() < numel for output, numel in zip(copy_outputs, numels)):
+        # Outputs of unevenly sharded Shard(i), i > 0, parameters drop the
+        # padding in each of their rows
+        output_inner_sizes = [
+            output.numel() // outer_size
+            for output, outer_size in zip(copy_outputs, outer_sizes)
+        ]
     torch.ops.fsdp._all_gather_copy_out_(
-        copy_outputs, all_gather_output, split_sizes, outer_sizes, world_size
+        copy_outputs,
+        all_gather_output,
+        split_sizes,
+        outer_sizes,
+        world_size,
+        output_inner_sizes=output_inner_sizes,
     )
 
 
@@ -89,9 +100,9 @@ def reduce_scatter_input_fn_with_native_copy(
     :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
     See the module documentation for the performance tradeoffs.
 
-    Contiguous nonzero-dimension shards copy directly into the collective buffer.
-    Noncontiguous gradients, and gradients whose nonzero shard dim the world size
-    does not divide, use the existing chunk-and-concatenate reorder.
+    Contiguous nonzero-dimension shards copy directly into the collective buffer,
+    which zero-pads uneven ones. Noncontiguous gradients sharded on a nonzero dim
+    use the existing chunk-and-concatenate reorder.
     """
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
@@ -99,7 +110,7 @@ def reduce_scatter_input_fn_with_native_copy(
             if shard_dim == 0:
                 continue
             grad = unsharded_grads[i]
-            if grad.is_contiguous() and grad.size(shard_dim) % world_size == 0:
+            if grad.is_contiguous():
                 num_leading_dims[i] = shard_dim
             else:
                 unsharded_grads[i] = _reorder_by_rank(grad, shard_dim, world_size)
