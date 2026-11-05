@@ -3,8 +3,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
-from typing_extensions import Self
+from typing import Any, overload, Self
 
 import torch
 from torch import Tensor
