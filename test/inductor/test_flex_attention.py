@@ -2897,7 +2897,10 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
+    @skipXPUIf(
+        True,
+        "inline_asm_elementwise HOP emits CUDA PTX; not supported on XPU, intel/torch-xpu-ops#6050",
+    )
     @skip_on_mps
     @skip_on_rocm
     def test_inline_asm_score_mod(self, device):
@@ -2935,7 +2938,10 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
+    @skipXPUIf(
+        True,
+        "inline_asm_elementwise HOP emits CUDA PTX; not supported on XPU, intel/torch-xpu-ops#6050",
+    )
     @skip_on_mps
     @skip_on_rocm
     def test_inline_asm_score_mod_pack2(self, device):
@@ -2962,7 +2968,10 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
+    @skipXPUIf(
+        True,
+        "inline_asm_elementwise HOP emits CUDA PTX; not supported on XPU, intel/torch-xpu-ops#6050",
+    )
     @skip_on_mps
     @skip_on_rocm
     def test_inline_asm_mask_mod(self, device):
@@ -3389,7 +3398,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
     @dtypes(torch.float16)
     @dtypesIfCUDA(torch.float16)
     @common_utils.parametrize("detach_temp", [False, True])
@@ -5534,7 +5542,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
         if not PLATFORM_SUPPORTS_BF16:
             self.skipTest("bf16 is required for this regression test")
@@ -5581,7 +5588,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    @skip_on_xpu
     def test_invalid_forward_kernel_options_error(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -5618,7 +5624,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    @skip_on_xpu
     def test_invalid_backward_kernel_options_error(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -5665,7 +5670,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    @skip_on_xpu
     def test_invalid_decode_kernel_options_error(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -7785,7 +7789,6 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
     def test_nested_tensor_inputs_error(self, device):
         def make_nt(lengths, heads=2, dim=8):
             elems = [
@@ -9403,7 +9406,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
     @supported_platform
-    @skip_on_xpu
+    @skipXPUIf(True, "torch.cuda.CUDAGraph is CUDA-only")
     @skip_on_mps  # uses torch.cuda.CUDAGraph; CUDA-only
     def test_create_is_cuda_graphable(self, device):
         def mask_mod(b, h, q, kv):
