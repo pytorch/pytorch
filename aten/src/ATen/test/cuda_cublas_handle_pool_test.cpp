@@ -9,6 +9,14 @@
 #include <thread>
 #include <vector>
 
+#if defined(__linux__) && !defined(USE_ROCM)
+#include <dlfcn.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#endif
+
 #ifdef USE_ROCM
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -81,6 +89,59 @@ TEST(CUDABlasHandlePoolTest, ConcurrentGetAndClearWorkspaces) {
 
   EXPECT_EQ(error_count.load(), 0);
 }
+
+#if defined(__linux__) && !defined(USE_ROCM)
+namespace {
+// A negative count disables failure injection for the other tests.
+thread_local int create_attempts = -1;
+} // namespace
+
+// Override the dynamically linked entry point to force an allocation failure.
+extern "C" C10_EXPORT cublasStatus_t cublasCreate_v2(cublasHandle_t* handle) {
+  if (create_attempts >= 0) {
+    static thread_local std::int64_t reserved_before_create = 0;
+    constexpr auto aggregate =
+        static_cast<std::size_t>(c10::CachingAllocator::StatType::AGGREGATE);
+    const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(
+        c10::cuda::current_device());
+    const auto reserved = stats.reserved_bytes[aggregate].current;
+    if (++create_attempts == 1) {
+      EXPECT_GT(reserved, 0);
+      reserved_before_create = reserved;
+      return CUBLAS_STATUS_ALLOC_FAILED;
+    }
+    // Verify PyTorch released cached memory before the cuBLAS retry.
+    EXPECT_LT(reserved, reserved_before_create);
+  }
+  static const auto real_create = reinterpret_cast<decltype(&cublasCreate_v2)>(
+      dlsym(RTLD_NEXT, "cublasCreate_v2"));
+  TORCH_CHECK(real_create, "Cannot find the real cublasCreate_v2");
+  return real_create(handle);
+}
+
+TEST(CUDABlasHandlePoolDeathTest, RetriesAllocationFailure) {
+  if (!at::cuda::is_available() ||
+      !c10::cuda::CUDACachingAllocator::isEnabled()) {
+    GTEST_SKIP() << "requires a CUDA device and allocator caching";
+  }
+  // Re-exec to get a fresh handle pool without inheriting a CUDA context.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        at::globalContext().lazyInitDevice(at::kCUDA);
+        auto* cached = c10::cuda::CUDACachingAllocator::raw_alloc(1024 * 1024);
+        c10::cuda::CUDACachingAllocator::raw_delete(cached);
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+        create_attempts = 0;
+        EXPECT_NE(at::cuda::getCurrentCUDABlasHandle(/*setup=*/false), nullptr);
+        EXPECT_EQ(create_attempts, 2);
+        // Propagate child assertion failures to the parent.
+        std::_Exit(::testing::Test::HasFailure() ? EXIT_FAILURE : EXIT_SUCCESS);
+      },
+      ::testing::ExitedWithCode(EXIT_SUCCESS),
+      "");
+}
+#endif // defined(__linux__) && !defined(USE_ROCM)
 
 #ifdef USE_ROCM
 
@@ -421,6 +482,13 @@ TEST(CUDABlasHandlePoolTest, CaptureHandleKeepsPointerModePerStream) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
-  c10::cuda::CUDACachingAllocator::init(1);
+  // Every TEST() below already guards on at::cuda::is_available() and returns
+  // early when there's no GPU. init() below is not: it unconditionally touches
+  // the CUDA driver (DeviceCachingAllocator's ctor calls cudaGetDeviceProperties),
+  // which aborts the whole process on a GPU-less machine before any TEST() body
+  // gets a chance to self-skip.
+  if (at::cuda::is_available()) {
+    c10::cuda::CUDACachingAllocator::init(1);
+  }
   return RUN_ALL_TESTS();
 }

@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import gc
 import re
+import sys
+import types
 import unittest
 import weakref
 from unittest.mock import patch
@@ -8,6 +10,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import trace_rules
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
@@ -20,6 +23,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -2814,6 +2818,170 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
+    def test_del_global_multi_stream_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            _stream_del_global = x
+            z0 = _stream_del_global + 1
+            with s:
+                z = torch.add(_stream_del_global, y)
+                e.record()
+            e.wait()
+            del _stream_del_global
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        # Reading a global that is first bound during tracing is unsupported, so
+        # bind it before compiling; the delete then replays against the module.
+        # patch.dict unbinds it again even if an assertion below fails.
+        with patch.dict(globals(), {"_stream_del_global": inp[0]}):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+
+    def test_del_global_created_in_trace_multi_stream_sync_dealloc(self, device):
+        # The name is absent from the module: the store binds it during tracing
+        # and the delete cancels that store, so nothing is replayed and the
+        # module never gets the name. The value is dropped while the side stream
+        # is still using it, so the dealloc sync is emitted all the same. The
+        # stored value cannot be read back -- reading a global that is first
+        # bound during tracing is itself a graph break -- so the tensor is used
+        # directly.
+        def fn(x, y):
+            global _stream_del_global_created
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            _stream_del_global_created = x
+            z0 = x + 1
+            with s:
+                z = torch.add(x, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_created
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        self.addCleanup(globals().pop, "_stream_del_global_created", None)
+        self.assertNotIn("_stream_del_global_created", globals())
+
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        graph_str = print_graph(fw_graphs[0])
+        self.assertIn("sync_dealloc", graph_str)
+        self.assertIn("record_event", graph_str)
+        self.assertNotIn("_stream_del_global_created", globals())
+
+    def test_del_global_preexisting_tensor_no_sync_dealloc(self, device):
+        # `_check_global_delete` emits the dealloc sync only for a value a
+        # STORE_GLOBAL made earlier in the same trace; a tensor that is already
+        # in the module when the trace starts is not covered, so deleting it
+        # here emits no `sync_dealloc`. Pin that gap so closing it has to update
+        # this test on purpose.
+        def fn(x, y):
+            global _stream_del_global_preexisting
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            z0 = _stream_del_global_preexisting + 1
+            with s:
+                z = torch.add(_stream_del_global_preexisting, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_preexisting
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
+            expected = fn(*inp)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+            # The name has to be present when the trace starts, so bind it again
+            # and let the compiled run delete it.
+            globals()["_stream_del_global_preexisting"] = inp[0]
+
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertNotIn("sync_dealloc", graph_str)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+
+    def test_del_global_same_stream_no_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                _stream_del_global = x
+                z = torch.add(_stream_del_global, y)
+                del _stream_del_global
+                e.record()
+            e.wait()
+            return z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        with patch.dict(globals(), {"_stream_del_global": inp[0]}):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertNotIn("sync_dealloc", graph_str)
+
+    def test_del_global_crossfile_multi_stream_sync_dealloc(self, device):
+        try:
+            from . import mock_store_global_crossfile_inline as mod
+        except ImportError:
+            import mock_store_global_crossfile_inline as mod
+
+        def fn(x, y):
+            return mod.store_then_delete_multi_stream_tensor_fn(x, y, device)
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        # See test_del_global_multi_stream_sync_dealloc: the inlined callee must
+        # see the name present at trace time for the delete to be recorded.
+        with patch.dict(
+            mod.__dict__, {"store_then_delete_multi_stream_tensor_value": inp[0]}
+        ):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+
     def test_del_subscr_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -2853,6 +3021,39 @@ class <lambda>(torch.nn.Module):
         x = torch.zeros(1, device=device)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
+
+    def test_nested_compile_in_backend_preserves_user_objects(self, device):
+        """A compile run from inside another compile's backend must not clobber
+        the outer compile's external object registry before the outer pre-graph
+        bytecode is generated, and the inner call's runtime object table must
+        not leak into AOTAutograd tracing of the outer graph."""
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        inner = torch.compile(
+            lambda t: t * torch.accelerator.current_stream(device).stream_id,
+            backend="eager",
+        )
+        aot_eager = aot_autograd(fw_compiler=nop)
+
+        def backend(gm, example_inputs):
+            inner(torch.ones(2, device=device))
+            return aot_eager(gm, example_inputs)
+
+        def fn(x, s):
+            with torch.accelerator.current_stream(device):
+                cur_id = torch.accelerator.current_stream(device).stream_id
+                y = x + 1
+            with s:
+                return y * 2, cur_id
+
+        x = torch.ones(2, device=device)
+        s = torch.Stream(device=device)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+        with torch.Stream(device=device) as other:
+            self.assertEqual(compiled(x, s), fn(x, s))
+            self.assertEqual(compiled(x, s)[1], other.stream_id)
 
     def test_recorded_events_append_runtime_objects(self, device):
         events = []
@@ -2948,6 +3149,45 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    def test_synchronize_indexless_device_resolves_current_device(self) -> None:
+        # Single-GPU counterpart to the 2-GPU test in test_compile_on_one_rank.py,
+        # since the dynamo shards are single-GPU. Patching current_device_index
+        # drives both the trace-time resolution and the guard that checks it, so a
+        # second current device must produce a second graph carrying the new index.
+        def f():
+            torch.cuda.synchronize(torch.device("cuda"))
+            return 1
+
+        def emitted():
+            return [
+                n.args
+                for g in backend.graphs
+                for n in g.graph.nodes
+                if "synchronize_device" in str(n.target)
+            ]
+
+        torch._dynamo.reset()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        # Devices 3 and 5 needn't exist, so keep Dynamo's current-stream setup and the
+        # synchronize itself off the hardware.
+        stream = torch.accelerator.current_stream()
+        synced = []
+        for index in (3, 5):
+            with (
+                patch.object(
+                    torch.accelerator, "current_device_index", return_value=index
+                ),
+                patch.object(torch.accelerator, "current_stream", return_value=stream),
+                patch.object(
+                    torch.accelerator, "synchronize", side_effect=synced.append
+                ),
+            ):
+                compiled()
+
+        self.assertEqual(emitted(), [("cuda", 3), ("cuda", 5)])
+        self.assertEqual(synced, [torch.device("cuda", 3), torch.device("cuda", 5)])
+
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
@@ -3331,6 +3571,378 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+
+def _accelerator_has_stream_api() -> bool:
+    """Whether the default accelerator provides the stream APIs the traced
+    tests need and routes current_stream into the handler table (torch.mps
+    has the APIs but its current_stream is in Dynamo's MOD_SKIPLIST)."""
+    if not torch.accelerator.is_available():
+        return False
+    module = torch.get_device_module(torch.accelerator.current_accelerator().type)
+    if not (hasattr(module, "Stream") and hasattr(module, "current_stream")):
+        return False
+    return module.current_stream in TorchInGraphFunctionVariable._get_handlers()
+
+
+class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
+    """
+    Regression test for https://github.com/pytorch/pytorch/pull/192970
+    Issue: https://github.com/pytorch/pytorch/issues/192969
+
+    Verifies that out-of-tree PrivateUse1 backends registered via DeviceInterface
+    get correct stream handling in Dynamo tracing:
+
+    - `current_stream` of the default accelerator's device module (e.g.
+      `torch.npu` for torch_npu) is intercepted by the handler, so `wait_stream`
+      receives valid stream indices and not `None`.
+    - `current_stream` of any other registered backend or device type fails
+      loudly with a device mismatch graph break instead of silently returning
+      the tracked stream of the wrong device.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        # Class cleanups run in LIFO order and, unlike tearDownClass, also run
+        # when setUpClass itself fails midway.  Registered first so it runs
+        # last: the handler table must be rebuilt only after the fake backend
+        # is gone from the interface registry and the trace rules.
+        cls.addClassCleanup(TorchInGraphFunctionVariable._get_handlers.cache_clear)
+
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def current_stream():
+                # Stand-in for an out-of-tree backend's current_stream, on a
+                # device other than the default accelerator so that silently
+                # substituting the tracked stream would be observable.  When
+                # the handler is correctly registered, Dynamo intercepts the
+                # call during tracing and never runs this function.
+                return torch.Stream(device="cpu")
+
+            # Override the base stubs: has_triton() walks all registered
+            # interfaces and would otherwise raise NotImplementedError from
+            # them (noise in compilation-metrics logging).
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return False
+
+        # Patch __module__/__qualname__ so that trace_rules string matching
+        # can resolve "torch.fake_device.current_stream" correctly.
+        fn = FakeDeviceInterface.current_stream
+        original_module = fn.__module__
+        fn.__module__ = "torch.fake_device"
+        fn.__qualname__ = "current_stream"
+        cls.addClassCleanup(setattr, fn, "__module__", original_module)
+
+        fake_device_module = types.ModuleType("fake_device")
+        fake_device_module.current_stream = fn
+        torch.fake_device = fake_device_module
+        cls.addClassCleanup(lambda: delattr(torch, "fake_device"))
+        sys.modules["torch.fake_device"] = fake_device_module
+        cls.addClassCleanup(sys.modules.pop, "torch.fake_device", None)
+        register_interface_for_device("fake_device", FakeDeviceInterface)
+        cls.addClassCleanup(device_interfaces.pop, "fake_device", None)
+
+        rule = dict.fromkeys(
+            ["torch.fake_device.current_stream"],
+            TorchInGraphFunctionVariable,
+        )
+        trace_rules.torch_name_rule_map.append(rule)
+        cls.addClassCleanup(trace_rules.torch_name_rule_map.remove, rule)
+        trace_rules.clear_lru_cache()
+        cls.addClassCleanup(trace_rules.clear_lru_cache)
+
+        # Rebuild the handler table so it includes the fake backend.
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+    def test_handler_table_contains_fake_backend(self):
+        """
+        CPU-runnable smoke test for the registration loop (the traced tests
+        below all require an accelerator): the fake backend's current_stream
+        must map to the same handler as torch.accelerator.current_stream, and
+        the abstract DeviceInterface.current_stream stub must not leak in as a
+        handler key (regression: the stub was once installed, which made
+        current_stream() of non-overriding interfaces silently return the
+        tracked stream instead of raising NotImplementedError).
+        """
+        handlers = TorchInGraphFunctionVariable._get_handlers()
+        self.assertIn(torch.fake_device.current_stream, handlers)
+        self.assertIs(
+            handlers[torch.fake_device.current_stream],
+            handlers[torch.accelerator.current_stream],
+        )
+        self.assertNotIn(DeviceInterface.current_stream, handlers)
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_wait_stream_graph_has_valid_index(self):
+        """
+        A newly created stream waits on `current_stream()` of the default
+        accelerator's device module; the handler must resolve it to a
+        StreamVariable with a valid stream index instead of None.
+
+        Which registration path this exercises depends on the machine: on
+        cuda/xpu it goes through the explicit @register entry (guarding that
+        the no-arg reverse lookup does not false-positive), while on
+        PrivateUse1 accelerator hardware (e.g. NPU) it is the literal
+        #192969 reproducer - without the registration loop,
+        `wait_stream(<stream>, None)` raises a RuntimeError from the C++
+        streams layer. The loop's success path has its own CI-runnable test
+        below (test_registration_loop_wait_stream_success).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+
+        def fn(x):
+            s = device_module.Stream()
+            s.wait_stream(device_module.current_stream())
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        # Execute the compiled function.
+        # Without the fix, this raises:
+        #   RuntimeError: streams::wait_stream() Expected a value of type 'int'
+        #   for argument 'waiting_stream_index' but instead found type 'NoneType'.
+        compiled_fn(torch.tensor(1.0))
+
+        # Compilation and execution succeeded: verify the graph structure.
+        self.assertEqual(len(backend.graphs), 1, "Should compile in a single frame")
+        graph = backend.graphs[0].graph
+
+        wait_stream_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and "wait_stream" in str(n.target)
+        ]
+
+        self.assertTrue(
+            len(wait_stream_nodes) > 0,
+            "No wait_stream node found in the compiled graph",
+        )
+
+        for node in wait_stream_nodes:
+            self.assertIsInstance(node.args[0], int)
+            self.assertEqual(
+                node.args[1],
+                CURRENT_STREAM_INDEX,
+                "wait_stream should reference the ambient current stream "
+                "(regression from #192969!)",
+            )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_registration_loop_wait_stream_success(self):
+        """
+        Regression test for the registration loop's success path (the #192969
+        fix itself): a backend whose current_stream is reachable ONLY through
+        the get_registered_device_interfaces() loop - not the explicit
+        @register list - must trace to a valid stream index. The fake backend
+        is registered under "<accelerator>:fake"; the reverse lookup strips
+        the ":fake" suffix, so the mismatch check passes and the handler
+        returns the tracked current stream. Without the loop, wait_stream
+        receives None (the #192969 error). The sibling test above cannot
+        cover this on CI: cuda/xpu current_stream already had an explicit
+        @register before this PR.
+        """
+        # Registered first so it runs last, after this test's registrations
+        # are undone (same ordering rationale as setUpClass).
+        self.addCleanup(TorchInGraphFunctionVariable._get_handlers.cache_clear)
+
+        device_type = torch.accelerator.current_accelerator().type
+
+        class FakeAccInterface(DeviceInterface):
+            @staticmethod
+            def current_stream():
+                # Never executed under compile: the handler intercepts.
+                return torch.Stream(device="cpu")
+
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return False
+
+        fn = FakeAccInterface.current_stream
+        original_module = fn.__module__
+        fn.__module__ = "torch.fake_acc"
+        fn.__qualname__ = "current_stream"
+        self.addCleanup(setattr, fn, "__module__", original_module)
+
+        fake_acc_module = types.ModuleType("fake_acc")
+        fake_acc_module.current_stream = fn
+        torch.fake_acc = fake_acc_module
+        self.addCleanup(lambda: delattr(torch, "fake_acc"))
+        sys.modules["torch.fake_acc"] = fake_acc_module
+        self.addCleanup(sys.modules.pop, "torch.fake_acc", None)
+        register_interface_for_device(f"{device_type}:fake", FakeAccInterface)
+        self.addCleanup(device_interfaces.pop, f"{device_type}:fake", None)
+
+        rule = dict.fromkeys(
+            ["torch.fake_acc.current_stream"],
+            TorchInGraphFunctionVariable,
+        )
+        trace_rules.torch_name_rule_map.append(rule)
+        self.addCleanup(trace_rules.torch_name_rule_map.remove, rule)
+        trace_rules.clear_lru_cache()
+        self.addCleanup(trace_rules.clear_lru_cache)
+
+        # Rebuild the handler table so it includes the fake accelerator
+        # backend registered above.
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+        device_module = torch.get_device_module(device_type)
+
+        def fn_under_test(x):
+            s = device_module.Stream()
+            s.wait_stream(torch.fake_acc.current_stream())
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn_under_test, backend=backend, fullgraph=True)(torch.tensor(1.0))
+
+        self.assertEqual(len(backend.graphs), 1, "Should compile in a single frame")
+        graph = backend.graphs[0].graph
+
+        wait_stream_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and "wait_stream" in str(n.target)
+        ]
+
+        self.assertTrue(
+            len(wait_stream_nodes) > 0,
+            "No wait_stream node found in the compiled graph",
+        )
+
+        for node in wait_stream_nodes:
+            self.assertIsInstance(node.args[0], int)
+            self.assertEqual(
+                node.args[1],
+                CURRENT_STREAM_INDEX,
+                "wait_stream should reference the ambient current stream",
+            )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_mixed_backend_current_stream_graph_breaks(self):
+        """
+        Mixing device types must fail loudly instead of silently returning the
+        tracked stream of the wrong device:
+        - a registered backend that is not the default accelerator (here
+          `torch.fake_device`)
+        - the default accelerator's module queried for a foreign device type
+          (the other GPU backend) or for 'cpu'
+        An int device index is not a mismatch: it is an index into the called
+        module's own device.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        other_type = "cuda" if device_type != "cuda" else "xpu"
+
+        def int_arg_fn(x):
+            device_module.current_stream(0)
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(int_arg_fn, backend=backend, fullgraph=True)(torch.tensor(1.0))
+        self.assertEqual(len(backend.graphs), 1)
+        torch._dynamo.reset()
+
+        def fake_backend_fn(x):
+            torch.fake_device.current_stream()
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fake_backend_fn, backend="eager", fullgraph=True)(
+                torch.tensor(1.0)
+            )
+        msg = str(ctx.exception)
+        self.assertIn("Dynamo stream mismatch", msg)
+        self.assertIn("fake_device", msg)
+        torch._dynamo.reset()
+
+        for foreign_type in (other_type, "cpu"):
+
+            def foreign_fn(x):
+                device_module.current_stream(foreign_type)
+                return x + 1
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+                torch.compile(foreign_fn, backend="eager", fullgraph=True)(
+                    torch.tensor(1.0)
+                )
+            msg = str(ctx.exception)
+            self.assertIn("Dynamo stream mismatch", msg)
+            self.assertIn(foreign_type, msg)
+            self.assertIn(device_type, msg)
+            torch._dynamo.reset()
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_foreign_backend_stream_not_silently_substituted(self):
+        """
+        Variant of the scenario in
+        https://gist.github.com/guilhermeleobas/138d6e71069e00efecf7b6294dc989d1:
+        a registered backend whose current_stream() returns a stream on a
+        foreign device, with the stream returned out of the compiled region.
+        Dynamo's stream state cannot represent that stream, so tracing must
+        fail loudly; silently returning the tracked accelerator stream would
+        make compiled diverge from eager (different device and stream_id).
+        """
+
+        def fn(x):
+            return torch.fake_device.current_stream(), x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        msg = str(ctx.exception)
+        self.assertIn("Dynamo stream mismatch", msg)
+        self.assertIn("fake_device", msg)
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_bad_device_arg_is_clean_graph_break(self):
+        """
+        A bogus device argument must surface as the structured "bad device
+        argument" graph break, not escape the handler as an internal error
+        (regression: the device mismatch check once raised ValueError from
+        torch.device() outside its try block).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+
+        def fn(x):
+            device_module.current_stream("bogus_device")
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+        self.assertIn("bad device argument", str(ctx.exception))
 
 
 if __name__ == "__main__":

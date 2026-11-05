@@ -299,11 +299,6 @@ class SideEffects:
         # Sources mutated during tracing: AttrSource for attribute
         # mutations, var.source for value mutations (list/dict/etc).
         self.mutated_sources: OrderedSet[Source] = OrderedSet()
-        # The source `mutated_sources` holds for each (item, name) store, so
-        # that a discarded mutation can drop exactly that source. Deliberately
-        # not carried over by clone(): the two are rebuilt together on every
-        # construction, and the map never names a source the set does not hold.
-        self.mutated_sources_by_attr: dict[tuple[VariableTracker, str], Source] = {}
 
         # Deferred side-effect checking for nullified attribute mutations.
         # Maps (vt_id, attr_name) → (original_value, current_value).
@@ -578,18 +573,12 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        if mutated_source is None:
+        if mutated_source is not None:
+            self.mutated_sources.add(mutated_source)
+        else:
             item_source = getattr(item, "source", None)
-            if item_source is None:
-                # The store is still tracked; there is just no source for
-                # readers of this object to intersect with.
-                return
-            mutated_source = AttrSource(item_source, name)
-        self.mutated_sources.add(mutated_source)
-        # Remember the source that was registered, so discard_attr_mutation can
-        # drop exactly this one instead of reconstructing it. The record has to
-        # be the source as passed in, wrapping and all.
-        self.mutated_sources_by_attr[(item, name)] = mutated_source
+            if item_source is not None:
+                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -608,8 +597,6 @@ class SideEffects:
                 # for both to surface any invariant violation.
                 del self.store_attr_mutations[item][name]
                 del self.attr_mutation_kinds[item][name]
-                # Absent for an item store_attr registered no source for.
-                self.mutated_sources_by_attr.pop((item, name), None)
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
     def get_attr_mutation_kind(
@@ -720,27 +707,43 @@ class SideEffects:
         # use, so mutated_sources intersects with traced_sources.
         self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
 
-    def discard_attr_mutation(self, item: VariableTracker, name: str) -> None:
-        """Drop a recorded mutation that replayed as a no-op.
+    def delete_global(self, gvar: VariableTracker, name: str, present: bool) -> None:
+        """Record a DELETE_GLOBAL, or cancel the store it removes.
 
-        Dropping the last name for `item` removes the `item` entries as well, so
-        the frame is no longer reported as having mutated it.
+        `present` is trace-time `name in f_globals`: only a name that exists
+        outside this trace has to be deleted at replay time. A name created by a
+        STORE_GLOBAL earlier in this trace never reaches the globals, so the
+        delete cancels that store instead of replaying.
         """
-        mutations = self.store_attr_mutations[item]
-        del mutations[name]
-        del self.attr_mutation_kinds[item][name]
-        # Looked up rather than handed in: the source store_attr registered is
-        # not always reconstructible from the call site, e.g. it is wrapped in
-        # SkipGuardSource for stdlib modules. An item with no source has no
-        # entry, and store_attr added nothing for it to drop.
-        discarded = self.mutated_sources_by_attr.pop((item, name), None)
-        if discarded is not None:
-            self.mutated_sources.discard(discarded)
-        self.deferred_attr_mutations.pop((id(item), name), None)
-        if not mutations:
-            del self.store_attr_mutations[item]
-            del self.attr_mutation_kinds[item]
-            self.mutation_user_stacks.pop(item, None)
+        if not present:
+            self.discard_global_store(gvar, name)
+        elif isinstance(gvar, variables.NewGlobalVariable):
+            self.store_global(gvar, name, variables.DeletedVariable())
+        else:
+            self.store_attr(
+                gvar, name, variables.DeletedVariable(), AttrMutationKind.GLOBAL_DELETE
+            )
+
+    def discard_global_store(self, gvar: VariableTracker, name: str) -> None:
+        """Drop the STORE_GLOBAL record that a later delete cancels."""
+        del self.store_attr_mutations[gvar][name]
+        del self.attr_mutation_kinds[gvar][name]
+        # The source store_attr registered for this store: store_global records
+        # the global's own source, a module-scope store_attr the attribute source.
+        if isinstance(gvar, variables.NewGlobalVariable):
+            mutated_source: Source | None = gvar.source
+        else:
+            item_source = getattr(gvar, "source", None)
+            mutated_source = (
+                None if item_source is None else AttrSource(item_source, name)
+            )
+        if mutated_source is not None:
+            self.mutated_sources.discard(mutated_source)
+        self.deferred_attr_mutations.pop((id(gvar), name), None)
+        if not self.store_attr_mutations[gvar]:
+            del self.store_attr_mutations[gvar]
+            del self.attr_mutation_kinds[gvar]
+            self.mutation_user_stacks.pop(gvar, None)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -1042,10 +1045,7 @@ class SideEffects:
             # Reusing it also stops repeated STORE_GLOBAL to one name from
             # orphaning a NewGlobalVariable per store.
             return self.id_to_variable[id(item)]
-        variable = variables.NewGlobalVariable(
-            mutation_type=AttributeMutationExisting(),
-            source=source,
-        )
+        variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -1360,7 +1360,7 @@ class SideEffects:
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
                         cg(var.source)
-                        cg(variables.ConstantVariable(name))
+                        cg(variables.ConstantVariable.create(name))
                         cg(value)
                         cg.extend_output(
                             [*create_call_method(3), create_instruction("POP_TOP")]
@@ -2074,9 +2074,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                     f"got {type(var.source)}"  # type: ignore[attr-defined]
                 )
             if isinstance(value, variables.DeletedVariable):
-                # DELETE_GLOBAL only records a delete when the name was present in
-                # the real globals, so this is always replayable; a name that was
-                # only created during tracing is discarded in the handler.
+                # A delete is only recorded for a name the real globals hold, so
+                # replay is unconditional; a trace-created name is cancelled.
                 ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
             else:
                 cg(value)
@@ -2106,7 +2105,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                     )
                 )
                 cg(var.source)  # type: ignore[attr-defined]
-                cg(variables.ConstantVariable(name))
+                cg(variables.ConstantVariable.create(name))
                 ctx.suffixes.append(
                     [*create_call_function(2, False), create_instruction("POP_TOP")]
                 )
@@ -2126,7 +2125,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                         )
                     )
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg(variables.ConstantVariable(name))
+                    cg(variables.ConstantVariable.create(name))
                     ctx.suffixes.append(
                         [
                             *create_call_function(2, False),
@@ -2154,7 +2153,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 )
             )
             cg(var.source)  # type: ignore[attr-defined]
-            cg(variables.ConstantVariable(name))
+            cg(variables.ConstantVariable.create(name))
             cg(value)
             ctx.suffixes.append(
                 [
@@ -2172,7 +2171,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             cg.load_import_from("builtins", "object")
             cg.load_method("__setattr__")
             cg(var.source)  # type: ignore[attr-defined]
-            cg(variables.ConstantVariable(name))
+            cg(variables.ConstantVariable.create(name))
             cg(value)
             ctx.suffixes.append([*create_call_method(3), create_instruction("POP_TOP")])
             side_effect_occurred = True

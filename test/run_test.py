@@ -24,6 +24,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple
 
+from conftest import STEPCURRENT_CACHE_DIR
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -74,6 +76,7 @@ from tools.testing.test_selections import (
     get_job_base_name,
     get_test_case_configs,
     NUM_PROCS,
+    NUM_PROCS_FOR_SHARDING_CALC,
     ShardedTest,
     THRESHOLD,
 )
@@ -231,16 +234,10 @@ if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
-    "dynamo/test_misc",
     "inductor/test_cpu_repro",
-    "inductor/test_cpu_select_algorithm",
-    "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
-    "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_jit",
-    "dynamo/test_utils",
-    "test_nn",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
@@ -280,8 +277,6 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
-    # new failures to investigate and fix
-    "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
     "dynamo/test_backends",
@@ -292,6 +287,13 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
+    # depends on torchvision
+    "onnx/test_utility_funs",
+    # crash on s390x that needs investigation
+    "test_schema_check",
+    "test_meta",
+    # needs fixes in s390x vectorization code
+    "inductor/test_compile_subprocess",
 ]
 
 XPU_BLOCKLIST = [
@@ -356,8 +358,25 @@ CI_SERIAL_LIST = [
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
-    "inductor/test_flex_attention",  # OOM
 ]
+
+# Serial files whose tests run concurrently under pytest-xdist with NUM_PROCS
+# workers. Their tests are compile-bound with small GPU footprints, so a
+# machine dedicated to the file is better used running several tests at once.
+XDIST_SERIAL_LIST = [
+    "inductor/test_flex_attention",
+]
+# Serial files (see CI_SERIAL_LIST) that run the same way, but only on CPU-only
+# jobs: their large CUDA tests need more than one worker's share of the GPU and
+# would skip. On CPU, largeTensorTest guards check free host memory without a
+# per-worker share, so these files mark their large CPU tests @serialTest.
+XDIST_SERIAL_CPU_LIST = [
+    "distributions/test_distributions",
+    "test_nn",
+    "test_reductions",
+    "test_torch",
+]
+XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
     "onnx/test_models",
@@ -525,18 +544,28 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
-def _torchci_report_args(reports_dir: str | None) -> list[str]:
+def _torchci_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
     if not HAS_TORCHCI_REPORTS or not reports_dir:
         return []
-    return [f"--save-torchci-reports={reports_dir}"]
+    if not is_cpp_test:
+        return [f"--save-torchci-reports={reports_dir}"]
+    # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    from torch.testing._internal.torchci import plugin
+
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
+    return ["-p", plugin.__name__, f"--torchci-report-prefix={prefix}"]
 
 
 def _torchci_reports_default() -> str | None:
-    # The CI jobs that write reports by default, widening until it's all of CI.
-    # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
-        return str(REPO_ROOT / "test/torchci-reports")
-    return None
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
+        return None
+    return str(REPO_ROOT / "test/torchci-reports")
 
 
 def run_test(
@@ -616,8 +645,8 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
-    if not is_cpp_test:
-        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -707,6 +736,11 @@ def run_test(
         and test_module.time is not None
         else THRESHOLD * 3
         if is_cpp_test
+        # The per-file xdist pass (see run_tests) skips the stepcurrent retries
+        # below, which bound each process. Its pieces are estimated at no more
+        # than THRESHOLD, but estimates can run several times low.
+        else THRESHOLD * 6
+        if options.pytest_xdist_workers is not None and test_file in XDIST_SERIAL_FILES
         else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
@@ -731,6 +765,13 @@ def run_test(
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
+            if (
+                options.pytest_xdist_workers is not None
+                and test_file in XDIST_SERIAL_FILES
+            ):
+                # Leave only this pass's failures in lastfailed for the rerun
+                # below.
+                drop_lastfailed(f"test/{test_file}.py::")
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
@@ -762,7 +803,75 @@ def run_test(
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
+    failed = (
+        [
+            nodeid
+            for nodeid in read_lastfailed()
+            if nodeid.startswith(f"test/{test_file}.py::")
+        ]
+        if ret_code == 1
+        and options.pytest_xdist_workers is not None
+        and test_file in XDIST_SERIAL_FILES
+        else []
+    )
+    if failed:
+        # The xdist pass skips the fresh-process retries that classify failures
+        # as flaky or consistent. Exit code 1 means it ran every test (no -x)
+        # and some failed, rather than timing out or crashing, so rerun just
+        # those through the retries. The failures are fixed up front: pytest's lastfailed cache changes as
+        # the retries run, and selecting from it would rerun the rest of the
+        # file once a flaky failure passes.
+        print_to_stderr(
+            f"{test_label} failed under xdist; rerunning its {len(failed)} failures"
+            " without xdist"
+        )
+        rerun_options = copy.deepcopy(options)
+        rerun_options.pytest_xdist_workers = None
+        # Run alone, without the xdist workers' memory cap.
+        rerun_env = {k: v for k, v in env.items() if k != "NUM_PARALLEL_PROCS"}
+        # Closed before the rerun reads it, which Windows requires.
+        nodeid_fd, nodeid_path = tempfile.mkstemp(
+            dir=REPO_ROOT / "test" / "test-reports", suffix="_failed_nodeids.txt"
+        )
+        with os.fdopen(nodeid_fd, "w") as f:
+            f.write("\n".join(failed))
+        rerun_options.additional_args.append(f"--nodeid-file={nodeid_path}")
+        try:
+            return run_test(
+                test_module,
+                test_directory,
+                rerun_options,
+                launcher_cmd,
+                extra_unittest_args,
+                rerun_env,
+                print_log,
+            )
+        finally:
+            os.unlink(nodeid_path)
     return ret_code
+
+
+LASTFAILED_PATH = REPO_ROOT / ".pytest_cache/v/cache/lastfailed"
+
+
+def read_lastfailed() -> list[str]:
+    """Node ids in pytest's lastfailed cache, which xdist runs write too."""
+    try:
+        with open(LASTFAILED_PATH) as f:
+            return list(json.load(f))
+    except FileNotFoundError:
+        return []
+
+
+def drop_lastfailed(prefix: str) -> None:
+    """Removes the node ids starting with prefix from pytest's lastfailed cache."""
+    try:
+        with open(LASTFAILED_PATH) as f:
+            lastfailed = json.load(f)
+    except FileNotFoundError:
+        return
+    with open(LASTFAILED_PATH, "w") as f:
+        json.dump({k: v for k, v in lastfailed.items() if not k.startswith(prefix)}, f)
 
 
 def install_cpp_extensions(extensions_dir, env=os.environ):
@@ -843,16 +952,40 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    # pytest keeps cache values under <cache_dir>/v/<key>.
+    cache_dir = REPO_ROOT / ".pytest_cache/v" / STEPCURRENT_CACHE_DIR / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finish_torchci_report(ret_code: int, signal_name: str) -> None:
+        # The report writer publishes the run in flight next to lastrun; a process
+        # that died left it unrecorded (torchci/README.md).
+        if not HAS_TORCHCI_REPORTS:
+            return
+        try:
+            from torch.testing._internal.torchci import plugin
+
+            # An installed torch whose plugin predates the publication.
+            if not hasattr(plugin, "take_inflight"):
+                return
+            inflight = plugin.take_inflight(cache_dir)
+            # pytest's own exits (interrupted, internal error, usage error): the
+            # process didn't die, so the run is only consumed.
+            if inflight is None or ret_code in (2, 3, 4):
+                return
+            if ret_code == 124:
+                limit = f" after {timeout // 60}min" if timeout else ""
+                plugin.append_run(inflight, "timed_out", f"timed out{limit}")
+            else:
+                summary = f"exit code {ret_code}{signal_name}"
+                plugin.append_run(inflight, "crashed", summary)
+        except Exception as e:
+            print_to_file(f"Could not finish the test run report: {e}")
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -872,6 +1005,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finish_torchci_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:
@@ -991,6 +1126,7 @@ def run_gloo_test(test_module, test_directory, options):
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
             "ProcessGroupGlooFRTest",
+            "DistributedDataParallelTest",
         ),
     )
 
@@ -1005,6 +1141,15 @@ def run_common_test(test_module, test_directory, options):
             "ProcessGroupWithDispatchedCollectivesTests",
             "LocalRankTest",
         ),
+    )
+
+
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
     )
 
 
@@ -1442,6 +1587,13 @@ def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=F
         # When under the normal mode, retry a failed test NUM_PYTEST_RERUNS more times.
         # -x means stop at the first failure. Set PYTORCH_NUM_PYTEST_RERUNS=0 to disable.
         rerun_options = ["-x", f"--reruns={NUM_PYTEST_RERUNS}"]
+        if options.pytest_xdist_workers is not None and (
+            options.continue_through_error or test_file in XDIST_SERIAL_FILES
+        ):
+            # Without -x the xdist session keeps going past failures, as
+            # run_test_retries does for non-xdist runs. XDIST_SERIAL_FILES
+            # always run every test so run_test reruns all of their failures.
+            rerun_options.remove("-x")
 
     pytest_args = [
         "-vv",
@@ -1450,7 +1602,6 @@ def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=F
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python.
         if options.pytest_xdist_workers is None:
-            # The custom pytest shard conflicts with xdist.
             pytest_args.extend(["-p", "no:xdist"])
         else:
             pytest_args.extend(["-n", str(options.pytest_xdist_workers)])
@@ -1509,7 +1660,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_common_test,
@@ -1683,7 +1834,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -1873,10 +2024,50 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
+        or file in XDIST_SERIAL_FILES
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
+
+
+# Smallest per-worker GPU memory cap for XDIST_SERIAL_LIST files; flex's
+# largeTensorTest("2GB") guards skip below 2 GiB of free memory per worker.
+MIN_XDIST_WORKER_GPU_GIB = 4
+
+
+def serial_file_xdist_workers(
+    file: str | ShardedTest, options, num_procs: int = NUM_PROCS
+) -> int:
+    """Number of pytest-xdist workers that run the non-@serial tests of an
+    XDIST_SERIAL_FILES file in its serial slot, or 1 to run it without xdist.
+
+    Returns 1 in the global --pytest-xdist-workers mode, which runs serial
+    files without xdist."""
+    if isinstance(file, ShardedTest):
+        file = file.name
+    if (
+        file not in XDIST_SERIAL_FILES
+        or (file in XDIST_SERIAL_CPU_LIST and torch.accelerator.is_available())
+        or options.pytest_xdist_workers is not None
+        or os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
+        # Only CUDA caps each worker's memory (NUM_PARALLEL_PROCS); CPU-only
+        # jobs need no cap. ROCm pins each parallel test process to its own
+        # GPU (see maybe_set_hip_visible_devies) and xdist would bypass that.
+        or (torch.accelerator.is_available() and not TEST_CUDA)
+        or torch.version.hip
+        # flake-finder's repeated runs are only established without xdist.
+        or RERUN_DISABLED_TESTS
+    ):
+        return 1
+    if TEST_CUDA:
+        # Mirrors the cap set_per_process_memory_fraction applies per worker.
+        gib = torch.cuda.get_device_properties(0).total_memory / 2**30
+        while num_procs > 1 and (gib - num_procs * 0.85) / num_procs < (
+            MIN_XDIST_WORKER_GPU_GIB
+        ):
+            num_procs -= 1
+    return num_procs
 
 
 def can_run_in_pytest(test):
@@ -2214,6 +2405,9 @@ def do_sharding(
         must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
         allow_pytest_sharding=not uses_xdist,
+        xdist_workers=lambda file: serial_file_xdist_workers(
+            file, options, NUM_PROCS_FOR_SHARDING_CALC
+        ),
     )
     return shards[which_shard - 1]
 
@@ -2330,38 +2524,47 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    def run_module(
+        test: ShardedTest,
+        serial_expr: str | None,
+        workers: int | None = None,
+    ) -> TestFailure | None:
+        options_clone = copy.deepcopy(options)
+        if can_run_in_pytest(test):
+            options_clone.pytest = True
+        options_clone.pytest_xdist_workers = workers
+        options_clone.additional_args.extend(marker_args(serial_expr))
+        return run_test_module(test, test_directory, options_clone)
+
+    def finish(failure: TestFailure | None) -> None:
+        test_failed = handle_complete(failure)
+        if (
+            test_failed
+            and not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+        ):
+            raise RuntimeError(failure.message + keep_going_message)
+
     pool = None
     try:
         for test in selected_tests_serial:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            options_clone.pytest_xdist_workers = None
-            options_clone.additional_args.extend(marker_args(None))
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_complete(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message + keep_going_message)
+            workers = serial_file_xdist_workers(test, options)
+            if workers == 1:
+                finish(run_module(test, None))
+                continue
+            # @serial tests still run alone. The rest share the machine across
+            # xdist workers, each capped to its share of GPU memory.
+            finish(run_module(test, "serial"))
+            os.environ["NUM_PARALLEL_PROCS"] = str(workers)
+            try:
+                failure = run_module(test, "not serial", workers)
+            finally:
+                del os.environ["NUM_PARALLEL_PROCS"]
+            finish(failure)
 
         # Run tests marked as serial first
         for test in selected_tests_parallel:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            options_clone.pytest_xdist_workers = None
-            options_clone.additional_args.extend(marker_args("serial"))
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_complete(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message + keep_going_message)
+            finish(run_module(test, "serial"))
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
         # the number of procs is the number of GPUs, so we don't need to do this.

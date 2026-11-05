@@ -527,7 +527,7 @@ Tensor isreal(const Tensor& self) {
 static bool is_fp8_type_without_inf(ScalarType dtype) {
   const bool without_inf = dtype == kFloat8_e4m3fn ||
       dtype == kFloat8_e4m3fnuz || dtype == kFloat8_e5m2fnuz ||
-      dtype == kFloat8_e8m0fnu;
+      dtype == kFloat8_e8m0fnu || dtype == kFloat8_e5m3fnu;
   TORCH_INTERNAL_ASSERT(
       without_inf || dtype == kFloat8_e5m2 || !c10::isFloat8Type(dtype),
       "unhandled fp8 dtype ",
