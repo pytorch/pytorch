@@ -379,6 +379,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // instead of the tensor output.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
+    bool hasFutureResult() const override {
+      return true;
+    }
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;

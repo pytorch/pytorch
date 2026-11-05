@@ -22,7 +22,7 @@
 // at once, so a fast collective that finished before the post-hook is retired
 // too.
 //
-// A Work with no result future (getFutureResult() throws) falls back to
+// A Work with no result future (hasFutureResult() is false) falls back to
 // retiring in the post-hook, i.e. at issue. Such an entry carries no duration
 // and never reads "completed", only "scheduled" and retired -- degraded, but
 // honest, because there is genuinely no moment at which this hook learns the op

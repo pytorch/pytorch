@@ -86,6 +86,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // Completes when the gloo op finishes on the host. For CUDA tensors
     // device-side work may still be queued.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
     uint64_t getSequencenumber() const override;
     std::chrono::milliseconds getTimeout() const override;
     // These three are not read in-tree; kept for out-of-tree subclasses.
@@ -220,6 +223,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // Completes on the first wait() that finishes the op; stays pending if the
     // work is never waited on or wait() is interrupted by abort().
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
 
    protected:
     at::Tensor tensor_;
@@ -249,6 +255,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // Completes on the first wait() that finishes the op; stays pending if the
     // work is never waited on or wait() is interrupted by abort().
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
 
    protected:
     at::Tensor tensor_;
