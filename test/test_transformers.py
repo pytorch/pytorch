@@ -6304,10 +6304,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
-        num_heads_q = num_heads_kv = 4
-        if enable_gqa:
-            num_heads_q = n_heads[0]
-            num_heads_kv = n_heads[1]
+        num_heads_q, num_heads_kv = n_heads
 
         query = torch.rand(batch_size, num_heads_q, seq_len_q, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
