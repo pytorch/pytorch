@@ -5827,6 +5827,145 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
 
+    def test_item_memo(self):
+        mode, _ = self._make_mode()
+        get_memo, set_memo = torch._C._get_fake_item_memo, torch._C._set_fake_item_memo
+
+        def make_fake():
+            meta = torch.empty((), device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        class IntSubclass(int):
+            pass
+
+        # Only Python and symbolic numbers are accepted, and returned as is
+        fake = make_fake()
+        self.assertIsNone(get_memo(fake))
+        for bad in (fake, None, 1j, IntSubclass(1)):
+            with self.assertRaisesRegex(TypeError, "Expected an int, float, bool"):
+                set_memo(fake, bad, False)
+        env = ShapeEnv()
+        syms = (env.create_unbacked_symint(), env.create_unbacked_symfloat())
+        for good in (2, 2.5, False, *syms, env.create_unbacked_symbool()):
+            set_memo(fake, good, False)
+            self.assertIs(get_memo(fake), good)
+
+        # Dropped once read in another epoch, unless kept across epochs
+        set_memo(fake, 2, False)
+        mode.epoch += 1
+        self.assertIsNone(get_memo(fake))
+        mode.epoch -= 1
+        self.assertIsNone(get_memo(fake))
+        set_memo(fake, 3, True)
+        mode.epoch += 1
+        self.assertEqual(get_memo(fake), 3)
+        # Dropped once the tensor is mutated, even if kept across epochs
+        torch._C._autograd._unsafe_set_version_counter((fake,), (fake._version + 1,))
+        self.assertIsNone(get_memo(fake))
+
+        # An inference fake has no version counter, but epochs still apply
+        with torch.inference_mode():
+            inference = make_fake()
+        set_memo(inference, 2, False)
+        self.assertEqual(get_memo(inference), 2)
+        mode.epoch += 1
+        self.assertIsNone(get_memo(inference))
+
+        # set_data drops the destination's memo and does not copy the source's
+        dst, src = make_fake(), make_fake()
+        set_memo(dst, 2, True)
+        set_memo(src, 3, True)
+        dst.data = src
+        self.assertIsNone(get_memo(dst))
+        # Once set_data disables the version counter, setting fails and leaves
+        # no memo
+        with torch.inference_mode():
+            disabled = make_fake()
+        disabled.data = make_fake()
+        with self.assertRaisesRegex(RuntimeError, "version counter"):
+            set_memo(disabled, 2, False)
+        self.assertIsNone(get_memo(disabled))
+
+        # A fake without a mode stores no memo; a real tensor has none and is
+        # rejected by the setters
+        no_mode = torch.empty((), device="meta")
+        torch._C._set_fake_device(no_mode, torch.device("cpu"))
+        set_memo(no_mode, 2, True)
+        self.assertIsNone(get_memo(no_mode))
+        real = torch.empty(())
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+            set_memo(real, 2, False)
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+            torch._C._set_fake_sym_memo(real, "nonzero_memo", 2)
+        self.assertIsNone(get_memo(real))
+        self.assertIsNone(torch._C._get_fake_sym_memo(real, "nonzero_memo"))
+
+    def test_memo_helpers(self):
+        from torch._subclasses.fake_tensor import (
+            maybe_get_item_memo,
+            maybe_get_sym_memo,
+            maybe_set_item_memo,
+            maybe_set_sym_memo,
+        )
+
+        shape_env = ShapeEnv()
+        mode, wrapper = self._make_mode(shape_env)
+        meta = torch.empty((), device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        # The memo helpers reach a C++ fake's memos, in its mode's epoch
+        source = LocalSource("i")
+        sym = shape_env.create_symbol(2, source, DimDynamic.DYNAMIC)
+        memo = shape_env.create_symintnode(sym, hint=2, source=source)
+        maybe_set_item_memo(fake, memo)
+        maybe_set_sym_memo(fake, "nonzero_memo", memo)
+        self.assertIs(maybe_get_item_memo(fake), memo)
+        self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, memo.node)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_item_memo(fake))
+        self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
+        # Like SymNumberMemoDescriptor, a backed SymFloat, unlike a backed
+        # SymInt, outlives an epoch change
+        source = LocalSource("x")
+        sym = shape_env.create_unspecified_symbol(2.5, source, DimDynamic.DYNAMIC)
+        backed = shape_env.create_symfloatnode(sym, hint=2.5, source=source)
+        maybe_set_item_memo(fake, backed)
+        mode.epoch += 1
+        self.assertIs(maybe_get_item_memo(fake), backed)
+        # but not a mutation, and an unbacked SymFloat does not outlive either
+        bumped = (fake._version + 1,)
+        torch._C._autograd._unsafe_set_version_counter((fake,), bumped)
+        self.assertIsNone(maybe_get_item_memo(fake))
+        unbacked = shape_env.create_unbacked_symfloat()
+        maybe_set_item_memo(fake, unbacked)
+        self.assertIs(maybe_get_item_memo(fake), unbacked)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_item_memo(fake))
+
+        # They read the epoch from the C++ mode, so they work without its
+        # Python wrapper
+        maybe_set_item_memo(fake, backed)
+        maybe_set_sym_memo(fake, "nonzero_memo", memo)
+        ref = weakref.ref(wrapper)
+        del wrapper
+        gc.collect()
+        self.assertIsNone(ref())
+        self.assertIs(maybe_get_item_memo(fake), backed)
+        self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, memo.node)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
+        self.assertIs(maybe_get_item_memo(fake), backed)
+        mode.epoch += 1
+        self.assertIs(maybe_get_item_memo(fake), backed)
+
+        # A fake without a mode has no memos
+        no_mode = torch.empty((), device="meta")
+        torch._C._set_fake_device(no_mode, torch.device("cpu"))
+        maybe_set_sym_memo(no_mode, "nonzero_memo", memo)
+        maybe_set_item_memo(no_mode, backed)
+        self.assertIsNone(maybe_get_sym_memo(no_mode, "nonzero_memo"))
+        self.assertIsNone(maybe_get_item_memo(no_mode))
+
 
 if __name__ == "__main__":
     run_tests()
