@@ -232,21 +232,42 @@ class TestRoundedConversion(TestCase):
         self.assertSameValues(x.to(device).to(dst), expected, x)
 
     def test_double_rounding(self, device):
-        # Just above the midpoint between 1 and the next float16, but rounding
-        # to float32 first would land exactly on the midpoint.
-        v = 1 + 2**-11 + 2**-40
+        for dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=dtype):
+                self._check_double_rounding(device, dtype)
+
+    def _check_double_rounding(self, device, dtype):
+        # Just above the midpoint between 1 and the next value of dtype, but
+        # rounding to float32 first would land exactly on the midpoint.
+        # (bfloat16 catches direct static_casts from double on every platform:
+        # float16 has a native conversion on aarch64.)
+        eps = torch.finfo(dtype).eps
+        v = 1 + eps / 2 + 2**-40
         x = torch.tensor([v], dtype=torch.float64, device=device)
-        self.assertEqual(x.to(torch.float16).item(), 1 + 2**-10)
-        self.assertEqual(x.to(torch.float32).to(torch.float16).item(), 1.0)
-        # Other conversions through c10::convert: from a Scalar, and of an
-        # operator's output.
-        y = torch.full((1,), v, dtype=torch.float16, device=device)
-        self.assertEqual(y.item(), 1 + 2**-10)
-        out = torch.empty(1, dtype=torch.float16, device=device)
-        self.assertEqual(torch.add(x, 0, out=out).item(), 1 + 2**-10)
-        z = torch.tensor([complex(v, -v)], dtype=torch.complex128, device=device)
+        self.assertEqual(x.to(dtype).item(), 1 + eps)
+        self.assertEqual(x.to(torch.float32).to(dtype).item(), 1.0)
+        # Other conversions: from a Scalar (fill_ special-cases one element),
+        # and of an operator's output, where chebyshev_polynomial_t
+        # (T_1(x) = x) is jiterated on CUDA.
+        for n in (1, 2):
+            y = torch.full((n,), v, dtype=dtype, device=device)
+            self.assertEqual(y.tolist(), [1 + eps] * n)
+        out = torch.empty(1, dtype=dtype, device=device)
+        self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
+        torch.special.chebyshev_polynomial_t(x, 1, out=out)
+        self.assertEqual(out.item(), 1 + eps)
+
+    def test_double_rounding_complex32(self, device):
+        v = 1 + 2**-11 + 2**-40
         expected = complex(1 + 2**-10, -(1 + 2**-10))
+        z = torch.tensor([complex(v, -v)], dtype=torch.complex128, device=device)
         self.assertEqual(z.to(torch.complex32).to(torch.complex128).item(), expected)
+        x = torch.tensor([v], dtype=torch.float64, device=device)
+        w = x.to(torch.complex32).to(torch.complex128)
+        self.assertEqual(w.item(), complex(1 + 2**-10, 0))
+        for n in (1, 2):
+            w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
+            self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
 
 
 instantiate_device_type_tests(TestRoundedConversion, globals())
