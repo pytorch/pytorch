@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -6458,6 +6458,21 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("use_pos_weight", [False, True])
+    @parametrize_test("create_graph", [False, True])
+    def test_bce_with_logits_numerical_stability(self, device, dtype, use_pos_weight, create_graph):
+        x = torch.tensor([37.42994775023705, -37.42994775023705], device=device, dtype=dtype, requires_grad=True)
+        target = torch.tensor([1.0, 0.0], device=device, dtype=dtype)
+        pos_weight = torch.tensor([2.0, 3.0], device=device, dtype=dtype) if use_pos_weight else None
+
+        loss = F.binary_cross_entropy_with_logits(x, target, pos_weight=pos_weight, reduction="sum")
+        (grad,) = torch.autograd.grad(loss, x, create_graph=create_graph)
+
+        scale = torch.tensor([-2.0 if use_pos_weight else -1.0, 1.0], device=device, dtype=dtype)
+        expected_grad = torch.sigmoid(-x.detach().abs()) * scale
+        self.assertEqual(grad, expected_grad)
+
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -8458,6 +8473,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, -1, 0], g[:, :, -pb - 1 :, : pl + 1].sum((-2, -1)))
             self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
 
+    @serialTest()
     @largeTensorTest("6GB")
     def test_ReplicationPad3d_large(self, device):
         shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
@@ -10524,6 +10540,7 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
 
+    @serialTest()
     @dtypes(torch.half)
     @largeTensorTest("20GB")
     def test_log_softmax_64bit_indexing(self, device, dtype):
@@ -10658,6 +10675,7 @@ class TestNNDeviceType(NNTestCase):
             torch.accelerator.synchronize()
         issue_24823_2()
 
+    @serialTest()
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
@@ -10706,6 +10724,7 @@ class TestNNDeviceType(NNTestCase):
             small_image.grad.zero_()
             large_view.grad.zero_()
 
+    @serialTest()
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
@@ -18265,6 +18284,10 @@ instantiate_device_type_tests(TestNNCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
+
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
