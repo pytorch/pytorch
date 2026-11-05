@@ -201,8 +201,6 @@ class FSDPParam:
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
-    # Shard(i), i > 0, whose dim size the shard world size does not divide
-    _uneven_nonzero_dim: bool
     # Whether this rank's shard is shorter than the padded shard on a nonzero dim
     pads_all_gather_input: bool
     sharded_post_forward_size: torch.Size  # ND
@@ -354,9 +352,6 @@ class FSDPParam:
             shard_rank = 0
             shard_world_size = 1
 
-        self._uneven_nonzero_dim = (
-            shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0
-        )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
@@ -366,7 +361,7 @@ class FSDPParam:
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
         self.pads_all_gather_input = (
-            self._uneven_nonzero_dim and self.sharded_size != padded_sharded_size
+            shard_dim != 0 and self.sharded_size != padded_sharded_size
         )
         self._default_all_gather_output_layouts = (
             _get_all_gather_output_layout(
@@ -869,12 +864,21 @@ class FSDPParam:
                 "Both fsdp_pre_all_gather and fsdp_post_all_gather should be defined "
                 f"if using all-gather extensions: {inner_tensor}"
             )
-        if has_fsdp_pre_all_gather and self._uneven_nonzero_dim:
+        shard_dim = self.fsdp_placement.dim
+        shard_world_size = (
+            self.mesh_info.shard_mesh_size
+            if isinstance(self.mesh_info, FSDPMeshInfo)
+            else 1
+        )
+        if (
+            has_fsdp_pre_all_gather
+            and shard_dim != 0
+            and self._orig_size[shard_dim] % shard_world_size != 0
+        ):
             raise NotImplementedError(
-                "FSDP does not support uneven sharding on dim "
-                f"{self.fsdp_placement.dim} for all-gather extensions: "
-                f"{self._orig_size} (world size: "
-                f"{cast(FSDPMeshInfo, self.mesh_info).shard_mesh_size})"
+                f"FSDP does not support uneven sharding on dim {shard_dim} for "
+                f"all-gather extensions: {self._orig_size} (world size: "
+                f"{shard_world_size})"
             )
         if has_release_all_gather_outputs and not has_fsdp_post_all_gather:
             raise AssertionError(
@@ -919,7 +923,8 @@ class FSDPParam:
         if len(self.all_gather_outputs) > 0:
             return  # already initialized
         output_numels = [numel * world_size for numel in all_gather_input_numels]
-        if self._uneven_nonzero_dim:
+        shard_dim = self.fsdp_placement.dim
+        if shard_dim != 0 and self._orig_size[shard_dim] % world_size != 0:
             # The copy-out drops the padding (see _default_all_gather_output_fn)
             output_numels = [self._orig_size.numel()]
         self.all_gather_outputs = [
