@@ -8761,8 +8761,8 @@ BACKWARD_SKIPS_AND_XFAILS = [
     ),
     # mean(): need to examine backwards formula
     XFailRule(
-        error_type=RuntimeError,
-        error_msg="SymIntArrayRef expected to contain only concrete integers",
+        error_type=AttributeError,
+        error_msg="'NestedIntNode' object has no attribute 'sym_max'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -9005,7 +9005,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
-        error_msg="'NestedIntNode' object has no attribute 'sym_float'",
+        error_msg="'NestedIntNode' object has no attribute 'sym_max'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name

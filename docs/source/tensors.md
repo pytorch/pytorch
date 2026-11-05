@@ -612,6 +612,7 @@ view of a storage and defines numeric operations on it.
     Tensor.rot90
     Tensor.round
     Tensor.round_
+    Tensor.round_to
     Tensor.rsqrt
     Tensor.rsqrt_
     Tensor.scatter
