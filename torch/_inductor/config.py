@@ -992,8 +992,10 @@ strict_output_strides = False
 # affine form (split reductions over symbolic ranges and a strided
 # slice_scatter whose dim is not provably a multiple of the step still use
 # ModularIndexing), False forces inlining.
+# [DO NOT LAND] forced on (strict affine indexing on every backend) so CI
+# exercises the avoid_modular_indexing paths in every test suite.
 avoid_modular_indexing: bool | None = {"0": False, "1": True}.get(
-    os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING", "")
+    os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING", ""), True
 )
 
 # In the automatic mode above, a dim-merging view of unrealized compute whose
