@@ -349,8 +349,8 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-class TestFlexDecoding(InductorTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestFlexDecodingBase(InductorTestCase):
+    """Shared helper methods for the flex decoding test classes."""
 
     @classmethod
     def setUpClass(cls):
@@ -812,6 +812,10 @@ class TestFlexDecoding(InductorTestCase):
             compiled_out,
         )
 
+
+class TestFlexDecoding(TestFlexDecodingBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_capabilities(Capability.attention.flex_attention)
     @expectedFailure  # tl.dot does not support embedding size less than 16
     @skip_on_cpu
@@ -1027,6 +1031,7 @@ class TestFlexDecoding(InductorTestCase):
 
         self.assertEqual(torch.compile(f)(x, k, v), f(x, k, v))
 
+    @requires_capabilities(Capability.attention.flex_attention)
     @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
@@ -2309,6 +2314,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check("BLOCK_M_PER_HQ").run(code[0])
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
+    @requires_capabilities(Capability.attention.flex_attention)
     @parametrize_device_dtype("dtypes_fast")
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):
@@ -2500,11 +2506,8 @@ class TestGetSplitKDeviceRouting(common_utils.TestCase):
         self.assertEqual(split_k, 80 // (2 * 4) * 2)
 
 
-instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
-
-
 class TestFlexDecodingLargeKV(InductorTestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.attention.flex_attention)
     @unittest.skip("OOMs in CI")
@@ -2545,7 +2548,7 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-class TestFlexDecodingCpuPartition(TestFlexDecoding):
+class TestFlexDecodingCpuPartition(TestFlexDecodingBase):
     hw_classification = HardwareClassification.CPU
 
     @requires_capabilities(Capability.attention.flex_attention)
@@ -2565,7 +2568,7 @@ class TestFlexDecodingCpuPartition(TestFlexDecoding):
 
 
 instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFlexDecodingCpuPartition, globals(), only_for="cpu")
 
 if __name__ == "__main__":
