@@ -2567,21 +2567,22 @@ class TestReductionsDevice(TestCase):
     @serialTest()
     @largeMPSBufferTest("5GB")
     @largeTensorTest("5GB")
+    @parametrize("n", [subtest((1 << 32) + 4096, name="above_uint32"), subtest((1 << 32) - 4096, name="above_int32")])
     @parametrize("fn,expected", [
-        subtest((lambda x: x.max(), 1), name="max"),
-        subtest((lambda x: x.argmax(), (1 << 32) + 4095), name="argmax"),
-        subtest((lambda x: x.min(), 0), name="min"),
-        subtest((lambda x: x.argmin(), 0), name="argmin"),
+        subtest((lambda x: x.max(), lambda n: 1), name="max"),
+        subtest((lambda x: x.argmax(), lambda n: n - 1), name="argmax"),
+        subtest((lambda x: x.min(), lambda n: 0), name="min"),
+        subtest((lambda x: x.argmin(), lambda n: 0), name="argmin"),
         # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA and XPU.
-        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
-        subtest((lambda x: x.any(), True), name="any"),
-        subtest((lambda x: x.all(), False), name="all"),
-        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], 1 << 20), name="max_dim"),
+        subtest((lambda x: x.sum(), lambda n: 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
+        subtest((lambda x: x.any(), lambda n: True), name="any"),
+        subtest((lambda x: x.all(), lambda n: False), name="all"),
+        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], lambda n: n // 4096 - 1), name="max_dim"),
     ])
-    def test_reductions_above_uint32(self, device, fn, expected):
-        x = torch.zeros((1 << 32) + 4096, device=device, dtype=torch.int8)
+    def test_large_reductions(self, device, n, fn, expected):
+        x = torch.zeros(n, device=device, dtype=torch.int8)
         x[-1] = 1
-        self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected(n))
 
     @onlyAccelerator
     @serialTest()
