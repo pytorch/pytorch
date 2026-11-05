@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     wrapSwapTensorsTest,
     xfailIf,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -2350,6 +2351,10 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         handle.wait()
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        device_type.type == "xpu" and not Xe2_Or_Later,
+        "torch.xpu._sleep is not supported before Xe2",
+    )
     def test_manual_backward_finalization_persistent_reduce_scatter_input(self):
         self.run_subtests(
             {"async_op": [False, True]},
