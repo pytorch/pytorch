@@ -2927,6 +2927,69 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         return None
 
 
+class _MixOrderTritonFinalize:
+    """Groups consecutive mix-order accumulators into one Triton finalize launch.
+
+    Only active with config.triton.mix_order_reduction_triton_finalize. The
+    finalizer writes through the output pointer, so outputs must be contiguous
+    and allocated before the call.
+    """
+
+    def __init__(self, ws_name: str, nsplit: str, rnumel: sympy.Expr) -> None:
+        self.ws_name = ws_name
+        self.nsplit = nsplit
+        self.rnumel = V.graph.wrapper_code.codegen_python_sizevar(rnumel)
+        self.first_idx = 0
+        self.buffer_names: list[str] = []
+
+    def add(self, idx: int, partial_accum: PartialAccumulate) -> bool:
+        """Queue the accumulator if the finalizer supports it; else return False."""
+        if not config.triton.mix_order_reduction_triton_finalize:
+            return False
+        if partial_accum.reduction_type != "sum":
+            return False
+        buffer = V.graph.get_buffer(partial_accum.buffer_name)
+        if not isinstance(buffer, ir.Buffer):
+            return False
+        layout = buffer.get_output_spec()
+        if not isinstance(
+            layout, (ir.FixedLayout, ir.FlexibleLayout, ir.NonOwningLayout)
+        ):
+            return False
+        if not layout.dtype.is_floating_point or not layout.is_contiguous():
+            return False
+
+        from ..runtime.mix_order_finalize import MAX_OUTPUTS
+
+        if self.buffer_names and (
+            idx != self.first_idx + len(self.buffer_names)
+            or len(self.buffer_names) == MAX_OUTPUTS
+        ):
+            self.flush()
+        if not self.buffer_names:
+            self.first_idx = idx
+        V.graph.wrapper_code.codegen_allocation(buffer)
+        self.buffer_names.append(partial_accum.buffer_name)
+        return True
+
+    def flush(self) -> None:
+        if not self.buffer_names:
+            return
+        wrapper = V.graph.wrapper_code
+        wrapper.add_import_once(
+            "from torch._inductor.runtime.mix_order_finalize "
+            "import colsum_finalize as mix_order_colsum_finalize"
+        )
+        ws = self.ws_name
+        if self.first_idx:
+            ws += f"[{self.first_idx} * ({self.nsplit}) * ({self.rnumel}):]"
+        wrapper.writeline(
+            f"mix_order_colsum_finalize({ws}, {self.nsplit}, {self.rnumel}, "
+            f"[{', '.join(self.buffer_names)}])"
+        )
+        self.buffer_names = []
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -3794,10 +3857,15 @@ class SIMDScheduling(BaseScheduling):
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + kernel.rsplit_size - 1) // kernel.rsplit_size
         )
+        triton_finalize = _MixOrderTritonFinalize(ws_name, nsplit, rnumel)
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
             if buffer_name in V.graph.removed_buffers:
+                triton_finalize.flush()
                 continue
+            if triton_finalize.add(idx, partial_accum):
+                continue
+            triton_finalize.flush()
 
             stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
@@ -3847,6 +3915,7 @@ class SIMDScheduling(BaseScheduling):
                     f"unsupported mix-order reduction output spec "
                     f"{type(spec).__name__} for {buffer_name}"
                 )
+        triton_finalize.flush()
 
         kernel.deallocate_workspaces()
 
