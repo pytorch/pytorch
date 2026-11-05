@@ -1321,6 +1321,10 @@ def slice_inputs(inputs, bdims, i):
     return tuple(result)
 
 
+# The eager reference that vmap results are compared against. Tracing its
+# per-example loop under PYTORCH_TEST_WITH_DYNAMO tests nothing and dominates
+# the time of tests with many outputs (e.g. test_tensor_split).
+@torch._dynamo.disable
 def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
     if isinstance(in_dims, int):
         in_dims = (in_dims,) * len(inputs)
