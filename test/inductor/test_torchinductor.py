@@ -9730,6 +9730,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([4096, 16]),))
 
+    def test_stack_cat_rule_exclusions(self):
+        # The cat rule only reroutes whole computed buffers; a slice of one and a
+        # no-op buffer compile as without it.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def sliced(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        def with_empty(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
+
+        x = torch.randn([4096, 16], device=self.device)
+        for fn in (sliced, with_empty):
+            codes = []
+            for enabled in (False, True):
+                torch._dynamo.reset()
+                with config.patch(cat_fuse_computed_input_copies=enabled):
+                    _, (code,) = run_and_get_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(codes[0], codes[1], fn.__name__)
+
     def test_stack_realized_channels_last_inputs(self):
         def fn(x):
             a = (x.sin() + x.cos() + x.exp() + x).sum(1)
