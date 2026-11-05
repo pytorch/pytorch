@@ -456,11 +456,13 @@ static py::object pyobject_dispatch_handle_torch_function(
     PyTuple_SET_ITEM(py_args.ptr(), i, Py_NewRef(args[i]));
   }
   py::dict py_kwargs;
-  for (const auto i : c10::irange(nkwargs)) {
-    TORCH_CHECK_PYTHON(
-        PyDict_SetItem(
-            py_kwargs.ptr(), PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) >=
-        0);
+  if (kwnames != nullptr) {
+    for (const auto i : c10::irange(nkwargs)) {
+      TORCH_CHECK_PYTHON(
+          PyDict_SetItem(
+              py_kwargs.ptr(), PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) >=
+          0);
+    }
   }
   // With no names, errors name the op by func's __module__ and __name__.
   PyObject* result = handle_torch_function_no_python_arg_parser(
@@ -1241,10 +1243,15 @@ static PyObject* pyobject_dispatch_vectorcall(
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<PyObjectDispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+  // A __torch_function__ handler set the one-hop flag to skip
+  // __torch_function__ for this call (torch.overrides); the C++ entry point
+  // consumes it.
+  if (C10_UNLIKELY(torch::peek_should_skip_torch_function())) {
+    return PyObject_Vectorcall(
+        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  bool skip_torch_function = torch::peek_should_skip_torch_function();
   if (C10_UNLIKELY(
-          !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
     if (auto result = pyobject_dispatch_handle_torch_function(
             self, args, nargs, kwnames)) {
@@ -1271,13 +1278,10 @@ static PyObject* pyobject_dispatch_vectorcall(
                       PyObject* call_kwnames) {
     auto key_set = pyobject_dispatch_compute_keyset(
         self->handle->dispatchKeyExtractor(), all_args, num_args);
-    if (C10_UNLIKELY(skip_torch_function)) {
-      key_set = key_set.remove(c10::DispatchKey::Python);
-    }
     return pyobject_dispatch_with_keyset(
         self,
         key_set,
-        skip_torch_function,
+        /*skip_torch_function=*/false,
         call_args,
         call_nargs,
         call_kwnames,

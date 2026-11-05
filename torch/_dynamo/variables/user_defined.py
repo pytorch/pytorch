@@ -43,6 +43,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._C._dynamo import PyNumberSlots
 from torch._guards import Source, TracingContext
+from torch._library.custom_ops import CustomOpDef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import GetAttrKey, is_structseq_class
@@ -3820,6 +3821,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
+        elif isinstance(self.value, CustomOpDef):
+            # CustomOpDef.__call__ hands the call to its OpOverload from C.
+            source = self.source and AttrSource(self.source, "_opoverload")
+            op = VariableTracker.build(tx, self.value._opoverload, source)
+            return op.call_function(tx, args, kwargs)
         elif callable(self.value):
             if self.source:
                 if self.cls_source is None:
