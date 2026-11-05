@@ -9,6 +9,7 @@
 #include "XpuptiTestUtilities.h"
 
 #include "src/ActivityBuffers.h"
+#include "src/ThrowUtil.h"
 #include "src/plugin/xpupti/XpuptiActivityProfiler.h"
 #include "test/xpupti/compute/XpuptiScopeProfilerCompute.h"
 
@@ -224,7 +225,8 @@ RunProfilerTest(
   // This helper returns a value, so it can't use ASSERT_NE. gtest reports an
   // exception from a test body as a failure and moves on to the next test.
   if (!pSession) {
-    throw std::runtime_error(
+    KINETO_THROW(
+        std::runtime_error,
         "XPUActivityProfiler::configure returned no session. Is PTI's local view available?");
   }
 
