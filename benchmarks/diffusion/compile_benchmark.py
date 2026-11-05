@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
+import hashlib
+import importlib.metadata
+import math
+import os
+import platform
+import statistics
 import time
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import torch
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
 MODES = ("eager", "full", "regional", "hierarchical")
@@ -588,6 +596,496 @@ def _load_toy(
 
     torch.manual_seed(scenario.workload.seed)
     return _finish_loading(ToyPipeline(), scenario, device)
+
+
+def _matched_region_classes(
+    component: Any, expected: tuple[str, ...]
+) -> tuple[tuple[type, ...], int]:
+    matches = [
+        module for module in component.modules() if type(module).__name__ in expected
+    ]
+    if not matches:
+        raise ValueError(
+            f"no repeated compilation targets matched {expected} in {type(component).__name__}"
+        )
+    classes = {type(module) for module in matches}
+    missing = set(expected) - {cls.__name__ for cls in classes}
+    if missing:
+        raise ValueError(
+            f"missing repeated compilation target classes: {sorted(missing)}"
+        )
+    ordered = tuple(sorted(classes, key=lambda cls: (cls.__module__, cls.__qualname__)))
+    return ordered, len(matches)
+
+
+def _compile_kwargs(backend: str, cudagraphs: bool) -> dict[str, Any]:
+    if cudagraphs and backend != "inductor":
+        raise ValueError("CUDA graphs require the inductor backend")
+    kwargs: dict[str, Any] = {"backend": backend, "fullgraph": True}
+    if backend == "inductor":
+        kwargs["options"] = {"triton.cudagraphs": cudagraphs}
+    return kwargs
+
+
+@contextlib.contextmanager
+def configure_compilation(
+    component: Any,
+    mode: str,
+    expected_regions: tuple[str, ...],
+    backend: str,
+    cudagraphs: bool,
+) -> Iterator[dict[str, Any]]:
+    if mode not in MODES:
+        raise ValueError(f"invalid compilation mode: {mode}")
+    if mode == "eager":
+        if cudagraphs:
+            raise ValueError("CUDA graphs cannot be enabled for eager execution")
+        yield {
+            "compiled_targets": [],
+            "matched_module_count": 0,
+            "regional_entry_point": None,
+        }
+        return
+
+    import torch
+
+    kwargs = _compile_kwargs(backend, cudagraphs)
+    details = {
+        "compiled_targets": [],
+        "matched_module_count": 0,
+        "regional_entry_point": None,
+    }
+    if mode == "full":
+        component.compile(**kwargs)
+        details["compiled_targets"] = [type(component).__name__]
+        details["matched_module_count"] = 1
+        yield details
+        return
+
+    matched_classes, matched_module_count = _matched_region_classes(
+        component, expected_regions
+    )
+    details["compiled_targets"] = [cls.__name__ for cls in matched_classes]
+    details["matched_module_count"] = matched_module_count
+    if mode == "regional":
+        repeated = tuple(getattr(component, "_repeated_blocks", ()))
+        if callable(getattr(component, "compile_repeated_blocks", None)) and repeated:
+            if set(repeated) != set(expected_regions):
+                raise ValueError(
+                    f"model repeated blocks {repeated} do not match recipe {expected_regions}"
+                )
+            component.compile_repeated_blocks(**kwargs)
+            details["regional_entry_point"] = "model.compile_repeated_blocks"
+        else:
+            for module in component.modules():
+                if type(module) in matched_classes:
+                    module.compile(**kwargs)
+            details["regional_entry_point"] = "explicit class selection"
+        yield details
+        return
+
+    originals: dict[type, Any] = {}
+    try:
+        for cls in matched_classes:
+            forward = cls.forward
+            if not hasattr(forward, "__marked_compile_region_fn__"):
+                originals[cls] = forward
+                cls.forward = torch.compiler.nested_compile_region(forward)
+        component.compile(**kwargs)
+        details["regional_entry_point"] = "torch.compiler.nested_compile_region"
+        yield details
+    finally:
+        for cls, forward in originals.items():
+            cls.forward = forward
+
+
+def _uses_accelerator(device: str) -> bool:
+    import torch
+
+    accelerator = torch.accelerator.current_accelerator()
+    return accelerator is not None and torch.device(device).type == accelerator.type
+
+
+def _synchronize(device: str) -> None:
+    import torch
+
+    if _uses_accelerator(device):
+        torch.accelerator.synchronize(device)
+
+
+def _timed_request(
+    loaded: LoadedPipeline, device: str, *, cudagraphs: bool
+) -> tuple[float, Any]:
+    import torch
+
+    args, kwargs = loaded.make_request()
+    _synchronize(device)
+    if cudagraphs:
+        torch.compiler.cudagraph_mark_step_begin()
+    start = time.perf_counter()
+    output = loaded.pipeline(*args, **kwargs)
+    _synchronize(device)
+    return time.perf_counter() - start, output
+
+
+def _extract_tensor(value: Any, fields: tuple[str, ...]) -> Any:
+    import numpy as np
+
+    import torch
+
+    for field in fields:
+        if isinstance(value, dict) and field in value:
+            return _extract_tensor(value[field], fields)
+        if hasattr(value, field):
+            return _extract_tensor(getattr(value, field), fields)
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu()
+    if isinstance(value, np.ndarray):
+        return torch.from_numpy(value.copy())
+    if isinstance(value, (list, tuple)) and value:
+        tensors = [_extract_tensor(item, fields) for item in value]
+        return torch.stack(tensors)
+    # Only postprocessed pipeline outputs are images, so Pillow stays optional.
+    from PIL import Image
+
+    if isinstance(value, Image.Image):
+        return torch.from_numpy(np.asarray(value).copy())
+    raise TypeError(f"cannot extract a tensor from output type {type(value).__name__}")
+
+
+def _tensor_summary(tensor: Any) -> dict[str, Any]:
+    import torch
+
+    contiguous = tensor.contiguous()
+    byte_view = contiguous.view(dtype=torch.uint8)
+    digest = hashlib.sha256(byte_view.numpy().tobytes()).hexdigest()
+    return {"shape": list(tensor.shape), "dtype": str(tensor.dtype), "sha256": digest}
+
+
+def _device_memory(device: str) -> dict[str, int | None]:
+    import torch
+
+    if not _uses_accelerator(device):
+        return {"allocated_bytes": None, "reserved_bytes": None}
+    return {
+        "allocated_bytes": torch.accelerator.max_memory_allocated(device),
+        "reserved_bytes": torch.accelerator.max_memory_reserved(device),
+    }
+
+
+def _reset_device_memory(device: str) -> None:
+    import torch
+
+    if _uses_accelerator(device):
+        torch.accelerator.reset_peak_memory_stats(device)
+
+
+def _compiler_diagnostics(mode: str, device: str, cudagraphs: bool) -> dict[str, Any]:
+    import torch
+    from torch._dynamo.utils import compilation_time_metrics, counters
+
+    counter_values = {
+        category: dict(values) for category, values in counters.items() if values
+    }
+    unique_graphs = counters["stats"]["unique_graphs"]
+    diagnostics: dict[str, Any] = {
+        "counters": counter_values,
+        "unique_graphs": unique_graphs,
+        "compiler_times_s": {
+            name: list(values) for name, values in compilation_time_metrics.items()
+        },
+        "cudagraph_capture_count": None,
+    }
+    if mode != "eager" and unique_graphs == 0:
+        raise RuntimeError("torch.compile produced no compiled graphs")
+    if mode == "eager" and unique_graphs != 0:
+        raise RuntimeError("eager scenario unexpectedly compiled a graph")
+    # Without a traced nested region, hierarchical mode is just full compilation.
+    nested = "invoke_subgraph_trace" in compilation_time_metrics
+    if mode == "hierarchical" and not nested:
+        raise RuntimeError("hierarchical compilation produced no nested region")
+    if cudagraphs:
+        from torch._inductor.cudagraph_trees import get_manager
+
+        # Inductor skips CUDA graphs per graph, at compile time or by falling back
+        # to eager at runtime, so captures elsewhere do not prove full coverage.
+        skips = counters["inductor"]["cudagraph_skips"]
+        if skips:
+            raise RuntimeError(
+                f"CUDA graphs were requested, but Inductor skipped them {skips} "
+                "time(s); the worker log has the reasons"
+            )
+        index = torch.device(device).index
+        if index is None:
+            index = torch.cuda.current_device()
+        manager = get_manager(index, create_if_none_exists=False)
+        nodes = [] if manager is None else list(manager.get_roots())
+        capture_count = 0
+        while nodes:
+            node = nodes.pop()
+            capture_count += node.graph is not None
+            for children in node.children.values():
+                nodes.extend(children)
+        diagnostics["cudagraph_capture_count"] = capture_count
+        if capture_count == 0:
+            raise RuntimeError(
+                "CUDA graphs were requested, but no graph capture was recorded"
+            )
+    return diagnostics
+
+
+def _dependency_versions(names: tuple[str, ...]) -> dict[str, str]:
+    versions = {}
+    for name in names:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = "not installed"
+    return versions
+
+
+def _hardware_info(device: str) -> dict[str, Any]:
+    import torch
+
+    cpu_model = platform.processor()
+    system_memory = None
+    try:
+        cpu_model = next(
+            line.split(":", 1)[1].strip()
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines()
+            if line.startswith("model name")
+        )
+    except (OSError, StopIteration):
+        pass
+    try:
+        system_memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        pass
+    info: dict[str, Any] = {
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": cpu_model,
+        "cpu_count": os.cpu_count(),
+        "system_memory_bytes": system_memory,
+        "torch_cpu_capability": torch.backends.cpu.get_cpu_capability(),
+    }
+    device_type = torch.device(device).type
+    info["accelerator"] = device_type
+    if device_type in ("cuda", "xpu"):
+        props = getattr(torch, device_type).get_device_properties(device)
+        info.update(accelerator=props.name, accelerator_memory_bytes=props.total_memory)
+    if device_type == "cuda":
+        info.update(
+            {
+                "compute_capability": f"{props.major}.{props.minor}",
+                "cuda_compiled_version": torch.version.cuda,
+                "hip_compiled_version": torch.version.hip,
+            }
+        )
+    return info
+
+
+def _relevant_environment() -> dict[str, str]:
+    # Only record known tuning options; compiler-prefixed variables can contain
+    # credentials (for example, a remote cache URL).
+    names = (
+        "CUDA_VISIBLE_DEVICES",
+        "MKL_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "PYTORCH_ALLOC_CONF",
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE",
+        "TORCHINDUCTOR_COMPILE_THREADS",
+        "TORCHINDUCTOR_FX_GRAPH_CACHE",
+        "TORCHINDUCTOR_MAX_AUTOTUNE",
+        "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM",
+        "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS",
+    )
+    return {name: os.environ[name] for name in names if name in os.environ}
+
+
+def _validate_worker_scenario(scenario: Scenario, device: str) -> None:
+    if scenario.mode not in MODES:
+        raise ValueError(f"invalid compilation mode: {scenario.mode}")
+    if scenario.workload.output_boundary not in OUTPUT_BOUNDARIES:
+        raise ValueError(
+            f"invalid output boundary: {scenario.workload.output_boundary}"
+        )
+    if scenario.execution.warmups < 0:
+        raise ValueError("warmups must be non-negative")
+    if scenario.execution.repetitions < 1:
+        raise ValueError("repetitions must be positive")
+    timeout = scenario.execution.timeout_s
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be finite and positive")
+    if (
+        scenario.execution.num_threads is not None
+        and scenario.execution.num_threads < 1
+    ):
+        raise ValueError("num_threads must be positive")
+    if scenario.execution.cudagraphs:
+        if scenario.mode == "eager":
+            raise ValueError("CUDA graphs cannot be enabled for eager execution")
+        if scenario.execution.backend != "inductor":
+            raise ValueError("CUDA graphs require the inductor backend")
+        if not device.startswith("cuda"):
+            raise ValueError("CUDA graphs require a CUDA device")
+        if scenario.execution.warmups < 1:
+            raise ValueError("CUDA graphs require at least one warmup request")
+
+
+def execute_scenario(
+    scenario: Scenario, sample_path: str | None = None
+) -> dict[str, Any]:
+    import torch
+    from torch._dynamo.utils import (
+        calculate_time_spent,
+        compilation_time_metrics,
+        counters,
+    )
+    from torch._functorch import config as functorch_config
+    from torch._inductor import config as inductor_config
+
+    device, dtype_name, dtype = _resolve_device_and_dtype(scenario)
+    _validate_worker_scenario(scenario, device)
+    cudagraphs = scenario.execution.cudagraphs
+    if scenario.execution.num_threads is not None:
+        torch.set_num_threads(scenario.execution.num_threads)
+
+    paths = _prefetch(scenario.model.artifacts)
+    # Start the device runtime outside the setup timer; synchronizing and
+    # resetting peaks are no-ops on an uninitialized indexed device ("cuda:0").
+    torch.empty(0, device=device)
+    _synchronize(device)
+    _reset_device_memory(device)
+    setup_start = time.perf_counter()
+    loader = globals()[scenario.loader]
+    loaded = loader(scenario, paths, device, dtype)
+    _synchronize(device)
+    setup_s = time.perf_counter() - setup_start
+    setup_memory = _device_memory(device)
+    torch._dynamo.reset()
+    counters.clear()
+    compilation_time_metrics.clear()
+
+    compile_start = time.perf_counter()
+    with (
+        torch._dynamo.config.patch(suppress_errors=False),
+        configure_compilation(
+            loaded.component,
+            scenario.mode,
+            scenario.model.repeated_block_classes,
+            scenario.execution.backend,
+            cudagraphs,
+        ) as compile_details,
+    ):
+        compile_setup_s = time.perf_counter() - compile_start
+        with torch.inference_mode():
+            first_request_s, output = _timed_request(
+                loaded, device, cudagraphs=cudagraphs
+            )
+            if scenario.mode != "eager" and counters["stats"]["unique_graphs"] == 0:
+                raise RuntimeError("first request completed without compiling a graph")
+            del output
+            for _ in range(scenario.execution.warmups):
+                _, output = _timed_request(loaded, device, cudagraphs=cudagraphs)
+                del output
+            # Exclude compilation, autotuning, and CUDA graph recording transients.
+            _reset_device_memory(device)
+            graphs_before_measurement = counters["stats"]["unique_graphs"]
+            metric_counts = {
+                name: len(values) for name, values in compilation_time_metrics.items()
+            }
+            samples = []
+            for repetition in range(scenario.execution.repetitions):
+                duration, output = _timed_request(loaded, device, cudagraphs=cudagraphs)
+                samples.append(duration)
+                if repetition + 1 < scenario.execution.repetitions:
+                    del output
+            new_compiler_metrics = {
+                name: values[metric_counts.get(name, 0) :]
+                for name, values in compilation_time_metrics.items()
+                if len(values) > metric_counts.get(name, 0)
+            }
+            new_graphs = counters["stats"]["unique_graphs"] - graphs_before_measurement
+            if new_graphs or new_compiler_metrics:
+                raise RuntimeError(
+                    "compilation occurred during steady-state measurement: "
+                    f"new_graphs={new_graphs}, phases={sorted(new_compiler_metrics)}"
+                )
+        request_memory = _device_memory(device)
+        diagnostics = _compiler_diagnostics(scenario.mode, device, cudagraphs)
+        compile_time_s = calculate_time_spent()["total_wall_time"]
+
+    tensor = _extract_tensor(output, loaded.output_fields)
+    output_summary = _tensor_summary(tensor)
+    if sample_path is not None:
+        torch.save(tensor, sample_path)
+    median_s = statistics.median(samples)
+    mad_s = statistics.median(abs(sample - median_s) for sample in samples)
+    compile_options = (
+        _compile_kwargs(scenario.execution.backend, cudagraphs)
+        if scenario.mode != "eager"
+        else {}
+    )
+    return {
+        "scenario_id": scenario.scenario_id,
+        "status": "success",
+        "error": None,
+        "model": dataclasses.asdict(scenario.model),
+        "workload": dataclasses.asdict(scenario.workload),
+        "execution": dataclasses.asdict(scenario.execution),
+        "mode": scenario.mode,
+        "pid": os.getpid(),
+        "device": device,
+        "dtype": dtype_name,
+        "compiled_component": scenario.model.component
+        if scenario.mode != "eager"
+        else None,
+        "compiled_targets": compile_details["compiled_targets"],
+        "matched_module_count": compile_details["matched_module_count"],
+        "regional_entry_point": compile_details["regional_entry_point"],
+        "effective_compile_options": compile_options,
+        "model_setup_s": setup_s,
+        "compile_wrapper_setup_s": compile_setup_s,
+        "compile_time_s": compile_time_s,
+        "first_request_s": first_request_s,
+        "steady_state_samples_s": samples,
+        "steady_state_median_s": median_s,
+        "steady_state_mad_s": mad_s,
+        "setup_device_peak": setup_memory,
+        "request_device_peak": request_memory,
+        "device_memory_definition": (
+            "allocator allocated/reserved process peaks; request peaks cover "
+            "steady-state requests and include resident model state"
+            if _uses_accelerator(device)
+            else "unavailable on CPU"
+        ),
+        "compiler_diagnostics": diagnostics,
+        "output_summary": output_summary,
+        "output_check": "not requested",
+        "dependencies": _dependency_versions(scenario.model.dependencies),
+        "torch": {
+            "version": torch.__version__,
+            "git_version": torch.version.git_version,
+            "cuda": torch.version.cuda,
+            "build_config": torch.__config__.show(),
+        },
+        "python_version": platform.python_version(),
+        "hardware": _hardware_info(device),
+        "environment": _relevant_environment(),
+        "compiler_caches": {
+            "force_disabled": inductor_config.force_disable_caches,
+            "fx_graph": inductor_config.fx_graph_cache,
+            "fx_graph_remote": inductor_config.fx_graph_remote_cache,
+            "autograd": functorch_config.enable_autograd_cache,
+            "autograd_remote": functorch_config.enable_remote_autograd_cache,
+            "autotune_local": inductor_config.autotune_local_cache,
+            "autotune_remote": inductor_config.autotune_remote_cache,
+            "bundled_autotune_remote": inductor_config.bundled_autotune_remote_cache,
+            "dynamo_pgo_remote": torch._dynamo.config.automatic_dynamic_remote_pgo,
+        },
+    }
 
 
 def _scenario_to_dict(scenario: Scenario) -> dict[str, Any]:

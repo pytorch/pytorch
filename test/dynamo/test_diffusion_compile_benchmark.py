@@ -3,6 +3,7 @@
 import dataclasses
 import json
 import sys
+import weakref
 from fnmatch import fnmatchcase
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +93,99 @@ class TestDiffusionCompileBenchmark(TestCase):
             "output_check": "not requested",
         }
 
+    def test_invalid_mode_and_missing_region(self):
+        model = torch.nn.Linear(2, 2)
+        with self.assertRaisesRegex(ValueError, "invalid compilation mode"):
+            with benchmark.configure_compilation(
+                model, "invalid", ("Linear",), "eager", False
+            ):
+                pass
+        with self.assertRaisesRegex(ValueError, "no repeated compilation targets"):
+            with benchmark.configure_compilation(
+                model, "regional", ("MissingBlock",), "eager", False
+            ):
+                pass
+        with self.assertRaisesRegex(ValueError, "CUDA graphs require the inductor"):
+            benchmark._compile_kwargs("eager", True)
+
+        scenario = self._toy_scenarios(("eager",))[0]
+        invalid_workload = dataclasses.replace(
+            scenario.workload, output_boundary="unspecified"
+        )
+        with self.assertRaisesRegex(ValueError, "invalid output boundary"):
+            benchmark._validate_worker_scenario(
+                dataclasses.replace(scenario, workload=invalid_workload), "cpu"
+            )
+
+    def test_regional_prefers_model_entry_point(self):
+        class Block(torch.nn.Module):
+            def forward(self, value):
+                return value + 1
+
+        class Model(torch.nn.Module):
+            _repeated_blocks = ("Block",)
+
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+                self.called = False
+
+            def compile_repeated_blocks(self, **kwargs):
+                self.called = True
+
+        model = Model()
+        with benchmark.configure_compilation(
+            model, "regional", ("Block",), "eager", False
+        ) as details:
+            self.assertTrue(model.called)
+            self.assertEqual(
+                details["regional_entry_point"], "model.compile_repeated_blocks"
+            )
+
+    def test_regional_falls_back_to_explicit_classes(self):
+        class Block(torch.nn.Module):
+            def forward(self, value):
+                return value + 1
+
+        class Mismatched(torch.nn.Sequential):
+            _repeated_blocks = ("Other",)
+
+            def compile_repeated_blocks(self, **kwargs):
+                raise AssertionError("mismatched entry point must not be used")
+
+        model = torch.nn.Sequential(Block(), Block())
+        with mock.patch.object(torch.nn.Module, "compile") as compile_module:
+            with benchmark.configure_compilation(
+                model, "regional", ("Block",), "eager", False
+            ) as details:
+                pass
+        self.assertEqual(details["regional_entry_point"], "explicit class selection")
+        self.assertEqual(compile_module.call_count, 2)
+        with self.assertRaisesRegex(ValueError, "do not match recipe"):
+            with benchmark.configure_compilation(
+                Mismatched(Block()), "regional", ("Block",), "eager", False
+            ):
+                pass
+
+    def test_hierarchical_marking_is_idempotent_and_restored(self):
+        class Block(torch.nn.Module):
+            def forward(self, value):
+                return value + 1
+
+        model = torch.nn.Sequential(Block(), Block())
+        original = Block.forward
+        with benchmark.configure_compilation(
+            model, "hierarchical", ("Block",), "eager", False
+        ):
+            marked = Block.forward
+            self.assertTrue(hasattr(marked, "__marked_compile_region_fn__"))
+            with benchmark.configure_compilation(
+                model, "hierarchical", ("Block",), "eager", False
+            ):
+                self.assertIs(Block.forward, marked)
+            self.assertIs(Block.forward, marked)
+        self.assertIs(Block.forward, original)
+
     def test_request_state_is_reconstructed(self):
         class Scheduler:
             config = {"value": 1}
@@ -121,6 +215,169 @@ class TestDiffusionCompileBenchmark(TestCase):
         self.assertEqual(pipeline.scheduler.value, 1)
         self.assertEqual(second["input"], [1])
         self.assertEqual(first_value, second_value)
+
+    def test_device_initializes_before_setup_timing(self):
+        scenario = self._toy_scenarios(("eager",))[0]
+        scenario = dataclasses.replace(
+            scenario,
+            execution=dataclasses.replace(
+                scenario.execution, device="cuda:0", num_threads=None
+            ),
+        )
+        calls = []
+        resolved = ("cuda:0", "float32", torch.float32)
+
+        def record(name):
+            return lambda device: calls.append((name, device))
+
+        with (
+            mock.patch.object(
+                benchmark, "_resolve_device_and_dtype", return_value=resolved
+            ),
+            mock.patch.object(
+                torch, "empty", side_effect=lambda size, device: record("init")(device)
+            ),
+            mock.patch.object(benchmark, "_synchronize", side_effect=record("sync")),
+            mock.patch.object(
+                benchmark, "_reset_device_memory", side_effect=record("reset")
+            ),
+            mock.patch.object(
+                benchmark, "_load_toy", side_effect=RuntimeError("reached model setup")
+            ),
+            self.assertRaisesRegex(RuntimeError, "reached model setup"),
+        ):
+            benchmark.execute_scenario(scenario)
+        # Synchronizing and resetting peaks do not start the runtime of an indexed
+        # device, so without the explicit initialization setup would include it.
+        expected = [("init", "cuda:0"), ("sync", "cuda:0"), ("reset", "cuda:0")]
+        self.assertEqual(calls, expected)
+
+    @parametrize("cudagraphs", (True, False))
+    def test_timed_request_cudagraph_boundary(self, cudagraphs):
+        output = object()
+
+        def make_request():
+            mark.assert_not_called()
+            return (), {}
+
+        def pipeline():
+            self.assertEqual(mark.call_count, int(cudagraphs))
+            return output
+
+        loaded = benchmark.LoadedPipeline(pipeline, None, make_request, ())
+        with mock.patch.object(torch.compiler, "cudagraph_mark_step_begin") as mark:
+            for _ in range(3):
+                mark.reset_mock()
+                _, result = benchmark._timed_request(
+                    loaded, "cpu", cudagraphs=cudagraphs
+                )
+                self.assertIs(result, output)
+                self.assertEqual(mark.call_count, int(cudagraphs))
+
+    def test_measured_outputs_are_released_between_requests(self):
+        scenario = self._toy_scenarios(("eager",))[0]
+        scenario = dataclasses.replace(
+            scenario,
+            execution=dataclasses.replace(
+                scenario.execution, warmups=1, repetitions=3, num_threads=None
+            ),
+        )
+        outputs = []
+
+        def pipeline():
+            if outputs:
+                self.assertIsNone(outputs[-1]())
+            value = torch.ones(1)
+            outputs.append(weakref.ref(value))
+            return {"images": value}
+
+        loaded = benchmark.LoadedPipeline(
+            pipeline, torch.nn.Identity(), lambda: ((), {}), ("images",)
+        )
+        with (
+            mock.patch.object(benchmark, "_load_toy", return_value=loaded),
+            torch.random.fork_rng(devices=[]),
+        ):
+            benchmark.execute_scenario(scenario)
+        self.assertEqual(len(outputs), 5)
+
+    def test_steady_state_recompilation_is_rejected(self):
+        scenario = self._toy_scenarios(("full",))[0]
+        scenario = dataclasses.replace(
+            scenario,
+            execution=dataclasses.replace(
+                scenario.execution, repetitions=2, num_threads=None
+            ),
+        )
+        model = torch.nn.Linear(4, 4)
+        rows = iter((1, 2, 3))
+
+        def make_request():
+            return (torch.randn(next(rows), 4),), {}
+
+        loaded = benchmark.LoadedPipeline(model, model, make_request, ())
+        with (
+            mock.patch.object(benchmark, "_load_toy", return_value=loaded),
+            self.assertRaisesRegex(RuntimeError, "during steady-state measurement"),
+        ):
+            benchmark.execute_scenario(scenario)
+
+    @parametrize("case", ("captured", "empty", "skipped"))
+    def test_cudagraph_diagnostics(self, case):
+        from torch._dynamo.utils import counters
+
+        captured = case != "empty"
+        leaf = SimpleNamespace(graph=object() if captured else None, children={})
+        child = SimpleNamespace(
+            graph=object() if captured else None, children={1: [leaf]}
+        )
+        root = SimpleNamespace(graph=None, children={0: [child]})
+        manager = SimpleNamespace(get_roots=lambda: iter([root]))
+        module = SimpleNamespace(get_manager=lambda *args, **kwargs: manager)
+        values = {
+            "stats": {"unique_graphs": 1},
+            "inductor": {"cudagraph_skips": int(case == "skipped")},
+        }
+        with (
+            mock.patch.dict(counters, values, clear=True),
+            mock.patch.dict(sys.modules, {"torch._inductor.cudagraph_trees": module}),
+        ):
+            if case == "captured":
+                diagnostics = benchmark._compiler_diagnostics("full", "cuda:0", True)
+                self.assertEqual(diagnostics["cudagraph_capture_count"], 2)
+            else:
+                message = "skipped them 1 time" if captured else "no graph capture"
+                with self.assertRaisesRegex(RuntimeError, message):
+                    benchmark._compiler_diagnostics("full", "cuda:0", True)
+
+    def test_hierarchical_requires_nested_region(self):
+        from torch._dynamo.utils import compilation_time_metrics, counters
+
+        with (
+            mock.patch.dict(counters, {"stats": {"unique_graphs": 1}}, clear=True),
+            mock.patch.dict(compilation_time_metrics, {}, clear=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no nested region"):
+                benchmark._compiler_diagnostics("hierarchical", "cpu", False)
+            compilation_time_metrics["invoke_subgraph_trace"] = [0.1]
+            benchmark._compiler_diagnostics("hierarchical", "cpu", False)
+
+    def test_extract_tensor_handles_pipeline_outputs(self):
+        import numpy as np
+        from PIL import Image
+
+        pixels = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        expected = torch.from_numpy(pixels).expand(2, 2, 2, 3)
+        fields = ("images", "frames")
+        for output in (
+            {"images": [Image.fromarray(pixels)] * 2},
+            SimpleNamespace(frames=np.stack([pixels, pixels])),
+        ):
+            self.assertEqual(benchmark._extract_tensor(output, fields), expected)
+        stacked = benchmark._extract_tensor((torch.ones(3), torch.ones(3)), fields)
+        self.assertEqual(stacked, torch.ones(2, 3))
+        with self.assertRaisesRegex(TypeError, "cannot extract a tensor"):
+            benchmark._extract_tensor(object(), fields)
 
     # File names from the pinned revisions; "unused" files must not be downloaded.
     @parametrize(
