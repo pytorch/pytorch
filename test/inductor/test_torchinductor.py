@@ -7464,7 +7464,9 @@ for dtype in (torch.int32, torch.int64):
     def test_max_pool3d_large_kernel(self, padding, ceil_mode: bool):
         # Window > 25 skips the low-memory decomposition for the non-unrolled reduction lowering
         def fn(x):
-            return aten.max_pool3d_with_indices(x, [3, 3, 3], [1, 2, 3], padding, 1, ceil_mode)
+            return aten.max_pool3d_with_indices(
+                x, [3, 3, 3], [1, 2, 3], padding, 1, ceil_mode
+            )
 
         self.common(fn, (torch.randn([2, 4, 6, 7, 8]),))
 
