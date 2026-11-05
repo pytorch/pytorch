@@ -4394,6 +4394,97 @@ class TestTemplateConfigPruning(TestCase):
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
 
+    def _rocm_mm_choice_descs(self, arch, m, k, n, persistent_filter=None):
+        """Compile an ``m x k @ k x n`` bf16 mm with max-autotune while the ROCm
+        heuristics see ``arch``, check the result, and return (choice name,
+        description) for every benchmarked choice plus the generated code. With
+        ``persistent_filter``, only the persistent configs it accepts are offered."""
+        import torch._inductor.heuristics.template.triton as triton_heuristics
+
+        seen = []
+
+        def saver(timings, name, input_nodes, choices, *args):
+            seen.extend((c.name, c.description) for c in choices)
+
+        cls = triton_heuristics.PersistentMMTemplateConfigHeuristic
+        configs_impl = cls._get_template_configs_impl
+
+        def filtered_configs_impl(self, *args, **kwargs):
+            for template_kwargs in configs_impl(self, *args, **kwargs):
+                if persistent_filter(template_kwargs):
+                    yield template_kwargs
+
+        patches = {
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+        }
+        if persistent_filter is not None:
+            patches["test_configs.autotune_choice_name_regex"] = "mm_persistent"
+        a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.reset()
+        clear_feedback_savers()
+        add_feedback_saver(saver)
+        try:
+            with (
+                mock.patch.object(
+                    triton_heuristics, "rocm_gfx_arch", return_value=arch
+                ),
+                mock.patch.object(
+                    cls,
+                    "_get_template_configs_impl",
+                    filtered_configs_impl if persistent_filter else configs_impl,
+                ),
+                config.patch(patches),
+                fresh_cache(),
+            ):
+                out, code = run_and_get_code(torch.compile(torch.mm), a, b)
+        finally:
+            clear_feedback_savers()
+        # A wrong tile mapping leaves O(10) errors; accumulation order alone stays
+        # well under 1 at these magnitudes.
+        torch.testing.assert_close(
+            out.float(), a.float() @ b.float(), atol=1.0, rtol=0.05
+        )
+        return seen, "\n".join(code)
+
+    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
+    def test_rocm_persistent_mm_gated_to_gfx950(self):
+        num_cus = torch.cuda.get_device_properties(0).multi_processor_count
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                descs = [
+                    d
+                    for name, d in self._rocm_mm_choice_descs(arch, 4096, 256, 4096)[0]
+                    if "persistent" in name
+                ]
+                self.assertTrue(descs)
+                if arch == "gfx942":
+                    # Original behavior: one program per CU, no XCD kwarg.
+                    for d in descs:
+                        self.assertIn(f"NUM_SMS={num_cus},", d)
+                        self.assertNotIn("NUM_XCDS", d)
+                else:
+                    for d in descs:
+                        self.assertIn("NUM_XCDS=", d)
+                    # Two workgroups per CU for tiles that fit, and the remap.
+                    self.assertTrue(any(f"NUM_SMS={2 * num_cus}," in d for d in descs))
+                    self.assertTrue(any("NUM_XCDS=8," in d for d in descs))
+
+    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
+    def test_rocm_persistent_mm_xcd_remap_correct(self):
+        # Ragged tile grid; only the XCD program-id remap variants are offered.
+        _, code = self._rocm_mm_choice_descs(
+            "gfx950",
+            4000,
+            1024,
+            4100,
+            persistent_filter=lambda kw: kw["NUM_XCDS"] > 1 and "XCD_N" not in kw,
+        )
+        self.assertIn("NUM_XCDS : tl.constexpr = 8", code)
+        self.assertNotIn("XCD_N", code)
+
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
         from torch._inductor.heuristics.template.triton import (
