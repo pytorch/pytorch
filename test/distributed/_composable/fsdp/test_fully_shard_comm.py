@@ -3336,11 +3336,13 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         fully_shard(other, mesh=init_device_mesh("cpu", (self.world_size,)))
         other.set_custom_all_gather(group._all_gather_comm)
         other.set_all_gather_layout(_ParamContiguousLayout("custom"))
-        # Replacing the layout keeps the comm, and 2.15's hook fails loudly
-        model.set_all_gather_layout(None)
+        # Replacing the layout keeps the comm. The layout must be given, and 2.15's
+        # hook fails loudly
+        model.set_all_gather_layout(DefaultAllGatherLayout())
         self.assertIs(type(group._all_gather_comm), _ParamContiguousAllGather)
-        with self.assertRaisesRegex(TypeError, "expected an AllGatherLayout"):
-            model.set_all_gather_layout(all_gather_output_fn_with_native_copy)
+        for not_a_layout in (None, all_gather_output_fn_with_native_copy):
+            with self.assertRaisesRegex(TypeError, "expected an AllGatherLayout"):
+                model.set_all_gather_layout(not_a_layout)
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
@@ -3376,7 +3378,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         self.assertIsNot(groups[0]._all_gather_layout, rank_major)
         # Default layouts' outputs depend on neither the copy-out nor the comm
         model.set_all_gather_layout(native)  # reaches every nested group
-        model.set_all_gather_layout(None, recurse=False)  # the root has no group
+        # The root has no group of its own
+        model.set_all_gather_layout(DefaultAllGatherLayout(), recurse=False)
         self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
         comm = DefaultAllGather()
         model[1].set_custom_all_gather(comm)
@@ -3417,7 +3420,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         inp = torch.randn(2, 8)
         with self.assertRaisesRegex(ValueError, "contiguous 1-D tensor"):
             model(inp)
-        model.set_all_gather_layout(None)
+        model.set_all_gather_layout(DefaultAllGatherLayout())
         model(inp).sum().backward()
 
         # A rejected refill frees what it re-allocated: the shared buffer, or the
@@ -3595,7 +3598,7 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
             block.set_custom_all_gather(comm)  # the installed comm stays allowed
             block.set_all_gather_layout(layout, recurse=False)  # a no-op
             with test.assertRaisesRegex(RuntimeError, "cannot replace"):
-                block.set_all_gather_layout(None)
+                block.set_all_gather_layout(DefaultAllGatherLayout())
 
 
 class TestFullyShardLayoutParity(FSDPTestMultiThread):

@@ -13,11 +13,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._all_gather_layout import (
-    AllGatherLayout,
-    DEFAULT_ALL_GATHER_LAYOUT,
-    DefaultAllGatherLayout,
-)
+from ._all_gather_layout import AllGatherLayout, DefaultAllGatherLayout
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
@@ -917,7 +913,7 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_all_gather_layout(
-        self, layout: AllGatherLayout | None, /, *, recurse: bool = True
+        self, layout: AllGatherLayout, /, *, recurse: bool = True
     ) -> None:
         r"""Set the layout that packs and finalizes a parameter group's all-gather.
 
@@ -944,12 +940,11 @@ class FSDPModule:
         layout. FSDP checks every group before changing any.
 
         Args:
-            layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
-                the default layout.
+            layout (AllGatherLayout): Layout to install; pass
+                ``DefaultAllGatherLayout()`` to restore the default.
             recurse (bool): Whether to also set the layout for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        layout = DEFAULT_ALL_GATHER_LAYOUT if layout is None else layout
         if not isinstance(layout, AllGatherLayout):
             raise TypeError(
                 f"expected an AllGatherLayout, e.g. DefaultAllGatherLayout(fn), but "
