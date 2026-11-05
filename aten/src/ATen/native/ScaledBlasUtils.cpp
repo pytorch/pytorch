@@ -316,10 +316,8 @@ void validate_scaled_mm_v2_inputs(
   const bool both_fp4 = is_fp4_type(mat_a.scalar_type()) && is_fp4_type(mat_b.scalar_type());
   const auto K_unpacked = both_fp4 ? mat_a.sym_size(1) * 2 : mat_a.sym_size(1);
   // XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes, unlike the
-  // L4-padded SWIZZLE_32_4_4 layout that CUDA expects. FakeTensor runs this
-  // on meta tensors, so fall back to the build's backend there.
-  const bool is_xpu =
-      mat_a.is_xpu() || (mat_a.is_meta() && at::globalContext().hasXPU());
+  // L4-padded SWIZZLE_32_4_4 layout that CUDA expects.
+  const bool is_xpu = at::globalContext().hasXPU();
 
   auto sym_ceil_div = [](const c10::SymInt& a, int64_t b) {
     return (a + b - 1) / b;
