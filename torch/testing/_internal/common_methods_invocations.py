@@ -23040,7 +23040,6 @@ if "cutedsl" in dsl_ops_by_dsl:
             decorators=[
                 DecorateInfo(onlyCUDA),
                 DecorateInfo(skipIfNoCuteDSL),
-                DecorateInfo(skipIfRocm),
                 DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
             ],
             skips=(
@@ -23065,7 +23064,6 @@ if "cutedsl" in dsl_ops_by_dsl:
             decorators=[
                 DecorateInfo(onlyCUDA),
                 DecorateInfo(skipIfNoCuteDSL),
-                DecorateInfo(skipIfRocm),
                 DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
             ],
             skips=(
