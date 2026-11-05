@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import functools
-import weakref
+import gc
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
@@ -44,7 +44,7 @@ from ._fsdp_init import (
     _validate_mesh,
     _validate_module,
 )
-from ._fsdp_param_group import _GradientReductionState
+from ._fsdp_param_group import _get_live_param_groups, _GradientReductionState
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -322,13 +322,28 @@ def fully_shard(
     return arg_module
 
 
-def _layout_comm_owner(comm: AllGather) -> FSDPParamGroup | None:
-    # The group that a layout bound to this comm is still installed on
-    owner_ref = getattr(comm, "_fsdp_param_group", None)
-    owner = owner_ref() if owner_ref is not None else None
-    if owner is not None and owner._all_gather_layout.comm is comm:
-        return owner
-    return None
+def _other_param_groups(
+    exclude: set[FSDPParamGroup], predicate: Callable[[FSDPParamGroup], bool]
+) -> list[FSDPParamGroup]:
+    # A deleted module's group can stay alive in a reference cycle until the
+    # cyclic GC runs, so collect before reporting a match: otherwise ranks could
+    # disagree, depending on when their GC last ran
+    def find() -> list[FSDPParamGroup]:
+        return [
+            group
+            for group in _get_live_param_groups()
+            if group not in exclude and predicate(group)
+        ]
+
+    if not find():
+        return []
+    gc.collect()  # holding no result of the first scan, which would keep its groups
+    return find()
+
+
+def _describe_param_groups(groups: list[FSDPParamGroup]) -> str:
+    names = [group._with_fqn(type(group.modules[0]).__name__) for group in groups]
+    return ", ".join(names)
 
 
 def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
@@ -810,10 +825,15 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
-            if _layout_comm_owner(comm) not in (None, fsdp_param_group):
+            if comm is not None and (
+                holders := _other_param_groups(
+                    {fsdp_param_group},
+                    lambda group: group._all_gather_layout.comm is comm,
+                )
+            ):
                 raise ValueError(
                     "this all-gather comm is bound to a layout installed on another "
-                    "parameter group"
+                    f"parameter group: {_describe_param_groups(holders)}"
                 )
             layout = fsdp_param_group._all_gather_layout
             if layout.comm is not None and comm is not layout.comm:
@@ -959,11 +979,12 @@ class FSDPModule:
         which restores the default comm unless it has its own comm, so re-apply
         that setter, :meth:`set_symm_mem_for_comm` or
         :meth:`set_allocate_memory_from_process_group_for_comm` afterwards. Such
-        a layout serves one parameter group; install a separate instance on each
-        module with ``recurse=False``. Set custom layouts and those comms before
-        the first unshard: neither can be replaced while an all-gather is pending,
-        while parameters are unsharded, or after they adopt outputs from a custom
-        layout. FSDP checks every group before changing any.
+        a layout serves one parameter group, and no other group may use its comm;
+        install a separate instance on each module with ``recurse=False``. Set
+        custom layouts and those comms before the first unshard: neither can be
+        replaced while an all-gather is pending, while parameters are unsharded,
+        or after they adopt outputs from a custom layout. FSDP checks every group
+        before changing any.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
@@ -1003,18 +1024,21 @@ class FSDPModule:
                     fsdp_param_group._check_all_gather_replaceable()
                 updates.append((fsdp_param_group, comm))
         if layout.comm is not None:
-            # Its comm may read per-call state that the layout keeps for one group
+            # Its comm may read per-call state that the layout keeps for one group,
+            # so no other group may call it, whichever setter installed it there
             groups = {group for group, _ in updates}
-            if (owner := _layout_comm_owner(layout.comm)) is not None:
-                groups.add(owner)
-            if len(groups) > 1:
+            callers = _other_param_groups(
+                groups, lambda group: group._all_gather_comm is layout.comm
+            )
+            users = [*groups, *callers]
+            if len(users) > 1:
                 raise ValueError(
-                    "A layout bound to its comm serves one parameter group; install "
-                    "a separate instance on each module with recurse=False"
+                    "A layout bound to its comm serves one parameter group, and no "
+                    "other group may call that comm; install a separate instance on "
+                    "each module with recurse=False. Groups that would call it: "
+                    f"{_describe_param_groups(users)}"
                 )
         for fsdp_param_group, comm in updates:
-            if layout.comm is not None:
-                layout.comm._fsdp_param_group = weakref.ref(fsdp_param_group)
             fsdp_param_group._all_gather_layout = layout
             fsdp_param_group._all_gather_comm = comm
 

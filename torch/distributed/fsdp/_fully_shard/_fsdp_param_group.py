@@ -4,6 +4,8 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
+import threading
+import weakref
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
@@ -66,6 +68,20 @@ logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 _GradInputs = TypeVarTuple("_GradInputs")
+
+# Parameter groups, for setters that check state shared across groups, such as a
+# comm that another group calls. Weak references without callbacks keep every
+# change to the set under the lock, which covers ranks run as threads.
+_param_group_refs: set[weakref.ref[FSDPParamGroup]] = set()
+_param_group_refs_lock = threading.Lock()
+
+
+def _get_live_param_groups() -> list[FSDPParamGroup]:
+    with _param_group_refs_lock:
+        _param_group_refs.difference_update(
+            [ref for ref in _param_group_refs if ref() is None]
+        )
+        return [group for ref in _param_group_refs if (group := ref()) is not None]
 
 
 """
@@ -335,6 +351,8 @@ class FSDPParamGroup:
         # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
+        with _param_group_refs_lock:
+            _param_group_refs.add(weakref.ref(self))
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:

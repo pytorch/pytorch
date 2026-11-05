@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import gc
 import itertools
 import math
 import os
@@ -3289,10 +3290,30 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model.set_custom_all_gather(comm)
         self.assertIs(group._all_gather_comm, comm)
         other.set_all_gather_layout(bound, recurse=False)  # no longer on model
+        # Nor can a layout bind a comm that another module calls, whichever setter
+        # installed it there
+        with self.assertRaisesRegex(ValueError, "one parameter group"):
+            other.set_all_gather_layout(
+                _ParamContiguousLayout("rank_major", comm), recurse=False
+            )
         # A bound comm stays even if a comm setter would install its type
         model.set_all_gather_layout(_ParamContiguousLayout("rank_major", comm))
         with self.assertRaisesRegex(RuntimeError, "bound to its comm"):
             model.set_allocate_memory_from_process_group_for_comm(False)
+        # A deleted module's group can outlive it in a reference cycle; FSDP
+        # collects it before rejecting a comm that only it still holds
+        gone = nn.Linear(8, 8)
+        fully_shard(gone, mesh=init_device_mesh("cpu", (self.world_size,)))
+        layout = _ParamContiguousAllGather("custom").layout
+        gone.set_all_gather_layout(layout)
+        gc_enabled = gc.isenabled()
+        gc.disable()  # keep the cycle until FSDP collects it
+        try:
+            del gone
+            other.set_all_gather_layout(layout, recurse=False)
+        finally:
+            if gc_enabled:
+                gc.enable()
         # Such a layout cannot serve a module's several parameter groups
         mesh = init_device_mesh("cpu", (self.world_size, 1), mesh_dim_names=("a", "b"))
         bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
