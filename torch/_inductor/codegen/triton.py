@@ -12,6 +12,7 @@ import logging
 import math
 import operator
 import os
+import struct
 import textwrap
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
@@ -1504,13 +1505,16 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        # Triton's scalar_constant() treats -0.0 as 0 (since -0.0 == 0 in Python),
-        # Work around by encoding -0.0 as its IEEE 754 hex in uint and bitcasting.
-        if value == 0 and math.copysign(1.0, value) < 0:
-            if triton_type == "tl.float32":
-                return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
-            elif triton_type == "tl.float64":
-                return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
+        # Preserve encodings that floating scalar constants can canonicalize.
+        if triton_type in ("tl.float32", "tl.float64") and (
+            (value == 0 and math.copysign(1.0, value) < 0)
+            or (config.strict_pointwise and math.isnan(value))
+        ):
+            bits = 32 if triton_type == "tl.float32" else 64
+            raw = int.from_bytes(
+                struct.pack("<f" if bits == 32 else "<d", value), "little"
+            )
+            return f"tl.full({shape}, {raw:#x}, tl.uint{bits}).to({triton_type}, bitcast=True)"
 
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
@@ -1552,7 +1556,20 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def abs(x):
+        if utils.is_strict_cuda_triton():
+            return f"triton_helpers.eager_unary_nan({x}, tl_math.abs({x}))"
         return f"tl_math.abs({x})"
+
+    @staticmethod
+    def neg(x):
+        if utils.is_strict_cuda_triton() and getattr(x, "dtype", None) in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        ):
+            return f"triton_helpers.eager_neg({x})"
+        return f"-{x}"
 
     # TODO - register these ops as having divergent dtype
     # output if doing graph pass to remove consecutive casts
@@ -2366,6 +2383,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     # pyrefly: ignore [bad-override]
     def signbit(x):
         # x < 0 is wrong for -0.0 in floating point, so use libdevice for supported floating
@@ -2740,6 +2758,13 @@ class TritonKernelOverrides(TritonOverrides):
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )
+        if utils.is_strict_cuda_triton():
+            mantissa = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"triton_helpers.eager_unary_nan({x}, {mantissa})",
+                dtype=x.dtype,
+                shape=x.shape,
+            )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
