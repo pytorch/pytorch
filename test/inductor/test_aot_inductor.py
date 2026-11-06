@@ -29,7 +29,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
-from torch._inductor.codecache import WritableTempFile
+from torch._inductor.codecache import CppWrapperCodeCache, WritableTempFile
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
 from torch._inductor.codegen.wrapper import (
@@ -855,6 +855,27 @@ class AOTInductorTestsTemplate:
             }
         ):
             self.check_model(Model(self.device), example_inputs)
+
+    def test_lazy_autotune_reuses_cached_jit_wrapper(self):
+        lazy_autotune = config.triton.autotune_at_compile_time is False
+        if self.device != GPU_TYPE or not lazy_autotune:
+            raise unittest.SkipTest("requires lazy autotune on GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y).relu() * 2
+
+        example_inputs = (
+            torch.randn(8, 8, device=self.device),
+            torch.randn(8, 8, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+        num_wrappers = len(CppWrapperCodeCache.cache)
+        self.assertGreater(num_wrappers, 0)
+        # The second compile reuses the cached JIT wrapper binary, and its first
+        # pass must still lazily compile the kernels to fill CudaKernelParamCache.
+        self.check_model(Model(), example_inputs)
+        self.assertEqual(len(CppWrapperCodeCache.cache), num_wrappers)
 
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):

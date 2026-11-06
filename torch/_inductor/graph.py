@@ -2922,6 +2922,7 @@ class GraphLowering(torch.fx.Interpreter):
                         device_type={device_type!r},
                         num_outputs={num_outputs!r},
                         kernel_code=kernel_src,
+                        private_module=True,
                     )
                 input_tensors = make_inputs()
                 input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
@@ -2982,10 +2983,6 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_source = wrapper_code.value
         kernel_source = kernel_code.value if kernel_code else None
 
-        # The JIT wrapper keeps lazy kernel state in function-local statics.
-        # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        # Not id(self): a later graph can reuse a freed graph's id.
-        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
@@ -3043,6 +3040,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         # This temporary Python-loaded wrapper can depend on libtorch even when
         # the final packaged AOTI artifact is built with link_libtorch=False.
+        # The JIT wrapper keeps lazy kernel state in native statics, so each
+        # first pass runs a private instance of the cached binary: an instance
+        # an earlier pass already ran would skip the lazy compiles that
+        # populate CudaKernelParamCache for this compile.
         with config.patch("aot_inductor.link_libtorch", True):
             compiled_fn = CppWrapperCodeCache.load_pybinding(
                 argtypes=["std::vector<AtenTensorHandle>"],
@@ -3050,6 +3051,7 @@ class GraphLowering(torch.fx.Interpreter):
                 device_type=device_type,
                 num_outputs=len(self.graph_outputs),
                 kernel_code=kernel_source,
+                private_module=True,
             )
 
         input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(
