@@ -132,10 +132,61 @@ jobs:
         with:
           no-sudo: true
 
+      # TheRock exposes rocminfo and amd-smi only after /etc/rocm_env.sh.
+      # Each step is a new shell, so source it in every step that calls them.
+      - name: Job pod ROCm version
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi version || true
+          rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
+
+      - name: Job pod system info
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release || true
+          rocm-sdk version || true
+          whoami
+          id
+
+      - name: Job pod amd-smi
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi monitor -ptumv
+          amd-smi list
+
+      - name: Job pod rocminfo
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          rocminfo
+
       - name: Job pod GPU check
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           required=1
           config="${{ matrix.config }}"
@@ -258,6 +309,8 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           USE_ARC: "1"
+          # Same IPC workaround _rocm-test.yml passes into its Docker container.
+          HSA_ENABLE_IPC_MODE_LEGACY: "1"
         shell: bash
         run: |
           set -euo pipefail
@@ -293,9 +346,12 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             timeout 180 python .ci/pytorch/rocm_preflight.py
           fi
-          # Match the old Docker test environment.
+          # Match the old Docker test environment, including
+          # --ulimit stack=10485760:83886080. bash ulimit -s is KiB.
           ulimit -S -c 0
           ulimit -H -c 0
+          ulimit -H -s 81920
+          ulimit -S -s 10240
           "${TEST_COMMAND}"
 
       - name: Print remaining test logs
