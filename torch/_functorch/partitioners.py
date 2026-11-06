@@ -4235,8 +4235,15 @@ def min_cut_rematerialization_partition(
             backward_dependencies.add(node)
             backward_dependency_stack.extend(node.all_input_nodes)
 
-        def partition_key(node: fx.Node) -> bool:
-            return node in backward_dependencies
+        def partition_key(node: fx.Node) -> tuple[bool, fx.Node | None]:
+            # Observable native mutations must retain their destination identity.
+            native_mutation = (
+                node
+                if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+                and isinstance(node.meta.get("original_aten_mutation"), tuple)
+                else None
+            )
+            return node in backward_dependencies, native_mutation
 
         cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph

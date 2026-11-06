@@ -553,7 +553,13 @@ class OpsHandler(Generic[T]):
     def sub(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
-    def mul(self, x0: T, x1: T) -> T:
+    def mul(self, x0: T, x1: T, *, native_cuda_execution=None) -> T:
+        """Multiply, optionally retaining native CUDA iteration and pointer provenance.
+
+        The metadata carries physical index, element count, operand base pointers
+        and offsets, and contiguity. It affects strict FP64 CUDA NaN priority;
+        other backends and dtype propagation ignore it.
+        """
         raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
@@ -924,7 +930,7 @@ class BasicMathOpsMixin:
         return f"{a} - {b}"
 
     @staticmethod
-    def mul(a, b):
+    def mul(a, b, *, native_cuda_execution=None):
         return f"{a} * {b}"
 
     @staticmethod

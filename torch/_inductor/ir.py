@@ -8776,6 +8776,8 @@ class SubgraphBuffer(ExternKernel):
                 for op in self.subgraph.operations:
                     op.set_config_patches(config_patches.copy())
 
+        V.graph.preserve_subgraph_input_alignment(self.subgraph, self.inputs)
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
@@ -11407,6 +11409,7 @@ class InvokeSubgraph(ExternKernel):
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
 
+        V.graph.preserve_subgraph_input_alignment(subgraph.graph, operands)
         outputs = subgraph.graph.graph_outputs
 
         # Find the device - operands could be integers from shapes, so we can't
@@ -11598,6 +11601,8 @@ class Switch(ExternKernel):
                         subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
+            V.graph.preserve_subgraph_input_alignment(subgraph.graph, operands)
+
         if any(branch.graph is None for branch in branches):
             raise AssertionError("Expected all branch.graph to be not None")
 
@@ -11778,7 +11783,10 @@ class WhileLoop(ExternKernel):
     # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
     # See test_scan_multiple_layers_gradient for a concrete example.
     @staticmethod
-    def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
+    def _clone_aliased_inputs(
+        carried_inputs: Sequence[IRNode],
+        protected_storage_names: OrderedSet[str] | None = None,
+    ) -> Sequence[IRNode]:
         if not _has_aliased_buffers(carried_inputs):
             return carried_inputs
 
@@ -11795,7 +11803,10 @@ class WhileLoop(ExternKernel):
         result: list[IRNode | TensorBox] = []
 
         for original_input, unwrapped_buffer in zip(carried_inputs, unwrapped_buffers):
-            if id(unwrapped_buffer) in seen_buffers:
+            if id(unwrapped_buffer) in seen_buffers and (
+                not protected_storage_names
+                or original_input.get_name() not in protected_storage_names
+            ):
                 result.append(ExternKernel.copy_input(original_input))
             else:
                 seen_buffers.add(id(unwrapped_buffer))
@@ -11866,13 +11877,9 @@ class WhileLoop(ExternKernel):
         fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
-        carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
-        carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
         additional_inputs_ = [cls.realize_input(x) for x in additional_inputs]
-        additional_inputs_ = _require_exact_strides(
-            additional_inputs_, fake_additional_inputs
-        )
         all_inputs = carried_inputs_ + additional_inputs_
+        protected_storage_names: OrderedSet[str] = OrderedSet()
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
@@ -11903,6 +11910,41 @@ class WhileLoop(ExternKernel):
                             subgraph.graph.graph_outputs,
                             fake_carried_inputs,
                         )
+
+            protected_storage_names.update(
+                V.graph.preserve_subgraph_input_alignment(subgraph.graph, all_inputs)
+            )
+
+        # Handling input mutations. Inputs can be mutated by cond_fn,
+        # body_fn or both (e.g. a captured tensor mutated only in cond_fn).
+        subgraph_mutated_idxs: list[OrderedSet[int]] = []
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None or not isinstance(
+                subgraph.graph.module, torch.fx.GraphModule
+            ):
+                raise AssertionError(
+                    "Expected lowered subgraph with a GraphModule, got "
+                    f"{subgraph.graph and subgraph.graph.module}"
+                )
+            mutated_idxs = check_input_alias_and_mutation(
+                subgraph.graph.module, fake_all_inputs
+            )[3]
+            subgraph_mutated_idxs.append(OrderedSet(mutated_idxs))
+        cond_mutated_idxs, body_mutated_idxs = subgraph_mutated_idxs
+        mutated_idx_set = cond_mutated_idxs | body_mutated_idxs
+
+        protected_storage_names.difference_update(
+            all_inputs[idx].get_name() for idx in mutated_idx_set
+        )
+
+        carried_inputs_ = WhileLoop._clone_aliased_inputs(
+            carried_inputs_, protected_storage_names
+        )
+        carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
+        additional_inputs_ = _require_exact_strides(
+            additional_inputs_, fake_additional_inputs
+        )
+        all_inputs = carried_inputs_ + additional_inputs_
 
         if not (cond_fn.graph and body_fn.graph):
             raise AssertionError("Expected cond_fn.graph and body_fn.graph")
@@ -11980,24 +12022,6 @@ class WhileLoop(ExternKernel):
             unbacked_bindings=unbacked_bindings,
             stack_output=stack_output,
         )
-
-        # Handling input mutations. Inputs can be mutated by cond_fn,
-        # body_fn or both (e.g. a captured tensor mutated only in cond_fn).
-        subgraph_mutated_idxs: list[OrderedSet[int]] = []
-        for subgraph in (cond_fn, body_fn):
-            if subgraph.graph is None or not isinstance(
-                subgraph.graph.module, torch.fx.GraphModule
-            ):
-                raise AssertionError(
-                    "Expected lowered subgraph with a GraphModule, got "
-                    f"{subgraph.graph and subgraph.graph.module}"
-                )
-            mutated_idxs = check_input_alias_and_mutation(
-                subgraph.graph.module, fake_all_inputs
-            )[3]
-            subgraph_mutated_idxs.append(OrderedSet(mutated_idxs))
-        cond_mutated_idxs, body_mutated_idxs = subgraph_mutated_idxs
-        mutated_idx_set = cond_mutated_idxs | body_mutated_idxs
 
         # Create all outputs first
         all_outputs: list[IRNode] = []

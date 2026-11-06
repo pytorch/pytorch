@@ -1563,15 +1563,23 @@ class TritonOverrides(OpOverrides):
         return f"{x} - {y}"
 
     @staticmethod
-    def mul(x, y):
+    def mul(x, y, *, native_cuda_execution=None):
         if utils.is_strict_cuda_triton() and (
             dtype := get_dtype_handler().mul(x, y)
         ) in (torch.float32, torch.float64):
             x = TritonOverrides._cast_libdevice_arg(x, dtype)
             y = TritonOverrides._cast_libdevice_arg(y, dtype)
-            # CUDA chooses the first NaN; fusion can commute the multiplication.
             result = f"triton_helpers.eager_unary_nan({y}, {x} * {y})"
-            return f"triton_helpers.eager_unary_nan({x}, {result})"
+            first = f"triton_helpers.eager_unary_nan({x}, {result})"
+            if dtype == torch.float64 and native_cuda_execution is not None:
+                index, numel, alignments, contiguous = native_cuda_execution
+                vectorized = f"({contiguous}) & triton_helpers.cuda_mul_full_block({index}, {numel})"
+                for name, offset in alignments:
+                    ptr = f"{V.kernel.args.input(name)}.to(tl.int64)" if name else "0"
+                    vectorized += f" & ((({ptr}) + ({offset}) * 8) % 16 == 0)"
+                second = f"triton_helpers.eager_unary_nan({y}, triton_helpers.eager_unary_nan({x}, {x} * {y}))"
+                return f"tl.where({vectorized}, {second}, {first})"
+            return first
         return f"{x} * {y}"
 
     @classmethod

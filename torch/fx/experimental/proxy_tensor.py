@@ -826,6 +826,14 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
         val, include_real=(proxy.node.op == "placeholder")
     )
 
+    destination = proxy.node.meta.get("original_aten_mutation")
+    if isinstance(destination, tuple) and destination[1] is None:
+        native = _original_aten_view_mutation_base(proxy.node)
+        proxy.node.meta["original_aten_mutation"] = (
+            native if native is not None else destination[0],
+            proxy.node.meta["val"],
+        )
+
     with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
         if is_fake(val):
@@ -2041,17 +2049,315 @@ ORIGINAL_ATEN: contextvars.ContextVar[object | None] = contextvars.ContextVar(
 @contextmanager
 def set_original_aten_op(
     func: OpOverload | torch._ops.HigherOrderOperator,
+    *,
+    destination: Tensor | None = None,
 ) -> Generator[None, None, None]:
     if ORIGINAL_ATEN.get() is None and fx_traceback.has_preserved_node_meta():
         token = ORIGINAL_ATEN.set(func)
         fx_traceback.current_meta["original_aten"] = func
+        previous_mutation = fx_traceback.current_meta.get("original_aten_mutation")
         try:
+            if destination is not None:
+                fx_traceback.current_meta["original_aten_mutation"] = (
+                    _original_mutation_destination(destination),
+                    None,
+                )
             yield
         finally:
             ORIGINAL_ATEN.reset(token)
             fx_traceback.current_meta["original_aten"] = None
+            if destination is not None:
+                if previous_mutation is None:
+                    fx_traceback.current_meta.pop("original_aten_mutation", None)
+                else:
+                    fx_traceback.current_meta["original_aten_mutation"] = (
+                        previous_mutation
+                    )
     else:
         yield
+
+
+def _is_original_aten_mutation(
+    node: fx.Node, *, allow_destination_cast: bool = True
+) -> bool:
+    from torch._library._out_variant import get_out_arg_names, to_out_variant
+    from torch.fx.passes.reinplace import _maybe_get_inplace_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .symbolic_shapes import statically_known_true, sym_eq
+
+    original = node.meta.get("original_aten")
+    # Functional out wrappers cast to the destination dtype after arithmetic.
+    # Only that final cast completes the exact native producer's storage write.
+    if (
+        allow_destination_cast
+        and node.target == torch.ops.prims.convert_element_type.default
+    ):
+        source = node.args[0]
+        if not isinstance(source, fx.Node):
+            return False
+        mutation = node.meta.get("original_aten_mutation")
+        source_mutation = source.meta.get("original_aten_mutation")
+        value = node.meta.get("val")
+        with disable_proxy_modes_tracing(), _disable_current_modes():
+            return (
+                isinstance(mutation, tuple)
+                and isinstance(source_mutation, tuple)
+                and isinstance(mutation[0], Tensor)
+                and isinstance(source_mutation[0], Tensor)
+                and isinstance(value, Tensor)
+                and value.dtype == mutation[0].dtype
+                and statically_known_true(sym_eq(value.size(), mutation[0].size()))
+                and source_mutation[0].untyped_storage()
+                == mutation[0].untyped_storage()
+                and source.meta.get("original_aten") == original
+                and _is_original_aten_mutation(source, allow_destination_cast=False)
+            )
+    return (
+        isinstance(original, OpOverload)
+        and isinstance(node.target, OpOverload)
+        and original._schema.is_mutable
+        and (
+            _maybe_get_inplace_op(node.target) == original
+            or (
+                torch.Tag.out in original.tags
+                and not node.target._schema.is_mutable
+                and len(get_out_arg_names(original)) == 1
+                and to_out_variant(node.target) == original
+            )
+        )
+    )
+
+
+def _normalize_original_aten_index(
+    index: int | SymInt | sympy.Expr,
+    size: int | SymInt | sympy.Expr,
+    *,
+    clamp: bool,
+) -> int | SymInt | sympy.Expr:
+    import sympy
+
+    from torch.utils._sympy.functions import Max, Min
+
+    minimum, maximum = (
+        (Min, Max)
+        if isinstance(index, sympy.Expr) or isinstance(size, sympy.Expr)
+        else (torch.sym_min, torch.sym_max)
+    )
+    # Integer sign indicator: one for a negative index, zero otherwise.
+    # Min/Max retain symbolic semantics in every existing size printer.
+    normalized = index + size * minimum(maximum(-index, 0), 1)
+    return maximum(0, minimum(size, normalized)) if clamp else normalized
+
+
+def _replay_original_aten_view(
+    native: Tensor,
+    target: OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    reference: fx.Node | None,
+) -> Tensor:
+    from .symbolic_shapes import statically_known_true, sym_eq
+
+    if reference is not None and target in (
+        torch.ops.aten.select.int,
+        torch.ops.aten.slice.Tensor,
+    ):
+        value = reference.meta.get("val")
+        base = cast(fx.Node, reference.args[0]).meta.get("val")
+        if (
+            isinstance(value, Tensor)
+            and isinstance(base, Tensor)
+            and native.dtype == base.dtype == value.dtype
+            and native.device == base.device == value.device
+            and value.untyped_storage() == base.untyped_storage()
+            and statically_known_true(sym_eq(native.size(), base.size()))
+        ):
+            # Equal base sizes and the same captured view arguments determine
+            # the same logical output size. Retain that binding, including an
+            # undecidable/empty slice extent, instead of allocating fresh sizes.
+            parameters = {
+                argument.name: value
+                for argument, value in zip(target._schema.arguments[1:], args)
+            }
+            parameters.update(kwargs)
+            dim = int(cast(int, parameters.get("dim", 0)))
+            if dim < 0:
+                dim += native.dim()
+            strides = list(native.stride())
+            is_slice = target == torch.ops.aten.slice.Tensor
+            index = parameters.get("start", 0) if is_slice else parameters["index"]
+            if index is None:
+                index = 0
+            normalized = _normalize_original_aten_index(
+                cast(int | SymInt, index), native.size(dim), clamp=is_slice
+            )
+            offset = native.storage_offset() + normalized * native.stride(dim)
+            if is_slice:
+                strides[dim] *= cast(int, parameters.get("step", 1))
+            else:
+                del strides[dim]
+            # Native coordinates preserve slice endpoints on either axis;
+            # scalar storage-offset decoding cannot distinguish an empty carry.
+            return native.as_strided(value.size(), strides, offset)
+    # Other views retain their operator semantics, including absolute offsets
+    # and dtype-reinterpreting views. Inverse eligibility still checks geometry.
+    return target(native, *args, **kwargs)
+
+
+def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
+    from torch.fx.passes.reinplace import _VIEW_INVERSE_MAP
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+        statically_known_true,
+        sym_eq,
+    )
+
+    original = node.meta.get("original_aten")
+    mutation = node.meta.get("original_aten_mutation")
+    if not (
+        node.target in _VIEW_INVERSE_MAP
+        and isinstance(original, OpOverload)
+        and original._schema.is_mutable
+        and isinstance(mutation, tuple)
+        and isinstance(mutation[0], Tensor)
+        and len(node.args) >= 2
+        and isinstance(base := node.args[0], fx.Node)
+        and isinstance(source := node.args[1], fx.Node)
+        and source.meta.get("original_aten") == original
+        and (
+            _is_original_aten_mutation(source)
+            or _original_aten_view_mutation_base(source) is not None
+        )
+    ):
+        return None
+    source_mutation = source.meta.get("original_aten_mutation")
+    if not (
+        isinstance(source_mutation, tuple)
+        and isinstance(source_mutation[0], Tensor)
+        and mutation[0].untyped_storage() == source_mutation[0].untyped_storage()
+    ):
+        return None
+    if mutation[1] is None:
+        native = _original_mutation_destination(base.meta["val"], node=base)
+    else:
+        # The completed writeback already captured its canonical base.
+        native = mutation[0]
+    with (
+        disable_proxy_modes_tracing(),
+        _disable_current_modes(),
+        _ignore_fresh_unbacked_symbols_tls_context(),
+    ):
+        if native is None or not statically_known_true(
+            sym_eq(native.size(), node.meta["val"].size())
+        ):
+            return None
+        args, kwargs = pytree.tree_map(
+            lambda arg: arg.meta["val"] if isinstance(arg, fx.Node) else arg,
+            (node.args[2:], node.kwargs),
+        )
+        target = _VIEW_INVERSE_MAP[node.target]
+        references = [
+            user
+            for user in base.users
+            if user.target == target
+            and user.args[0] is base
+            and user.args[1:] == node.args[2:]
+            and user.kwargs == node.kwargs
+        ]
+        expected = source_mutation[0]
+        for reference in references or [None]:
+            view = _replay_original_aten_view(native, target, args, kwargs, reference)
+            if (
+                isinstance(expected, Tensor)
+                and view.dtype == expected.dtype
+                and view.device == expected.device
+                and view.untyped_storage() == expected.untyped_storage()
+                and all(
+                    statically_known_true(sym_eq(a, b))
+                    for a, b in (
+                        (view.size(), expected.size()),
+                        (view.stride(), expected.stride()),
+                        (view.storage_offset(), expected.storage_offset()),
+                    )
+                )
+            ):
+                return native
+    return None
+
+
+def _original_mutation_destination(
+    destination: Tensor, *, node: fx.Node | None = None
+) -> Tensor | None:
+    from torch.fx.passes.reinplace import _is_view_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+        statically_known_true,
+        sym_eq,
+    )
+
+    if destination.layout != torch.strided:
+        return None
+    # Resolve before dead-code removal: a later out= write can erase the earlier
+    # functional result, while both native writes still own the same storage.
+    if node is None:
+        mode = get_innermost_proxy_mode()
+        slot = get_proxy_slot(destination, mode.tracer, None) if mode else None
+        node = slot.proxy.node if slot is not None else None
+    views = []
+    while node is not None:
+        mutation = node.meta.get("original_aten_mutation")
+        if isinstance(mutation, tuple) and (
+            _is_original_aten_mutation(node)
+            or _original_aten_view_mutation_base(node) is not None
+        ):
+            original, result = mutation[:2]
+            if isinstance(original, Tensor) and isinstance(result, Tensor):
+                # Replay describes metadata, not graph operations or fresh outputs.
+                with (
+                    disable_proxy_modes_tracing(),
+                    _disable_current_modes(),
+                    _ignore_fresh_unbacked_symbols_tls_context(),
+                ):
+                    # A resizing write no longer has the captured geometry.
+                    if not statically_known_true(
+                        sym_eq(original.size(), result.size())
+                    ):
+                        break
+                    for reference in reversed(views):
+                        args, kwargs = pytree.tree_map(
+                            lambda arg: arg.meta["val"]
+                            if isinstance(arg, fx.Node)
+                            else arg,
+                            (reference.args[1:], reference.kwargs),
+                        )
+                        original = _replay_original_aten_view(
+                            original, reference.target, args, kwargs, reference
+                        )
+                    return snapshot_fake(original)
+        # Only views of the current fake storage can lead to its native owner.
+        if not (
+            isinstance(node.target, OpOverload)
+            and _is_view_op(node.target)
+            and node.args
+            and isinstance(node.args[0], fx.Node)
+            and isinstance(value := node.meta.get("val"), Tensor)
+            and isinstance(base := node.args[0].meta.get("val"), Tensor)
+            and value.untyped_storage() == base.untyped_storage()
+        ):
+            break
+        views.append(node)
+        node = node.args[0]
+    with (
+        disable_proxy_modes_tracing(),
+        _disable_current_modes(),
+        _ignore_fresh_unbacked_symbols_tls_context(),
+    ):
+        return snapshot_fake(destination)
 
 
 class TorchFunctionMetadataMode(TorchFunctionMode):

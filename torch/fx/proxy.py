@@ -156,6 +156,7 @@ _COPY_META_FIELDS = [
     "torch_fn",
     "source_fn_stack",
     "original_aten",
+    "original_aten_mutation",
     "recompute",
     "ac_graph_id",
     "has_backward_hook",

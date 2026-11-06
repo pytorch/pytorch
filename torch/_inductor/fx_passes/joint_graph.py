@@ -108,6 +108,13 @@ def remove_no_ops(
     """
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
+        from ..lowering import _cuda_mul_mutation_storage_nodes
+
+        native_mutation_storage = (
+            _cuda_mul_mutation_storage_nodes(graph)
+            if config.strict_pointwise
+            else OrderedSet()
+        )
 
         def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
@@ -141,6 +148,9 @@ def remove_no_ops(
 
         def replace_no_op(node, replace_input_index):
             value = node.meta["val"]
+            if node in native_mutation_storage:
+                # A native write owns storage observed by a later FP64 dtype view.
+                return
             if (
                 config.strict_pointwise
                 and isinstance(value, torch.Tensor)
@@ -296,7 +306,12 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 if alias:
                     is_needed = False
                     node.replace_all_uses_with(alias)
-                    alias.meta.update(node.meta)
+                    # Reusing a view does not change the alias producer's native op.
+                    alias.meta.update(
+                        (k, v)
+                        for k, v in node.meta.items()
+                        if k not in ("original_aten", "original_aten_mutation")
+                    )
                     graph.erase_node(node)
             else:
                 from_type = src.meta["val"].dtype
@@ -895,6 +910,53 @@ def joint_graph_passes(
         stable_topological_sort(graph.graph)
         graph.graph.lint()
         graph.recompile()
+
+    if config.strict_pointwise:
+        from torch.fx.experimental.proxy_tensor import _original_mutation_destination
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        from ..fx_utils import get_node_storage, get_storage
+        from ..lowering import _cuda_mul_mutation_storage_nodes
+
+        input_storages = OrderedSet(
+            [
+                get_node_storage(node)
+                for node in graph.graph.nodes
+                if node.op == "placeholder"
+            ]
+        )
+
+        # Recomputing a functionalized native mutation would lose the destination
+        # storage, which strict FP64 multiplication also observes in backward.
+        native_storages = OrderedSet()
+        native_mutation_storage = _cuda_mul_mutation_storage_nodes(graph.graph)
+        for node in graph.graph.nodes:
+            if node in native_mutation_storage:
+                node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+                native_storages.add(get_storage(node.meta["original_aten_mutation"][1]))
+
+        # Saved aliases must retain caller ownership even when a view was
+        # taken outside the original native mutation's tracing context.
+        for node in graph.graph.nodes:
+            mutation = node.meta.get("original_aten_mutation")
+            if get_node_storage(node) in native_storages and not isinstance(
+                mutation, tuple
+            ):
+                native = _original_mutation_destination(node.meta["val"], node=node)
+                if native is not None:
+                    mutation = (native, node.meta["val"])
+            if (
+                isinstance(mutation, tuple)
+                and (
+                    get_storage(mutation[1]) in native_storages
+                    or node.meta.get("original_aten") == aten.mul_.Tensor
+                )
+                and get_node_storage(node) == get_storage(mutation[1])
+            ):
+                node.meta["original_aten_mutation"] = (
+                    *mutation[:2],
+                    get_storage(mutation[0]) in input_storages,
+                )
     return graph
 
 
