@@ -480,13 +480,15 @@ def flex_attention(
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
-    unfiltered_configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
+    unrefined_configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim,
         seq_len_q,
         dtype,
         query.get_device().type,
         V.graph.sizevars.guard_int(v_head_dim),
     )
+    # Not a top-level import: the heuristics module imports kernel templates,
+    # and importing the kernel package imports this module.
     from ...heuristics.template.triton import FlexAttentionConfigContext
 
     context = FlexAttentionConfigContext(
@@ -501,6 +503,8 @@ def flex_attention(
         qk_head_dim_rounded=kernel_options["QK_HEAD_DIM_ROUNDED"],
         v_head_dim_rounded=kernel_options["V_HEAD_DIM_ROUNDED"],
         dtype=dtype,
+        key_dtype=key.get_dtype(),
+        value_dtype=value.get_dtype(),
         device=query.get_device(),
         inputs_contiguous=all(
             is_dense_contiguous_storage_and_layout(node) for node in (query, key, value)
@@ -514,7 +518,9 @@ def flex_attention(
         score_mod_reads_buffers=bool(score_mod_other_buffers),
         kernel_options=MappingProxyType(dict(kernel_options)),
     )
-    configs = V.choices.refine_flex_attention_fwd_configs(unfiltered_configs, context)
+    configs = V.choices.refine_flex_attention_fwd_configs(unrefined_configs, context)
+    if unrefined_configs and not configs:
+        raise RuntimeError("refine_flex_attention_fwd_configs returned no configs")
 
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
@@ -648,7 +654,7 @@ def flex_attention(
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
     choices = V.choices.append_flex_attention_choices(
         choices,
-        unfiltered_configs,
+        unrefined_configs,
         [
             query,
             key,

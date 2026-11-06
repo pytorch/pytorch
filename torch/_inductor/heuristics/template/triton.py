@@ -332,6 +332,7 @@ def _origami_flex_attention_tiles(
         b_transpose=origami_module.transpose_t.N,
     )
 
+    # Only tiles both sub-GEMMs can run are ranked.
     qk_scores: dict[tuple[int, int], float] = {}
     pv_scores: dict[tuple[int, int], float] = {}
     for block_m, block_n in candidate_tiles:
@@ -357,16 +358,14 @@ def _origami_flex_attention_tiles(
         pv_latency = origami_module.compute_total_latency(
             pv_problem, hardware, pv_config, hardware.N_CU
         )
-        tile = (block_m, block_n)
-        if math.isfinite(qk_latency):
-            qk_scores[tile] = qk_latency
-        if math.isfinite(pv_latency):
-            pv_scores[tile] = pv_latency
+        if math.isfinite(qk_latency) and math.isfinite(pv_latency):
+            qk_scores[block_m, block_n] = qk_latency
+            pv_scores[block_m, block_n] = pv_latency
 
+    if not qk_scores:
+        return ()
     qk_ranked = sorted(qk_scores, key=lambda tile: (qk_scores[tile], tile))
     pv_ranked = sorted(pv_scores, key=lambda tile: (pv_scores[tile], tile))
-    if not qk_ranked or not pv_ranked:
-        return ()
     selected = []
     for tile in (
         *qk_ranked[:ORIGAMI_FLEX_QK_TOPK],
@@ -558,7 +557,10 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
 @dataclasses.dataclass(frozen=True)
 class FlexAttentionConfigContext:
-    """Shape and layout facts needed to refine a forward config list."""
+    """Shape and layout facts needed to refine a forward config list.
+
+    ``dtype`` is the query's; ``key_dtype`` and ``value_dtype`` may differ.
+    """
 
     batch_size: int | sympy.Expr
     kv_batch_size: int | sympy.Expr
@@ -571,11 +573,13 @@ class FlexAttentionConfigContext:
     qk_head_dim_rounded: int
     v_head_dim_rounded: int
     dtype: torch.dtype
+    key_dtype: torch.dtype
+    value_dtype: torch.dtype
     device: torch.device
     inputs_contiguous: bool
     is_noop_block_mask: bool
     score_mod_reads_buffers: bool
-    kernel_options: Mapping[str, Any]
+    kernel_options: Mapping[str, Any] = dataclasses.field(hash=False)
 
 
 class BaseHeuristicSingleton(type):
@@ -1533,7 +1537,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """Return the forward configs to autotune, given the full attention context.
 
         The result may replace ``configs`` rather than subset it and must be
-        non-empty; a single config takes the lowering's one-config path.
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
         """
         return configs
 
@@ -2422,13 +2427,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             or config.max_autotune_flex_search_space != "DEFAULT"
             or not context.is_noop_block_mask
             or context.dtype not in (torch.float16, torch.bfloat16)
+            or context.key_dtype != context.dtype
+            or context.value_dtype != context.dtype
         ):
             return configs
-        # A subclass that customizes the stock pool owns it.
-        if (
-            type(self).get_flex_attn_fwd_configs
-            is not ROCmConfigHeuristic.get_flex_attn_fwd_configs
-        ):
+        # Any override of the stock lookup (subclass, instance or patch) owns the
+        # pool it returns.
+        lookup = getattr(self.get_flex_attn_fwd_configs, "__func__", None)
+        if lookup is not _ROCM_STOCK_FLEX_ATTN_FWD_CONFIGS:
             return configs
         # Origami models the two GEMMs; score_mods that stream captured buffers
         # add memory traffic outside that model and are unmeasured.
@@ -2533,10 +2539,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if not selected_tiles:
             return configs
 
-        # Build the safety config for the query's verified gfx950 target instead
-        # of recovering it from `configs`: for D=32 the generic default is also
-        # present in the autotune list, and a heterogeneous process may have
-        # initialized that list using another device's architecture.
+        # Build the safety config from the gfx950 table instead of recovering it
+        # from `configs`: for D=32 the generic default is also present in the
+        # autotune list.
         stock_default = self.gfx950_default_flex_config.get(
             (context.dtype, qk_head_dim)
         )
@@ -2627,6 +2632,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_decode_configs.append(default_config)
 
         return flex_decode_configs
+
+
+_ROCM_STOCK_FLEX_ATTN_FWD_CONFIGS = ROCmConfigHeuristic.get_flex_attn_fwd_configs
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):

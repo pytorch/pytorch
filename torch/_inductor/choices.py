@@ -184,16 +184,17 @@ class InductorChoices:
         """Return the forward configs to autotune, given the full attention context.
 
         The result may replace ``configs`` rather than subset it and must be
-        non-empty; a single config takes the lowering's one-config path.
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
         ``append_flex_attention_choices`` still receives the unrefined pool.
         Only the stock pool is refined: a handler that overrides
         ``get_flex_attention_fwd_configs`` keeps its pool unless it also
         overrides this method.
         """
-        if (
-            type(self).get_flex_attention_fwd_configs
-            is not InductorChoices.get_flex_attention_fwd_configs
-        ):
+        # Resolve through the instance: composed choices dispatch each hook to
+        # the contributor that overrides it, which type(self) would not see.
+        lookup = getattr(self.get_flex_attention_fwd_configs, "__func__", None)
+        if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
             return configs
         flex_heuristics = self.get_config_heuristics(context.device.type)
         refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
@@ -354,9 +355,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM and FlexAttention configs under
-        # autotuning, so with it off there is nothing that needs fixed strides and
-        # flexible layouts should be preserved (matches non-origami behavior).
+        # origami only contributes Triton GEMM configs under autotuning, so with it
+        # off there is nothing that needs fixed strides and flexible layouts should
+        # be preserved (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM
@@ -856,6 +857,8 @@ class InductorChoices:
             proximity_score,
         )
 
+
+_STOCK_FLEX_ATTENTION_FWD_CONFIGS = InductorChoices.get_flex_attention_fwd_configs
 
 InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
 InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
