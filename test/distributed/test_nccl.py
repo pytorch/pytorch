@@ -39,6 +39,7 @@ from torch.testing._internal.common_symmem import (
     gated_signal_pad_order,
 )
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     lazy_skip_if,
@@ -1956,12 +1957,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Delays this rank's next collective on the device. A rank that skips
         # the collective instead would leave its peer blocked in RCCL's
         # host-side enqueue, so the peer's work would never reach wait().
-        torch.cuda.synchronize(self.device)
-        start = time.monotonic()
-        torch.cuda._sleep(10**7)
-        torch.cuda.synchronize(self.device)
-        seconds_per_cycle = max(time.monotonic() - start, 1e-4) / 10**7
-        torch.cuda._sleep(int(seconds / seconds_per_cycle))
+        torch.cuda._sleep(int(seconds * 1000 * get_cycles_per_ms()))
 
     def _assert_stale(self, handle) -> None:
         # buffer_ptrs checks liveness without launching through the comm.
