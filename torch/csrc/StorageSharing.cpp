@@ -452,7 +452,7 @@ static PyObject* THPStorage_newSharedCuda(
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   const auto acc_type = at::accelerator::getAccelerator(true).value();
-  t::cuda::CUDAGuard device_guard(device);
+  at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {
     // Ensure that producer prepared all tensor's data
@@ -684,4 +684,3 @@ static PyMethodDef THPStorage_sharingMethods[] = {
 PyMethodDef* THPStorage_getSharingMethods() {
   return THPStorage_sharingMethods;
 }
- 
