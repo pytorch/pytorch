@@ -5872,14 +5872,47 @@ class FixedGrid(GridExpr):
 
 
 class PrecomputedGrid(GridExpr):
-    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        for candidate in self.inductor_meta["precomputed_grids"]:
-            if all(meta.get(k) == v for k, v in candidate["config"].items()):
-                self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
-                return
-        raise AssertionError(
-            f"Precomputed grid not found for {meta} in {self.inductor_meta['precomputed_grids']}"
+    @staticmethod
+    def _match_key(
+        config: dict[str, Any], declared_constexpr_names: Container[str]
+    ) -> dict[str, Any]:
+        # The pipelining-disabled retry lowers num_stages (and a NUM_STAGES
+        # kwarg, which stays in the key). A grid sees num_stages only when the
+        # kernel declares it as a constexpr (Dynamo then copies it into the
+        # config kwargs), so otherwise leave it out of the key. Every other
+        # key, launch options included, must match.
+        key = dict(config)
+        if "num_stages" not in declared_constexpr_names:
+            key.pop("num_stages", None)
+        return key
+
+    @staticmethod
+    def find_candidate_index(
+        inductor_meta: InductorMeta,
+        config: dict[str, Any],
+    ) -> int:
+        """Return the index of the precomputed-grid candidate for `config`.
+
+        The first candidate whose `_match_key` equals that of `config`
+        wins. Raises RuntimeError when no candidate matches.
+        """
+        declared_constexpr_names = inductor_meta.get("declared_constexpr_names", ())
+        lookup_key = PrecomputedGrid._match_key(config, declared_constexpr_names)
+        precomputed_grids = inductor_meta.get("precomputed_grids", [])
+        for idx, candidate in enumerate(precomputed_grids):
+            candidate_key = PrecomputedGrid._match_key(
+                candidate["config"], declared_constexpr_names
+            )
+            if candidate_key == lookup_key:
+                return idx
+        raise RuntimeError(
+            f"Precomputed grid not found for {config} in {precomputed_grids}"
         )
+
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        candidate_index = self.find_candidate_index(self.inductor_meta, meta)
+        candidate = self.inductor_meta["precomputed_grids"][candidate_index]
+        self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
 
 
 class ComboKernelGrid(GridExpr):
