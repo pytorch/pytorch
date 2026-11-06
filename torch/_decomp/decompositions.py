@@ -2162,7 +2162,9 @@ def native_batch_norm_helper(
         save_mean = torch.squeeze(mean, reduction_dims)
         save_rstd = torch.squeeze(rstd, reduction_dims)
         if running_mean is not None:
-            new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+            new_running_mean = (
+                momentum * save_mean + (1 - momentum) * running_mean
+            ).to(running_mean.dtype)
             if not functional:
                 running_mean.copy_(new_running_mean)
         if running_var is not None:
@@ -2172,7 +2174,9 @@ def native_batch_norm_helper(
             # numerics probably don't matter.
             squeezed_var = torch.squeeze(biased_var, reduction_dims)
             unbiased_var = squeezed_var * (n / (n - 1))
-            new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+            new_running_var = (
+                momentum * unbiased_var + (1 - momentum) * running_var
+            ).to(running_var.dtype)
             if not functional:
                 running_var.copy_(new_running_var)
     else:
@@ -2180,10 +2184,10 @@ def native_batch_norm_helper(
             raise AssertionError(
                 "running_mean and running_var must not be None in eval mode"
             )
+        new_running_mean = running_mean.clone()
+        new_running_var = running_var.clone()
         running_mean = running_mean.to(dtype=computation_dtype, copy=True)
-        new_running_mean = running_mean
         running_var = running_var.to(dtype=computation_dtype, copy=True)
-        new_running_var = running_var
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
         # Very annoying inconsistency where CPU and CUDA give different shapes
