@@ -5881,7 +5881,7 @@ def logspace(
         )
         if dtype_was_none:
             dtype = default_complex_dtype
-        _dtype = dtype  # torch.linspace will update the correct dtype
+        _dtype = dtype  
     else:
         _dtype = highest_precision_float(device)
 
