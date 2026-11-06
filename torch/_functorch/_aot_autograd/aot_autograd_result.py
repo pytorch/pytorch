@@ -389,6 +389,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
     # Used by Compiled Autograd
     serialized_bw_module: SerializedGraphModule | None
+    backward_input_signature: tuple[Any, ...] | None = None
 
     def pre_save(self) -> None:
         """
@@ -546,11 +547,28 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             if self.compiled_bw is None:
                 raise AssertionError("compiled_bw must not be None when needs_autograd")
 
+            bw_compiler = (
+                aot_config.bw_compiler
+                if aot_config.preserve_tangent_layout
+                and isinstance(aot_config, AOTConfig)
+                else None
+            )
             cached_lazy_backward = None
             if self.serialized_bw_module is not None:
                 cached_lazy_backward = CachedAutogradLazyBackwardCompileInfo(
                     self.serialized_bw_module.deserialize
                 )
+                if bw_compiler is not None:
+                    from torch._guards import CompileContext, TracingContext
+
+                    from .runtime_wrappers import AutogradLazyBackwardCompileInfo
+
+                    cached_lazy_backward = AutogradLazyBackwardCompileInfo(
+                        self.serialized_bw_module.deserialize(),
+                        [],
+                        TracingContext.try_get(),
+                        CompileContext.try_get(),
+                    )
             # This function is run on both cache miss and cache hit, either here
             # or in aot_dispatch_autograd. On a cache hit,
             # 1. the bw is already compiled
@@ -565,10 +583,11 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 disable_amp=disable_amp,
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
                 lazy_backward_info=cached_lazy_backward,
-                bw_compiler=None,
+                bw_compiler=bw_compiler,
                 aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
+                backward_input_signature=self.backward_input_signature,
             )
             compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 

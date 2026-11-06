@@ -122,6 +122,7 @@ class _AOTCompiledFunction(Protocol):
     maybe_subclass_metadata: "SubclassMeta | None"
     _aot_id: int
     _bw_prologue_fn: Callable[..., Any]
+    _bw_has_input_alias_validator: bool
     _bw_epilogue_fn: Callable[..., Any]
 
 
@@ -531,6 +532,7 @@ class AutogradCompilerInstance:
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
         bw_prologue_fn = CompiledFunction._bw_prologue_fn
+        has_input_alias_validator = CompiledFunction._bw_has_input_alias_validator
         bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
@@ -541,7 +543,6 @@ class AutogradCompilerInstance:
                         "torch.compile does not currently support higher order gradients."
                     )
 
-        @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(
             ctx_saved_tensors: Sequence[torch.Tensor],
             ctx_symints: Sequence[IntLikeType],
@@ -555,10 +556,20 @@ class AutogradCompilerInstance:
                 flat_args,
             )
 
+        # Metadata alias checks must run on real inputs before backward mutations.
+        # Backend tracing would evaluate and erase an allow_in_graph check.
+        prologue = (
+            torch._dynamo.disable(
+                call_aot_bwd_prologue,
+                reason="Strict backward alias validation must precede saved-input mutations.",
+            )
+            if has_input_alias_validator
+            else torch._dynamo.allow_in_graph(call_aot_bwd_prologue)
+        )
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
             # pyrefly: ignore [bad-argument-type]
-            target=call_aot_bwd_prologue,
+            target=prologue,
             args=(
                 psaved_tensors,
                 psymints,
