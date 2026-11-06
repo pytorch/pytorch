@@ -65,7 +65,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact, TD_SOURCE
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -2711,7 +2711,9 @@ def main():
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        included = [x.to_json() for x in include]
+        excluded = [x.to_json() for x in exclude]
+        gen_ci_artifact(included, excluded, source=TD_SOURCE, td_excluded=excluded)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
