@@ -1372,7 +1372,16 @@ class TestDistributionsDevice(DistributionsTestCase):
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
 
+        sample_transform = None
+        if isinstance(distribution, LogisticNormal):
+            # Use unconstrained stick-breaking coordinates so finite differences
+            # stay on the simplex without poorly conditioned boundary directions.
+            sample_transform = distribution.transforms[0]
+            s = sample_transform.inv(s).detach().requires_grad_()
+
         def apply_fn(s, *params):
+            if sample_transform is not None:
+                s = sample_transform(s)
             return dist_ctor(*params).log_prob(s)
 
         gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
@@ -2617,17 +2626,9 @@ class TestDistributionsDevice(DistributionsTestCase):
             rtol=0,
         )
 
-        # TODO: gradcheck seems to mutate the sample values so that the simplex
-        # constraint fails by a very small margin.
-        self._gradcheck_log_prob(
-            lambda m, s: LogisticNormal(m, s, validate_args=False), (mean, std)
-        )
-        self._gradcheck_log_prob(
-            lambda m, s: LogisticNormal(m, s, validate_args=False), (mean, 1.0)
-        )
-        self._gradcheck_log_prob(
-            lambda m, s: LogisticNormal(m, s, validate_args=False), (0.0, std)
-        )
+        self._gradcheck_log_prob(LogisticNormal, (mean, std))
+        self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
+        self._gradcheck_log_prob(LogisticNormal, (0.0, std))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_logprob(self):

@@ -293,7 +293,9 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    return (in + Vec(static_cast<scalar_t>(1))) * Vec(scaling_factor) - Vec(static_cast<scalar_t>(0.5));
+    // Keep contraction independent of grid layout and compiler inlining.
+    return fmadd(in + Vec(static_cast<scalar_t>(1)), Vec(scaling_factor),
+                 Vec(static_cast<scalar_t>(-0.5)));
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
@@ -836,13 +838,13 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
-    coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
+    coeffs[0] = fmadd(fmadd(fmadd(A, x, -Vec(5) * A), x, Vec(8) * A), x, -Vec(4) * A);
     x = tx;           // x = |0 - tx| <= 1
-    coeffs[1] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
+    coeffs[1] = fmadd(fmadd(A + Vec(2), x, -(A + Vec(3))) * x, x, Vec(1));
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
-    coeffs[2] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
+    coeffs[2] = fmadd(fmadd(A + Vec(2), x, -(A + Vec(3))) * x, x, Vec(1));
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    coeffs[3] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
+    coeffs[3] = fmadd(fmadd(fmadd(A, x, -Vec(5) * A), x, Vec(8) * A), x, -Vec(4) * A);
   }
 
   // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
@@ -850,13 +852,13 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients_grad(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
-    coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
+    coeffs[0] = fmadd(fmadd(Vec(-3) * A, x, -Vec(10) * A), x, -Vec(8) * A);
     x = Vec(0) - tx;  // x = |0 - tx| <= 1
-    coeffs[1] = (Vec(-3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
+    coeffs[1] = fmadd(Vec(-3) * (A + Vec(2)), x, -Vec(2) * (A + Vec(3))) * x;
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
-    coeffs[2] = (Vec(3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
+    coeffs[2] = fmadd(Vec(3) * (A + Vec(2)), x, -Vec(2) * (A + Vec(3))) * x;
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
+    coeffs[3] = fmadd(fmadd(Vec(3) * A, x, -Vec(10) * A), x, Vec(8) * A);
   }
 
   inline Vec get_value_bounded(const scalar_t* data, const Vec& x, const Vec& y) const {
@@ -989,8 +991,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
           }
 
           auto val = get_value_bounded(inp_slice_C_ptr, xx, yy);
-          gx = gx - val * gOut * coeff_x_grad[i] * coeff_y[j];
-          gy = gy - val * gOut * coeff_y_grad[j] * coeff_x[i];
+          gx = fmadd(-val * gOut * coeff_x_grad[i], coeff_y[j], gx);
+          gy = fmadd(-val * gOut * coeff_y_grad[j], coeff_x[i], gy);
         }
       }
     }
