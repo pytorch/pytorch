@@ -172,12 +172,29 @@ jobs:
           # The max duration enforced by the server side
           role-duration-seconds: 18000
 
-      - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+      - name: Download complete exact failed-job native build
+        shell: bash
+        run: |
+          curl --fail --retry 2 --output artifacts.zip https://gha-artifacts.s3.amazonaws.com/pytorch/pytorch/42120695933/linux-jammy-cuda13.2-py3-gcc11-slow-gradcheck/artifacts.zip
+          echo '444f66a033292d84991e454228c2b5f8f9b1be279b81d25772aaf98fa4a5038d  artifacts.zip' | sha256sum --check
+          unzip -o artifacts.zip
+          rm artifacts.zip
+
+      - name: Download complete old Triton CUDA package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: ${{ inputs.build-environment }}
-          s3-bucket: ${{ inputs.s3-bucket }}
-          use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
+          name: triton-wheel-3.11-cuda-manylinux_2_28_x86_64
+          run-id: '40454125718'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pin-logisticnormal-packages/old
+
+      - name: Download complete candidate Triton CUDA package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: triton-wheel-3.11-cuda-manylinux_2_28_x86_64
+          run-id: '42111682053'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pin-logisticnormal-packages/candidate
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -317,42 +334,16 @@ jobs:
           USE_ARC: "1"
         shell: bash
         run: |
-          set -x
+          python3 .ci/pytorch/triton_pin_logisticnormal_controls.py
 
-          if [[ "${TEST_CONFIG}" == 'multigpu' ]]; then
-            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          else
-            TEST_COMMAND=.ci/pytorch/test.sh
-          fi
-
-          # HF model cache. Offline (the default for PRs): read the shared, pre-seeded
-          # read-only cache mounted at /mnt/hf_cache. Online (refresh runs: schedule,
-          # workflow_dispatch, or the ci-refresh-hf-cache label): download into a
-          # writable dir that the "Refresh the HF cache in S3" step below syncs back
-          # into the shared bucket. Also fall back to online+writable if the mount is
-          # absent (e.g. a runner without the shared cache).
-          if [[ "${TRANSFORMERS_OFFLINE}" == "1" && -d /mnt/hf_cache ]]; then
-            export HF_CACHE=/mnt/hf_cache
-          else
-            export HF_CACHE="${RUNNER_TEMP}/hf_cache"
-            mkdir -p "${HF_CACHE}"
-            export TRANSFORMERS_OFFLINE=0
-            export HF_DATASETS_OFFLINE=0
-          fi
-
-          # The datasets library writes its arrow build + lock files even in offline
-          # mode and even for local datasets, so it can't use the read-only mount
-          # directly. Use a writable dir warmed from the seeded /mnt/hf_cache/datasets
-          # (so offline Hub datasets resolve); the refresh step syncs it back to S3.
-          export HF_DATASETS_CACHE="${RUNNER_TEMP}/hf_datasets"
-          mkdir -p "${HF_DATASETS_CACHE}"
-          if [[ -d /mnt/hf_cache/datasets ]]; then
-            cp -a /mnt/hf_cache/datasets/. "${HF_DATASETS_CACHE}/" 2>/dev/null || true
-          fi
-
-          # shellcheck disable=SC2046
-          python3 -m pip install $(echo dist/*.whl)[opt-einsum]
-          ${TEST_COMMAND}
+      - name: Upload complete LogisticNormal control evidence
+        if: always() && steps.test.conclusion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: triton-pin-logisticnormal-controls-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: error
+          path: test/test-reports/logisticnormal-controls/**/*
 
       - name: Report soft-failed tests
         if: always() && inputs.soft-fail-tests && steps.test.outcome == 'failure'

@@ -1,68 +1,36 @@
-# Owner(s): ["module: rocm"]
-# Unneeded for CI: trunk.yml covers the same ROCm testing.
-# Kept in-repo for metrics; auto-triggers below are commented out.
-# workflow_dispatch remains for manual runs.
+# Owner(s): ["module: ci"]
+# Temporary exact-native A10G controls for draft #202417.
 name: inductor-rocm-mi350
-
 on:
-  #push:
-  #  branches:
-  #    - main
-  #    - release/*
-  #  tags:
-  #    - ciflow/inductor-rocm-mi350/*
   workflow_dispatch:
-
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-logisticnormal-${{ github.sha }}
   cancel-in-progress: true
-
 permissions:
   id-token: write
   contents: read
   actions: read
-
 jobs:
-  target-determination:
-    if: github.repository_owner == 'pytorch'
-    name: before-test
-    uses: ./.github/workflows/target_determination.yml
-
   get-label-type:
-    name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
+      issue_owner: ${{ github.triggering_actor }}
+      curr_branch: ${{ github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
-      check_experiments: amd-dpx
-
-  linux-noble-rocm-py3_11-inductor-build:
-    name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_linux-build.yml
+  logisticnormal-controls:
     needs: get-label-type
+    uses: ./.github/workflows/_linux-test.yml
     with:
-      runner_prefix: "mt-"
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-noble-rocm-py3.11-mi350
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
-      rocm-arch-list: gfx950
+      build-environment: linux-jammy-cuda13.2-py3-gcc11-slow-gradcheck
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-c3702f0a877b3a11803c36cd75a39a8cdf31865d
+      timeout-minutes: 120
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "logisticnormal_controls", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" }
         ]}
-    secrets: inherit
-
-  linux-noble-rocm-py3_11-inductor-test:
-    name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-noble-rocm-py3_11-inductor-build
-    with:
-      build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
-      test-matrix:  ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}
     secrets: inherit
