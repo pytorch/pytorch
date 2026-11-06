@@ -2328,16 +2328,17 @@ class TestMetaKernelRegistrations(TestCase):
     @parametrize("self_kind", ["transpose", "scalar"])
     def test_addr_metadata(self, self_kind):
         from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        shapes = ((2, 3), (1, 3), (2, 1), (0, 3), (2, 0))
+        scalar = self_kind == "scalar"
+        dtype = torch.complex64 if scalar else torch.complex128
+        shapes = ((2, 3), (1, 3), (2, 1), (0, 3), (2, 0), (0, 0))
         for m, n in shapes:
-            scalar = self_kind == "scalar"
             inp = (
                 torch.tensor(0.5, dtype=torch.float64)
                 if scalar
                 else torch.empty(n, m, dtype=torch.complex128).t()
             )
-            dtype = torch.complex64 if scalar else torch.complex128
             vec1, vec2 = torch.ones(m, dtype=dtype), torch.ones(n, dtype=dtype)
             for beta in (0, 0.7):
                 expected = torch.addr(inp, vec1, vec2, beta=beta, alpha=2.3)
@@ -2357,6 +2358,63 @@ class TestMetaKernelRegistrations(TestCase):
                     self.assertEqual(actual.shape, expected.shape)
                     self.assertEqual(actual.stride(), expected.stride())
                     self.assertEqual(actual.dtype, expected.dtype)
+
+        for symbolic_dims, vector_stride in itertools.product(
+            ((True, False), (False, True), (True, True)), (0, 1, 3)
+        ):
+            shape_env = ShapeEnv()
+            with (
+                enable_python_dispatcher(),
+                FakeTensorMode(shape_env=shape_env, allow_fallback_kernels=False),
+            ):
+                m, n = (
+                    shape_env.create_unbacked_symint() if symbolic else size
+                    for symbolic, size in zip(symbolic_dims, (2, 3))
+                )
+                torch._check(m >= 0)
+                torch._check(n >= 0)
+                inp = (
+                    torch.empty((), dtype=torch.float64)
+                    if scalar
+                    else torch.empty_strided((m, n), (1, m), dtype=torch.complex128)
+                )
+                vec1 = torch.empty_strided((m,), (vector_stride,), dtype=dtype)
+                vec2 = torch.empty(n, dtype=dtype)
+                fake = torch.addr(inp, vec1, vec2, beta=0, alpha=2.3)
+
+            for m0, n0 in itertools.product(
+                (0, 1, 2) if symbolic_dims[0] else (2,),
+                (0, 1, 3) if symbolic_dims[1] else (3,),
+            ):
+                substitutions = {
+                    size.node.expr: value
+                    for size, value in ((m, m0), (n, n0))
+                    if isinstance(size, torch.SymInt)
+                }
+                inp = (
+                    torch.empty((), dtype=torch.float64)
+                    if scalar
+                    else torch.empty_strided((m0, n0), (1, m0), dtype=torch.complex128)
+                )
+                expected = torch.addr(
+                    inp, torch.empty_strided((m0,), (vector_stride,), dtype=dtype),
+                    torch.empty(n0, dtype=dtype),
+                    beta=0, alpha=2.3,
+                )
+                for actual, native in ((fake.shape, expected.shape), (fake.stride(), expected.stride())):
+                    evaluated = tuple(
+                        int(size.node.expr.subs(substitutions))
+                        if isinstance(size, torch.SymInt) else size
+                        for size in actual
+                    )
+                    self.assertEqual(evaluated, native)
+                self.assertEqual(fake.dtype, expected.dtype)
+                for assertions in shape_env.deferred_runtime_asserts.values():
+                    for assertion in assertions:
+                        self.assertTrue(bool(assertion.expr.subs(substitutions)))
+            for size in (m, n):
+                if isinstance(size, torch.SymInt):
+                    self.assertEqual(shape_env.var_to_range[size.node.expr].lower, 0)
 
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])

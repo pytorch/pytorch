@@ -231,8 +231,8 @@ def mv(self, vec):
 
 @register_decomposition(aten.addr.default)
 def addr(self, vec1, vec2, *, beta=1, alpha=1):
-    if is_strict_cuda_triton(self.device) and (
-        self.is_complex() or vec1.is_complex() or vec2.is_complex()
+    if is_strict_cuda_triton(self.device) and any(
+        t.is_floating_point() or t.is_complex() for t in (self, vec1, vec2)
     ):
         return NotImplemented
     return decomp_addr(self, vec1, vec2, beta=beta, alpha=alpha)
