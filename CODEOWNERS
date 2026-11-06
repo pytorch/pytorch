@@ -126,11 +126,12 @@
 # /aten/src/ATen/native/SpectralOpsUtils.h
 # /test/test_spectral_ops.py
 # label: module: linear algebra, module: floatx (formerly float8)
-# owner: @drisspg @slayton58
+# owner: @drisspg @slayton58 @vkuzo
 # /aten/src/ATen/native/ScaledBlas.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+/test/test_quantize_tensor.py @vkuzo @slayton58
 #
 # [sparse]
 # label: module: sparse
@@ -161,6 +162,8 @@
 # /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+# /test/expect/TestSparseXPU.test_print_coalesced_xpu_float64.expect
+# /test/expect/TestSparseXPU.test_print_uncoalesced_xpu_float64.expect
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
@@ -1379,8 +1382,6 @@
 # /.github/pi/
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
-# /.github/workflows/claude-distributed-triage-cron.yml
-# /.github/workflows/distributed-triage-pi.yml
 # /.github/workflows/issue-triage-pi.yml
 # /.github/workflows/issue-triage.yml
 # /.github/workflows/pi-agent-tests.yml

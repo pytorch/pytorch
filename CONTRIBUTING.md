@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -366,6 +367,9 @@ To install the nightly binaries built with ROCm, you can pass in the flag `--roc
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
+
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
@@ -660,6 +664,17 @@ preserve it, so you do not need to repeat the prefix on each update.
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
 
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
+
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
 
@@ -670,6 +685,8 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
+
+A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
 
 ## GreenLight
 
