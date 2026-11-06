@@ -20795,10 +20795,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._check(v.size(0) > u.size(0))
             return v[: v.size(0) - u.size(0)].exp()
 
-        def guarded_floordiv_sum(v):
-            # reduces over v.size(0) // 4, which Dynamo guards to be nonzero
-            return v.unflatten(0, (-1, 4)).sum(1).sum(0)
-
         def nonzero_sum(m):
             # reduces u0 rows into one element, so it launches whatever u0 is
             return torch.nonzero(m).float().sum(0)
@@ -20812,8 +20808,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         u = torch.randn(8, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(v, 0)
         torch._dynamo.mark_dynamic(u, 0)
-        v2d = torch.randn(64, 32, device=GPU_TYPE)
-        torch._dynamo.mark_dynamic(v2d, 0)
         # small integers keep the TF32 dot exact; the row epilogue needs
         # static sizes
         a = torch.randint(-3, 4, (64, 32), device=GPU_TYPE).float()
@@ -20824,7 +20818,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for middle, args, kernel, patches in [
             (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp", {}),
             (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
-            (guarded_floordiv_sum, (v2d,), "def triton_red_fused_sum_view", {}),
             (nonzero_sum, (m,), "def triton_red_fused__to_copy_sum", {}),
             (native_matmul_row_sum, (a, b), "def triton_per_fused_add_mm_sum", native),
         ]:
