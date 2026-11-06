@@ -3991,16 +3991,9 @@ class View(GenericView):
                     x, new_size, FlexibleLayout.contiguous_strides(new_size)
                 )
 
-        if 0 in new_size:
-
-            def fake_reindex(index: Any) -> tuple[int, ...]:
-                return tuple([0] * len(old_size))
-
-            return cls(data=x, size=list(new_size), reindex=fake_reindex)
-
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous:
-            # Input is contiguous, output can use contiguous strides
+        if 0 in new_size or is_contiguous:
+            # Empty reshapes also need valid strides for subsequent dtype views.
             return create_reinterpret_view(
                 x, new_size, FlexibleLayout.contiguous_strides(new_size)
             )
@@ -8004,6 +7997,9 @@ class ExternKernel(InputsKernel):
                 if sizevars.statically_known_equals(exact_strides[i], 0)
                 and sizevars.statically_known_geq(x.get_size()[i], 2)
             ]
+
+            if expanded_dims and not isinstance(x, TensorBox):
+                x = TensorBox(x)
 
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)

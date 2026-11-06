@@ -1179,6 +1179,7 @@ class CacheableAOTConfig:
     # this is always false outside of export.
     pre_dispatch: bool = False
     precompile_backend_id: str | None = None
+    preserve_tangent_layout: bool = False
 
     def __post_init__(self) -> None:
         if self.pre_dispatch and not self.is_export:
@@ -1216,6 +1217,9 @@ class AOTConfig:
     ignore_shape_env: bool = False
     precompile_backend_id: str | None = None
     force_non_lazy_backward_lowering: bool = False
+    # Backends whose arithmetic depends on input layout need the actual tangent
+    # layout, rather than the layout inferred from the corresponding output.
+    preserve_tangent_layout: bool = False
     # This config makes sure to check certain things like
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
@@ -1238,6 +1242,7 @@ class AOTConfig:
             enable_log=self.enable_log,
             pre_dispatch=self.pre_dispatch,
             precompile_backend_id=self.precompile_backend_id,
+            preserve_tangent_layout=self.preserve_tangent_layout,
         )
 
     def __post_init__(self) -> None:
