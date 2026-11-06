@@ -10965,7 +10965,7 @@ class AOTInductorTestsTemplate:
             (InBoundsAsStrided(), (x,)),
             # Different attention backends.
             (Attention(), (q,)),
-            (Attention(), (q.bfloat16(),)),
+            *([(Attention(), (q.bfloat16(),))] if SM80OrLater else []),
         ):
             # The C API PR later in the stack captures and replays each of
             # these through run_with_lazy_cuda_graphs.
@@ -11056,7 +11056,6 @@ class AOTInductorTestsTemplate:
                 s = torch.cuda.Stream()
                 with torch.cuda.stream(s):
                     y = x + 1
-                s.record_event().wait()
                 return y * 2
 
         class Effectful(torch.nn.Module):
@@ -11068,6 +11067,15 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 # Past the end of a (4, 4) input.
                 return x.as_strided((4, 4), (4, 1), 1) * 2
+
+        class ReturnsCpuConstant(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Larger than the constants Inductor inlines as literals.
+                self.register_buffer("table", torch.arange(16.0))
+
+            def forward(self, x):
+                return x * 2, self.table
 
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
@@ -11084,15 +11092,16 @@ class AOTInductorTestsTemplate:
             (Item(), "incompatible op", {}),
             (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
             (Cond(), "control flow operator: torch.cond", {}),
-            (SyncsEvent(), "incompatible op streams.synchronize_event", {}),
-            (SyncsStream(), "incompatible op streams.synchronize_stream", {}),
-            (SyncsDevice(), "incompatible op streams.synchronize_device", {}),
+            (SyncsEvent(), "it uses stream op streams.record_event", {}),
+            (SyncsStream(), "it uses stream op streams.synchronize_stream", {}),
+            (SyncsDevice(), "it uses stream op streams.synchronize_device", {}),
             (Random(), r"it uses random numbers \(prims.inductor_seeds", {}),
             (AttentionDropout(), "it uses random numbers", {}),
             (SideStream(), "it uses a side stream", {}),
             (Effectful(), "_linalg_check_errors.* has side effects", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
             (InputAsStrided(), "reads a graph input through as_strided", {}),
+            (ReturnsCpuConstant(), "output 1 is on cpu", {}),
         ):
             with (
                 self.subTest(type(model).__name__, **configs),
