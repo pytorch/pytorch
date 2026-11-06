@@ -522,6 +522,9 @@ def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
 
+TEST_INFRA_REASON = "change touches test infrastructure"
+
+
 def parse_model_output(
     out: object, candidates: set[str], grep: Callable[[str], list[str]] | None = None
 ) -> tuple[set[str], set[str]]:
@@ -670,7 +673,7 @@ class Selection:
                 return grep_failure(e)
             files, sweeps = set(), set()
         if needs_run_all(changed_files):
-            return cls(run_all=True, reason="change touches test infrastructure")
+            return cls(run_all=True, reason=TEST_INFRA_REASON)
         # Before any grep, so that a failed one cannot turn it into an error.
         if isinstance(out, dict) and out["run_all"]:
             return cls(
@@ -770,7 +773,9 @@ class Selection:
             or d["version"] != SELECTION_VERSION
         ):
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
-        if unknown := set(d) - {"version", *(f.name for f in fields(cls))}:
+        # select_tests.py's diagnostics are for humans and the shadow metrics.
+        known = {"version", "diagnostics", *(f.name for f in fields(cls))}
+        if unknown := set(d) - known:
             raise ValueError(f"unknown keys {sorted(unknown)}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = (
