@@ -19,6 +19,7 @@ from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 import math
+import struct
 import itertools
 import torch.optim as optim
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
@@ -193,7 +194,7 @@ def _check_equal(
         raise ValueError(msg)
 
 
-def check_out_and_grad(
+def _check_out_and_grad_legacy(
     out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -241,6 +242,53 @@ def check_out_and_grad(
                 fudge_factors.get("grad_attn_mask", default_fudge_factor),
                 "grad_attn_mask",
             )
+
+
+def check_out_and_grad(
+    out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_value_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_attn_mask_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+    fudge_factors: dict[str, float] | None = None,
+) -> None:
+    arguments = (out_tuple, grad_query_tuple, grad_key_tuple, grad_value_tuple, grad_attn_mask_tuple, fudge_factors)
+    if fudge_factors is not None and type(fudge_factors) is not dict:
+        return _check_out_and_grad_legacy(*arguments)
+    factors = {} if fudge_factors is None else fudge_factors
+    checks = [(out_tuple, "out"), (grad_query_tuple, "grad_query"), (grad_key_tuple, "grad_key"), (grad_value_tuple, "grad_value")]
+    if grad_attn_mask_tuple:
+        checks.append((grad_attn_mask_tuple, "grad_attn_mask"))
+    if any(type(values) not in (tuple, list) or len(values) != 3 for values, _ in checks):
+        return _check_out_and_grad_legacy(*arguments)
+    golden = out_tuple[0]
+    if type(golden) is not torch.Tensor or golden.dtype not in (torch.float32, torch.float64):
+        return _check_out_and_grad_legacy(*arguments)
+    allowed = (torch.float16, torch.bfloat16, torch.float32) + ((torch.float64,) if golden.dtype == torch.float64 else ())
+    for values, name in checks:
+        gold, ref, test = values
+        factor = factors.get(name, 5.0)
+        if (type(factor) not in (int, float) or (type(factor) is int and not -(2**63) <= factor < 2**63)
+                or any(type(tensor) is not torch.Tensor or tensor.is_nested or tensor.layout != torch.strided
+                       or not tensor.is_cuda or tensor.device != golden.device or tensor.shape != gold.shape
+                       or not tensor.numel() or tensor.dtype not in allowed for tensor in values)
+                or gold.dtype != golden.dtype):
+            return _check_out_and_grad_legacy(*arguments)
+    with torch.no_grad():
+        errors = []
+        for (gold, ref, test), name in checks:
+            test_error = (gold - test).abs().max()
+            ref_error = (gold - ref).abs().max()
+            errors.extend((test_error, ref_error, ref_error * factors.get(name, 5.0)))
+        host = torch.stack(errors).cpu().tolist()
+        atol = default_atol[torch.float32]
+        if golden.dtype == torch.float32:
+            # Match the scalar promotion in the original CUDA comparison.
+            atol = struct.unpack("f", struct.pack("f", atol))[0]
+        for index, (values, name) in enumerate(checks):
+            test_error, ref_error, scaled_ref_error = host[3 * index:3 * index + 3]
+            if (math.isnan(test_error) and not math.isnan(ref_error)) or test_error > max(atol, scaled_ref_error):
+                _check_equal(*values, factors.get(name, 5.0), name)
 
 
 def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype = None):
@@ -6514,6 +6562,24 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertFalse(torch.isnan(out).any().item())
         self.assertFalse(torch.isinf(out).any().item())
         _check_equal(golden, lp_ref, out, 4.0, "out")
+
+    @onlyCUDA
+    @parametrize("gold_dtype", [torch.float32, torch.float64])
+    @parametrize("masked", [False, True])
+    def test_check_out_and_grad_batched_dispatch(self, device, gold_dtype, masked):
+        golden = torch.ones((2, 3), device=device, dtype=gold_dtype)
+        values = [(golden, golden.to(torch.bfloat16), golden.to(torch.float16)) for _ in range(5)]
+        arguments = (*values[:4], values[4] if masked else None)
+        with patch(f"{__name__}._check_out_and_grad_legacy", wraps=_check_out_and_grad_legacy) as legacy, \
+                patch(f"{__name__}._check_equal", wraps=_check_equal) as scalar:
+            check_out_and_grad(*arguments)
+            check_out_and_grad(*arguments, fudge_factors={})
+            legacy.assert_not_called()
+            scalar.assert_not_called()
+        values[2][2].zero_()
+        values[4][2].zero_()
+        with self.assertRaisesRegex(ValueError, "^grad_key Test error"):
+            check_out_and_grad(*arguments)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
