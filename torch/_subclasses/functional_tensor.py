@@ -638,16 +638,40 @@ class FunctionalTensorMode(TorchDispatchMode):
                     else:
                         self._sync_view_replay_annotations(args, kwargs)
 
+                        writable = [
+                            (i, arg)
+                            for i, arg in enumerate(func._schema.arguments)
+                            if arg.alias_info is not None and arg.alias_info.is_write
+                        ]
+                        native_destination = None
+                        if len(writable) == 1:
+                            i, arg = writable[0]
+                            native_destination = kwargs_unwrapped.get(
+                                arg.name,
+                                args_unwrapped[i] if i < len(args_unwrapped) else None,
+                            )
+                            if isinstance(
+                                native_destination, torch.Tensor
+                            ) and torch._is_functional_tensor(native_destination):
+                                native_destination = torch._from_functional_tensor(
+                                    native_destination
+                                )
+                            if not isinstance(native_destination, torch.Tensor):
+                                native_destination = None
+
                         # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                         # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                         # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
                         # from the TLS in order to avoid infinite looping, but this would prevent us from coming
                         # back to PreDispatch later
-                        outs_unwrapped = func._op_dk(
-                            torch._C.DispatchKey.Functionalize,
-                            *args_unwrapped,
-                            **kwargs_unwrapped,
-                        )
+                        with torch.fx.experimental.proxy_tensor.set_original_aten_op(
+                            func, destination=native_destination
+                        ):
+                            outs_unwrapped = func._op_dk(
+                                torch._C.DispatchKey.Functionalize,
+                                *args_unwrapped,
+                                **kwargs_unwrapped,
+                            )
 
                         if self.export:
                             if func is torch.ops.aten.dropout.default:
