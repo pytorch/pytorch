@@ -155,7 +155,7 @@ def rebuild_meta_tensor(
     return t
 
 
-def rebuild_cuda_tensor(
+def _rebuild_device_tensor(
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -179,8 +179,8 @@ def rebuild_cuda_tensor(
         cache_key = (storage_device, storage_handle, storage_offset_bytes)
         storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
-            torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(
+            torch.get_device_module()._lazy_init()
+            storage = storage_cls._new_shared_device(
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
@@ -218,6 +218,10 @@ def rebuild_cuda_tensor(
         t.requires_grad = requires_grad
 
     return t
+
+
+# Kept for BC only.
+rebuild_cuda_tensor = _rebuild_device_tensor
 
 
 def reduce_tensor(tensor):
@@ -340,7 +344,8 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
+    device_type = storage._untyped_storage.device.type
+    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
         (
             device,
             handle,
@@ -350,13 +355,13 @@ def reduce_tensor(tensor):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = storage._share_device_()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
-            rebuild_cuda_tensor,
+            _rebuild_device_tensor,
             (
                 type(tensor),
                 tensor.size(),
@@ -365,9 +370,9 @@ def reduce_tensor(tensor):
                 type(storage),
                 tensor.dtype,
                 device,
-                handle,  # identifier which CUDA allocation is the storage in.
+                handle,  # identifier which device allocation is the storage in.
                 storage_size_bytes,  # size(in bytes) of the storage
-                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+                storage_offset_bytes,  # offset(in bytes) of the storage in the device allocation
                 tensor.requires_grad,
                 ref_counter_handle,
                 ref_counter_offset,
@@ -375,7 +380,7 @@ def reduce_tensor(tensor):
                 event_sync_required,
             ),
         )
-    elif storage._untyped_storage.device.type == "meta":
+    elif device_type == "meta":
         return (
             rebuild_meta_tensor,
             (
@@ -592,11 +597,12 @@ def reduce_typed_storage_child(storage):
 def reduce_storage(storage):
     from . import get_sharing_strategy
 
-    if storage.is_cuda:
+    device_type = storage.device.type
+    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
         raise RuntimeError(
-            "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+            f"Cannot pickle {device_type} storage; try pickling a {device_type} tensor instead"
         )
-    elif storage.device.type == "meta":
+    elif device_type == "meta":
         raise RuntimeError(
             "Cannot pickle meta storage; try pickling a meta tensor instead"
         )
