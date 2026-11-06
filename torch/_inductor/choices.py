@@ -178,51 +178,26 @@ class InductorChoices:
             head_dim, seq_len, dtype, v_head_dim
         )
 
-    def filter_flex_attention_fwd_configs(
-        self,
-        configs: list[Any],
-        *,
-        batch_size: int | sympy.Expr,
-        kv_batch_size: int | sympy.Expr,
-        num_heads: int | sympy.Expr,
-        num_kv_heads: int | sympy.Expr,
-        seq_len_q: int | sympy.Expr,
-        seq_len_kv: int | sympy.Expr,
-        qk_head_dim: int | sympy.Expr,
-        v_head_dim: int | sympy.Expr,
-        qk_head_dim_rounded: int,
-        v_head_dim_rounded: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        inputs_contiguous: bool,
-        is_noop_block_mask: bool,
-        kernel_options: dict[str, Any],
+    def refine_flex_attention_fwd_configs(
+        self, configs: list[Any], context: FlexAttentionConfigContext
     ) -> list[Any]:
-        """Refine forward configs using facts unavailable to the base lookup."""
-        # Origami's import decision is intentionally load-time-only, matching
-        # the existing GEMM path. The ROCm heuristic checks that cached binding
-        # and the call-time config.rocm.origami flag.
-        if not IS_ROCM or not config.max_autotune:
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty; a single config takes the lowering's one-config path.
+        ``append_flex_attention_choices`` still receives the unrefined pool.
+        Only the stock pool is refined: a handler that overrides
+        ``get_flex_attention_fwd_configs`` keeps its pool unless it also
+        overrides this method.
+        """
+        if (
+            type(self).get_flex_attention_fwd_configs
+            is not InductorChoices.get_flex_attention_fwd_configs
+        ):
             return configs
-        context = FlexAttentionConfigContext(
-            batch_size=batch_size,
-            kv_batch_size=kv_batch_size,
-            num_heads=num_heads,
-            num_kv_heads=num_kv_heads,
-            seq_len_q=seq_len_q,
-            seq_len_kv=seq_len_kv,
-            qk_head_dim=qk_head_dim,
-            v_head_dim=v_head_dim,
-            qk_head_dim_rounded=qk_head_dim_rounded,
-            v_head_dim_rounded=v_head_dim_rounded,
-            dtype=dtype,
-            device=device,
-            inputs_contiguous=inputs_contiguous,
-            is_noop_block_mask=is_noop_block_mask,
-            kernel_options=kernel_options,
-        )
-        flex_heuristics = self.get_config_heuristics(device.type)
-        return flex_heuristics.filter_flex_attn_fwd_configs(configs, context)
+        flex_heuristics = self.get_config_heuristics(context.device.type)
+        refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
+        return configs if refine is None else refine(configs, context)
 
     def get_flex_attention_bwd_configs(
         self,
@@ -379,9 +354,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM configs under autotuning, so with it
-        # off there is nothing that needs fixed strides and flexible layouts should
-        # be preserved (matches non-origami behavior).
+        # origami only contributes Triton GEMM and FlexAttention configs under
+        # autotuning, so with it off there is nothing that needs fixed strides and
+        # flexible layouts should be preserved (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM

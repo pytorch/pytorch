@@ -3148,7 +3148,8 @@ class rocm:
     # When True, the rocm-origami pip package is consulted at compile time to
     # pre-select Triton configs from the DEFAULT GEMM and FlexAttention search
     # spaces, reducing autotuning cost while retaining near-exhaustive runtime.
-    # Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    # Read once at config import from TORCHINDUCTOR_ORIGAMI; on unless that is
+    # set to something other than "1".
     #
     # config.patch behaviour:
     #   patching to False  -- disables origami at call time (_origami_enabled()).
@@ -3161,11 +3162,11 @@ class rocm:
     #   - config.max_autotune
     #   - config.rocm.origami (this knob)
     #   - rocm-origami is installed (else the import gate sets it inert)
-    # Each consumer has additional gates. GEMM requires its DEFAULT search space;
-    # outside DEFAULT (e.g. EXHAUSTIVE) it is bypassed with a one-time warning.
-    # FlexAttention currently requires its DEFAULT search space plus a static,
-    # dense, contiguous fp16/bf16 gfx950 forward problem in the measured shape
-    # domain; every other case retains the regular config generator.
+    # Each consumer has additional gates. GEMM requires its DEFAULT search space
+    # and warns when EXHAUSTIVE bypasses it. FlexAttention currently requires its
+    # DEFAULT search space plus a static, dense, contiguous fp16/bf16 gfx950
+    # forward problem in the measured shape domain whose score_mod reads no
+    # captured buffers; every other case retains the regular config generator.
     #
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend

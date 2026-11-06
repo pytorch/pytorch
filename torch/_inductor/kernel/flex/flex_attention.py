@@ -7,6 +7,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -15,7 +16,7 @@ import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-from torch.nn.attention.flex_attention import _Backend
+from torch.nn.attention.flex_attention import _Backend, _LARGE_SPARSE_BLOCK_SIZE
 from torch.utils._sympy.functions import FloorDiv
 
 from ...ir import (
@@ -486,14 +487,9 @@ def flex_attention(
         query.get_device().type,
         V.graph.sizevars.guard_int(v_head_dim),
     )
-    is_noop_block_mask = (
-        not has_full_blocks
-        and SPARSE_Q_BLOCK_SIZE == 1 << 30
-        and SPARSE_KV_BLOCK_SIZE == 1 << 30
-        and is_trivial_mask_graph(mask_graph.graph_module)
-    )
-    configs = V.choices.filter_flex_attention_fwd_configs(
-        unfiltered_configs,
+    from ...heuristics.template.triton import FlexAttentionConfigContext
+
+    context = FlexAttentionConfigContext(
         batch_size=B,
         kv_batch_size=Bkv,
         num_heads=Hq,
@@ -509,9 +505,16 @@ def flex_attention(
         inputs_contiguous=all(
             is_dense_contiguous_storage_and_layout(node) for node in (query, key, value)
         ),
-        is_noop_block_mask=is_noop_block_mask,
-        kernel_options=kernel_options,
+        is_noop_block_mask=(
+            not has_full_blocks
+            and SPARSE_Q_BLOCK_SIZE == _LARGE_SPARSE_BLOCK_SIZE
+            and SPARSE_KV_BLOCK_SIZE == _LARGE_SPARSE_BLOCK_SIZE
+            and is_trivial_mask_graph(mask_graph.graph_module)
+        ),
+        score_mod_reads_buffers=bool(score_mod_other_buffers),
+        kernel_options=MappingProxyType(dict(kernel_options)),
     )
+    configs = V.choices.refine_flex_attention_fwd_configs(unfiltered_configs, context)
 
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization

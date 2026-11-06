@@ -22,7 +22,7 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, get_default_kpack
+from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
@@ -62,7 +62,7 @@ _PRIOR_FP32_MATMUL_PRECISION: str | None = None
 
 
 class TestOrigamiFlexAttentionConfigSelection(TestCase):
-    """CPU-only coverage for the gating and projected gfx950 candidate pool."""
+    """Mocked coverage for the gating and projected gfx950 candidate pool."""
 
     def setUp(self):
         super().setUp()
@@ -113,6 +113,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             "device": torch.device("cuda", 0),
             "inputs_contiguous": True,
             "is_noop_block_mask": True,
+            "score_mod_reads_buffers": False,
             "kernel_options": {},
         }
         values.update(overrides)
@@ -122,14 +123,14 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         self,
         context,
         *,
+        heuristic=None,
         arch="gfx950",
-        configs: list[FlexConfig] | None = None,
         search_space="DEFAULT",
         enabled=True,
         origami_module=object(),
         selected_tiles=((128, 128), (64, 128)),
     ):
-        configs = self.stock if configs is None else configs
+        heuristic = self.heuristic if heuristic is None else heuristic
         get_device_properties = mock.Mock(return_value=mock.Mock(gcnArchName=arch))
         self.last_get_device_properties = get_device_properties
         with (
@@ -151,13 +152,10 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 "get_device_properties",
                 get_device_properties,
             ),
-            mock.patch.object(
-                self.heuristic,
-                "get_flex_attn_fwd_configs",
-                return_value=self.stock,
-            ),
+            # The real lookup caches the queried architecture process-wide.
+            mock.patch.object(triton_heuristics, "get_default_kpack", return_value=1),
         ):
-            return self.heuristic.filter_flex_attn_fwd_configs(configs, context)
+            return heuristic.refine_flex_attn_fwd_configs(self.stock, context)
 
     def test_selects_subgemm_tiles_and_keeps_unmodeled_backend_axes(self):
         selected = self._select(self._context())
@@ -202,9 +200,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 v_head_dim_rounded=32,
             )
         )
-        self.assertIn(
-            ROCmFlexConfig(128, 64, 1, 4, kpack=get_default_kpack()), selected
-        )
+        self.assertIn(ROCmFlexConfig(128, 64, 1, 4, kpack=1), selected)
 
     def test_gqa_keeps_two_and_four_warp_variants(self):
         selected = self._select(self._context(num_kv_heads=4))
@@ -252,22 +248,76 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             "prefixed_rocm_option": self._context(
                 kernel_options={"fwd_waves_per_eu": 2}
             ),
+            "score_mod_buffers": self._context(score_mod_reads_buffers=True),
         }
         for name, context in cases.items():
             with self.subTest(name=name):
                 self.assertIs(self._select(context), self.stock)
-        self.assertIs(self._select(self._context(), arch="gfx942"), self.stock)
-        custom: list[FlexConfig] = [ROCmFlexConfig(64, 64, 1, 4)]
-        self.assertIs(self._select(self._context(), configs=custom), custom)
-        self.assertIs(
-            self._select(self._context(), search_space="EXHAUSTIVE"), self.stock
+        select_options = {
+            "non_gfx950": {"arch": "gfx942"},
+            "exhaustive_search": {"search_space": "EXHAUSTIVE"},
+            "origami_unavailable": {"origami_module": None},
+            "origami_disabled": {"enabled": False},
+            "no_selected_tiles": {"selected_tiles": ()},
+        }
+        for name, options in select_options.items():
+            with self.subTest(name=name):
+                self.assertIs(self._select(self._context(), **options), self.stock)
+
+    def test_subclass_that_customizes_the_pool_keeps_it(self):
+        class CustomPoolHeuristic(ROCmConfigHeuristic):
+            def get_flex_attn_fwd_configs(self, *args, **kwargs):
+                return []
+
+        heuristic = object.__new__(CustomPoolHeuristic)
+        heuristic.__dict__.update(self.heuristic.__dict__)
+        self.assertIs(self._select(self._context(), heuristic=heuristic), self.stock)
+
+    def test_choices_dispatch_to_the_device_heuristic(self):
+        from torch._inductor.choices import InductorChoices
+
+        context = self._context()
+        refined: list[FlexConfig] = [ROCmFlexConfig(128, 128, 2, 4)]
+        heuristic = mock.Mock(spec=["refine_flex_attn_fwd_configs"])
+        heuristic.refine_flex_attn_fwd_configs.return_value = refined
+        choices = InductorChoices()
+        with mock.patch.object(
+            choices, "get_config_heuristics", return_value=heuristic
+        ):
+            self.assertIs(
+                choices.refine_flex_attention_fwd_configs(self.stock, context), refined
+            )
+        heuristic.refine_flex_attn_fwd_configs.assert_called_once_with(
+            self.stock, context
         )
-        self.assertIs(self._select(self._context(), origami_module=None), self.stock)
-        self.assertIs(self._select(self._context(), enabled=False), self.stock)
-        self.assertIs(self._select(self._context(), selected_tiles=()), self.stock)
+        # Heuristics without the hook keep the pool.
+        with mock.patch.object(choices, "get_config_heuristics", return_value=object()):
+            self.assertIs(
+                choices.refine_flex_attention_fwd_configs(self.stock, context),
+                self.stock,
+            )
+
+    def test_choices_handler_that_supplies_the_pool_keeps_it(self):
+        from torch._inductor.choices import InductorChoices
+
+        class CustomPoolChoices(InductorChoices):
+            def get_flex_attention_fwd_configs(self, *args, **kwargs):
+                return []
+
+        choices = CustomPoolChoices()
+        with mock.patch.object(choices, "get_config_heuristics") as heuristics:
+            self.assertIs(
+                choices.refine_flex_attention_fwd_configs(self.stock, self._context()),
+                self.stock,
+            )
+        heuristics.assert_not_called()
 
     def test_d128_and_d256_positive_boundaries(self):
-        for head_dim in (128, 256):
+        expected_tiles = {
+            128: {(128, 128), (64, 128), (128, 64)},
+            256: {(128, 128), (64, 128), (32, 64)},
+        }
+        for head_dim, tiles in expected_tiles.items():
             with self.subTest(head_dim=head_dim):
                 selected = self._select(
                     self._context(
@@ -279,7 +329,14 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                         v_head_dim_rounded=head_dim,
                     )
                 )
-                self.assertGreater(len(selected), 1)
+                self.assertEqual(len(selected), 9)
+                self.assertEqual(
+                    {(config.block_m, config.block_n) for config in selected}, tiles
+                )
+                self.assertEqual(
+                    {(config.num_stages, config.num_warps) for config in selected},
+                    {(2, 4)},
+                )
 
     @staticmethod
     def _fake_origami(latencies):
@@ -344,8 +401,15 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
 
     def test_requires_finite_results_from_both_subgemms(self):
         tiles = ((64, 64), (128, 128))
-        selected, _ = self._run_model((math.inf, 1.0, math.inf, 2.0), tiles)
-        self.assertEqual(selected, ())
+        # Calls alternate QK/PV per tile.
+        latencies = {
+            "qk_nonfinite": (math.inf, 1.0, math.inf, 2.0),
+            "pv_nonfinite": (1.0, math.inf, 2.0, math.inf),
+        }
+        for name, values in latencies.items():
+            with self.subTest(name=name):
+                selected, _ = self._run_model(values, tiles)
+                self.assertEqual(selected, ())
 
 
 def setUpModule():
@@ -519,20 +583,20 @@ class TestOrigami(TestCase):
         expected_out.sum().backward()
         triton_heuristics._origami_flex_attention_tiles.cache_clear()
         selected_tiles = []
-        filtered_pools = []
+        refined_pools = []
         appended_pools = []
         select_tiles = triton_heuristics._origami_flex_attention_tiles
-        filter_configs = ROCmConfigHeuristic.filter_flex_attn_fwd_configs
+        refine_configs = ROCmConfigHeuristic.refine_flex_attn_fwd_configs
 
         def record_tiles(*args):
             tiles = select_tiles(*args)
             selected_tiles.append(tiles)
             return tiles
 
-        def record_filter(heuristic, configs, context):
-            filtered = filter_configs(heuristic, configs, context)
-            filtered_pools.append((configs, filtered))
-            return filtered
+        def record_refine(heuristic, configs, context):
+            refined = refine_configs(heuristic, configs, context)
+            refined_pools.append((configs, refined))
+            return refined
 
         def record_append(handler, choices, configs, *args, **kwargs):
             appended_pools.append(configs)
@@ -553,8 +617,8 @@ class TestOrigami(TestCase):
             ),
             mock.patch.object(
                 ROCmConfigHeuristic,
-                "filter_flex_attn_fwd_configs",
-                record_filter,
+                "refine_flex_attn_fwd_configs",
+                record_refine,
             ),
             mock.patch.object(
                 InductorChoices,
@@ -566,20 +630,20 @@ class TestOrigami(TestCase):
             actual_out.sum().backward()
 
         self.assertEqual(len(selected_tiles), 1)
-        self.assertEqual(len(filtered_pools), 1)
+        self.assertEqual(len(refined_pools), 1)
         tiles = set(selected_tiles[0])
-        stock_pool, filtered = filtered_pools[0]
+        stock_pool, refined = refined_pools[0]
         self.assertTrue(tiles)
-        self.assertLess(len(filtered), len(stock_pool))
+        self.assertLess(len(refined), len(stock_pool))
         # Every candidate is a variant of a selected tile or the stock default.
-        for candidate in filtered:
+        for candidate in refined:
             self.assertTrue(
                 (candidate.block_m, candidate.block_n) in tiles
                 or candidate in stock_pool,
                 candidate,
             )
         self.assertLessEqual(
-            tiles, {(candidate.block_m, candidate.block_n) for candidate in filtered}
+            tiles, {(candidate.block_m, candidate.block_n) for candidate in refined}
         )
         # Extension hooks still receive the unrefined pool.
         self.assertEqual(len(appended_pools), 1)
@@ -594,6 +658,7 @@ class TestOrigami(TestCase):
             torch.testing.assert_close(actual_grad, expected_grad, atol=3e-2, rtol=3e-2)
 
     def test_origami_leaves_flex_decoding_unchanged(self):
+        from torch._inductor.choices import InductorChoices
         from torch.nn.attention.flex_attention import flex_attention
 
         torch.manual_seed(0)
@@ -603,7 +668,13 @@ class TestOrigami(TestCase):
             for _ in range(2)
         )
         expected = flex_attention(q, k, v)
-        triton_heuristics._origami_flex_attention_tiles.cache_clear()
+        refine_calls = []
+        refine_configs = InductorChoices.refine_flex_attention_fwd_configs
+
+        def record_refine(handler, configs, context):
+            refine_calls.append(context)
+            return refine_configs(handler, configs, context)
+
         with (
             fresh_cache(),
             config.patch(
@@ -615,14 +686,12 @@ class TestOrigami(TestCase):
                 }
             ),
             mock.patch.object(
-                triton_heuristics,
-                "_origami_flex_attention_tiles",
-                wraps=triton_heuristics._origami_flex_attention_tiles,
-            ) as select_tiles,
+                InductorChoices, "refine_flex_attention_fwd_configs", record_refine
+            ),
         ):
             actual = torch.compile(flex_attention, fullgraph=True)(q, k, v)
 
-        self.assertEqual(select_tiles.call_count, 0)
+        self.assertEqual(refine_calls, [])
         torch.testing.assert_close(actual, expected, atol=2e-2, rtol=2e-2)
 
     def test_origami_respects_gemm_search_space(self):
