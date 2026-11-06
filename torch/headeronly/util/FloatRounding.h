@@ -110,7 +110,8 @@ C10_HOST_DEVICE inline float round_to_odd_float(double x) {
   return fp32_from_bits(bits);
 }
 
-// Requires x != 0.
+// Requires x != 0. This is std::countl_zero, which needs C++20 and, in device
+// code, nvcc's --expt-relaxed-constexpr.
 C10_HOST_DEVICE inline int leading_zeros(uint64_t x) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return __clzll(static_cast<long long>(x));
@@ -138,6 +139,9 @@ C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   using SrcL = std::numeric_limits<Src>;
   using DstL = std::numeric_limits<Dst>;
   static_assert(SrcL::is_iec559, "the source must be an IEEE 754 format");
+  static_assert(
+      DstL::is_specialized && !DstL::is_integer && DstL::radix == 2,
+      "the destination must be a binary floating-point format");
 
   constexpr int kSrcMantBits = SrcL::digits - 1;
   // The bits that are neither the sign nor the mantissa.
