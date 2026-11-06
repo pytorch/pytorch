@@ -3567,25 +3567,21 @@ class TestHardwareClassifications(TestCase):
             self._cu.filter_by_hw_classification([object()], None, get_class=lambda item: None, on_match=kept.append, exclude=exclude)
             self.assertEqual(len(kept), 1)
 
-    # The fixture runs as the default config, so other test configs and CUDA/ROCm
-    # builds would only repeat it.
+    # The fixture runs as the default config, so other test configs would only repeat it.
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
-    @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "the filter doesn't depend on the device")
     def test_hw_classification_exclude_env_var(self):
         # Runs the fixture directly (unittest) and with --use-pytest, as run_test.py
         # runs test files, in place under test/ so test/conftest.py and pytest.ini apply.
         env = _FIXTURE_CHILD_ENV | {"PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION": "GENERIC,CPU"}
         fixture = _HW_CLASSIFICATION_TESTDATA / "hw_classification_suite.py"
-        for runner, extra_args, summaries in [
-            ("unittest", [], [r"\bRan 2 tests\b"]),
-            ("pytest", ["--use-pytest", "-p", "no:cacheprovider"], [r"\b2 passed\b", r"\b2 deselected\b"]),
-        ]:
+        runners = [("unittest", [], [r"\bRan 2 tests\b"])]
+        if _fixture_child_versions()["pytest"] is not None:
+            runners.append(("pytest", ["--use-pytest", "-p", "no:cacheprovider"], [r"\b2 passed\b", r"\b2 deselected\b"]))
+        for runner, extra_args, summaries in runners:
             with self.subTest(runner=runner):
-                if runner == "pytest" and _fixture_child_versions()["pytest"] is None:
-                    self.skipTest("needs pytest")
                 result = subprocess.run(
                     [sys.executable, str(fixture.relative_to(fixture.parents[1])), "-v", *extra_args],
                     cwd=fixture.parents[1],

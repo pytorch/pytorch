@@ -10,6 +10,13 @@ PyTorch has a large upstream test suite. OOT backends can reuse these tests dire
 
 Test classification labels each test class (`GENERIC` / `ACCELERATOR` / device-specific), enabling runtime filtering via `--hw-classification` (supported by both `unittest` and `pytest`).
 
+
+| Classification                 | Test scope                                                |
+| ------------------------------ | --------------------------------------------------------- |
+| `GENERIC`                      | Validates framework functionality that is independent of accelerator support. |
+| `ACCELERATOR`                  | Validates common functionality expected from accelerator backends.  |
+| Device-specific (`CPU`, `CUDA`, `XPU`, `MPS`) | Validates functionality or behavior specific to a particular backend.          |
+
 `--hw-classification` runs only the listed labels and drops unclassified classes. To drop the listed labels instead and keep everything else, including unclassified classes, set the `PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION` environment variable (there is no flag form) to a comma-separated, case-insensitive list of labels; an unknown label is an error. Dropped tests aren't reported as skipped and don't appear in JUnit XML: `unittest` doesn't load them, and `pytest` deselects them (which needs PyTorch's `test/conftest.py`). If both are set, a class must pass both.
 
 ```bash
@@ -17,13 +24,6 @@ PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC python test/run_test.py -i test_a
 ```
 
 Upstream CI sets `PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC` on most CUDA and ROCm test jobs (see `.ci/pytorch/test.sh`), so a `GENERIC` class must not depend on an accelerator: no `device` parameter, no accelerator APIs or device-specific decorators, and no `instantiate_device_type_tests`. When running `.ci/pytorch/test.sh` yourself, a value set beforehand replaces that default, and an empty value turns the exclusion off.
-
-
-| Classification                 | Test scope                                                |
-| ------------------------------ | --------------------------------------------------------- |
-| `GENERIC`                      | Validates framework functionality that is independent of accelerator support. |
-| `ACCELERATOR`                  | Validates common functionality expected from accelerator backends.  |
-| Device-specific (`CPU`, `CUDA`, `XPU`, `MPS`) | Validates functionality or behavior specific to a particular backend.          |
 
 
 **For OOT backends, upstream test reuse should primarily focus on `ACCELERATOR` tests.** `GENERIC` tests are already covered by upstream CPU CI. Device-specific tests target built-in backends. OOT backends typically maintain their own device-specific tests downstream.
