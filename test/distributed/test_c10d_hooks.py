@@ -22,11 +22,12 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
     """
     Verify that pre/post collective hooks registered on a ProcessGroup fire for
     every collective issued through it, and for split_group. Collective hooks
-    are wired into the c10d dispatcher kernels (Ops.cpp), so they fire wherever a c10d op is dispatched
-    -- including replay of a captured graph that re-dispatches the raw op (see
-    test_hooks_fire_on_captured_graph_replay). Uses a real gloo backend; a
-    pure-Python or fake ProcessGroup overrides the collective methods and
-    dispatches without going through the c10d ops, so it bypasses these hooks.
+    are wired into the c10d dispatcher kernels (Ops.cpp), so they fire wherever
+    a c10d op is dispatched -- including replay of a captured graph that
+    re-dispatches the raw op (see test_hooks_fire_on_captured_graph_replay).
+    Uses a real gloo backend; a pure-Python or fake ProcessGroup overrides the
+    collective methods and dispatches without going through the c10d ops, so it
+    bypasses these hooks.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -181,10 +182,14 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
             ),
         )
         pg.register_post_hook(0, post.append)
-        # Rank 0 is not in the new group.
-        child = dist.split_group(split_ranks=[list(range(1, self.world_size))])
-        pg.unregister_pre_hook(0)
-        pg.unregister_post_hook(0)
+        try:
+            # Rank 0 is not in the new group.
+            child = dist.split_group(split_ranks=[list(range(1, self.world_size))])
+        finally:
+            pg.unregister_pre_hook(0)
+            pg.unregister_post_hook(0)
+        if self.rank != 0:
+            self.addCleanup(dist.destroy_process_group, child)
 
         self.assertEqual(len(pre), 1)
         name, op_id, num_tensors, root, async_op = pre[0]
@@ -201,7 +206,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         else:
             self.assertIs(args.group, child)
             self.assertEqual(args.group.group_name, child.group_name)
-            dist.destroy_process_group(child)
 
         dist.barrier()
 
@@ -259,22 +263,24 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
     def test_collective_annotation_hooks(self):
         group = dist.new_group()
+        self.addCleanup(dist.destroy_process_group, group)
         annotator, calls = object(), mock.Mock()
         with mock.patch(_PGS_TO_ANNOTATE, return_value=[group]):
             register_collective_annotation_hooks(annotator, calls.push, calls.pop)
-            # Lifecycle ops are not annotated.
-            child = dist.split_group(
-                parent_pg=group, split_ranks=[list(range(self.world_size))]
-            )
-            dist.all_reduce(torch.ones(1), group=group)
-            unregister_collective_annotation_hooks(annotator)
+            try:
+                # Lifecycle ops are not annotated.
+                child = dist.split_group(
+                    parent_pg=group, split_ranks=[list(range(self.world_size))]
+                )
+                self.addCleanup(dist.destroy_process_group, child)
+                dist.all_reduce(torch.ones(1), group=group)
+            finally:
+                unregister_collective_annotation_hooks(annotator)
             unregister_collective_annotation_hooks(annotator)  # idempotent
         dist.all_reduce(torch.ones(1), group=group)
         self.assertEqual([name for name, _, _ in calls.mock_calls], ["push", "pop"])
         metadata = calls.push.call_args.args[0]
         self.assertEqual(metadata["Process Group Name"], group.group_name)
-        dist.destroy_process_group(child)
-        dist.destroy_process_group(group)
 
         dist.barrier()
 

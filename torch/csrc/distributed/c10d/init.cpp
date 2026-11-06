@@ -1646,9 +1646,11 @@ instead.)")
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
-      "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.",
+#if PYBIND11_VERSION_MAJOR >= 3
       // A kept copy may hold the last reference to a group or work.
-      py::release_gil_before_calling_cpp_dtor())
+      py::release_gil_before_calling_cpp_dtor(),
+#endif
+      "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
       .def_readwrite(
           "name",
@@ -1672,7 +1674,8 @@ instead.)")
           &::c10d::PostHookArgs::group,
           "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
           "for other operations. When created by ``torch.distributed.split_group``, "
-          "the hook runs before the group is registered.")
+          "the hook runs before the group is registered, so lookups such as "
+          "``get_rank(group)`` or ``get_process_group_ranks`` fail on it.")
       .def_readwrite(
           "window",
           &::c10d::PostHookArgs::window,
