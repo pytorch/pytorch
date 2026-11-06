@@ -188,34 +188,22 @@ def adaptive_max_pool3d(input, output_size):
 def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
     if not config.avoid_modular_indexing:
         return decomp_roll(a, shifts, dims)
-    # The reference decomposition gathers with (iota + shift) % size, which
-    # becomes ModularIndexing. Rolling via two slices keeps the loads linear.
     if not isinstance(shifts, Sequence):
         shifts = (shifts,)
     if not isinstance(dims, Sequence):
         dims = (dims,)
-    if a.numel() == 0:
+    if len(shifts) != 1 or len(dims) != 1 or a.numel() == 0:
+        # the reference checks the arguments, flattens for dims=() and rolls
+        # one dim at a time, which comes back here
+        return decomp_roll(a, shifts, dims)
+    # The reference gathers one dim with (iota + shift) % size, which becomes
+    # ModularIndexing. Rolling via two slices keeps the loads affine.
+    dim = utils.canonicalize_dim(a.ndim, dims[0])
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    if guard_or_false(start == 0):
         return a.clone()
-    if len(dims) == 0:
-        if len(shifts) != 1:
-            raise RuntimeError("`shifts` required")
-        return torch.roll(a.flatten(), shifts, 0).view(a.shape)
-    if len(shifts) != len(dims):
-        raise RuntimeError(
-            f"shifts and dimensions must align. shifts: {len(shifts)}, dims: {len(dims)}"
-        )
-    result = a
-    for shift, dim in zip(shifts, utils.canonicalize_dims(a.ndim, dims)):
-        size = result.shape[dim]
-        start = (size - shift) % size
-        if start == 0:
-            continue
-        result = torch.cat(
-            [result.narrow(dim, start, size - start), result.narrow(dim, 0, start)],
-            dim,
-        )
-    # roll always returns a fresh tensor, even for a no-op shift
-    return result.clone() if result is a else result
+    return torch.cat([a.narrow(dim, start, size - start), a.narrow(dim, 0, start)], dim)
 
 
 @register_decomposition([aten.special_log_ndtr])

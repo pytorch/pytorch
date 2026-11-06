@@ -12,6 +12,7 @@ from torch.utils._config_module import (
     inherit_fields_from,
     install_config_module,
 )
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 if TYPE_CHECKING:
@@ -71,7 +72,19 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+    if triton_compile_iq_enabled():
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+            )
+        return False
+    elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
@@ -978,13 +991,19 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
 
-# Keep load/store indices affine in the loop variables (no ModularIndexing,
-# FloorDiv, Min/Max/Abs of loop variables). Views that cannot be expressed with
-# strides are realized into a separate kernel instead of being inlined, split
-# reductions split at a dim boundary, repeat/roll are lowered without modular
-# arithmetic, and non-affine index arithmetic (%, //, abs, clamp) stays a value
-# computation behind an indirect variable. Helps backends with restricted
-# memory addressing at the cost of extra kernels.
+# Keep load/store indices affine in the loop variables, as the scheduler's
+# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
+# of loop variables and no products of them (the Triton backend still splits
+# its flat block index with // and %). Views that merge dims are realized (a
+# copy, unless the producer's layout is still flexible) instead of being
+# inlined, split reductions split at a dim boundary, repeat, roll and strided
+# slice_scatter are lowered without modular arithmetic, loop reindexing during
+# fusion is skipped, and non-affine index arithmetic (%, //, abs, clamp) stays
+# a value computation behind an indirect variable. Best effort: adaptive
+# pooling with non-divisible sizes, split reductions over symbolic ranges and
+# a strided slice_scatter whose dim is not provably a multiple of the step
+# still produce modular addresses. Helps backends with restricted memory
+# addressing at the cost of extra buffers and copies.
 avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
 
 # Enabling this will let compiler print warning messages if a generated triton
@@ -997,6 +1016,9 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
+# Broadcasts at least this wide also apply realize_reads_threshold to the
+# broadcast producer, which is otherwise recomputed for every broadcast element
+realize_broadcast_reuse_threshold = 64
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
 realize_opusers_threshold = 5
@@ -1164,6 +1186,15 @@ max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
+
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -3313,6 +3344,13 @@ class trace:
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
     )
 
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
+    )
+
     # Maximum number of trace events to process in profiler timeline post-processing.
     # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
     # Set to 0 to disable this protection.
@@ -3447,9 +3485,9 @@ class test_configs:
     static_cpp_dtype_assert = False
 
     # Raise when a scheduler node's load/store index is not affine in the loop
-    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs or a product of
-    # loop variables). Used together with avoid_modular_indexing to find the
-    # places that still generate such indexing.
+    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs/Where or a
+    # product of loop variables). Used together with avoid_modular_indexing to
+    # find the places that still generate such indexing.
     raise_on_modular_indexing = (
         os.environ.get("TORCHINDUCTOR_RAISE_ON_MODULAR_INDEXING") == "1"
     )

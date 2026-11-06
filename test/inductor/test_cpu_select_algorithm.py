@@ -1103,11 +1103,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         bias,
         dtype,
     ):
-        if inductor_config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count of inlined modular indexing"
-            )
-
         # Reproducer from the coat_lite_mini model in timm
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -1372,10 +1367,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
-        self.assertEqual(
-            counters["inductor"]["cpp_epilogue_fusion_counter"], 2 if TEST_MKL else 1
-        )
+        if not inductor_config.avoid_modular_indexing:
+            # the realized permute + reshape changes which epilogues fuse
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+            self.assertEqual(
+                counters["inductor"]["cpp_epilogue_fusion_counter"],
+                2 if TEST_MKL else 1,
+            )
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1499,6 +1497,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     ):
         if not int8_mixed_bf16 and dtype == torch.bfloat16:
             return
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest(
+                "oneDNN qlinear binary with a bf16 operand needs bf16 hardware support"
+            )
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
         input2 = torch.randn(*B, in_features).to(dtype=torch.float32)
