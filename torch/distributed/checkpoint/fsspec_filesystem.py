@@ -394,7 +394,7 @@ class FsspecReader(FileSystemReader):
         # the planner supports batched resolve_tensor calls (e.g., a custom
         # resolve_tensor reusing one scratch buffer for commit_tensor would
         # overwrite that buffer across batched resolve_tensor calls).
-        parallel_copy = bool(getattr(planner, "supports_batched_resolve", False))
+        parallel_copy = planner.supports_batched_resolve
 
         def apply_batch(cpu_executor, b_reqs, loaded):
             # Every planner hook runs on this thread, so planners need not be

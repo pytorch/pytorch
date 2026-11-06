@@ -298,10 +298,13 @@ class DefaultLoadPlanner(LoadPlanner):
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
     allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
-    supports_batched_resolve: Whether a reader may resolve a batch of tensors
-        before copying and committing them. Defaults to True, and is reset to
-        False on subclasses that override ``resolve_tensor`` or ``commit_tensor``
-        without setting ``supports_batched_resolve`` explicitly.
+
+    ``supports_batched_resolve`` (default ``True``) lets a reader resolve a
+    batch of tensors before copying and committing them. That breaks a
+    ``resolve_tensor`` that reuses one buffer across items, or a
+    ``commit_tensor`` that expects to run right after its ``resolve_tensor``,
+    so a subclass that overrides either method defaults to ``False``.
+    Overrides that do neither can set it back to ``True``.
     """
 
     original_state_dict: STATE_DICT_TYPE
