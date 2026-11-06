@@ -307,6 +307,7 @@ class PreHookArgs:
     output_tensors: list[Tensor]
     root: int
     op_id: int
+    device: torch.device | None
 
 class PostHookArgs:
     name: HookOpName

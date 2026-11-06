@@ -141,8 +141,10 @@ std::string sanitizeBackendName(std::string name) {
   return name;
 }
 
-// PreHookArgs carries no device, so take it from the op's tensors.
 std::optional<c10::Device> opDevice(const PreHookArgs& args) {
+  if (args.device) {
+    return args.device;
+  }
   if (!args.input_tensors.empty() && args.input_tensors.front().defined()) {
     return args.input_tensors.front().device();
   }
@@ -152,11 +154,11 @@ std::optional<c10::Device> opDevice(const PreHookArgs& args) {
   return std::nullopt;
 }
 
-// FlightRecorder keys pg_id by a per-recorder monotonic id in the built-in
-// backends (ProcessGroupGloo's local_id_, ProcessGroupNCCL's local_id_). One
-// process-wide counter for every hooked group: hooked groups never share a
-// recorder with a natively recording backend (their ops are skipped), and two
-// hooked groups get distinct ids from here whether or not they share one.
+// FlightRecorder keys pg_id by a per-recorder monotonic id in natively
+// recording backends (ProcessGroupNCCL's local_id_). One process-wide counter
+// for every hooked group: hooked groups never share a recorder with a natively
+// recording backend (their ops are skipped), and two hooked groups get distinct
+// ids from here whether or not they share one.
 std::atomic<size_t> next_pg_id{0};
 
 // Both accessors throw rather than return empty on a backend that does not
@@ -256,10 +258,10 @@ FlightRecorderHook::FlightRecorderHook(
       target.name = std::move(name);
     }
     // Backends that write to a FlightRecorder themselves keep their entries:
-    // ProcessGroupGloo records in enqueue(), so recording its ops here too
-    // would put a second, independently sequenced entry in the trace for every
-    // gloo collective. Resolved per device rather than per group so a mixed
-    // "cpu:gloo,cuda:nccl2" group still gets its CUDA half recorded.
+    // recording their ops here too would put a second, independently sequenced
+    // entry in the trace for every collective. Resolved per device rather than
+    // per group so a mixed "cpu:gloo,cuda:nccl" group still gets its CPU half
+    // recorded.
     if (!recordsFlightRecorderNatively(target.name)) {
       target.recorder = getFlightRecorder(target.name);
     }
@@ -335,8 +337,7 @@ const FlightRecorderHook::BackendTarget& FlightRecorderHook::targetFor(
       return it->second;
     }
   }
-  // barrier() reaches the hook with no tensors, so the dispatcher's device is
-  // not visible here.
+  // An op that names no device, e.g. one issued with empty tensor lists.
   return default_target_;
 }
 
@@ -345,19 +346,15 @@ std::optional<bool> FlightRecorderHook::captureActive(
   if (device) {
     return streamIsCapturing(*device);
   }
-  // barrier() is the one op that reaches the hook with no tensors: Ops.cpp
-  // binds a dummy tensor to pick the dispatch key and does not forward it, so
-  // the device it was dispatched on is invisible here. It did go to one of the
-  // group's own backends though, and that is enough to answer this question --
-  // if none of the devices the group serves is on a capturing stream, then
-  // neither is this op, whichever of them it went to. For the usual
-  // single-device group that is one query, on CUDA for a CUDA group.
+  // An op with no device of its own still went to one of the group's own
+  // backends, and that is enough to answer this question -- if none of the
+  // devices the group serves is on a capturing stream, then neither is this op,
+  // whichever of them it went to.
   //
   // Not getBoundDeviceId(): it is only set when init_process_group was given a
-  // device_id, so it answers nothing for the groups that hit this, and its
-  // index names the bound device rather than the one the calling thread is
-  // capturing on. The unset index used here resolves to the current device,
-  // which is where the capture is.
+  // device_id, and its index names the bound device rather than the one the
+  // calling thread is capturing on. The unset index used here resolves to the
+  // current device, which is where the capture is.
   if (targets_.empty()) {
     return std::nullopt;
   }

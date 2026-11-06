@@ -1289,7 +1289,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       bool async_op,
       int64_t root,
       std::vector<at::Tensor> input_tensors,
-      std::vector<at::Tensor> output_tensors) {
+      std::vector<at::Tensor> output_tensors,
+      std::optional<c10::Device> device = std::nullopt) {
     int64_t op_id = hookOpIdCounter_++;
     if (!preHooks_.empty()) {
       PreHookArgs args{
@@ -1298,7 +1299,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
           std::move(input_tensors),
           std::move(output_tensors),
           root,
-          op_id};
+          op_id,
+          device};
       for (auto& entry : preHooks_) {
         entry.second(args);
       }
@@ -1311,7 +1313,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // to it (0 when no hooks are registered). The tensor lists are only copied /
   // flattened into the hook args when a pre-hook is registered, so the common
   // no-hook path adds no work. Overloaded for the various collective tensor
-  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
+  // shapes (flat, list-of-lists, single tensor, none, device). Invoked from the
   // dispatcher kernels in Ops.cpp and from the ProcessGroup methods that are
   // not dispatcher ops; see firePostHook for the matching post-hook.
   int64_t firePreHook(
@@ -1378,6 +1380,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       return 0;
     }
     return firePreHookImpl(name, async_op, root, {}, {});
+  }
+
+  // For tensorless ops dispatched for a device (barrier).
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      c10::Device device) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, {}, {}, device);
   }
 
   // Fire registered post-hooks for an operation, correlated with the matching
