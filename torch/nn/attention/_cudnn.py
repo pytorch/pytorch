@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import logging
-import os
 from typing import Protocol
 
 from torch._vendor.packaging.version import InvalidVersion, Version
@@ -30,9 +28,6 @@ _INSTALL_FN = "install_sdpa_overrides"
 # backend varlen_attn selected. install_sdpa_overrides() dates from 1.32.0, so
 # its presence alone does not tell the two apart.
 _MIN_FRONTEND_VERSION = "1.32.2"
-ENV_VAR = "TORCH_CUDNN_SDPA_USE_PYTHON"
-
-logger = logging.getLogger(__name__)
 
 
 class _OverridesHandle(Protocol):
@@ -92,22 +87,3 @@ def disable() -> None:
     handle, _ACTIVE_HANDLE = _ACTIVE_HANDLE, None
     if handle is not None:
         handle.remove()
-
-
-def _enable_from_env() -> None:
-    """Honor TORCH_CUDNN_SDPA_USE_PYTHON; the last step of ``import torch``.
-
-    Never raises: the variable is process-wide and usually set by a launcher,
-    so a stale value or a missing package must not break ``import torch``.
-    """
-    if os.environ.get(ENV_VAR, "0") != "1":
-        return
-    try:
-        enable()
-    except Exception:
-        logger.warning(
-            "%s is set but the cuDNN Python implementation could not be enabled; "
-            "the built-in implementation stays active.",
-            ENV_VAR,
-            exc_info=True,
-        )
