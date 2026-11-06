@@ -269,6 +269,327 @@ g () {
         self.assertTrue(sel.covers("test_nn", "default"))
         self.assertTrue(Selection.from_json(sel.to_json()).covers("test_nn", "default"))
 
+    def test_model_run_all_needs_no_grep(self) -> None:
+        out = answer(run_all=True, reason="why", tests=[{"file": "jit/test_freezing"}])
+        grep = mock.Mock(side_effect=OSError("[Errno 7] Argument list too long"))
+        for changed in ("test/test_nn.py", "test/dynamo_skips/TestNN.test_x"):
+            sel = Selection.from_model_output(out, CANDIDATES, [changed], grep)
+            self.assertEqual((sel.run_all, sel.reason, sel.error), (True, "why", None))
+        grep.assert_not_called()
+
+    def test_test_files_cover_the_drivers(self) -> None:
+        for test in DRIVER_MAPPINGS:
+            path = selection.TEST_FILES.get(test, f"test/{test}.py")
+            self.assertTrue((REPO_ROOT / path).is_file(), test)
+
+    def select_in_tree(
+        self,
+        sources: dict[str, str],
+        candidates: set[str],
+        changed: list[str],
+    ) -> Selection:
+        """from_model_output with an empty answer and select_tests.git_grep over `sources`, a test/ tree."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        # git also reads a global ignore or attributes file under these.
+        env |= {"HOME": os.devnull, "XDG_CONFIG_HOME": os.devnull, "LC_ALL": "C"}
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(d)),
+        ):
+            for name, text in sources.items():
+                (Path(d) / "test" / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(d) / "test" / name).write_text(text)
+            select_tests.git("init", "-q")
+            select_tests.git("add", "-A")
+            select_tests.git(
+                "-c",
+                "user.name=a",
+                "-c",
+                "user.email=a@b.c",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "tree",
+            )
+            return Selection.from_model_output(
+                answer(),
+                candidates,
+                changed,
+                lambda p: select_tests.git_grep(p, "HEAD"),
+            )
+
+    def test_importers_are_selected(self) -> None:
+        sources = {
+            "dynamo/test_misc.py": "from inductor.test_torchinductor import check_model\n",
+            "test_ops.py": "    import test_torchinductor\n",
+            "test_nn.py": "from test_torchinductor_utils import x\nfrom torch._inductor.test_case import TestCase\n",
+            "helper.py": "import test_torchinductor\n",
+            "cpython/v3_13/test_set.py": "from helper import *\n",
+            "jit/test_rel.py": "    from . import helper\n",
+            "test_jit.py": "from jit.test_rel import *\n",
+            "test_jit_legacy.py": "from test_jit import *\n",
+        }
+        candidates = CANDIDATES | {"test_jit", "test_jit_legacy"}
+        sel = self.select_in_tree(
+            sources, candidates, ["test/inductor/test_torchinductor.py"]
+        )
+        expected = {
+            "inductor/test_torchinductor",
+            "dynamo/test_misc",
+            "test_ops",
+            "cpython/v3_13/test_set",
+            "test_jit",
+            "test_jit_legacy",
+        }
+        self.assertEqual(sel.files, expected)
+
+    def test_importers_of_drivers_of_non_py_edits_are_selected(self) -> None:
+        sources = {
+            "jit/data.txt": "",
+            "test_jit.py": "",
+            "test_jit_legacy.py": "from test_jit import *\n",
+            "test_nn.py": "from test_jit import JitTestCase\n",
+        }
+        sel = self.select_in_tree(
+            sources, CANDIDATES | {"test_jit", "test_jit_legacy"}, ["test/jit/data.txt"]
+        )
+        self.assertEqual(sel.files, {"test_jit", "test_jit_legacy", "test_nn"})
+
+    def test_importers_of_the_files_drivers_run_are_selected(self) -> None:
+        sources = {
+            "cpp_extensions/ext.cpp": "",
+            "test_autoload.py": "",
+            "test_cpp_extensions_aot.py": "",
+            "test_nn.py": "from test_autoload import x\n",
+            "test_ops.py": "import test_cpp_extensions_aot\n",
+            # No such file: the driver runs test_autoload.py.
+            "test_jit.py": "import test_autoload_enable\n",
+        }
+        drivers = {
+            "test_autoload_enable",
+            "test_autoload_disable",
+            "test_cpp_extensions_aot_ninja",
+            "test_cpp_extensions_aot_no_ninja",
+        }
+        changed = ["test/cpp_extensions/ext.cpp"]
+        sel = self.select_in_tree(sources, CANDIDATES | drivers | {"test_jit"}, changed)
+        self.assertEqual(sel.files, drivers | {"test_nn", "test_ops"})
+
+    def test_importers_of_drivers_of_importers_are_selected(self) -> None:
+        # test_fx runs fx/test_user.py, which imports the edited helper.
+        sources = {
+            "helper.py": "",
+            "fx/test_user.py": "from helper import x\n",
+            "test_fx.py": "",
+            "test_nn.py": "from test_fx import TestFX\n",
+        }
+        sel = self.select_in_tree(sources, CANDIDATES | {"test_fx"}, ["test/helper.py"])
+        self.assertEqual(sel.files, {"test_fx", "test_nn"})
+
+    def test_bare_names_that_import_something_else_are_not_matched(self) -> None:
+        sources = {
+            "test_nn.py": "from . import random\nfrom server.test import x\nfrom typing.helper import y\n",
+            "test_ops.py": "from . import other\nfrom test.test_math import y\nimport test\nfrom typing import (\n    Any,\n)\n",
+            "dynamo/test_misc.py": "from .random import *\n",
+            "inductor/test_torchinductor.py": "from test.random import x\n",
+        }
+        # random and typing are standard library modules, and test is test/,
+        # unless relative or prefixed with test.
+        prefixed = {"test_nn", "dynamo/test_misc", "inductor/test_torchinductor"}
+        for changed, expected in [
+            ("test/random.py", prefixed),
+            ("test/server/test/__init__.py", {"test_nn"}),
+            ("test/typing/helper.py", {"test_nn"}),
+        ]:
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+
+    def test_parenthesized_relative_imports_are_matched(self) -> None:
+        sources = {
+            "dynamo/helper.py": "",
+            "dynamo/test_misc.py": "from . import (\n    helper,\n)\n",
+            "inductor/pkg/util.py": "",
+            "inductor/test_torchinductor.py": "from .pkg import (\n    util,\n)\n",
+        }
+        # The names of `from . import (` may be on later lines, so it matches every module.
+        both = {"dynamo/test_misc", "inductor/test_torchinductor"}
+        for changed, expected in [
+            ("test/dynamo/helper.py", {"dynamo/test_misc"}),
+            ("test/inductor/pkg/util.py", both),
+        ]:
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual(sel.files, expected, changed)
+
+    def test_import_greps_are_chunked(self) -> None:
+        patterns: list[str] = []
+
+        def grep(pattern: str) -> list[str]:
+            patterns.append(pattern)
+            return []
+
+        files = [f"test/m{i}.py" for i in range(5)]
+        with mock.patch.object(selection, "MAX_GREP_MODULES", 2):
+            found = selection.importers(files, CANDIDATES, grep)
+        self.assertEqual(found, set())
+        chunks = [selection.import_pattern(files[i : i + 2]) for i in (0, 2, 4)]
+        self.assertEqual(patterns, chunks)
+        sources = {"test_nn.py": "import m0\n", "test_ops.py": "import m4\n"}
+        with mock.patch.object(selection, "MAX_GREP_MODULES", 1):
+            sel = self.select_in_tree(sources, CANDIDATES, ["test/m0.py", "test/m4.py"])
+        self.assertEqual(sel.files, {"test_nn", "test_ops"})
+
+    def test_grep_failure_runs_all(self) -> None:
+        argv = ["git", "grep", "x" * 1000]
+        for e, error in [
+            (OSError("[Errno 7] Argument list too long"), None),
+            (RuntimeError("git grep failed: fatal"), None),
+            (subprocess.TimeoutExpired(argv, 60), "TimeoutExpired after 60s"),
+            (subprocess.CalledProcessError(2, argv), "CalledProcessError"),
+        ]:
+            error = error or f"{type(e).__name__}: {e}"
+            # The first answer greps every path, the second only for importers.
+            for out in (answer(tests=[{"file": "jit/test_freezing"}]), answer()):
+                sel = Selection.from_model_output(
+                    out, CANDIDATES, ["test/test_nn.py"], mock.Mock(side_effect=e)
+                )
+                self.assertEqual(
+                    (sel.run_all, sel.reason, sel.error),
+                    (True, f"grep failed ({error})", error),
+                )
+            # A test infrastructure change runs everything whatever grep does.
+            infra = ["test/run_test.py"]
+            out = answer(tests=[{"file": "jit/test_freezing"}])
+            grep = mock.Mock(side_effect=e)
+            sel = Selection.from_model_output(out, CANDIDATES, infra, grep)
+            self.assertEqual((sel.run_all, sel.error), (True, None))
+            grep.assert_called_once_with("^")
+
+    def test_import_forms(self) -> None:
+        sources = {
+            "inductor/ext/triton/device.py": "",
+            "inductor/test_ext.py": "from ext.triton.device import X\n",
+            "onnx/defs/model.py": "",
+            "onnx/test_onnx.py": "from defs import word, model\n",
+            "onnx/test_paren.py": "from defs import (\n    model,\n)\n",
+            "pkg/__init__.py": "",
+            "dynamo/test_misc.py": "import pkg.util\n",
+            "test_autograd.py": "",
+            "test_nn.py": 'test_autograd = load_test_module("test_autograd")\n',
+            "dynamo/test_hops.py": "",
+            "test_load_slash.py": 'm = load_test_module("dynamo/test_hops")\n',
+            "test_load_dot.py": 'm = load_test_module("dynamo.test_hops")\n',
+            "inductor/custom_inductor_config.py": "",
+            "dynamo/test_after_aot.py": '    c = importlib.import_module("custom_inductor_config")\n',
+            "dynamo/test_pkg_aot.py": 'importlib.import_module(".custom_inductor_config", "x")\n',
+            "test_math.py": "",
+            "test_cmath.py": "from test.test_math import parse_testfile\n",
+            "test_fmath.py": "import test.test_math as test_math\n",
+            "test_lmath.py": "import os, test_math\n",
+            "test_smath.py": "import os; import test_math\n",
+            "test_tmath.py": "from os import path; import test_math\n",
+            "test_ymath.py": "try: import test_math\n",
+            "test_umath.py": "if TYPE_CHECKING: from test_math import x\n",
+            "test_vmath.py": "import os; from . import test_math\n",
+            "test_pmath.py": "from test.inductor.ext.triton import device\n",
+            # The CPython tests redirect test.mapping_tests to mapping_tests.
+            "cpython/v3_13/mapping_tests.py": "",
+            "cpython/v3_13/test_dict.py": "from test import mapping_tests\n",
+            "cpython/v3_13/test_userdict.py": "from test import mapping_tests, support\n",
+            "cpython/v3_13/test_odict.py": "try: from test import mapping_tests\n",
+            "test_weak.py": "# from test import mapping_tests\n",
+        }
+        candidates = CANDIDATES | {
+            "inductor/test_ext",
+            "onnx/test_onnx",
+            "onnx/test_paren",
+            "test_autograd",
+            "test_load_slash",
+            "test_load_dot",
+            "dynamo/test_after_aot",
+            "dynamo/test_pkg_aot",
+            "test_math",
+            "test_cmath",
+            "test_fmath",
+            "test_lmath",
+            "test_smath",
+            "test_tmath",
+            "test_ymath",
+            "test_umath",
+            "test_vmath",
+            "test_pmath",
+            "cpython/v3_13/test_dict",
+            "cpython/v3_13/test_userdict",
+            "cpython/v3_13/test_odict",
+            "test_weak",
+        }
+        for changed, expected in [
+            ("test/inductor/ext/triton/device.py", {"inductor/test_ext", "test_pmath"}),
+            ("test/onnx/defs/model.py", {"onnx/test_onnx", "onnx/test_paren"}),
+            ("test/pkg/__init__.py", {"dynamo/test_misc"}),
+            ("test/test_autograd.py", {"test_autograd", "test_nn"}),
+            ("test/dynamo/test_hops.py", {"test_load_slash", "test_load_dot"}),
+            (
+                "test/inductor/custom_inductor_config.py",
+                {"dynamo/test_after_aot", "dynamo/test_pkg_aot"},
+            ),
+            (
+                "test/test_math.py",
+                {
+                    "test_math",
+                    "test_cmath",
+                    "test_fmath",
+                    "test_lmath",
+                    "test_smath",
+                    "test_tmath",
+                    "test_ymath",
+                    "test_umath",
+                    "test_vmath",
+                },
+            ),
+            (
+                "test/cpython/v3_13/mapping_tests.py",
+                {
+                    "cpython/v3_13/test_dict",
+                    "cpython/v3_13/test_userdict",
+                    "cpython/v3_13/test_odict",
+                },
+            ),
+        ]:
+            sel = self.select_in_tree(sources, candidates, [changed])
+            self.assertEqual(sel.files, expected, changed)
+
+    def test_import_chain_hop_limit(self) -> None:
+        reason = "test modules import the change through too many hops"
+        hops = selection.MAX_IMPORT_HOPS
+        # Round k greps for the module found in round k - 1 and finds m<k>.
+        for depth, run_all, rounds in [
+            (2, False, 3),
+            (hops - 1, False, hops),
+            (hops, True, hops),
+        ]:
+            calls: list[str] = []
+
+            def grep(pattern: str) -> list[str]:
+                calls.append(pattern)
+                k = len(calls)
+                grepped = "test/test_nn.py" if k == 1 else f"test/m{k - 1}.py"
+                self.assertEqual(pattern, selection.import_pattern([grepped]))
+                return [f"test/m{k}.py"] if k <= depth else []
+
+            # The module found in the last round that finds one is a candidate.
+            candidates = CANDIDATES | {f"m{depth}"}
+            sel = Selection.from_model_output(
+                answer(), candidates, ["test/test_nn.py"], grep
+            )
+            self.assertEqual((sel.run_all, sel.error), (run_all, None), depth)
+            self.assertEqual(sel.reason == reason, run_all, depth)
+            self.assertEqual(len(calls), rounds, depth)
+            if not run_all:
+                self.assertEqual(sel.files, {"test_nn", f"m{depth}"}, depth)
+
     def test_fallbacks_run_all(self) -> None:
         sel = Selection.from_model_output(None, CANDIDATES, ["torch/a.py"])
         self.assertEqual((sel.run_all, sel.error), (True, "no model output"))
