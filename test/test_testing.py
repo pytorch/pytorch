@@ -2834,6 +2834,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
+        # Under PYTORCH_TEST_OMIT_SKIPPED=1, cls_name=None skips in op_db omit supported_dtypes() names.
         with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
             instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
@@ -2858,6 +2859,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
+        # Likewise guard module_info.dtypes names against cls_name=None skips when omitting.
         with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
             instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
