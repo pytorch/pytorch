@@ -2956,6 +2956,15 @@ def _maybe_attach_flight_recorder(
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
+def _remove_flight_recorder_hook(pg: ProcessGroup) -> None:
+    # remove() rather than drop the handle: the hook may hold Works, and once
+    # dropped it can be destroyed by a running result callback, on the
+    # backend's watchdog.
+    hook = _world.pg_flight_recorder_hooks.pop(pg, None)
+    if hook is not None:
+        hook.remove()
+
+
 def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
@@ -3366,7 +3375,8 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3393,7 +3403,7 @@ def destroy_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3480,7 +3490,8 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3508,7 +3519,7 @@ def _abort_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -8317,7 +8328,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups

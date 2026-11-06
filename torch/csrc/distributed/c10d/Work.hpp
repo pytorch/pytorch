@@ -127,19 +127,26 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   // Get a Future object that would be marked as either success or failure
   // This API can be used by the user to track the completion of the work
-  // and handle the exception if any.
+  // and handle the exception if any. The value is an int encoding WorkResult.
+  // Callbacks run on the thread that completes the future (e.g. a backend
+  // watchdog or a wait()/isCompleted() caller), or inline in addCallback if
+  // already complete. Backends should complete it with no locks held, so a
+  // callback may call back into the Work or issue another op; not all do
+  // (legacy NCCL, nccl2 reconfigure), and such a callback can deadlock there.
+  // Throws c10::NotImplementedError if unsupported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
+
+  // Whether getFutureResult() is implemented. False means it throws; true
+  // doesn't guarantee it won't. Override it along with getFutureResult(), or
+  // FlightRecorderHook retires the Work's ops at issue. Called for every op
+  // FlightRecorderHook records, so it must be cheap.
+  virtual bool hasFutureResult() const;
 
   virtual float getDuration() const;
 
   virtual uint64_t getSequencenumber() const;
 
   virtual std::chrono::milliseconds getTimeout() const;
-
-  // Opaque identity used to correlate a Work with backend completion. A
-  // backend whose completion can outlive the Work must override this with a
-  // non-reused key.
-  virtual uint64_t getCompletionKey() const;
 
   OpType retrieveOpType() const;
 
