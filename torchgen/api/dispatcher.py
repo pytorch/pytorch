@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING
-from typing_extensions import assert_never
+from typing import assert_never, TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import ArgName, Binding, CType, NamedCType

@@ -6,8 +6,8 @@ import contextlib
 import dataclasses
 import sys
 import threading
-from typing import Any, TYPE_CHECKING
-from typing_extensions import override, Self
+from typing import Any, Self, TYPE_CHECKING
+from typing_extensions import override
 from unittest.mock import patch
 
 from torch._inductor import config
