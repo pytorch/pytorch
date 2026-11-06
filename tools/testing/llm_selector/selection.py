@@ -495,6 +495,29 @@ def failure_list_sources(
     return sources, missing
 
 
+def edits_doctest(diff: str) -> bool:
+    """Whether `diff`, a `git diff`, adds or removes a line in a hunk of a .py
+    file under torch/ that has a `>>>` line, changed or context: the doctests
+    test runs those examples with xdoctest, including the expected output and
+    `...` lines that follow a `>>>` line within the diff's context."""
+    paths: list[str] = []
+    in_header = in_torch = doctest = changed = False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            paths, in_header, in_torch = [], True, False
+        elif in_header and line.startswith(("--- a/", "+++ b/")):
+            paths.append(line[6:])
+        elif line.startswith("@@"):
+            in_header = doctest = changed = False
+            in_torch = any(re.match(r"torch/.*\.py$", f) for f in paths)
+        elif in_torch and line[:1] in (" ", "+", "-"):
+            doctest = doctest or ">>>" in line
+            changed = changed or line[:1] != " "
+            if doctest and changed:
+                return True
+    return False
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -606,6 +629,7 @@ class Selection:
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
         deleted: Collection[str] = (),
+        diff: str = "",
     ) -> Selection:
         """Turn the model's structured output into a Selection. Everything runs
         when failure_list_sources reports the inductor list, that is for an
@@ -676,6 +700,8 @@ class Selection:
         fallback = (len(files), len(sweeps)) != before
         edited = edited_tests(changed_files, candidates)
         files |= edited
+        if "doctests" in candidates and edits_doctest(diff):
+            files.add("doctests")
         if grep is not None:
             try:
                 data = data_file_readers(changed_files, candidates, grep, deleted)

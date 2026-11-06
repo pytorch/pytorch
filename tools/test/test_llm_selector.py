@@ -1350,6 +1350,61 @@ g () {
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
 
+    def test_doctest_edits_select_doctests(self) -> None:
+        def diff(path: str, line: str, context: str = "    x = 0") -> str:
+            return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n {context}\n{line}\n"
+
+        candidates = CANDIDATES | {"doctests"}
+        for d, expected in [
+            (diff("torch/nn/functional.py", "+    >>> x = 1"), {"doctests"}),
+            (diff("torch/nn/functional.py", "-    >>> x = 1"), {"doctests"}),
+            (
+                diff("torch/a.py", "-    >>> x = 1").replace(
+                    "+++ b/torch/a.py", "+++ /dev/null"
+                ),
+                {"doctests"},
+            ),
+            (diff("torch/nn/functional.py", "+    x = 1  # >> not a doctest"), set()),
+            # The expected output and continuation lines of an unchanged `>>>` line.
+            (
+                diff("torch/nn/functional.py", "+    tensor([1])", "    >>> x"),
+                {"doctests"},
+            ),
+            (
+                diff(
+                    "torch/nn/functional.py",
+                    "-    ...     y = 1",
+                    "    >>> for i in x:",
+                ),
+                {"doctests"},
+            ),
+            (
+                diff("torch/nn/functional.py", "+    y = 1", "    >>> x")
+                + diff("torch/a.py", "+    y = 1"),
+                {"doctests"},
+            ),
+            (
+                diff("torch/a.py", "+    y = 1")
+                + diff("torch/nn/functional.py", " \n@@ -9 +9 @@\n     >>> x"),
+                set(),
+            ),
+            (diff("test/test_nn.py", "+    tensor([1])", "    >>> x"), set()),
+            (diff("test/test_nn.py", "+    >>> x = 1"), set()),
+            (diff("torch/a.txt", "+    >>> x = 1"), set()),
+            (diff("docs/a.py", "+>>> x") + diff("torch/a.py", "+x"), set()),
+        ]:
+            sel = Selection.from_model_output(
+                answer(), candidates, ["torch/a.py"], diff=d
+            )
+            self.assertEqual(sel.files, expected, d)
+        d = diff("torch/nn/functional.py", "+    >>> x = 1")
+        self.assertEqual(
+            Selection.from_model_output(
+                answer(), CANDIDATES, ["torch/a.py"], diff=d
+            ).files,
+            set(),
+        )
+
     def test_drivers_match_the_test_list(self) -> None:
         for test in DRIVER_MAPPINGS:
             self.assertIn(test, TESTS)
