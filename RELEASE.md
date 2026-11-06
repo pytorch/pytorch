@@ -72,19 +72,19 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.14 PyTorch Supports following CUDA Architectures:
+For Release 2.15 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
-| 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
-| 13.0.3 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
-| 13.2.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+| 13.2.2 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0) | Release wheels ship SASS only; Linux nightlies also add +PTX for 12.0 |
+| 13.4.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0) | Windows builds use CUDA 13.4.2. Release wheels ship SASS only; Linux nightlies also add +PTX for 12.0 |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
-| 12.6.3 | Ampere(8.0), Hopper(9.0) |
-| 13.0.3 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
-| 13.2.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
+| 13.2.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0) |
+| 13.4.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0) |
+
+Release wheels ship SASS only; Linux aarch64 nightlies also add +PTX for 12.0.
 
 ## Release Cadence
 
@@ -480,7 +480,7 @@ Supported OS flavors are summarized in the table below:
 | Operating System family | Architecture | Notes |
 | --- | --- | --- |
 | Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
-| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 14 (Sonoma). MPS support is enabled on macOS 14 (Sonoma) or later. |
+| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 15 (Sequoia) and macOS 26 (Tahoe). MPS support is enabled on macOS 15 (Sequoia) or later. |
 | Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials
