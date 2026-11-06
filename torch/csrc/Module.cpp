@@ -2893,7 +2893,7 @@ Call this whenever a new thread is created in order to propagate values from
         TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
         auto* impl = fake.unsafeGetTensorImpl();
         if (auto mode = impl->fake_tensor_mode()) {
-          impl->set_fake_sym_memo(name, std::move(memo), mode->epoch_.load());
+          impl->set_fake_sym_memo(name, std::move(memo), mode->epoch_);
         }
       },
       py::arg("fake"),
@@ -2912,7 +2912,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return std::nullopt;
         }
-        return impl->fake_sym_memo(name, mode->epoch_.load());
+        return impl->fake_sym_memo(name, mode->epoch_);
       },
       py::arg("fake"),
       py::arg("name"));
@@ -2944,7 +2944,7 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 memo.inc_ref().ptr(), getPyInterpreter()),
             keep_across_epochs ? std::nullopt
-                               : std::optional<uint64_t>(mode->epoch_.load()));
+                               : std::optional<uint64_t>(mode->epoch_));
       },
       py::arg("fake"),
       py::arg("memo"),
@@ -2962,7 +2962,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return py::none();
         }
-        auto memo = impl->fake_item_memo(mode->epoch_.load());
+        auto memo = impl->fake_item_memo(mode->epoch_);
         if (!memo) {
           return py::none();
         }
@@ -3049,25 +3049,23 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_property(
           "allow_meta",
-          [](const c10::FakeTensorMode& mode) {
-            return mode.allow_meta_.load();
-          },
+          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_; },
           [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_meta_.store(value);
+            mode.allow_meta_ = value;
           })
       .def_property(
           "_allow_unsafe_data_ptr_access",
           [](const c10::FakeTensorMode& mode) {
-            return mode.allow_unsafe_data_ptr_access_.load();
+            return mode.allow_unsafe_data_ptr_access_;
           },
           [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_unsafe_data_ptr_access_.store(value);
+            mode.allow_unsafe_data_ptr_access_ = value;
           })
       .def_property(
           "epoch",
-          [](const c10::FakeTensorMode& mode) { return mode.epoch_.load(); },
+          [](const c10::FakeTensorMode& mode) { return mode.epoch_; },
           [](c10::FakeTensorMode& mode, uint64_t value) {
-            mode.epoch_.store(value);
+            mode.epoch_ = value;
           });
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
