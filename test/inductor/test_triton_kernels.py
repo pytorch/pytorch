@@ -915,6 +915,32 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(output, torch.zeros_like(t1))
 
     @requires_gpu
+    def test_triton_kernel_mutated_input_nodes_skip_read_only_args(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_utils import get_mutated_input_nodes
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x, y, output):
+            triton_kernel_wrapper_mutation(
+                kernel_idx=kernel_side_table.add_kernel(add_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
+                grid=[(1, 1, 1)],
+                tma_descriptor_metadata={},
+                kwargs={"in_ptr0": x, "in_ptr1": y, "out_ptr": output},
+            )
+            return output
+
+        args = [torch.rand(5, device=GPU_TYPE) for _ in range(3)]
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        (node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        output = gm.graph.find_nodes(op="placeholder")[2]
+        self.assertEqual(get_mutated_input_nodes(node), [output])
+
+    @requires_gpu
     @parametrize(
         "case",
         ["e8m0", "complex", "meta", "sparse", "fp8", "fp8_uint8", "cpu_output"],

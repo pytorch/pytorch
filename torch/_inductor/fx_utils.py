@@ -843,7 +843,21 @@ def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     if target is torch.ops.higher_order.with_effects:
         target, args = args[1], args[2:]
     if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
-        written = [node.kwargs["kwargs"]]
+        kernel_args = cast(dict[str, Any], node.kwargs["kwargs"])
+        arg_nodes = [v for v in kernel_args.values() if isinstance(v, torch.fx.Node)]
+        if not all("val" in n.meta for n in arg_nodes):
+            return arg_nodes
+        fake_args = {
+            k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+            for k, v in kernel_args.items()
+        }
+        mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
+            cast(int, node.kwargs["kernel_idx"]),
+            cast(int, node.kwargs["constant_args_idx"]),
+            fake_args,
+            cast(Any, node.kwargs["tma_descriptor_metadata"]),
+        )
+        written = [kernel_args[name] for name in mutated]
     elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
         written = [
             arg
@@ -871,6 +885,37 @@ def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
             if storage is not None:
                 storages.add(storage)
     return storages
+
+
+def get_mutated_base_nodes(gm: torch.fx.GraphModule) -> OrderedSet[torch.fx.Node]:
+    """
+    Nodes of gm whose values are written in place, found by following each
+    written node back through views to its base. Unlike get_mutated_storages,
+    this does not need fake values. Writes in control_deps subgraphs are mapped
+    to the outer arguments.
+    """
+    bases: OrderedSet[torch.fx.Node] = OrderedSet()
+
+    def add_base(n: torch.fx.Node) -> None:
+        while (
+            n.target is operator.getitem
+            or (isinstance(n.target, torch._ops.OpOverload) and n.target.is_view)
+        ) and isinstance(n.args[0], torch.fx.Node):
+            n = n.args[0]
+        bases.add(n)
+
+    for node in gm.graph.nodes:
+        for written in get_mutated_input_nodes(node):
+            add_base(written)
+        subgraph_attr = node.args[1] if node.target is control_deps else None
+        if isinstance(subgraph_attr, torch.fx.Node) and subgraph_attr.op == "get_attr":
+            subgraph = getattr(gm, cast(str, subgraph_attr.target))
+            inner_bases = get_mutated_base_nodes(subgraph)
+            placeholders = subgraph.graph.find_nodes(op="placeholder")
+            for placeholder, arg in zip(placeholders, node.args[2:]):
+                if placeholder in inner_bases and isinstance(arg, torch.fx.Node):
+                    add_base(arg)
+    return bases
 
 
 def _same_size_stride_and_storage_offset(
