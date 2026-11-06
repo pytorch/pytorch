@@ -201,6 +201,20 @@ class StrictNumericsConfigTest(TestCase):
 
 
 class StrictNumericsFallbackTest(TestCase):
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_foreach_inplace_tensor_list(self, device, dtype, numerics):
+        def fn(a, b):
+            return torch._foreach_add_([a, b], 1)
+
+        a = torch.arange(4, device=device, dtype=dtype)
+        b = torch.ones_like(a)
+        eager_args = (a.clone(), b.clone())
+        expected = fn(*eager_args)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(a, b)
+        self.assertEqual(actual, expected)
+        self.assertEqual((a, b), eager_args)
+
     @ops(
         [op for op in op_db if op.name == "logit"],
         allowed_dtypes=(torch.bool, torch.int64),
@@ -806,6 +820,582 @@ class StrictNumericsCompileTest(TestCase):
         expected = fn(x)
         actual = torch.compile(fn, fullgraph=True)(x)
         self.assertEqual(actual, expected, exact_stride=True)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "layout", ("aligned", "misaligned", "strided", "expanded", "transposed")
+    )
+    def test_mul_nan_payload_full_block_and_tail(self, device, dtype, numerics, layout):
+        values = _min_max_specials(dtype, device)
+
+        def operand(value):
+            if layout == "misaligned":
+                return value.repeat(1026)[1:]
+            if layout == "strided":
+                return value.repeat(2050)[::2]
+            if layout == "expanded":
+                return value.expand(1025)
+            result = value.repeat(1025)
+            return result.reshape(205, 5).t() if layout == "transposed" else result
+
+        a, b = operand(values[7:8]), operand(values[6:7])
+        compiled = torch.compile(
+            torch.mul, fullgraph=True, options={"numerics": numerics}
+        )
+        actual, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertTrue(_outputs_equal(actual, a * b))
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("cudagraphs", (False, True))
+    @parametrize("input_dtype", (torch.float64, torch.int64, torch.float32))
+    def test_mul_nan_payload_input_provenance(
+        self, device, dtype, numerics, cudagraphs, input_dtype
+    ):
+        values = _min_max_specials(dtype, device)
+        shared = torch.empty(2052, device=device, dtype=dtype)
+        shared[:1026] = values[7]
+        shared[1026:] = values[6]
+        a, b = shared[:1025].view(input_dtype), shared[1026:2051].view(input_dtype)
+
+        def fn(a, b):
+            return a.view(dtype) * b.view(dtype)
+
+        counter = CompileCounterWithBackend("inductor")
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        with config.patch({"numerics": numerics, "triton.cudagraphs": cudagraphs}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            actual, codes = run_and_get_code(compiled, a, b)
+            self.assertIn("@triton.jit", "\n".join(codes))
+            self.assertTrue(_outputs_equal(actual, fn(a, b)))
+            del actual
+            # Read-only input aliasing and pointer alignment can change without guards.
+            for left, right in ((0, 1), (0, 0), (1, 1), (0, 0), (1, 1)):
+                a = values[7:8].repeat(1025 + left)[left:].view(input_dtype)
+                b = values[6:7].repeat(1025 + right)[right:].view(input_dtype)
+                torch.compiler.cudagraph_mark_step_begin()
+                actual = compiled(a, b)
+                self.assertTrue(_outputs_equal(actual, fn(a, b)))
+                del actual
+        self.assertEqual(counter.frame_count, 1)
+        if cudagraphs:
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "hop", ("cond", "nested_cond", "invoke", "while_loop", "aliased_clone")
+    )
+    def test_mul_nan_payload_subgraph_input_alignment(
+        self, device, dtype, numerics, hop
+    ):
+        values = _min_max_specials(dtype, device)
+
+        @torch.compiler.nested_compile_region
+        def region(a, b):
+            return a * b
+
+        def run_loop(a, b):
+            _, result, _ = torch.while_loop(
+                lambda i, a, b: i < 1,
+                lambda i, a, b: (i + 1, a * b, b + 0),
+                (torch.zeros((), device=a.device, dtype=torch.int64), a, b),
+            )
+            return result
+
+        def fn(p, a, b):
+            if hop == "invoke":
+                return region(a, b), region(b, a)
+            if hop == "aliased_clone":
+                computed = a + 0
+                return (
+                    run_loop(a.clone()[:1025], a.clone()[1025:]),
+                    run_loop(computed.clone()[:1025], computed.clone()[1025:]),
+                )
+            if hop == "while_loop":
+                return run_loop(a, b)
+            if hop == "nested_cond":
+
+                def true_fn(a, b):
+                    return torch.cond(
+                        p, lambda a, b: a * b, lambda a, b: a * b + 2, (a, b)
+                    )
+            else:
+
+                def true_fn(a, b):
+                    return a * b
+
+            return torch.cond(p, true_fn, lambda a, b: a * b + 1, (a, b))
+
+        counter = CompileCounterWithBackend("inductor")
+        p = torch.tensor(True, device=device)
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        with config.patch({"numerics": numerics, "triton.cudagraphs": True}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            for offset in (0, 1, 0):
+                a = values[7:8].repeat(1025 + offset)[offset:]
+                b = values[6:7].repeat(1025)
+                if hop == "aliased_clone":
+                    a = torch.cat((a, b))
+                torch.compiler.cudagraph_mark_step_begin()
+                actual = compiled(p, a, b)
+                if hop == "aliased_clone":
+                    expected = fn(p, a, b)
+                else:
+                    expected = (a * b, b * a) if hop == "invoke" else a * b
+                self.assertTrue(_outputs_equal(actual, expected))
+                del actual
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "producer",
+        (
+            "inplace",
+            "chain_view",
+            "dtype_view",
+            "fresh",
+            "copied_fresh",
+            "byte_view",
+            "float32_inplace",
+            "complex64_inplace",
+            "out",
+        ),
+    )
+    def test_mul_nan_payload_mutation_provenance(
+        self, device, dtype, numerics, producer
+    ):
+        values = _min_max_specials(dtype, device)
+
+        def fn(a, b, dst=None):
+            if producer == "out":
+                if typed_root:
+                    dst.add_(0)
+                    a, dst = a.view(dtype), dst.view(dtype)
+                torch.add(a, 0, out=dst)
+                # The overwritten result may disappear; the destination view
+                # must still refer to the original native storage.
+                torch.add(a.reshape(205, -1), 0, out=dst.reshape(205, -1))
+                a = dst.view(dtype)
+            elif producer == "fresh":
+                a = a + 0
+            elif producer == "byte_view":
+                a = a[3:].view(dtype)
+            elif producer == "copied_fresh":
+                result = a + 0
+                a.copy_(result)
+                a = result
+            elif producer in ("float32_inplace", "complex64_inplace"):
+                a.add_(0)
+                a = a.view(dtype)
+            else:
+                a.view(dtype).add_(0)
+                if producer == "inplace":
+                    if partial_write:
+                        a[:1025].add_(0)
+                    else:
+                        a.add_(0)
+                elif producer == "chain_view":
+                    a, b = a.reshape(205, 5), b.reshape(205, 5)
+                    a.sub_(0)
+                elif producer == "dtype_view":
+                    a = a.view(torch.int64).view(dtype)
+                    a.add_(0)
+            return (a[:1025] if partial_write else a) * b
+
+        def operands(offset):
+            if producer == "out":
+                dst = torch.zeros(1025 + offset, device=device, dtype=dtype)[
+                    offset:
+                ].view(out_dtype)
+                a = values[7:8].repeat(1025).view(out_dtype)
+                if writer_dtype != out_dtype:
+                    a = (
+                        torch.full(
+                            (1025,), 0x7FC00011, dtype=torch.int32, device=device
+                        ).view(torch.float32)
+                        if writer_dtype == torch.float32
+                        else a.to(writer_dtype)
+                    )
+                return (
+                    a,
+                    values[6:7].repeat(1025),
+                    dst,
+                )
+            if producer == "byte_view":
+                a = (
+                    values[7:8]
+                    .repeat(1027 + offset)
+                    .view(torch.float32)[1 + 2 * offset :]
+                )
+                return a, values[6:7].repeat(1025)
+            count = 2050 if partial_write else 1025
+            storage = values[7:8].repeat(count * input_stride + offset)
+            if input_stride == 2:
+                storage[offset + 1 :: 2] = 1
+            a = storage[offset::input_stride]
+            if producer == "float32_inplace":
+                a = a.view(torch.float32)
+            elif producer == "complex64_inplace":
+                a = a.view(torch.complex64)
+            b = values[6:7].repeat(1025).requires_grad_(partial_write)
+            return a, b
+
+        for out_dtype, writer_dtype, typed_root, input_stride, partial_write in (
+            (
+                (dtype, dtype, False, 1, False),
+                (torch.int64, torch.int64, False, 1, False),
+                (torch.float32, torch.float32, True, 1, False),
+                (dtype, torch.float32, False, 1, False),
+                (torch.float32, dtype, False, 1, False),
+            )
+            if producer == "out"
+            else tuple(
+                (dtype, dtype, False, stride, partial)
+                for stride in (
+                    (1, 2)
+                    if producer in ("inplace", "chain_view", "dtype_view")
+                    else (1,)
+                )
+                for partial in ((False, True) if producer == "inplace" else (False,))
+            )
+        ):
+            counter = CompileCounterWithBackend("inductor")
+            with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                compiled = torch.compile(fn, fullgraph=True, backend=counter)
+                for i, offset in enumerate((0, 1, 0, 1)):
+                    eager_args, actual_args = operands(offset), operands(offset)
+                    expected = fn(*eager_args)
+                    if i == 0:
+                        actual, codes = run_and_get_code(compiled, *actual_args)
+                        self.assertIn("@triton.jit", "\n".join(codes))
+                    else:
+                        actual = compiled(*actual_args)
+                    self.assertEqual(
+                        actual.view(torch.int64), expected.view(torch.int64)
+                    )
+                    if partial_write:
+                        grad = values[6:7].repeat(1025)
+                        expected_grad = torch.autograd.grad(
+                            expected, eager_args[1], grad
+                        )[0]
+                        actual_grad = torch.autograd.grad(actual, actual_args[1], grad)[
+                            0
+                        ]
+                        self.assertEqual(
+                            actual_grad.view(torch.int64),
+                            expected_grad.view(torch.int64),
+                        )
+                        self.assertEqual(
+                            actual_args[0].view(torch.int64),
+                            eager_args[0].view(torch.int64),
+                        )
+                    if input_stride == 2:
+                        self.assertEqual(
+                            actual_args[0]._base.view(torch.int64),
+                            eager_args[0]._base.view(torch.int64),
+                        )
+                    if producer == "out":
+                        for index in (0, 2):
+                            self.assertEqual(
+                                actual_args[index].view(torch.uint8),
+                                eager_args[index].view(torch.uint8),
+                            )
+                if producer == "out" and out_dtype == writer_dtype == dtype:
+
+                    def prior_reader(a, dst):
+                        old = dst + 1
+                        torch.add(a, 1, out=dst)
+                        return old * dst
+
+                    a = torch.ones(1025, device=device, dtype=dtype)
+                    dst = torch.ones_like(a)
+                    actual = torch.compile(prior_reader, fullgraph=True)(a, dst)
+                    self.assertEqual(actual, torch.full_like(actual, 4))
+                    self.assertEqual(dst, torch.full_like(dst, 2))
+                    self.assertEqual(a, torch.ones_like(a))
+            self.assertEqual(counter.frame_count, 1)
+
+        if producer == "inplace":
+
+            def fresh_and_mutated(a, b, c):
+                fresh = a + 0
+                a.add_(0)
+                result = a * b
+                a.add_(1)
+                return fresh * b, result, c.sin()
+
+            counter = CompileCounterWithBackend("inductor")
+            with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                compiled = torch.compile(
+                    fresh_and_mutated, fullgraph=True, backend=counter
+                )
+                for offset in (0, 1, 0, 1):
+
+                    def inputs():
+                        a = values[7:8].repeat(1025 + offset)[offset:]
+                        b = values[6:7].repeat(1025)
+                        c = torch.tensor(
+                            [0.25, -0.5, 0.75],
+                            device=device,
+                            dtype=dtype,
+                            requires_grad=True,
+                        )
+                        return a, b, c
+
+                    eager_args, actual_args = inputs(), inputs()
+                    expected = fresh_and_mutated(*eager_args)
+                    actual = compiled(*actual_args)
+                    for expected_value, actual_value in zip(expected, actual):
+                        self.assertEqual(
+                            actual_value.view(torch.int64),
+                            expected_value.view(torch.int64),
+                        )
+                    expected_grad = torch.autograd.grad(
+                        expected[2], eager_args[2], torch.ones_like(eager_args[2])
+                    )[0]
+                    actual_grad = torch.autograd.grad(
+                        actual[2], actual_args[2], torch.ones_like(actual_args[2])
+                    )[0]
+                    self.assertEqual(
+                        actual_grad.view(torch.int64), expected_grad.view(torch.int64)
+                    )
+                    self.assertEqual(
+                        actual_args[0]._base.view(torch.int64),
+                        eager_args[0]._base.view(torch.int64),
+                    )
+            self.assertEqual(counter.frame_count, 1)
+
+    @dtypes(torch.float64)
+    @parametrize("option", ("strict_pointwise", "numerics"))
+    @parametrize("mutation_first", (False, True))
+    def test_mul_nan_payload_mutation_cache(
+        self, device, dtype, option, mutation_first
+    ):
+        def copied_fresh(a, b):
+            result = a + 0
+            a.copy_(result)
+            return result * b
+
+        def mutate(a, b):
+            a.add_(0)
+            return a * b
+
+        def local(a, b):
+            z = a + 0
+            z.add_(0)
+            return z * b, a
+
+        def caller(a, b):
+            z = a + 0
+            a.add_(0)
+            return a * b, z
+
+        values = _min_max_specials(dtype, device)
+        functions = (mutate, copied_fresh) if mutation_first else (copied_fresh, mutate)
+        options = {
+            option: True if option == "strict_pointwise" else "strict_pointwise",
+            "triton.cudagraphs": False,
+        }
+        with config.patch(
+            force_disable_caches=False,
+            fx_graph_cache=True,
+            fx_graph_remote_cache=False,
+        ):
+            for index, fn in enumerate((*functions, functions[0])):
+                torch._dynamo.reset()
+                a = values[7:8].repeat(1026)[1:]
+                b = values[6:7].repeat(1025)
+                eager_a = values[7:8].repeat(1026)[1:]
+                expected = fn(eager_a, b)
+                hits = counters["inductor"]["fxgraph_cache_hit"]
+                misses = counters["inductor"]["fxgraph_cache_miss"]
+                actual = torch.compile(fn, fullgraph=True, options=options)(a, b)
+                self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
+                self.assertEqual(a.view(torch.int64), eager_a.view(torch.int64))
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_miss"], misses + (index < 2)
+                )
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_hit"], hits + (index == 2)
+                )
+            functions = (caller, local) if mutation_first else (local, caller)
+            for fn in functions:
+                torch._dynamo.reset()
+                a = torch.arange(1, 1026, device=device, dtype=dtype)
+                b = torch.full_like(a, 2).requires_grad_()
+                eager_a = a.clone()
+                eager_b = b.detach().clone().requires_grad_()
+                expected = fn(eager_a, eager_b)
+                misses = counters["inductor"]["fxgraph_cache_miss"]
+                actual = torch.compile(fn, fullgraph=True, options=options)(a, b)
+                self.assertEqual(actual, expected)
+                grad = torch.full_like(a, 3)
+                expected_grad = torch.autograd.grad(expected[0], eager_b, grad)[0]
+                actual_grad = torch.autograd.grad(actual[0], b, grad)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                self.assertEqual(a, eager_a)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], misses + 2)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("cpu_scalar", (False, True))
+    @parametrize("producer", ("inplace", "out"))
+    def test_mul_nan_payload_mutation_backward(
+        self, device, dtype, numerics, cpu_scalar, producer
+    ):
+        values = torch.tensor(
+            [
+                0x7FF8000000000011,
+                0x7FF8000000000001,
+                0x7FF8000000000033,
+                0x7FF8000000000022,
+            ],
+            dtype=torch.int64,
+            device=device,
+        ).view(dtype)
+
+        def fn(a, b, dst=None, c=None):
+            if producer == "out":
+                if typed_root:
+                    dst.add_(0)
+                    dst = dst.view(dtype)
+                torch.add(a, 0, out=dst)
+                torch.add(c.reshape(205, -1), 0, out=dst.reshape(205, -1))
+                a = dst.view(dtype)
+            else:
+                if native_mul:
+                    if native_mul == "before":
+                        a.add_(0)
+                    result = a.mul_(b)
+                    if native_mul == "after":
+                        a.add_(0)
+                    return result
+                a.add_(0)
+            return a * b
+
+        def operands(offset):
+            a = values[0:1].repeat(1025 + offset)[offset:]
+            b = (
+                torch.tensor(1.0, dtype=dtype, device="cpu", requires_grad=True)
+                if cpu_scalar
+                else values[1:2].repeat(1025).requires_grad_()
+            )
+            if producer == "out":
+
+                def source_value(value, payload):
+                    if writer_dtype == torch.float32:
+                        return torch.full(
+                            (1025,), payload, dtype=torch.int32, device=device
+                        ).view(torch.float32)
+                    result = value.repeat(1025)
+                    return (
+                        result
+                        if backing_dtype == dtype or typed_root
+                        else result.view(backing_dtype).to(writer_dtype)
+                    )
+
+                return (
+                    source_value(values[0:1], 0x7FC00011),
+                    b,
+                    torch.zeros(1025 + offset, dtype=dtype, device=device)[
+                        offset:
+                    ].view(backing_dtype),
+                    source_value(values[3:4], 0x7FC00022),
+                )
+            return a, b
+
+        grad_output = values[2:3].repeat(1025)
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            for backing_dtype, writer_dtype, typed_root, native_mul in (
+                (
+                    (dtype, dtype, False, False),
+                    (torch.float32, dtype, True, False),
+                    (dtype, torch.float32, False, False),
+                    (torch.float32, dtype, False, False),
+                )
+                if producer == "out"
+                else tuple(
+                    (dtype, dtype, False, native)
+                    for native in (
+                        (False, True)
+                        if cpu_scalar
+                        else (False, True, "before", "after")
+                    )
+                )
+            ):
+                counter = CompileCounterWithBackend("inductor")
+                compiled = torch.compile(fn, fullgraph=True, backend=counter)
+                frames = None
+                for offset in (0, 1, 0, 1):
+                    eager_args = operands(offset)
+                    eager = fn(*eager_args)
+                    expected = torch.autograd.grad(eager, eager_args[1], grad_output)[0]
+                    args = operands(offset)
+                    output = compiled(*args)
+                    self.assertEqual(output.view(torch.int64), eager.view(torch.int64))
+                    actual = torch.autograd.grad(output, args[1], grad_output)[0]
+                    self.assertEqual(
+                        actual.view(torch.int64), expected.view(torch.int64)
+                    )
+                    for index in (0, 2) if producer == "out" else (0,):
+                        self.assertEqual(
+                            args[index].view(torch.uint8),
+                            eager_args[index].view(torch.uint8),
+                            msg=f"{backing_dtype=}, {writer_dtype=}, {typed_root=}, {offset=}, {index=}",
+                        )
+                    if frames is None:
+                        frames = counter.frame_count
+                    self.assertEqual(counter.frame_count, frames)
+                if not cpu_scalar:
+                    self.assertEqual(counter.frame_count, 1)
+
+            def prior_reader(a, b, dst):
+                if producer == "out":
+                    old = dst + 1
+                    torch.add(a, 1, out=dst)
+                    return old * dst * b
+                old = a + 1
+                a.add_(1)
+                return old * a * b
+
+            if not cpu_scalar:
+                compiled = torch.compile(prior_reader, fullgraph=True)
+                a = torch.ones(1025, device=device, dtype=dtype)
+                b = torch.ones_like(a, requires_grad=True)
+                dst = torch.ones_like(a)
+                actual = compiled(a, b, dst)
+                self.assertEqual(actual, torch.full_like(actual, 4))
+                self.assertEqual(
+                    torch.autograd.grad(actual, b, torch.ones_like(actual))[0],
+                    torch.full_like(b, 4),
+                )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("index_propagation", (False, True))
+    def test_mul_arange(self, device, dtype, numerics, index_propagation):
+        def fn(x):
+            a = torch.arange(x.numel(), device=x.device, dtype=dtype)
+            b = torch.arange(x.numel(), device=x.device, dtype=dtype)
+            return a * b
+
+        x = torch.empty(1025, device=device)
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": numerics,
+                "constant_and_index_propagation": index_propagation,
+            },
+        )
+        actual, codes = run_and_get_code(compiled, x)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(actual.view(torch.int64), fn(x).view(torch.int64))
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
