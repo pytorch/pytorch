@@ -77,35 +77,38 @@ class CudaGraphManager {
   CudaGraphManager(CudaGraphManager&&) = delete;
   CudaGraphManager& operator=(CudaGraphManager&&) = delete;
 
-  // Calls fn(inputs, outputs, stream) eagerly or replays its capture. A
-  // manager serves one fn with a fixed number of outputs, every input is a
-  // CUDA tensor on the manager's device, and `stream` must not be capturing.
-  // Replayed kernels run at default priority, whatever `stream`'s priority. fn
-  // borrows `inputs`, writes new references into `outputs`, enqueues all its
-  // GPU work on the stream it is passed (`stream` in eager calls, which isn't
-  // made current, and the manager's own stream, made current, in captures; a
-  // null `stream` means the device's legacy default stream), returns only
-  // tensors on the manager's device (or its capture fails), and must not
-  // mutate its inputs: a replay would only
-  // mutate the graph's copies. fn may also see views over the graph's buffers,
-  // at other storage offsets than the caller's inputs, which hold only the
-  // inputs' elements, so fn must not read other parts of its inputs' storage
-  // (aot_inductor.cudagraphs rejects models that would). Graphs have no random
-  // number state, since replays would advance the generator without its lock,
-  // so a capture of fn that uses random numbers fails.
-  // Each output slot gets its own handle; replayed outputs never alias the
-  // inputs, nor each other unless fn wrote the same handle twice, while eager
-  // calls return fn's outputs as they are. A graph keeps
-  // reading everything else fn read at capture, e.g. constants, at the same
-  // addresses, so call reset() before replacing or freeing any of it, with no
-  // run() in flight or starting until the replacement is done. run(),
-  // reset() and the destructor may delete the pool, which the shim forbids
-  // while the calling thread has a capture open, or while any thread has a
-  // global-mode capture open. Eager calls don't hold the manager's lock, so fn
-  // must be safe to call from several threads at once, including while another
-  // thread captures it; captures do hold it, so fn must not call back into the
-  // manager. On success the caller owns every non-null slot; a
-  // failed call leaves every slot null, deleting any handle fn wrote.
+  // Calls fn(inputs, outputs, stream) eagerly, or captures it and replays the
+  // capture. Requirements:
+  // - Every input is a CUDA tensor on the manager's device, and `stream` isn't
+  //   capturing; a null `stream` means the device's legacy default stream.
+  // - A manager serves one fn, with a fixed number of outputs.
+  // - fn borrows `inputs` and writes new references into `outputs`.
+  // - fn enqueues all its GPU work on the stream it is passed: `stream` in
+  //   eager calls (not made current), the manager's own stream in captures
+  //   (made current).
+  // - fn returns only tensors on the manager's device, or its capture fails.
+  // - fn doesn't mutate its inputs (a replay would only mutate the graph's
+  //   copies), and doesn't read other parts of their storage: the graph's
+  //   buffers hold only the inputs' elements, at other storage offsets
+  //   (aot_inductor.cudagraphs rejects models that would).
+  // - fn doesn't use random numbers: graphs have no RNG state, so its capture
+  //   fails.
+  // - fn is safe to call from several threads at once, including while another
+  //   thread captures it, and doesn't call back into the manager, since
+  //   captures hold the manager's lock.
+  // - A graph keeps reading everything else fn read at capture, e.g.
+  //   constants, at the same addresses: call reset() before replacing or
+  //   freeing any of it, with no run() in flight until that's done.
+  // - run(), reset() and the destructor may delete the pool, which the shim
+  //   forbids while the calling thread, or any thread in global mode, has a
+  //   capture open.
+  // Results:
+  // - On success the caller owns every non-null slot; a failed call leaves
+  //   every slot null, deleting any handle fn wrote.
+  // - Each slot gets its own handle. Replayed outputs are copies that never
+  //   alias the inputs, nor each other unless fn wrote the same handle twice;
+  //   eager calls return fn's outputs as they are.
+  // - Replayed kernels run at default priority, whatever `stream`'s priority.
   template <typename Fn>
   void run(
       Fn&& fn,
@@ -134,7 +137,7 @@ class CudaGraphManager {
       }
       bool warming_up = false;
       if (!eager) {
-        if (warmups_.size() >= kMaxWarmupKeys && warmups_.count(key) == 0) {
+        if (warmups_.size() >= kMaxWarmupEntries && warmups_.count(key) == 0) {
           warmups_.clear();
         }
         auto& warmup = warmups_[key];
@@ -154,7 +157,7 @@ class CudaGraphManager {
           if (found != warmups_.end()) {
             auto& threads = found->second.threads;
             ++found->second.calls;
-            if (threads.size() >= kMaxWarmupKeys) {
+            if (threads.size() >= kMaxWarmupEntries) {
               threads.clear();
             }
             threads.insert(thread_token());
@@ -187,9 +190,11 @@ class CudaGraphManager {
     return graphs_.size();
   }
 
-  // Caps the keys, and the threads per key, remembered for warm-up, so one-off
-  // shapes or threads can't grow the manager without bound.
-  static constexpr size_t kMaxWarmupKeys = 1024;
+  // Caps the keys remembered for warm-up, and the threads remembered per key.
+  // A full table is mostly one-off shapes or exited threads, so it is cleared
+  // rather than frozen: live keys just warm up again, while a frozen table
+  // would keep any later key from ever being captured.
+  static constexpr size_t kMaxWarmupEntries = 1024;
   // Inputs and outputs of at least this size are copied one by one: on a B200,
   // the fused kernel stops beating memcpys for a pair of them around here.
   static constexpr int64_t kMaxFusedCopyBytes = 16 << 10;
@@ -291,13 +296,43 @@ class CudaGraphManager {
     return storage_extent(layout) > numel ? Storage::kGapped : Storage::kDense;
   }
 
+  // The dtypes _foreach_copy_'s CUDA kernel fuses; it throws on lists of
+  // others, such as float8_e8m0fnu. Copying the rest one by one is always
+  // correct, so a model built from this header just won't fuse dtypes the
+  // kernel learns later.
+  static bool fused_dtype(int32_t dtype) {
+    for (int32_t fused :
+         {aoti_torch_dtype_float32(),
+          aoti_torch_dtype_float64(),
+          aoti_torch_dtype_float16(),
+          aoti_torch_dtype_bfloat16(),
+          aoti_torch_dtype_float8_e4m3fn(),
+          aoti_torch_dtype_float8_e4m3fnuz(),
+          aoti_torch_dtype_float8_e5m2(),
+          aoti_torch_dtype_float8_e5m2fnuz(),
+          aoti_torch_dtype_complex64(),
+          aoti_torch_dtype_complex128(),
+          aoti_torch_dtype_bool(),
+          aoti_torch_dtype_uint8(),
+          aoti_torch_dtype_int8(),
+          aoti_torch_dtype_int16(),
+          aoti_torch_dtype_int32(),
+          aoti_torch_dtype_int64()}) {
+      if (dtype == fused) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Whether an input, or a dense output, covering `extent` elements joins a
-  // fused copy: it isn't empty, and is small enough that the fused kernel
-  // copies it no slower than a memcpy.
+  // fused copy: the kernel fuses its dtype, it isn't empty, and it is small
+  // enough that the fused kernel copies it no slower than a memcpy.
   static bool fusable(int32_t dtype, int64_t extent) {
     auto element_size =
         static_cast<int64_t>(aoti_torch_dtype_element_size(dtype));
-    return extent > 0 && extent * element_size < kMaxFusedCopyBytes;
+    return fused_dtype(dtype) && extent > 0 &&
+        extent * element_size < kMaxFusedCopyBytes;
   }
 
   // Groups tensors[i], for each i in `indices`, by dtype. A dtype with only
