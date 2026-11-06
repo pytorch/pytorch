@@ -4,6 +4,7 @@ import argparse
 import ast
 import importlib
 import json
+import math
 import os
 import platform
 import re
@@ -665,6 +666,102 @@ def test_linalg(device="cpu") -> None:
             torch.linalg.svd(A)
 
 
+def _inv_eps(r: float, a: float = 600.0, e_in: float = 12.25, n: int = 15):
+    """Fourier (Toeplitz) matrix of 1/epsilon for a circular inclusion of radius r.
+
+    A 961x961 Hermitian matrix with condition number 12.25.
+    """
+    m = torch.arange(-n, n + 1, dtype=torch.float64)
+    mx, my = (v.reshape(-1) for v in torch.meshgrid(m, m, indexing="ij"))
+    dx = mx[:, None] - mx[None, :]
+    dy = my[:, None] - my[None, :]
+    g = 2 * math.pi / a * torch.hypot(dx, dy)
+    f = math.pi * r**2 / a**2
+    # g == 0 gives 0/0 = nan, which torch.where discards in favor of f.
+    s = torch.where(
+        g == 0,
+        torch.full_like(g, f),
+        2 * f * torch.special.bessel_j1(g * r) / (g * r),
+    )
+    return ((-1.0) ** (dx + dy) * (1 / e_in - 1) * s + (g == 0)).to(torch.complex128)
+
+
+def _mkl_version() -> tuple[int, int] | None:
+    """(year, minor) of the MKL PyTorch is linked with, e.g. (2026, 2).
+
+    Parsed from the line torch.__config__.show() prints under AT_MKL_ENABLED
+    (aten/src/ATen/Version.cpp), which comes from mkl_get_version_string: "Intel(R)
+    oneAPI Math Kernel Library Version 2026.2-Product Build ...".
+    """
+    match = re.search(
+        r"Math Kernel Library Version (\d+)\.(\d+)", torch.__config__.show()
+    )
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def check_mkl_version() -> tuple[int, int] | None:
+    """Fail if PyTorch is linked with an MKL older than 2026.2, which has the LAPACK
+    DLASD2 bug (https://github.com/pytorch/pytorch/issues/202596).
+
+    Returns the version, or None for a build without MKL (nothing to check).
+    """
+    if not torch.backends.mkl.is_available():
+        return None
+    mkl_version = _mkl_version()
+    if mkl_version is None:
+        # Every build with MKL prints it, so a missing line means the format changed.
+        raise RuntimeError(
+            "PyTorch is built with MKL but torch.__config__.show() has no MKL "
+            "version line to check"
+        )
+    if mkl_version < (2026, 2):
+        raise RuntimeError(
+            f"PyTorch is linked with MKL {mkl_version[0]}.{mkl_version[1]}, which has "
+            "the LAPACK DLASD2 bug (fixed in MKL 2026.2): torch.linalg.svd can fail "
+            "on well-conditioned matrices"
+        )
+    print(f"MKL {mkl_version[0]}.{mkl_version[1]}: has the LAPACK DLASD2 fix")
+    return mkl_version
+
+
+def test_linalg_svd_dlasd2() -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/202596
+
+    MKL before 2026.2 (like Reference-LAPACK before PR #1140) has a DLASD2
+    deflation bug: ?gesdd with jobz='A'/'S' returns info=1 for tightly clustered
+    singular values, so torch.linalg.svd raises LinAlgError on a well-conditioned
+    matrix. Whether a dense matrix hits it depends on last-bit rounding, which
+    changes with the ISA and the thread count; with the affected MKL, one thread
+    and r=158.05 fail on an AVX-512 machine.
+    """
+    if not torch.backends.mkl.is_available():
+        # Other builds (OpenBLAS, Accelerate) bring their own LAPACK, which is
+        # not what this checks.
+        print("Skipping smoke_test_linalg_svd_dlasd2: PyTorch is not built with MKL")
+        return
+    print("Testing smoke_test_linalg_svd_dlasd2")
+    # The numeric reproducer below can pass with an affected MKL, because it
+    # depends on rounding, so check the version directly as well.
+    mkl_version = check_mkl_version()
+    A = _inv_eps(158.05)
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        try:
+            U, S, Vh = torch.linalg.svd(A)
+        except torch.linalg.LinAlgError as e:
+            raise RuntimeError(
+                "torch.linalg.svd failed on a well-conditioned matrix with MKL "
+                f"{mkl_version[0]}.{mkl_version[1]}, which should have the DLASD2 fix: "
+                f"the bug is still there or has come back. {e}"
+            ) from e
+    finally:
+        torch.set_num_threads(num_threads)
+    recon_err = (A - U @ torch.diag(S).to(U.dtype) @ Vh).abs().max().item()
+    if not math.isfinite(recon_err) or recon_err > 1e-9:
+        raise AssertionError(f"SVD reconstruction error too large: {recon_err}")
+
+
 def test_sdpa(device="cpu", dtype=torch.float16) -> None:
     """Regression test for https://github.com/pytorch/pytorch/issues/167602
     Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
@@ -825,6 +922,11 @@ def smoke_test_modules(package: str):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--mkl-version-only",
+        help="Only check that the MKL PyTorch is linked with has the LAPACK DLASD2 fix",
+        action="store_true",
+    )
+    parser.add_argument(
         "--package",
         help="Package to include in smoke testing",
         type=str,
@@ -858,6 +960,12 @@ def parse_args():
 def main() -> None:
     options = parse_args()
     print(f"torch: {torch.__version__}")
+    if options.mkl_version_only:
+        # For wheel types whose tests skip the rest of this file (Linux XPU and
+        # ROCm) and for every Windows wheel, run before the no-GPU early exit in
+        # smoke_test.bat.
+        check_mkl_version()
+        return
     print(torch.__config__.parallel_info())
     # All PyTorch binary builds should be built with OpenMP
     if not torch.backends.openmp.is_available():
@@ -866,6 +974,7 @@ def main() -> None:
     check_version(options.package)
     smoke_test_conv2d()
     test_linalg()
+    test_linalg_svd_dlasd2()
     test_numpy()
     test_sdpa()
 
