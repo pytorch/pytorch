@@ -1488,8 +1488,12 @@ class AOTInductorModelBase {
       if (max_graphs) {
         options.max_graphs = *max_graphs;
       }
-      cudagraph_manager_ =
-          std::make_unique<CudaGraphManager>(device_idx_, options);
+      // Created, and destroyed, only here, so models compiled without
+      // aot_inductor.cudagraphs don't reference the CUDA graph shim
+      // functions through ~CudaGraphManager.
+      cudagraph_manager_ = CudaGraphManagerPtr(
+          new CudaGraphManager(device_idx_, options),
+          [](CudaGraphManager* manager) { delete manager; });
     }
 
     auto inputs =
@@ -2213,7 +2217,9 @@ class AOTInductorModelBase {
   // Set by generated code compiled with aot_inductor.cudagraphs=True.
   bool cudagraphs_{false};
 #ifdef USE_CUDA
-  std::unique_ptr<CudaGraphManager> cudagraph_manager_;
+  using CudaGraphManagerPtr =
+      std::unique_ptr<CudaGraphManager, void (*)(CudaGraphManager*)>;
+  CudaGraphManagerPtr cudagraph_manager_{nullptr, nullptr};
 #endif // USE_CUDA
 };
 

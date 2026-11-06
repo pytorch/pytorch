@@ -11348,6 +11348,9 @@ class AOTInductorTestsTemplate:
             options={"aot_inductor.cudagraphs": True},
         )
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 2, self.device)
+        # The binding holds the GIL, so calls take turns: this checks that each
+        # instance keeps its own graphs across threads, not overlapping calls,
+        # which CudaGraphManagerTest.RunsConcurrently covers.
         errors = []
         barrier = threading.Barrier(4)
 
@@ -11417,6 +11420,7 @@ compiled = torch._inductor.aoti_load_package({package_path!r})
 x = torch.randn(4, 16, device="cuda")
 # A warm-up call, then a capture.
 torch.testing.assert_close(compiled.run_with_lazy_cuda_graphs(x), compiled(x))
+print("warmed up", flush=True)
 compiled.run_with_lazy_cuda_graphs(x)
 """
         env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "backend:cudaMallocAsync"}
@@ -11424,7 +11428,8 @@ compiled.run_with_lazy_cuda_graphs(x)
             [sys.executable, "-c", code], env=env, capture_output=True, text=True
         )
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("backend:cudaMallocAsync", proc.stderr)
+        self.assertIn("warmed up", proc.stdout)
+        self.assertIn("CUDA graph capture isn't supported", proc.stderr)
 
     @xfailIfROCm
     def test_aot_cudagraphs_run_rejects_unsupported_callers(self):
@@ -11455,7 +11460,16 @@ compiled.run_with_lazy_cuda_graphs(x)
         x = torch.randn(4, 16, device=self.device)
         # Models compiled without the flag must still load on a libtorch that
         # lacks the CUDA graph shim functions.
-        symbols = ["aoti_torch_cuda_graph_capture_begin", "aoti_torch__foreach_copy_"]
+        symbols = [
+            "aoti_torch_create_cuda_graph",
+            "aoti_torch_delete_cuda_graph",
+            "aoti_torch_create_cuda_mem_pool",
+            "aoti_torch_delete_cuda_mem_pool",
+            "aoti_torch_cuda_graph_capture_begin",
+            "aoti_torch_cuda_graph_capture_end",
+            "aoti_torch_cuda_graph_replay",
+            "aoti_torch__foreach_copy_",
+        ]
         for flag in (False, True):
             so_path = AOTIRunnerUtil.legacy_compile(
                 model, (x,), options={"aot_inductor.cudagraphs": flag}

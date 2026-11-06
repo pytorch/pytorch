@@ -615,6 +615,8 @@ TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
 TEST_F(CudaGraphManagerTest, CapturesAnFnThatLeavesAnotherStreamCurrent) {
   CudaGraphManager manager(0, no_warmup());
   auto original = at::cuda::getCurrentCUDAStream();
+  // So a regression doesn't leave `side` current for later tests.
+  at::cuda::CUDAStreamGuard restore(original);
   auto side = at::cuda::getStreamFromPool();
   auto fn = [&](AtenTensorHandle* inputs,
                 AtenTensorHandle* outputs,
@@ -791,7 +793,7 @@ TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
         e8m0({8}),
         e8m0({1, 6}).expand({4, 6}),
         // Copied alone, being large.
-        at::randn({CudaGraphManager::kMaxFusedCopyBytes / 4 + 1}, at::kCUDA),
+        at::randn({CudaGraphManager::kMaxFusedCopyBytes / 4}, at::kCUDA),
         // Overlapping and gapped, each copied alone, being alone in its dtype.
         at::randint(100, {1, 6}, at::TensorOptions(at::kCUDA).dtype(at::kInt))
             .expand({4, 6}),

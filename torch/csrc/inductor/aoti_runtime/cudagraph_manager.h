@@ -47,8 +47,10 @@ struct CudaGraphOptions {
 // failed capture's memory stays in the pool until reset(), or until the next
 // capture if no graph exists. Unlike torch.cuda.graph, a capture doesn't
 // empty the allocator's cache first, so it can run out of memory where an
-// eager call wouldn't. Under PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync,
-// which the shim's memory pools don't support, every capture fails.
+// eager call wouldn't. Under the cudaMallocAsync allocator backend
+// (backend:cudaMallocAsync in PYTORCH_ALLOC_CONF or PYTORCH_CUDA_ALLOC_CONF),
+// which the shim's memory pools don't support, every capture fails, so each
+// key's calls throw after warm-up; use max_graphs=0 there.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -89,8 +91,9 @@ class CudaGraphManager {
   // - fn returns only tensors on the manager's device, or its capture fails.
   // - fn doesn't mutate its inputs (a replay would only mutate the graph's
   //   copies), and doesn't read other parts of their storage: the graph's
-  //   buffers hold only the inputs' elements, at other storage offsets
-  //   (aot_inductor.cudagraphs rejects models that would).
+  //   buffers, at other storage offsets, hold the inputs' elements, and
+  //   for a gapped input copied as a block also the caller's storage
+  //   between them (aot_inductor.cudagraphs rejects models that would).
   // - fn doesn't use random numbers: graphs have no RNG state, so its capture
   //   fails.
   // - fn is safe to call from several threads at once, including while another
@@ -225,6 +228,13 @@ class CudaGraphManager {
     std::vector<AtenTensorHandle> destinations;
   };
 
+  struct TensorLayout {
+    int32_t dtype = 0;
+    int64_t dim = 0;
+    int64_t* sizes = nullptr;
+    int64_t* strides = nullptr;
+  };
+
   struct Graph {
     AOTICudaGraph graph;
     // Buffers covering each input's storage extent, and the views over them
@@ -244,13 +254,8 @@ class CudaGraphManager {
     // and the others, cloned one by one.
     std::vector<std::vector<size_t>> output_groups;
     std::vector<size_t> separate_outputs;
-  };
-
-  struct TensorLayout {
-    int32_t dtype = 0;
-    int64_t dim = 0;
-    int64_t* sizes = nullptr;
-    int64_t* strides = nullptr;
+    // Each output's layout, read once; static outputs are never restrided.
+    std::vector<TensorLayout> output_layouts;
   };
 
   static TensorLayout layout_of(AtenTensorHandle tensor) {
@@ -383,7 +388,8 @@ class CudaGraphManager {
   static void group_output_copies(Graph& graph) {
     std::vector<size_t> candidates;
     for (size_t i = 0; i < graph.static_outputs.size(); ++i) {
-      auto layout = layout_of(graph.static_outputs[i]);
+      const auto& layout =
+          graph.output_layouts.emplace_back(layout_of(graph.static_outputs[i]));
       bool fuse = storage_of(layout) == Storage::kDense &&
           fusable(layout.dtype, storage_extent(layout));
       (fuse ? candidates : graph.separate_outputs).push_back(i);
@@ -402,7 +408,7 @@ class CudaGraphManager {
       destinations.clear();
       sources.clear();
       for (size_t i : group) {
-        auto layout = layout_of(graph.static_outputs[i]);
+        const auto& layout = graph.output_layouts[i];
         AtenTensorHandle clone = nullptr;
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
             layout.dim,
