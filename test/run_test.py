@@ -125,10 +125,12 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-# The periodic config hosts slow-gated tests (test.sh sets
-# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+# The periodic configs host slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for them), so they get slow's per-file timeout budget.
 IS_SLOW = (
-    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+    "slow" in TEST_CONFIG
+    or "slow" in BUILD_ENVIRONMENT
+    or TEST_CONFIG in ("periodic", "periodic_daily")
 )
 IS_S390X = platform.machine() == "s390x"
 
@@ -2330,7 +2332,10 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = {
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
+    }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
