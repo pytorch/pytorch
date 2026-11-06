@@ -402,7 +402,6 @@ def _disable_current_modes():
         _len_torch_dispatch_stack_pre_dispatch,
         _pop_mode_from_pre_dispatch,
     )
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
     from torch._subclasses.functional_tensor import FunctionalTensorMode
     from torch._subclasses.schema_check_mode import SchemaCheckMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
@@ -445,16 +444,20 @@ def _disable_current_modes():
             )
 
     # Manually disable proxy and fake modes, if any are active
+    cpp_fake_mode = None
     try:
         # A C++ FakeTensorMode is not on the mode stack, but with the Python
         # modes popped, the FAKE slot reports it.
-        with unset_fake_temporarily():
-            yield old_pre_dispatch_modes + old_modes
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        cpp_fake_mode = torch._C._unset_dispatch_mode(fake_key)
+        yield old_pre_dispatch_modes + old_modes
     finally:
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):
             _push_mode(mode)
+        if cpp_fake_mode is not None:
+            torch._C._set_dispatch_mode(cpp_fake_mode)
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
