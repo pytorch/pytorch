@@ -7,12 +7,10 @@ C10_DEFINE_REGISTRY(PyInterpreterHooksRegistry, PyInterpreterHooksInterface)
 
 const PyInterpreterHooksInterface& getPyInterpreterHooks() {
   auto create_impl = [] {
-#if !defined C10_MOBILE
     auto hooks = PyInterpreterHooksRegistry()->Create("PyInterpreterHooks");
     if (hooks) {
       return hooks;
     }
-#endif
     // Return stub implementation that will throw errors when methods are called
     return std::make_unique<PyInterpreterHooksInterface>();
   };
