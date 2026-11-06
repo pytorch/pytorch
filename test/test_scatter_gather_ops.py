@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
     dtypes,
@@ -415,6 +416,43 @@ class TestScatterGatherDevice(TestCase):
                 self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                         is_scalar=False, reduction=None)
 
+    @dtypes(torch.float32, torch.bfloat16, torch.int8)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("rows,row_bytes", [(64, 240), (64, 256), (64, 272), (16384, 256), (8, 65536)])
+    def test_scatter_copy_slices(self, device, dtype, index_dtype, rows, row_bytes):
+        width = row_bytes // dtype.itemsize
+        src = make_tensor((rows, 2, width // 2), device=device, dtype=dtype)
+        dst = torch.zeros((2 * rows, 2, width // 2), device=device, dtype=dtype)
+        index = torch.randperm(2 * rows, device=device, dtype=index_dtype)[:rows]
+        expected = dst.cpu().index_copy_(0, index.cpu().long(), src.cpu())
+        dst.scatter_(0, index[:, None, None].expand_as(src), src)
+        self.assertEqual(dst.cpu(), expected, atol=0, rtol=0)
+
+    @parametrize("op", ["scatter", "index_copy"])
+    def test_copy_misaligned_out(self, device, op):
+        dst = torch.zeros((64, 128), device=device)
+        src = torch.ones((32, 128), device=device)
+        index = torch.arange(32, device=device)
+        expected = dst.cpu().index_copy_(0, index.cpu(), src.cpu())
+        out = torch.empty(dst.numel() + 1, device=device)[1:].view_as(dst)
+        if op == "scatter":
+            index = index[:, None].expand_as(src)
+        result = getattr(torch, op)(dst, 0, index, src, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @serialTest()
+    @largeTensorTest("5GB")
+    def test_scatter_copy_large_slice(self, device):
+        # The last valid vector fits int32, but the final loop increment does not.
+        width = 2**29
+        src = torch.ones((1, width), device=device).expand(2, width)
+        dst = torch.zeros((1, width), device=device)
+        index = torch.zeros((2, 1), device=device, dtype=torch.int64).expand_as(src)
+        dst.scatter_(0, index, src)
+        self.assertEqual(dst[0, [0, width // 2, width - 1]], torch.ones(3, device=device))
+
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
@@ -707,6 +745,84 @@ class TestScatterGatherDevice(TestCase):
                 if (include_self):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "op",
+        [
+            "scatter_add",
+            "scatter_reduce_sum",
+            "scatter_reduce_mean",
+            "scatter_scalar_add",
+            "index_add",
+            "index_add_many",
+            "index_reduce_mean",
+            "put_accumulate",
+        ],
+    )
+    def test_atomic_add_preserves_neighbours(self, device, dtype, op):
+        # Half-precision atomic adds may be packed with the other half of the
+        # 4-byte word holding the target, inside or outside self. The packed
+        # lane must leave that slot unchanged; -0.0 would flip under +0.0.
+        # See https://github.com/pytorch/pytorch/issues/202905
+        def view_5x5(b):
+            return b[:25].view(5, 5)
+
+        cases = [
+            (view_5x5, 1, 4),
+            (view_5x5, 0, 4),
+            (lambda b: view_5x5(b).t(), 1, 4),
+            (lambda b: b[1:26].view(5, 5), 1, 0),
+            (lambda b: b[:30].view(5, 6)[:, :5], 1, 4),
+            (lambda b: b[:10:2], 0, 1),
+            (lambda b: b[1:11:2], 0, 1),
+        ]
+
+        # Each case leaves the targeted slice at 1 and all other bits unchanged.
+        def apply(x, dim, i, idx, src):
+            if op == "scatter_add":
+                x.scatter_add_(dim, idx, src)
+            elif op == "scatter_reduce_sum":
+                x.scatter_reduce_(dim, idx, src, "sum")
+            elif op == "scatter_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.scatter_reduce_(dim, idx, src * 2, "mean")
+            elif op == "scatter_scalar_add":
+                x.scatter_(dim, idx, 1.0, reduce="add")
+            elif op == "index_add":
+                x.index_add_(dim, idx.flatten()[:1], src)
+            elif op == "index_add_many":
+                # More than 16 indices selects the large-index kernel, and
+                # alpha != 1 avoids delegating to scatter_add_.
+                n = 32
+                many = idx.flatten()[:1].repeat(n)
+                x.index_add_(dim, many, torch.cat([src] * n, dim) / 16, alpha=0.5)
+            elif op == "index_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.index_reduce_(dim, idx.flatten()[:1], src * 2, "mean")
+            elif op == "put_accumulate":
+                flat_idx = torch.arange(x.numel(), device=device).view(x.shape)
+                x.put_(flat_idx.select(dim, i), src, accumulate=True)
+            else:
+                raise AssertionError(f"unknown op {op}")
+
+        for make_self, dim, i in cases:
+            base = torch.full((32,), -0.0, device=device, dtype=dtype)
+            x = make_self(base)
+            shape = list(x.shape)
+            shape[dim] = 1
+            idx = torch.full(shape, i, device=device)
+            src = torch.ones(shape, device=device, dtype=dtype)
+            apply(x, dim, i, idx, src)
+
+            expected = torch.full((32,), -0.0, device=device, dtype=dtype)
+            make_self(expected).select(dim, i).fill_(1)
+            self.assertEqual(
+                base.view(torch.int16),
+                expected.view(torch.int16),
+                msg=f"dim={dim}, index={i}, self strides {x.stride()}, offset {x.storage_offset()}",
+            )
 
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):

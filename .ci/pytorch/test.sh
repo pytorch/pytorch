@@ -261,7 +261,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
-  # devices on expensive gpu machines
+  # devices on expensive gpu machines. The nogpu_NO_AVX2 job brings back
+  # inductor's RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
@@ -402,6 +403,11 @@ fi
 
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
+  # A CUDA build sets ONLY_FOR=cuda, which turns off inductor's RUN_CPU test
+  # classes; bring them back here, the only CI config that runs them without a
+  # vector ISA. nogpu_AVX512 deliberately leaves them off to save test time:
+  # pull.yml's CPU build already runs them on the same AVX-512 runners.
+  export PYTORCH_TEST_INDUCTOR_RUN_CPU=1
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx512
   # valgrind cannot decode AVX-512 instructions
@@ -657,7 +663,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLOneSidedOpHandleTypeTest or NCCLSymmetricMemoryRestartTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -722,7 +728,10 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  rm -rf "${sycl_tla_dir}" && git clone --depth 1 --single-branch -b v0.8 --quiet https://github.com/intel/sycl-tla.git "${sycl_tla_dir}"
+  # sycl-tla pin is the v0.8 tag commit
+  rm -rf "${sycl_tla_dir}" && git init -q "${sycl_tla_dir}"
+  git -C "${sycl_tla_dir}" fetch -q --depth 1 https://github.com/intel/sycl-tla.git "$(get_pinned_commit sycl-tla)"
+  git -C "${sycl_tla_dir}" checkout -q FETCH_HEAD
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
@@ -849,6 +858,29 @@ test_inductor_core() {
   assert_git_not_dirty
 }
 
+# inductor_avx2 runs a subset of the inductor CPU tests on x86 AVX2 (Inductor and
+# ATen generate different code per ISA): the files whose CPU classes would
+# otherwise get AVX2 only from GPU jobs, without slow tests. Fail unless both
+# ATen's CPU capability and Inductor's vector ISA are AVX2, so the job can't
+# silently run on AVX-512/AMX hardware or without vectorized codegen. cd test,
+# because from the repo root the source torch/ dir shadows the installed wheel.
+assert_avx2_host() {
+  local isa
+  isa=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; from torch._inductor import cpu_vec_isa; print(torch.backends.cpu.get_cpu_capability(), cpu_vec_isa.pick_vec_isa())")
+  if [[ "$isa" != "AVX2 avx2" ]]; then
+    echo "inductor_avx2 needs ATen and Inductor to both pick AVX2, but they picked: $isa"
+    exit 1
+  fi
+}
+
+test_inductor_avx2_shard() {
+  # This job is itself periodic, so also run @periodic tests on AVX2.
+  PYTORCH_TEST_WITH_PERIODIC=1 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_cpu_select_algorithm inductor/test_torchinductor_dynamic_shapes inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_cpu_repro inductor/test_aot_inductor_arrayref inductor/test_fused_attention \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+}
+
 test_inductor_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -884,9 +916,11 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  # test_aoti_inference is not run: it loads libaoti_custom_class.so and its model
-  # and data files from its build directory, which the build artifacts don't include.
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile &&
+    # CUDA graph capture must fail cleanly under the async allocator backend.
+    /usr/bin/env "${TEST_ENVS[@]}" PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync \
+      "${BUILD_BIN_DIR}/test_shim" --gtest_filter='*CudaMallocAsync*' \
+      --gtest_output=xml:test/test-reports/cpp/test_shim_cuda_malloc_async.xml
 }
 
 test_inductor_aoti_fallback_shard() {
@@ -956,20 +990,13 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune \
               inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
     --include test_torch \
     -k 'take' \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
-
-  # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
-  # Will drop this after AOTInductor also switches to lazy Triton compilation.
-  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 
@@ -1332,8 +1359,10 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main \
-    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  # better-benchmark pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  git -C "${benchmark_dir}" init -q
+  git -C "${benchmark_dir}" fetch -q --depth 1 https://github.com/eellison/better-benchmark.git "$(get_pinned_commit better-benchmark)"
+  git -C "${benchmark_dir}" checkout -q FETCH_HEAD
   pushd "${benchmark_dir}"
 
   local gpu_indices
@@ -1841,11 +1870,7 @@ test_libtorch_profiler() {
   # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
-  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
-    # Kineto's xpu tests compile SYCL device code through an ExternalProject,
-    # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
-    echo "Skipping Kineto C++ tests on XPU"
-  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+  if [[ "${TEST_CONFIG}" == *nogpu* ]]; then
     # CUDA builds link Kineto's tests against CUPTI, which segfaults without
     # a driver present rather than letting the tests skip.
     echo "Skipping Kineto C++ tests on nogpu"
@@ -1854,9 +1879,13 @@ test_libtorch_profiler() {
     local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
     local kineto_tests=()
     local kineto_test
+    local kineto_name
     for kineto_test in "${kineto_bin_dir}"/*; do
-      [[ -x "${kineto_test}" ]] || continue
-      kineto_tests+=("cpp/$(basename "${kineto_test}")")
+      kineto_name="${kineto_test##*/}"
+      # run_test.py leaves __pycache__ in this directory, and the xpu tests'
+      # SYCL kernel library sits next to them; shared libraries are executable.
+      [[ -f "${kineto_test}" && -x "${kineto_test}" && "${kineto_name}" != *.so* ]] || continue
+      kineto_tests+=("cpp/${kineto_name}")
     done
     if [[ ${#kineto_tests[@]} -eq 0 ]]; then
       echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
@@ -1985,6 +2014,7 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
+    python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
 }
 
@@ -1993,9 +2023,7 @@ test_distributed_single_gpu() {
   # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
   # the `multigpu` marker in test/conftest.py). Sharded with the rest of the
   # `default` config's Python tests.
-  install_torchcomms
   install_spmd_types
-  install_nccl4py
   test_distributed not-multigpu
 }
 
@@ -2103,18 +2131,14 @@ test_libtorch_agnostic_targetting() {
     popd
 
     # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
+    create_venv_over_image venv_pytorch_2_9
     # shellcheck disable=SC1091
     . venv_pytorch_2_9/bin/activate
 
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
+    # Clear PYTHONPATH so it can't put the development PyTorch ahead of the venv's
+    echo "Clearing PYTHONPATH..."
     unset PYTHONPATH
-
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
+    python -m pip --version
 
     echo "Installing PyTorch 2.9..."
 
@@ -2133,7 +2157,7 @@ test_libtorch_agnostic_targetting() {
         echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
     fi
 
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
+    if python -m pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
         echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
     else
         echo "  FAILED to install PyTorch 2.9.0 from release channel"
@@ -2143,17 +2167,14 @@ test_libtorch_agnostic_targetting() {
         return 1
     fi
 
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
+    assert_venv_torch
+    INSTALLED_VERSION=$(cd / && python -c "import torch; print(torch.__version__)")
     echo "  Installed version: $INSTALLED_VERSION"
-
-    # Install test dependencies
-    echo "Installing test dependencies..."
-    pip install expecttest numpy unittest-xml-reporting
 
     # Install the pre-built wheel
     echo ""
     echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
+    python -m pip install "$WHEEL_FILE"
     echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
 
     # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
@@ -2200,48 +2221,6 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
-build_xla() {
-  # xla test needs pytorch headers in torch/include
-  pushd ..
-  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
-  popd
-
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  XLA_DIR=xla
-  USE_CACHE=1
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "xla/.circleci/common.sh"
-
-  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
-  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
-  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
-
-  apply_patches
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
-  assert_git_not_dirty
-}
-
-test_xla() {
-  # xla test needs sccache setup.
-  # shellcheck source=./common-build.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
-  # Set LD_LIBRARY_PATH for C++ tests
-  export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
-  assert_git_not_dirty
-}
 
 function check_public_api_test_fails {
     test_name=$1
@@ -2367,7 +2346,7 @@ EOF
 
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  python -m venv venv
+  create_venv_over_image venv
   # shellcheck disable=SC1091
   . venv/bin/activate
 
@@ -2375,7 +2354,7 @@ EOF
   git reset --hard "${SHA_TO_COMPARE}"
   git submodule sync && git submodule update --init --recursive
   echo "::group::Installing Torch From Base Commit"
-  pip3 install -r requirements.txt
+  python -m pip install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   python -m build --wheel --no-isolation --outdir "base_dist"
@@ -2383,7 +2362,8 @@ EOF
   echo "::endgroup::"
 
   pushd test/forward_backward_compatibility
-  pip show torch
+  assert_venv_torch
+  python -m pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
@@ -2480,7 +2460,6 @@ test_executorch() {
 
 test_torchtitan() {
   install_torchao
-  install_torchcomms
   # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
   # from the pinned commit rather than PyPI so it links the CI-built torch.
   install_torchvision
@@ -2498,7 +2477,7 @@ test_torchtitan() {
   # Neither helion nor torchtitan should pull their own copies of these from
   # PyPI, that would silently run the tests against the wrong PyTorch
   local ci_built_versions
-  ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
+  ci_built_versions=$(get_pkg_versions torch torchao)
 
   pip_install helion
 
@@ -2506,7 +2485,7 @@ test_torchtitan() {
   pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
-  installed_versions=$(get_pkg_versions torch torchao torchcomms)
+  installed_versions=$(get_pkg_versions torch torchao)
   if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
     echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
     echo "Expected:"
@@ -2606,7 +2585,8 @@ test_attention_microbenchmark() {
 
   # Install attention-gym dependency
   echo "Installing attention-gym..."
-  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  # attention-gym pin is a main commit (untagged); bump by hand, its consumer is schedule-only
+  python -m pip install "git+https://github.com/meta-pytorch/attention-gym.git@$(get_pinned_commit attention-gym)"
   pip show triton
 
   cd "${TEST_DIR}"/benchmarks/transformer
@@ -2643,15 +2623,6 @@ elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
   test_libtorch_agnostic_targetting
-elif [[ "${TEST_CONFIG}" == *xla* ]]; then
-  install_torchvision
-  build_xla
-  test_xla
-elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
-    (cd .ci/lumen_cli && python -m pip install -e .)
-
-    python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
   test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
@@ -2664,13 +2635,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
-  install_torchcomms
   install_spmd_types
   test_distributed_4gpu
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchcomms
   install_spmd_types
-  install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
   # off to the `default` config's 1-GPU runner (see below), so this multi-GPU box
   # only runs the process-spawning ones. Elsewhere (e.g. CPU pull) there is no
@@ -2727,7 +2695,6 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2795,6 +2762,12 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
     collect_tlparse_output
   fi
+elif [[ "${TEST_CONFIG}" == inductor_cpp_wrapper_cpu ]]; then
+  # All of CPUReproTests under cpp_wrapper. The default CPU jobs run only the
+  # curated subset in test_cpu_cpp_wrapper.
+  setup_torch_trace
+  TORCHINDUCTOR_CPP_WRAPPER=1 python test/run_test.py --include inductor/test_cpu_repro --verbose
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   setup_torch_trace
@@ -2818,6 +2791,12 @@ elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
+  collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == inductor_avx2 ]]; then
+  assert_avx2_host
+  install_torchvision
+  setup_torch_trace
+  test_inductor_avx2_shard "${SHARD_NUMBER}"
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
@@ -2894,8 +2873,6 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
-  install_torchcomms
-  install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem

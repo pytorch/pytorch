@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
@@ -429,6 +429,8 @@ class TestReductionsDevice(TestCase):
         t = make_tensor((32, 2 ** 16), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
+    # Serial: the host-memory guard doesn't account for concurrent xdist workers.
+    @serialTest()
     @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
@@ -1408,7 +1410,9 @@ class TestReductionsDevice(TestCase):
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            # Dynamo would trace the reference sum over each of up to 200000
+            # Python floats, which takes ~17 min under dynamo_wrapped.
+            self.assertEqual(tensor.sum(), torch._dynamo.disable(sum)(pylist))
 
         if dtype != torch.bool:
             check_sum_all(torch.tensor([1, 2, 3, 4, 5], dtype=dtype, device=device))
@@ -3403,7 +3407,6 @@ class TestReductionsDevice(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @dtypes(torch.float32, torch.float64)
-    @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
     def test_histc_out_dtype(self, device, dtype):
         x = torch.randn(8, dtype=dtype, device=device)
         # Mismatched out dtype should raise
