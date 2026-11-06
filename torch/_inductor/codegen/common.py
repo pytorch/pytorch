@@ -1122,15 +1122,17 @@ class OpDecompositions:
         return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
-    def _chbevl(x: OpVarT, coefficients: tuple[float, ...]) -> OpsValue:
-        b0 = ops.constant(coefficients[0], torch.float32)
-        b1 = b2 = ops.constant(0.0, torch.float32)
+    def _chbevl(
+        x: OpVarT, coefficients: tuple[float, ...], dtype: torch.dtype = torch.float32
+    ) -> OpsValue:
+        b0 = ops.constant(coefficients[0], dtype)
+        b1 = b2 = ops.constant(0.0, dtype)
         for coefficient in coefficients[1:]:
             b2, b1 = b1, b0
             b0 = ops.fma(x, b1, ops.neg(b2))
-            b0 = ops.add(b0, ops.constant(coefficient, torch.float32))
+            b0 = ops.add(b0, ops.constant(coefficient, dtype))
         return ops.mul(
-            ops.constant(0.5, torch.float32),
+            ops.constant(0.5, dtype),
             ops.sub(b0, b2),
         )
 
@@ -1210,13 +1212,15 @@ class OpDecompositions:
         return ops.where(ops.isinf(abs_x), ops.sub(x, x), result)
 
     @staticmethod
-    def _strict_i1(x: OpVarT) -> OpsValue:
-        return OpDecompositions._strict_i1_impl(x, modified_bessel=False)
+    def _strict_i1(x: OpVarT, dtype: torch.dtype = torch.float32) -> OpsValue:
+        return OpDecompositions._strict_i1_impl(x, modified_bessel=False, dtype=dtype)
 
-    # The CUDA jiterator uses these double-derived coefficients for float32.
+    # The CUDA jiterator uses these coefficients for float32 and float64.
     # Its i1 variants differ in factor ordering and the NaN sign at -inf.
     @staticmethod
-    def _strict_i1_impl(x: OpVarT, modified_bessel: bool) -> OpsValue:
+    def _strict_i1_impl(
+        x: OpVarT, modified_bessel: bool, dtype: torch.dtype = torch.float32
+    ) -> OpsValue:
         a = (
             2.77791411276104639959e-18,
             -2.11142121435816608115e-17,
@@ -1276,26 +1280,27 @@ class OpDecompositions:
             7.78576235018280120474e-1,
         )
         abs_x = ops.abs(x)
-        two = ops.constant(2.0, torch.float32)
+        two = ops.constant(2.0, dtype)
         small_z = ops.sub(ops.truediv(abs_x, two), two)
-        chbevl = OpDecompositions._chbevl(small_z, a)
+        chbevl = OpDecompositions._chbevl(small_z, a, dtype)
         if modified_bessel:
             small = ops.mul(ops.mul(chbevl, abs_x), ops.exp(abs_x))
         else:
             small = ops.mul(ops.mul(ops.exp(abs_x), abs_x), chbevl)
-        large_z = ops.sub(ops.truediv(ops.constant(32.0, torch.float32), abs_x), two)
+        large_z = ops.sub(ops.truediv(ops.constant(32.0, dtype), abs_x), two)
         large = ops.truediv(
-            ops.mul(ops.exp(abs_x), OpDecompositions._chbevl(large_z, b)),
+            ops.mul(ops.exp(abs_x), OpDecompositions._chbevl(large_z, b, dtype)),
             ops.sqrt(abs_x),
         )
-        magnitude = ops.where(
-            ops.le(abs_x, ops.constant(8.0, torch.float32)), small, large
-        )
+        magnitude = ops.where(ops.le(abs_x, ops.constant(8.0, dtype)), small, large)
         result = ops.where(
-            ops.lt(x, ops.constant(0.0, torch.float32)),
+            ops.lt(x, ops.constant(0.0, dtype)),
             ops.neg(magnitude),
             magnitude,
         )
+        if dtype == torch.float64:
+            # ATen's double Cephes expression also supplies its infinity NaNs.
+            return result
         nan = ops.sub(x, x)
         infinity = nan if modified_bessel else ops.copysign(nan, x)
         return ops.where(ops.isinf(abs_x), infinity, result)

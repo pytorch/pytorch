@@ -2704,10 +2704,14 @@ class TritonKernelOverrides(TritonOverrides):
             torch.float16,
             torch.bfloat16,
             torch.float32,
+            torch.float64,
         ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i1(ops.to_dtype(x, torch.float32)).value
+            dtype = (
+                torch.float64 if triton_arg_dtype(x) == torch.float64 else torch.float32
+            )
+            return OpDecompositions._strict_i1(ops.to_dtype(x, dtype), dtype).value
         return _triton_cyl_bessel_i(1, x)
 
     @staticmethod
