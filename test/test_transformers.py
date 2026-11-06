@@ -7285,14 +7285,10 @@ class TestSDPAAccelerator(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, max_seq_len_q, max_seq_len_kv, query_padding_mask, key_padding_mask, causal=is_causal)
             dropout_mask = softmax_mask >= 0
-            nt_stack = []
-            for tensor_component in range(batch_size):
-                batch_stack = []
-                for head in range(n_heads):
-                    batch_stack.append(dropout_mask[tensor_component, head,
-                                                    0:seq_lens_q[tensor_component],
-                                                    0:seq_lens_kv[tensor_component]].unsqueeze(0))
-                nt_stack.append(torch.cat(batch_stack))
+            nt_stack = [
+                dropout_mask[batch, :, :seq_lens_q[batch], :seq_lens_kv[batch]]
+                for batch in range(batch_size)
+            ]
             nested_dropout_mask = torch.nested.nested_tensor(nt_stack)
             # High Precision Math Reference
             with tf32_off():
