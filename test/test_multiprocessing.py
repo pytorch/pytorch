@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    set_warn_always_context,
     slowTest,
     subtest,
     TEST_WITH_ASAN,
@@ -106,11 +107,11 @@ def _test_cuda_ipc_collect_during_export():
     try:
         # Exhaust the first counter file and the IPC event allowance.
         for i in range(counter_file_size):
-            handles.append(tensors[i].untyped_storage()._share_cuda_())
+            handles.append(tensors[i].untyped_storage()._share_device_())
         torch._C._activate_gpu_trace()
         gpu_trace.register_callback_for_stream_synchronization(collect)
         # Collect during stream synchronization for the first slot in a new file.
-        handles.append(tensors[-1].untyped_storage()._share_cuda_())
+        handles.append(tensors[-1].untyped_storage()._share_device_())
         test_case.assertEqual(collections, 1)
         test_case.assertEqual(handles[0][5], 0)
         test_case.assertEqual(handles[-2][5], counter_file_size - 1)
@@ -120,7 +121,7 @@ def _test_cuda_ipc_collect_during_export():
         test_case.assertNotEqual(handles[-1][4], handles[0][4])
     finally:
         for handle in handles:
-            torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+            torch.UntypedStorage._release_ipc_counter_device(handle[4], handle[5])
         tensors.clear()
         torch.cuda.ipc_collect()
 
@@ -179,7 +180,7 @@ def send_tensor_with_untyped_storage(queue, event, expandable, peer):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = storage._share_device_()
         specs.append(
             {
                 "tensor_cls": type(tensor),
@@ -907,6 +908,16 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         p.join(5)
         self.assertEqual(p.exitcode, 0)
         del t_received
+
+    def test_cuda_ipc_deprecated_aliases(self):
+        storage = torch.ones(4, device="cuda").untyped_storage()
+        with set_warn_always_context(True):
+            with self.assertWarnsRegex(UserWarning, "_share_cuda_ is deprecated"):
+                handle = storage._share_cuda_()
+            with self.assertWarnsRegex(
+                UserWarning, "_release_ipc_counter_cuda is deprecated"
+            ):
+                torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
 
     def test_cuda_ipc_deadlock(self):
         ctx = mp.get_context("spawn")
