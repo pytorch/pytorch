@@ -249,7 +249,15 @@ class AbstractWindowTest:
         post = []
         pg.register_pre_hook(
             0,
-            lambda args: pre.append((args.name, args.op_id, args.root, args.async_op)),
+            lambda args: pre.append(
+                (
+                    args.name,
+                    args.op_id,
+                    len(args.input_tensors) + len(args.output_tensors),
+                    args.root,
+                    args.async_op,
+                )
+            ),
         )
         pg.register_post_hook(0, post.append)
         try:
@@ -259,9 +267,9 @@ class AbstractWindowTest:
             pg.unregister_post_hook(0)
 
         self.assertEqual(len(pre), 1)
-        name, op_id, root, async_op = pre[0]
+        name, op_id, num_tensors, root, async_op = pre[0]
         self.assertEqual(name, HookOpName.NEW_WINDOW)
-        self.assertEqual((root, async_op), (-1, False))
+        self.assertEqual((num_tensors, root, async_op), (0, -1, False))
         self.assertEqual(len(post), 1)
         args = post[0]
         self.assertEqual((args.name, args.op_id), (HookOpName.NEW_WINDOW, op_id))
