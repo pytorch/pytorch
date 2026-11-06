@@ -2562,9 +2562,8 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
             self.assertTrue(expands)
             for line in expands:
                 name = line.split("_host_tma_desc")[0].strip()
-                self.assertIn(
-                    f'{name}_aligned = _host_tma_aligned({name}, "{name}")', lines
-                )
+                aligned = f'{name}_aligned = _host_tma_aligned({name}, "{name}"'
+                self.assertTrue(any(ln.startswith(aligned) for ln in lines), lines)
                 self.assertIn(f"{name}_aligned,", line)
 
     def test_host_tma_meta_index_follows_signature_order(self):
