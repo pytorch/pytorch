@@ -1801,16 +1801,38 @@ class TestForeachDevice(TestCase):
 
     @onlyAccelerator
     @skipXPU
-    @dtypes(torch.uint16, torch.uint32, torch.uint64)
-    def test_foreach_copy_barebones_unsigned(self, device, dtype):
+    @dtypes(torch.uint16, torch.uint32, torch.uint64, torch.float8_e8m0fnu)
+    def test_foreach_copy_unfused_dtypes(self, device, dtype):
         # The fused kernel doesn't instantiate these, so they take the slow path.
-        dtype_pairs = ((dtype, dtype), (dtype, torch.int64), (torch.float32, dtype))
+        other = torch.float32 if dtype == torch.float8_e8m0fnu else torch.int64
+        dtype_pairs = ((dtype, dtype), (dtype, other), (torch.float32, dtype))
         for dst_dtype, src_dtype in dtype_pairs:
             src = [torch.arange(n, device=device).to(src_dtype) for n in (3, 5)]
             dst = [torch.zeros(n, device=device, dtype=dst_dtype) for n in (3, 5)]
             ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
-            torch._foreach_copy_(dst, src)
+            ForeachFuncWrapper(torch.foreach.copy_)(
+                (dst, src), device=device, expect_fastpath=False
+            )
             self.assertEqual(dst, ref)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2)
+    def test_foreach_copy_preserves_nan_bits(self, device, dtype):
+        # Same-dtype lists, which the fused kernel copies, keep NaN signs and payloads.
+        nans = {
+            torch.float16: [-1, 0x7C01, 0x7D00],
+            torch.bfloat16: [-1, 0x7F81, 0x7FC1],
+            torch.float8_e5m2: [-3, 0x7D, 0x7E],
+        }
+        int_dtype = torch.int8 if dtype.itemsize == 1 else torch.int16
+        bits = torch.tensor(nans[dtype] + [1], dtype=int_dtype, device=device)
+        src = [bits.view(dtype), bits.flip(0).view(dtype)]
+        dst = [torch.empty_like(s) for s in src]
+        ForeachFuncWrapper(torch.foreach.copy_)(
+            (dst, src), device=device, expect_fastpath=True
+        )
+        self.assertEqual(
+            [d.view(int_dtype) for d in dst], [s.view(int_dtype) for s in src]
+        )
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
