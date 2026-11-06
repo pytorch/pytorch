@@ -441,6 +441,35 @@ class TestStandaloneInductor(TestCase):
         with config.patch({"cuda.arch": "90a"}):
             self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
 
+    def test_is_datacenter_blackwell_arch(self):
+        from torch._inductor.codegen.cuda import cuda_env
+
+        def clear_caches():
+            cuda_env.get_cuda_arch.cache_clear()
+            cuda_env.is_datacenter_blackwell_arch.cache_clear()
+
+        self.addCleanup(clear_caches)
+        cases = {
+            "90": False,
+            "100": True,
+            "103": True,
+            "110": True,
+            "120": False,
+            "121": False,
+        }
+        for arch, expected in cases.items():
+            clear_caches()
+            with (
+                self.subTest(arch=arch),
+                config.patch({"cuda.arch": arch}),
+                mock.patch("torch.version.hip", None),
+            ):
+                self.assertEqual(cuda_env.is_datacenter_blackwell_arch(), expected)
+
+        clear_caches()
+        with config.patch({"cuda.arch": "110"}), mock.patch("torch.version.hip", "7.0"):
+            self.assertFalse(cuda_env.is_datacenter_blackwell_arch())
+
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "8.0;8.6"})
     @mock.patch(
         "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",

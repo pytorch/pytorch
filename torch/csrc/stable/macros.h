@@ -90,10 +90,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 // is the single place that holds the per-platform lookup; the macros below are
 // platform agnostic.
 [[maybe_unused]] static void* lookup_stable_symbol(const char* name) {
-#if defined(C10_MOBILE)
-  (void)name;
-  return nullptr;
-#elif defined(_WIN32)
+#if defined(_WIN32)
   // Windows has no RTLD_DEFAULT equivalent, so resolve against the modules that
   // export the stable shims. Today these live in torch_cpu.dll and
   // torch_cuda.dll, so try each in turn. GetModuleHandleW does not take a
