@@ -54,6 +54,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -3060,6 +3061,23 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("meta"),
       py::arg("device"),
       py::arg("mode").none(false));
+
+  // The Python wrapper of a C++ fake's mode, or None for any other tensor,
+  // including a Python FakeTensor (maybe_get_fake_mode handles those) and a
+  // tensor with the Fake key but no mode (see _set_fake_device). Unlike
+  // maybe_get_fake_mode, it does not look inside functional, functorch or
+  // traceable wrapper tensors. If the wrapper has been collected,
+  // getCppFakeTensorModePyObj rebuilds it (see Note [C++ FakeTensorMode Python
+  // wrapper lifetime] in torch/csrc/FakeTensorMode.cpp), propagating any error
+  // raised while doing so.
+  // TODO: the rebuild always fails until CppFakeTensorMode is added.
+  py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
+    if (!t.defined() || !t.is_fake()) {
+      return py::none();
+    }
+    return torch::fake_tensor::getCppFakeTensorModePyObj(
+        t.unsafeGetTensorImpl()->fake_tensor_mode());
+  });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
