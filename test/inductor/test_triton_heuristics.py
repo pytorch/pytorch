@@ -8,6 +8,7 @@ import math
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
