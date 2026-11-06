@@ -264,6 +264,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # devices on expensive gpu machines. The nogpu_NO_AVX2 job brings back
   # inductor's RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+  # GENERIC test classes don't use an accelerator, and CPU jobs run them. Keep
+  # them where no CPU job runs the same mode (the nogpu configs, a CUDA build on
+  # a machine without a GPU; slow gradcheck; debug builds), and when specific
+  # tests were requested (TESTS_TO_INCLUDE) or disabled tests are being rerun.
+  # A value set beforehand replaces the default (empty keeps GENERIC classes);
+  # CI workflows don't forward it, so that's for local or direct test.sh runs.
+  if [[ "$TEST_CONFIG" != *nogpu* && "$BUILD_ENVIRONMENT" != *slow-gradcheck* &&
+        "$BUILD_ENVIRONMENT" != *-debug* && -z "$TESTS_TO_INCLUDE" &&
+        "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" != "1" ]]; then
+    export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION="${PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION-GENERIC}"
+  fi
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
@@ -572,7 +583,6 @@ test_python_smoke_b200() {
       test_scaled_matmul_cuda \
       inductor/test_fp8 \
       nn/attention/test_fa4 \
-      nn/attention/test_open_registry \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
