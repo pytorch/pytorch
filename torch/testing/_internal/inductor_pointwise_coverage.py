@@ -11,6 +11,8 @@ reruns. A matched row describes the executed comparisons, with kernel generation
 checked per test; it does not prove every signature used a generated kernel.
 Copies, representation views and evaluation dropout may match without a kernel;
 these comparisons have a separate matched_without_kernel status.
+Matching graphs with native fallback calls report matched_with_fallback, even
+when they also generate Triton kernels for copies or other operations.
 
 The combined forward/backward cases report comparison counts for ordinary and
 edge samples separately. A run missing either family is unverified. Routine
@@ -115,6 +117,7 @@ class CoverageRecord:
     compared: int = 0
     matched: int = 0
     generated_kernels: int = 0
+    generated_fallbacks: int = 0
     kernel_required: bool = True
     mismatches: Counter = field(default_factory=Counter)
     filters: Counter = field(default_factory=Counter)
@@ -133,6 +136,7 @@ class CoverageRecord:
             "compared": self.compared,
             "matched": self.matched,
             "generated_kernels": self.generated_kernels,
+            "generated_fallbacks": self.generated_fallbacks,
             "kernel_required": self.kernel_required,
             "mismatches": dict(self.mismatches),
             "filters": dict(self.filters),
@@ -186,9 +190,13 @@ def record_result(record, result, test):
                                 )
                             ):
                                 record.status = (
-                                    "matched"
-                                    if record.generated_kernels > 0
-                                    else "matched_without_kernel"
+                                    "matched_with_fallback"
+                                    if record.generated_fallbacks > 0
+                                    else (
+                                        "matched"
+                                        if record.generated_kernels > 0
+                                        else "matched_without_kernel"
+                                    )
                                 )
                             else:
                                 record.status = "unverified"
@@ -241,9 +249,10 @@ def summarize(directory):
         "known_mismatch": 2,
         "unverified": 3,
         "skipped": 4,
-        "matched": 5,
-        "matched_without_kernel": 5,
-        "not_run": 6,
+        "matched_with_fallback": 5,
+        "matched": 6,
+        "matched_without_kernel": 6,
+        "not_run": 7,
     }
     rows = []
     filters = Counter()
