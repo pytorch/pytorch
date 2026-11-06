@@ -31,6 +31,7 @@ from torch._decomp.decompositions import (
     hardswish_backward as decomp_hardswish_backward,
     logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
+    mv as decomp_mv,
     pw_cast_for_int_to_real,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -53,6 +54,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
+    addr as decomp_addr,
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
     sgn as decomp_sgn,
@@ -180,6 +182,8 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
     aten.mvlgamma,  # preserve eager rounding and reduction order
+    aten.mv.default,
+    aten.addr.default,
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -214,6 +218,24 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten.mv.default)
+def mv(self, vec):
+    if is_strict_cuda_triton(self.device) and (
+        self.is_floating_point() or self.is_complex()
+    ):
+        return NotImplemented
+    return decomp_mv(self, vec)
+
+
+@register_decomposition(aten.addr.default)
+def addr(self, vec1, vec2, *, beta=1, alpha=1):
+    if is_strict_cuda_triton(self.device) and (
+        self.is_complex() or vec1.is_complex() or vec2.is_complex()
+    ):
+        return NotImplemented
+    return decomp_addr(self, vec1, vec2, beta=beta, alpha=alpha)
 
 
 @register_decomposition(aten.adaptive_max_pool3d.default)
@@ -1308,11 +1330,16 @@ def add(
     if y.ndim == 0:
         y = y.reshape(1)
 
-    z = y
-    if alpha is not None:
-        z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
-
+    strict_complex = is_strict_cuda_triton(x.device)
+    if strict_complex:
+        # TensorIterator promotes both operands before complex alpha arithmetic.
+        x = x.to(complex_type)
+        y = y.to(complex_type)
+    z = y
+    if strict_complex or alpha is not None:
+        # CUDA multiplies by complex alpha even when it is one.
+        z = (1 if alpha is None else alpha) * y
     if _requires_fallback(x) or _requires_fallback(z):
         return NotImplemented
 
@@ -1335,9 +1362,14 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
-    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
-    x = x + 0
-    z = z + 0
+    # Resolve conjugated values before viewing their real storage.
+    if strict_complex:
+        # Cloning resolves conjugation without changing signed zeros.
+        x = x.clone()
+        z = z.clone()
+    else:
+        x = x + 0
+        z = z + 0
 
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))

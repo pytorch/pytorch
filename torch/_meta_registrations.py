@@ -96,6 +96,39 @@ def elementwise_meta(
     )
 
 
+@register_meta(aten.addr.default)
+def meta_addr(self, vec1, vec2, *, beta=1, alpha=1):
+    for vec, name in ((vec1, "vec1"), (vec2, "vec2")):
+        torch._check(
+            vec.ndim == 1,
+            lambda: f"addr: Expected 1-D argument {name}, but got {vec.ndim}-D",
+        )
+    shape = (vec1.shape[0], vec2.shape[0])
+    self = self.expand(shape)
+    _, dtype = elementwise_dtypes(
+        self, vec1, vec2, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    )
+    for scalar, name in ((beta, "beta"), (alpha, "alpha")):
+        torch._check(
+            not isinstance(scalar, bool) or dtype == torch.bool,
+            lambda: f"Boolean {name} only supported for Boolean results.",
+        )
+        torch._check(
+            utils.is_weakly_lesser_type(
+                type(scalar), int if dtype == torch.bool else utils.dtype_to_type(dtype)
+            ),
+            lambda: f"cannot safely convert {type(scalar)} to {dtype}",
+        )
+    args = _maybe_broadcast(self, vec1.reshape(shape[0], 1), vec2)
+    utils.check_same_device(*args, allow_cpu_scalar_tensors=False)
+    # Native addr's differently ranked inputs bypass TensorIterator's fast setup.
+    perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(
+        *args, allow_fast_path=False
+    )
+    strides = (1, shape[0]) if perm == [1, 0] else make_contiguous_strides_for(shape)
+    return self.new_empty_strided(shape, strides, dtype=dtype)
+
+
 def toRealValueType(dtype):
     from_complex = {
         torch.complex32: torch.half,

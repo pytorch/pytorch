@@ -1742,6 +1742,76 @@ class FxGraphHashDetails:
         # so cached code compiled under one default dtype is not valid under another.
         self.default_dtype = torch.get_default_dtype()
 
+        # Strict multiplication uses native schemas to distinguish input mutations
+        # from fresh functional results, even when their FX code is identical.
+        if gm is not None and config.strict_pointwise:
+            from .fx_utils import get_storage
+
+            def native_metadata(module):
+                nodes = list(module.graph.nodes)
+                values = [
+                    mutation[1]
+                    if isinstance(
+                        mutation := node.meta.get("original_aten_mutation"), tuple
+                    )
+                    else node.meta.get("val")
+                    for node in nodes
+                ]
+                storage_aliases: (
+                    dict[int, list[tuple[int, int | torch.SymInt]]] | None
+                ) = None
+                result = []
+                for node in nodes:
+                    mutation = node.meta.get("original_aten_mutation")
+                    destination = mutation[0] if isinstance(mutation, tuple) else None
+                    alias_metadata = None
+                    if isinstance(destination, torch.Tensor):
+                        if storage_aliases is None:
+                            storage_aliases = {}
+                            for i, value in enumerate(values):
+                                if isinstance(value, torch.Tensor):
+                                    storage_aliases.setdefault(
+                                        get_storage(value), []
+                                    ).append(
+                                        (
+                                            i,
+                                            value.storage_offset()
+                                            * value.element_size(),
+                                        )
+                                    )
+                        destination_offset = (
+                            destination.storage_offset() * destination.element_size()
+                        )
+                        aliases = tuple(
+                            (i, destination_offset - byte_offset)
+                            for i, byte_offset in storage_aliases.get(
+                                get_storage(destination), ()
+                            )
+                        )
+                        alias_metadata = (
+                            extract_tensor_metadata_for_cache_key(destination),
+                            aliases,
+                        )
+                    caller_alias = (
+                        mutation[2]
+                        if isinstance(mutation, tuple) and len(mutation) == 3
+                        else None
+                    )
+                    result.append(
+                        (
+                            str(node.meta.get("original_aten")),
+                            alias_metadata,
+                            caller_alias,
+                        )
+                    )
+                return tuple(result)
+
+            self.original_aten = tuple(
+                native_metadata(module)
+                for module in gm.modules()
+                if isinstance(module, torch.fx.GraphModule)
+            )
+
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
             torch.backends.cuda.matmul.fp32_precision,
