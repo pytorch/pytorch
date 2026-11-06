@@ -135,6 +135,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_guarding_hint,
     ShapeEnv,
 )
+from torch.fx.node import map_aggregate
 from torch.utils._config_module import _ImplicationConfigModule
 from torch.utils._device import _device_constructors
 from torch.utils._ordered_set import OrderedSet
@@ -1594,6 +1595,20 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
+        # GraphModule serialization spells all NaNs alike. Include the original
+        # constants so pickle can distinguish their signs and payloads.
+        self.nan_constants: list[float | complex] = []
+
+        def collect_nan(arg: Any) -> Any:
+            if isinstance(arg, (float, complex)) and arg != arg:
+                self.nan_constants.append(arg)
+            return arg
+
+        if gm is not None:
+            for module in gm.modules():
+                if isinstance(module, torch.fx.GraphModule):
+                    for node in module.graph.nodes:
+                        map_aggregate((node.args, node.kwargs), collect_nan)
         # Replace opaque references with hashable ordinals. What's important
         # is that if the same reference appears twice then it's the same hash
         # value for each.
