@@ -696,7 +696,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard_fn(module)
         fully_shard_fn(model)
         if unshard_async_op:
-            model._set_unshard_async_op(unshard_async_op)
+            model.set_unshard_in_current_stream(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
