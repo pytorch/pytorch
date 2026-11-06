@@ -349,9 +349,10 @@ TEST_F(CudaGraphManagerTest, ClonesOutputsWithTheirLayouts) {
     auto x = at::randn({4, 6}, at::kCUDA);
     CountForeachCopies counter;
     outs.push_back(run_with(manager, region, {x}, 8));
-    // One per dtype of the dense outputs. copy_ runs for the lone input, the
-    // two float8_e8m0fnu outputs (the kernel's fallback) and two clones.
-    EXPECT_EQ(foreach_copies, 3);
+    // One per dtype the kernel fuses (float and half). copy_ runs for the lone
+    // input and the clones of the two float8_e8m0fnu outputs, the gapped one
+    // and the overlapping one.
+    EXPECT_EQ(foreach_copies, 2);
     EXPECT_EQ(copies, 5);
     expected.push_back(compute(x));
   }
@@ -818,10 +819,10 @@ TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
     auto xs = make_inputs();
     CountForeachCopies counter;
     auto out = run_with(manager, region, xs, 1);
-    // The small float and float8_e8m0fnu inputs, of any layout. copy_ runs for
-    // the two float8_e8m0fnu inputs (the kernel's fallback) and the six inputs
-    // copied alone.
-    EXPECT_EQ(foreach_copies, 2);
+    // The small float inputs, of any layout. copy_ runs for the seven inputs
+    // copied alone (empty, large, alone in their dtype, or float8_e8m0fnu,
+    // which the kernel doesn't fuse) and the output's clone.
+    EXPECT_EQ(foreach_copies, 1);
     EXPECT_EQ(copies, 8);
     EXPECT_TRUE((*out)[0].equal(expected(xs)));
   }
@@ -879,7 +880,7 @@ TEST_F(CudaGraphManagerTest, ForgetsWarmupsPastLimit) {
   CudaGraphManager manager(0);
   Region region(affine);
   // Fill warm-up tracking with one-off shapes, then add one more.
-  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupKeys + 1; ++n) {
+  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupEntries + 1; ++n) {
     run(manager, region, at::randn({static_cast<int64_t>(n)}, at::kCUDA));
   }
   // The first shape was forgotten, so it warms up again before capture.
