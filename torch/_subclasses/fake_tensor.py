@@ -383,9 +383,7 @@ def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
     if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            return cast(Any, fake_mode).get_item_memo(x)
+        return torch._C._get_fake_item_memo(x)
     return None
 
 
@@ -393,9 +391,11 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            cast(Any, fake_mode).set_item_memo(x, memo)
+        # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
+        # change. No code currently fills in a SymFloat's hint later, so this
+        # can be decided now.
+        backed = isinstance(memo, SymFloat) and memo.node.hint is not None
+        torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
 
 # The SymInt memos of a fake (nonzero_memo, unique_memo,
@@ -423,10 +423,7 @@ def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
         return None
     _check_sym_memo_name(name)
-    fake_mode = maybe_get_fake_mode(x)
-    if fake_mode is None:
-        return None
-    return torch._C._get_fake_sym_memo(x, name, fake_mode.epoch)
+    return torch._C._get_fake_sym_memo(x, name)
 
 
 def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
@@ -434,10 +431,7 @@ def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
         setattr(x, name, value)
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         _check_sym_memo_name(name)
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is None:
-            return
-        torch._C._set_fake_sym_memo(x, name, value, fake_mode.epoch)
+        torch._C._set_fake_sym_memo(x, name, value)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
