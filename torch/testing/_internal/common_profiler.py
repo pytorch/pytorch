@@ -42,6 +42,15 @@ def forbid_profiler_capture():
         yield
 
 
+def get_profiler_activities(device_type):
+    activities = [ProfilerActivity.CPU]
+    if device_type not in ("cpu", "meta"):
+        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if device_activity and device_activity in supported_activities():
+            activities.append(device_activity)
+    return activities
+
+
 def initialize_kineto_with_cuda():
     if (
         kineto_available()

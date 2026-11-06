@@ -640,7 +640,6 @@
   "test/profiler/test_cpp_thread.py",
   "test/profiler/test_cuspy.py",
   "test/profiler/test_execution_trace.py",
-  "test/profiler/test_kineto.py",
   "test/profiler/test_memory_profiler.py",
   "test/profiler/test_profiler.py",
   "test/profiler/test_profiler_tree.py",
