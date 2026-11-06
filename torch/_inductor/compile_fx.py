@@ -1035,6 +1035,7 @@ def compile_fx_inner(
     compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
+    """Compile an AOT-produced FX graph into an OutputCode with Inductor."""
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -1051,6 +1052,9 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # Re-apply override_cudagraphs after torch.compile options, which may reset it.
+        if isinstance(kwargs["cudagraphs"], BoxedBool):
+            stack.enter_context(cudagraph_annotation_context(kwargs["cudagraphs"]))
         # When cpp_wrapper is enabled, ensure the required triton config
         # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
         # needed because lazy backward compilation may run after the
