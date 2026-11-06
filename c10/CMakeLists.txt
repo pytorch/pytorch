@@ -150,7 +150,8 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
-    if(BUILD_SHARED_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(BUILD_SHARED_LIBS AND LINUX AND NOT USE_SYSTEM_CPUINFO)
+      # libc10.so owns cpuinfo symbols, so forward only headers to avoid duplicate state.
       target_include_directories(c10 INTERFACE "$<BUILD_INTERFACE:$<TARGET_PROPERTY:cpuinfo,INTERFACE_INCLUDE_DIRECTORIES>>")
     else()
       target_link_libraries(c10 INTERFACE "$<BUILD_INTERFACE:cpuinfo>")

@@ -481,6 +481,26 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
         raise RuntimeError("Didn't find enough cxx11 symbols")
 
 
+def check_cpuinfo_symbols(install_root: Path) -> None:
+    from subprocess import check_output
+
+    lib_dir = install_root / "lib"
+
+    def nm(lib: Path, option: str) -> str:
+        return check_output(["nm", "-D", option, str(lib)], text=True)
+
+    libc10 = lib_dir / "libc10.so"
+    libtorch_cpu = lib_dir / "libtorch_cpu.so"
+    if " cpuinfo_initialize" not in nm(libc10, "--defined-only"):
+        raise RuntimeError("libc10.so does not define cpuinfo_initialize")
+    if " cpuinfo_initialize" not in nm(libtorch_cpu, "--undefined-only"):
+        raise RuntimeError("libtorch_cpu.so does not resolve cpuinfo through libc10.so")
+
+    for lib in lib_dir.glob("libtorch*.so"):
+        if " cpuinfo_" in nm(lib, "--defined-only"):
+            raise RuntimeError(f"{lib.name} defines duplicate cpuinfo symbols")
+
+
 def main() -> None:
     if "install_root" in os.environ:
         install_root = Path(os.getenv("install_root"))
@@ -493,6 +513,7 @@ def main() -> None:
     libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
     check_lib_symbols_for_abi_correctness(libtorch_cpu_path)
     check_lib_statically_linked_libstdc_cxx_abi_symbols(libtorch_cpu_path)
+    check_cpuinfo_symbols(install_root)
 
     # Check symbols when TORCH_STABLE_ONLY is defined
     check_stable_only_symbols(install_root)
