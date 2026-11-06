@@ -2025,12 +2025,7 @@ class FakeTensorMode(TorchDispatchMode):
         """
         device: torch.device | None = None
         raw_device = kwargs.get("device")
-        if isinstance(raw_device, str):
-            try:
-                device = torch.device(raw_device)
-            except RuntimeError:
-                pass
-        elif isinstance(raw_device, torch.device):
+        if isinstance(raw_device, torch.device):
             device = raw_device
         if device is not None and not self._is_device_available(device.type):
             return True
@@ -3117,7 +3112,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # The destination device can be unavailable even when this machine has
         # some other accelerator, in which case avoid_device_init is False.
-        if not avoiding_device_init and self._targets_unavailable_device(args, kwargs):
+        # Keep this separate from avoid_device_init: that flag is a machine-level
+        # proxy that does not model every backend (e.g. MPS), so only this value
+        # gates real execution below.
+        device_unavailable = self._targets_unavailable_device(args, kwargs)
+        if device_unavailable:
             avoiding_device_init = True
 
         # skip const prop for aten._to_copy if
@@ -3259,7 +3258,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         real = (
             run_real_op(self, func, args, kwargs)
-            if self.propagate_real_tensors and not avoiding_device_init
+            if self.propagate_real_tensors and not device_unavailable
             else None
         )
 
