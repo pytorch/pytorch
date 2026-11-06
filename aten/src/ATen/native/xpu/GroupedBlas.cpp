@@ -360,7 +360,9 @@ Tensor _grouped_mm_xpu(
 
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
-  const bool supported_cases = (a_is_2d && !b_is_2d) && !bias.has_value();
+
+  // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
+  const bool supported_cases = a_is_2d && !bias.has_value();
 
   bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ =
