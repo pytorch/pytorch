@@ -1040,6 +1040,14 @@ class TestSymbolicTracing(TestCase):
                 self.assertEqual(rx, ry)
         return traced_f
 
+    # The arg parser expands a scalar SymInt for an int[N] arg, but calling an OpOverload directly doesn't
+    def test_op_overload_scalar_symint_for_int_list(self):
+        def f(x, k):
+            return torch.ops.aten.max_pool2d_with_indices.default(x, k)
+
+        with self.assertRaisesRegex(RuntimeError, r"List\[int\].*SymInt"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2, 6, 6), 3)
+
 
     def test_debug_interpreter(self):
         from torch.library import _scoped_library
@@ -2127,8 +2135,6 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-
-    xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??

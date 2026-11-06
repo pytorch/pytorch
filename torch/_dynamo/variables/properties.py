@@ -115,12 +115,13 @@ class PropertyVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
         from ..polyfills import property_isabstractmethod
-        from .functions import UserFunctionVariable
+        from .builder import SourcelessBuilder
         from .lists import TupleVariable
 
         # Trace truth testing so user-defined __bool__ methods and their
         # exceptions are handled within the traced program.
-        return UserFunctionVariable(property_isabstractmethod).call_function(
+        fn = SourcelessBuilder.create_internal_user_function(property_isabstractmethod)
+        return fn.call_function(
             tx,
             [
                 TupleVariable(
@@ -145,6 +146,12 @@ class PropertyVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: property, source: "Source | None" = None
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         return "PropertyVariable()"
@@ -175,7 +182,7 @@ class PropertyVariable(VariableTracker):
         if source is not None:
             return VariableTracker.build(tx, descriptor, source, realize=True)
         if type(descriptor) is property:
-            return PropertyVariable(descriptor)
+            return PropertyVariable.create(descriptor)
         if inspect.getattr_static(type(descriptor), "__get__") is not property.__get__:
             unimplemented(
                 gb_type="Property subclass getter without a source",
@@ -245,16 +252,6 @@ class PropertyVariable(VariableTracker):
             explanation="Dynamo cannot trace reinitialization of an existing property.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
-
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def _raise_missing_accessor(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker, kind: str
