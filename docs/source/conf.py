@@ -627,7 +627,7 @@ coverage_ignore_functions = [
     # torch.multiprocessing.reductions
     "fd_id",
     "init_reductions",
-    "rebuild_device_tensor",
+    "rebuild_cuda_tensor",
     "rebuild_meta_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",

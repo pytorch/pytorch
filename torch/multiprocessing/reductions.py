@@ -155,7 +155,7 @@ def rebuild_meta_tensor(
     return t
 
 
-def rebuild_device_tensor(
+def _rebuild_device_tensor(
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -221,7 +221,7 @@ def rebuild_device_tensor(
 
 
 # Kept for BC only.
-rebuild_cuda_tensor = rebuild_device_tensor
+rebuild_cuda_tensor = _rebuild_device_tensor
 
 
 def reduce_tensor(tensor):
@@ -361,7 +361,7 @@ def reduce_tensor(tensor):
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
-            rebuild_device_tensor,
+            _rebuild_device_tensor,
             (
                 type(tensor),
                 tensor.size(),

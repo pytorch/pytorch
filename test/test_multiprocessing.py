@@ -1054,13 +1054,13 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
                     self.assertEqual(handle_type, 2)  # FABRIC_HANDLE
                 struct.pack_into("=i", wrong_handle, 26, 0)  # UNSPECIFIED
                 with self.assertRaisesRegex(RuntimeError, "Unsupported.*IPC"):
-                    mp.reductions.rebuild_device_tensor(
+                    mp.reductions._rebuild_device_tensor(
                         **dict(specs[0], storage_handle=bytes(wrong_handle))
                     )
             for dev in range(2 if peer else 1):
                 start = 3 * dev
                 tensors.extend(
-                    mp.reductions.rebuild_device_tensor(**dict(s, storage_device=dev))
+                    mp.reductions._rebuild_device_tensor(**dict(s, storage_device=dev))
                     for s in specs[start : start + 3]
                 )
                 self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
