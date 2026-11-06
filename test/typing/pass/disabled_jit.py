@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import TypeVar
-from typing_extensions import assert_never, assert_type, ParamSpec
+from typing import assert_never, assert_type, TypeVar
+from typing_extensions import ParamSpec
 
 import pytest
 
