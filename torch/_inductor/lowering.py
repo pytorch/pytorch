@@ -3766,6 +3766,14 @@ def constrain_to_fx_exact_strides(fx_node, *args, **kwargs):
     return constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs)
 
 
+# The mv decomposition retains native CUDA reduction order under strict numerics.
+make_fallback(
+    aten.mv.default,
+    layout_constraint=constrain_to_fx_exact_strides,
+    override_decomp=True,
+)
+
+
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
     make_fallback(
         _batch_norm_op,
