@@ -540,6 +540,8 @@ TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
 TEST_F(CudaGraphManagerTest, CapturesAnFnThatLeavesAnotherStreamCurrent) {
   CudaGraphManager manager(0, no_warmup());
   auto original = at::cuda::getCurrentCUDAStream();
+  // So a regression doesn't leave `side` current for later tests.
+  at::cuda::CUDAStreamGuard restore(original);
   auto side = at::cuda::getStreamFromPool();
   auto fn = [&](AtenTensorHandle* inputs,
                 AtenTensorHandle* outputs,

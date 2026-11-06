@@ -47,8 +47,10 @@ struct CudaGraphOptions {
 // failed capture's memory stays in the pool until reset(), or until the next
 // capture if no graph exists. Unlike torch.cuda.graph, a capture doesn't
 // empty the allocator's cache first, so it can run out of memory where an
-// eager call wouldn't. Under PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync,
-// which the shim's memory pools don't support, every capture fails.
+// eager call wouldn't. Under the cudaMallocAsync allocator backend
+// (backend:cudaMallocAsync in PYTORCH_ALLOC_CONF or PYTORCH_CUDA_ALLOC_CONF),
+// which the shim's memory pools don't support, every capture fails, so each
+// key's calls throw after warm-up; use max_graphs=0 there.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
