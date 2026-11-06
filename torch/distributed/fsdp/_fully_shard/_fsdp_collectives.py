@@ -582,17 +582,17 @@ def _default_all_gather_output_fn(
         rows = output.view(outer_size, -1)
         if not drops_padding:
             torch.cat(chunks.unbind(0), dim=1, out=rows)
-            continue
-        # torch.chunk gives full chunks, at most one short chunk, then empty ones,
-        # so each row is num_full whole chunks and then a tail of the short chunk
-        chunk_size = chunks.size(2)
-        num_full, tail = divmod(rows.size(1), chunk_size)
-        full_size = num_full * chunk_size
-        rows[:, :full_size].view(outer_size, num_full, chunk_size).copy_(
-            chunks[:num_full].transpose(0, 1)
-        )
-        if tail:
-            rows[:, full_size:].copy_(chunks[num_full, :, :tail])
+        else:
+            # torch.chunk gives full chunks, at most one short chunk, then empty ones,
+            # so each row is num_full whole chunks and then a tail of the short chunk
+            chunk_size = chunks.size(2)
+            num_full, tail = divmod(rows.size(1), chunk_size)
+            full_size = num_full * chunk_size
+            rows[:, :full_size].view(outer_size, num_full, chunk_size).copy_(
+                chunks[:num_full].transpose(0, 1)
+            )
+            if tail:
+                rows[:, full_size:].copy_(chunks[num_full, :, :tail])
 
 
 def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
@@ -663,14 +663,13 @@ def _default_reduce_scatter_input_fn(
         # Shard(0) that is already its shard, so stack the other gradients' rank
         # chunks along dim 0.
         for i, shard_dim in enumerate(shard_dims):
-            if shard_dim == 0:
-                continue
-            grad = unsharded_grads[i]
-            if grad.shape[shard_dim] % world_size == 0:
-                grad = torch.cat(torch.chunk(grad, world_size, dim=shard_dim), dim=0)
-            else:
-                grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
-            unsharded_grads[i] = grad
+            if shard_dim != 0:
+                grad = unsharded_grads[i]
+                if grad.shape[shard_dim] % world_size == 0:
+                    grad = torch.cat(torch.chunk(grad, world_size, shard_dim), dim=0)
+                else:
+                    grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
+                unsharded_grads[i] = grad
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
 
 
