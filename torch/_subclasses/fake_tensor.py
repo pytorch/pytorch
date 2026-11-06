@@ -712,6 +712,15 @@ def _enter_fake_mode(
 ) -> None:
     import torch.nested._internal.nested_tensor
 
+    # Python and C++ fake modes are never mixed, so neither may be entered while
+    # the other is active
+    active = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    is_cpp = isinstance(mode, CppFakeTensorMode)
+    if active is not None and isinstance(active, CppFakeTensorMode) != is_cpp:
+        raise AssertionError(
+            f"cannot enter {type(mode).__name__} while {type(active).__name__} is active"
+        )
+
     prev_only_lift_cpu_tensors = None
     if mode.avoid_device_init:
         # See NOTE: [torch.tensor, lift_fresh, and device movement]
