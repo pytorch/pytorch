@@ -431,8 +431,14 @@ if(_USE_NCCL_EXPLICITLY_SET)
       "If you want to build without NCCL, please set USE_NCCL=0.")
   endif()
 endif()
-cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_XPU;UNIX;NOT APPLE" OFF)
+pytorch_dependent_option(USE_XCCL "Use XCCL" ON
+                          "USE_XPU;UNIX;NOT APPLE" OFF)
+if(_USE_XCCL_EXPLICITLY_SET AND NOT USE_XPU)
+  message(FATAL_ERROR
+    "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires an "
+    "XPU build. "
+    "If you want to build without XCCL, please set USE_XCCL=0.")
+endif()
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"

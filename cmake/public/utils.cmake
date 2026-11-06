@@ -121,16 +121,18 @@ macro(caffe2_update_option variable value)
   if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
     set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+    # the write keeps the entry's help string, so the result is
+    # indistinguishable from a ccmake / cmake-gui edit by help string
+    # alone. stamp the settled value so the next configure can tell the
+    # fallback's write from the user's hand (see
+    # pytorch_record_explicit_request). downstream consumers of the
+    # installed utils.cmake get the plain-variable branch only, which
+    # never touches the cache.
+    set(_${variable}_LAST_SEEN "${value}" CACHE INTERNAL
+        "value ${variable} settled on" FORCE)
   else()
     set(${variable} ${value})
   endif()
-  # the write keeps the entry's help string, so the result is
-  # indistinguishable from a ccmake / cmake-gui edit by help string
-  # alone. stamp the settled value so the next configure can tell the
-  # fallback's write from the user's hand (see
-  # pytorch_record_explicit_request).
-  set(_${variable}_LAST_SEEN "${value}" CACHE INTERNAL
-      "value ${variable} settled on at declaration time" FORCE)
 endmacro()
 
 
@@ -152,18 +154,17 @@ endmacro()
 #   1. the help string is not the declaration's own (-D entry, env
 #      forwarding, a -C script with its own wording): whatever wrote the
 #      entry, the value is the user's intent.
-#   2. the help string matches but the value moved since the declaration
-#      last ran (tracked in the _<option>_LAST_SEEN INTERNAL entry the
-#      wrappers stamp after every declaration): option() never rewrites
-#      the value of an entry it adopts, and the not-found fallbacks only
-#      ever write OFF after their guard had its chance to fail the
-#      configure, so a value change under the declaration's help string
-#      is a ccmake / cmake-gui / hand edit of CMakeCache.txt, which is
-#      gh-114388's exact symptom, or a -C script that quoted the doc
-#      string into a fresh dir (no _LAST_SEEN yet). either way the new
-#      value is the user's. editing the value back to OFF this way
-#      withdraws the request, which the early refusals in CMakeLists.txt
-#      read.
+#   2. the help string matches but the cached value moved since the
+#      last write the build itself made (tracked in the
+#      _<option>_LAST_SEEN INTERNAL entry): option() never rewrites the
+#      value of an entry it adopts, and every caffe2_update_option()
+#      write restamps it with what it wrote, so a value that differs
+#      from the stamp is a ccmake / cmake-gui / hand edit of
+#      CMakeCache.txt, which is gh-114388's exact symptom, or a -C
+#      script that quoted the doc string into a fresh dir (no stamp
+#      yet). either way the new value is the user's. editing the value
+#      back to OFF this way withdraws the request on the run that sees
+#      it, which the early refusals in CMakeLists.txt read.
 #   3. otherwise the value is stable since the declaration last ran: a
 #      declaration default or an already-recorded request, and the marker
 #      is left alone.
@@ -178,9 +179,11 @@ endmacro()
 # both impersonate the declaration's default is indistinguishable from
 # one and always was; env forwarding that rewrites a value the cache
 # already holds is a no-op and leaves no new signal (harmless, the
-# outcome is the same); and a request withdrawn by retyping the value in
-# the cache errors once and then proceeds, since the retyped cache no
-# longer holds the request.
+# outcome is the same); a forced dependent-option value lives in a
+# normal variable that the cache never sees, so the request state reads
+# the cache; and caffe2_update_option() writes that re-affirm an ON the
+# declaration already settled (FBGEMM, NUMPY, ROCm, SYSTEM_NCCL) restamp
+# the same value and cannot invent or erase a request.
 function(pytorch_record_explicit_request option docstring)
   if(DEFINED CACHE{${option}})
     get_property(_help CACHE ${option} PROPERTY HELPSTRING)
@@ -223,8 +226,8 @@ endfunction()
 macro(pytorch_option option docstring default_value)
   pytorch_record_explicit_request(${option} "${docstring}")
   option(${option} "${docstring}" ${default_value})
-  set(_${option}_LAST_SEEN "${${option}}" CACHE INTERNAL
-      "value ${option} settled on at declaration time" FORCE)
+  set(_${option}_LAST_SEEN "$CACHE{${option}}" CACHE INTERNAL
+      "value ${option} settled on" FORCE)
 endmacro()
 
 
@@ -232,8 +235,12 @@ macro(pytorch_dependent_option option docstring default_value depends force)
   pytorch_record_explicit_request(${option} "${docstring}")
   cmake_dependent_option(${option} "${docstring}" ${default_value}
                          "${depends}" ${force})
-  set(_${option}_LAST_SEEN "${${option}}" CACHE INTERNAL
-      "value ${option} settled on at declaration time" FORCE)
+  # stamp what the cache holds, not ${option}: the dependent option's
+  # force value lands in a normal variable while the cache entry keeps
+  # its old value, and a stamp that disagrees with the cache would read
+  # as a user edit on the next configure
+  set(_${option}_LAST_SEEN "$CACHE{${option}}" CACHE INTERNAL
+      "value ${option} settled on" FORCE)
 endmacro()
 
 

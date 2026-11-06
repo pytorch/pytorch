@@ -84,7 +84,7 @@ def build_harness() -> str:
     cmake_lists = (REPO / "CMakeLists.txt").read_text()
     options = extract(
         cmake_lists,
-        r"^option\(USE_ASAN .*?(?=^cmake_dependent_option\(USE_XCCL)",
+        r"^option\(USE_ASAN .*?(?=^cmake_dependent_option\(USE_RCCL)",
         "USE_ASAN..USE_NCCL option block",
     )
     dependencies = (REPO / "cmake" / "Dependencies.cmake").read_text()
@@ -186,13 +186,26 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
                        build="force-cuda")
         self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
                        build="force-nccl")
-        # seed a real cache first: a fresh dir has no cached USE_NCCL for
-        # the force to beat, so the assertion would pass even if the
-        # wrapper dropped the forced value on the floor. what the seed
-        # holds depends on the box: ON where a backend is installed, the
-        # fallback OFF where none is
-        self.assert_ok("USE_NCCL", HAVE_CUDA or HAVE_ROCM,
+        # seed the cache by hand instead of by configuring: on a box with
+        # no backend the fallback caches USE_NCCL=OFF during a seed run,
+        # and the forced-OFF assertion below would pass even if the
+        # wrapper dropped the forced value on the floor. the hand-written
+        # entry is what a configure that settled on ON leaves behind
+        # (declaration help string, cached ON, matching _LAST_SEEN stamp,
+        # no request marker), so the force has a real cached ON to beat
+        build = self.tmp / "force-nccl-seed"
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text(
+            "//Use NCCL\n"
+            "USE_NCCL:BOOL=ON\n"
+            "\n"
+            "_USE_NCCL_LAST_SEEN:INTERNAL=ON\n")
+        self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
                        build="force-nccl-seed")
+        # the forced OFF lives in a normal variable while the cache keeps
+        # the ON entry, so the second run is where a stamp that recorded
+        # the normal variable would read the gap as a user edit and fail
+        # the configure through the early refusal. it has to stay quiet
         self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
                        build="force-nccl-seed")
 
@@ -300,6 +313,15 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         self.assert_fails(message, env={"USE_NCCL": "1", "USE_CUDA": "0",
                                         "USE_ROCM": "0"},
                           build="nccl-no-backend-env")
+
+    def test_xccl_explicit_request_no_xpu(self) -> None:
+        # the USE_XCCL declaration is wrapped now, so an explicit request
+        # against a disabled XPU has to fail at declaration time instead
+        # of falling back silently at the Dependencies.cmake site
+        self.assert_fails(
+            "XCCL was explicitly requested (USE_XCCL=1) but requires an "
+            "XPU build.",
+            "-DUSE_XCCL=ON", "-DUSE_XPU=OFF", build="xccl-no-xpu")
 
     # --- a configure that dies before a fallback site runs must not leave
     # the declaration defaults looking like user requests on the next run
