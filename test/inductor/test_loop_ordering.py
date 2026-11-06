@@ -2,7 +2,6 @@
 
 import contextlib
 import os
-import unittest
 from unittest import mock
 
 import numpy as np
@@ -32,7 +31,6 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
@@ -1253,7 +1251,6 @@ class LoopOrderingTest(TestCase):
         torch._dynamo.reset()
 
     @requires_capabilities(Capability.dtype.fp8)
-    @unittest.skipIf(not SM90OrLater, "sm89 errors out on this test")
     def test_fp8_cast_and_t(self, device):
         """
         This test repros the not able to fuses issue in
