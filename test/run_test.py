@@ -265,7 +265,6 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
     # lacks quantization support
     "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
@@ -2120,7 +2119,6 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = [
             "test_ops",
             "test_mps",
-            "test_metal",
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
