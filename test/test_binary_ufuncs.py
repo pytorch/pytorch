@@ -6,6 +6,7 @@ import math
 import operator
 import random
 import sys
+import unittest
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -58,6 +59,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_samples,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -424,6 +426,9 @@ class TestBinaryUfuncsDevice(TestCase):
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
     @ops(binary_ufuncs_with_references)
+    @decorateIf(
+        unittest.skip("Doesn't support bool!"), lambda p: p["dtype"] is torch.bool
+    )
     def test_reference_numerics_small_values(self, device, dtype, op):
         if dtype is torch.bool:
             self.skipTest("Doesn't support bool!")
@@ -4036,6 +4041,11 @@ class TestBinaryUfuncsDevice(TestCase):
         _test_helper(a, b)
 
     @skipIfTorchDynamo()  # complex infs/nans differ under Dynamo/Inductor
+    @decorateIf(
+        unittest.skip("complex flaky in 3.12"),
+        lambda params: sys.version_info >= (3, 12)
+        and params["dtype"] in (torch.complex32, torch.complex64, torch.complex128),
+    )
     @dtypesIfCUDA(
         torch.float32,
         torch.float64,
@@ -4959,7 +4969,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.

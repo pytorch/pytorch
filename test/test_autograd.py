@@ -58,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipMeta,
     skipXPUIf,
 )
@@ -18130,6 +18131,8 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 
 @skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
 class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
+    setUp = preserves_device_selection(_TestSACAmbientSavedTensorsHooksBase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
