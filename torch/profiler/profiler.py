@@ -659,8 +659,10 @@ class _KinetoProfile:
         package. Other paths are uncompressed (the ``cuspy`` backend defaults to
         gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
 
-        Raises :class:`OSError` if the trace cannot be written, for example when
-        the destination directory does not exist.
+        Raises :class:`RuntimeError` if Kineto cannot write the trace. Exports
+        that write the file from Python, such as compressed paths and
+        ``use_python_export``, raise :class:`OSError` instead, for example
+        :class:`FileNotFoundError` when the destination directory does not exist.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass

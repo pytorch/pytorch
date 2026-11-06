@@ -292,9 +292,6 @@ class EventList(list):
 
         Args:
             path (str): Path where the trace will be written.
-
-        Raises:
-            OSError: If the trace cannot be written.
         """
         import os
 

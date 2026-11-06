@@ -4956,7 +4956,10 @@ class TestProfilerTraceCompression(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             bad_path = os.path.join(tmpdir, "missing_dir", "trace" + suffix)
-            with self.assertRaisesRegex(FileNotFoundError, "missing_dir"):
+            # Only Kineto's native save raises from C++; the rest fail in open().
+            native = suffix == ".json" and not use_python_export
+            error = RuntimeError if native else FileNotFoundError
+            with self.assertRaisesRegex(error, "missing_dir"):
                 prof.export_chrome_trace(bad_path, use_python_export=use_python_export)
             # A failed export must not consume the native trace.
             path = os.path.join(tmpdir, "trace" + suffix)
