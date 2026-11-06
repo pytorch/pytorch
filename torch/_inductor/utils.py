@@ -3301,7 +3301,12 @@ def use_decompose_k_choice(
 ) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
+    rocm_bounds = _rocm_decompose_k_auto()
+    decompose_k_threshold = (
+        config.rocm.decompose_k_threshold
+        if rocm_bounds
+        else config.triton.decompose_k_threshold
+    ) * threshold_multiple
 
     return (
         V.graph.sizevars.statically_known_true(
@@ -3312,7 +3317,8 @@ def use_decompose_k_choice(
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
-        and config.triton.num_decompose_k_splits > 0
+        and decompose_k_num_splits() > 0
+        and (not rocm_bounds or _rocm_decompose_k_shape_ok(m, n, k))
         # Callers rely on False to retain the regular MM fallback.
         and bool(get_k_splits(m, n, k))
     )
@@ -3342,10 +3348,51 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
+# ROCm archs where decompose_k is on by default (num_decompose_k_splits=-1) and
+# bounded by config.rocm.decompose_k_*.
+_ROCM_DECOMPOSE_K_ARCHS = ("gfx950",)
+
+
+def _rocm_decompose_k_auto() -> bool:
+    """Whether the validated ROCm defaults apply: num_decompose_k_splits=-1 on one of
+    _ROCM_DECOMPOSE_K_ARCHS. An explicit split count keeps the generic behavior."""
+    return (
+        config.triton.num_decompose_k_splits < 0
+        and rocm_gfx_arch() in _ROCM_DECOMPOSE_K_ARCHS
+    )
+
+
+def _rocm_decompose_k_shape_ok(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    """The config.rocm.decompose_k_* bounds on K and on the unsplit output tile count.
+
+    Symbolic shapes are not offered decompose_k unless these bounds are provable.
+    """
+    from torch._inductor.virtualized import V
+
+    return V.graph.sizevars.statically_known_true(
+        sympy.And(
+            sympy.Ge(k, config.rocm.decompose_k_min_k),
+            sympy.Le(k, config.rocm.decompose_k_max_k),
+            sympy.Lt(
+                CeilDiv(m, 256) * CeilDiv(n, 256),
+                config.rocm.decompose_k_max_output_tiles,
+            ),
+        )
+    )
+
+
+def decompose_k_num_splits() -> int:
+    """config.triton.num_decompose_k_splits, with -1 resolved for the current device."""
+    num_splits = config.triton.num_decompose_k_splits
+    if num_splits >= 0:
+        return num_splits
+    return 10 if _rocm_decompose_k_auto() else 0
+
+
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
-    k_splits_limit = config.triton.num_decompose_k_splits
+    k_splits_limit = decompose_k_num_splits()
 
     # Hand-tuned
     default_k_splits = [16, 32, 64, 128, 256]

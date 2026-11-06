@@ -17,7 +17,13 @@ from ...kernel.decompose_k import (
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
-from ...utils import ceildiv, get_k_splits, use_triton_blackwell_tma_template
+from ...utils import (
+    _ROCM_DECOMPOSE_K_ARCHS,
+    ceildiv,
+    get_k_splits,
+    rocm_gfx_arch,
+    use_triton_blackwell_tma_template,
+)
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -33,10 +39,13 @@ if TYPE_CHECKING:
 def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
     """Return (min_output_tiles, max_workspace_bytes) for decompose-K splits.
 
-    0 means unbounded. Tuned by timing every legal split against ATen on B200 and
-    H100 and checking that no split that beat ATen gets filtered out.
+    0 means unbounded. Tuned by timing every legal split against ATen on B200,
+    H100 and MI350X and checking that no split that beat ATen gets filtered out.
     """
     device_properties = DeviceProperties.create(device)
+    if device_properties.type == "hip" and rocm_gfx_arch() in _ROCM_DECOMPOSE_K_ARCHS:
+        # MI350X: at least 32 output tiles and at most 64 MiB of FP32 workspace.
+        return 32, 64 * 1024 * 1024
     if device_properties.type != "cuda":
         return 0, 0
     if (device_properties.major or 0) >= 10:
@@ -87,7 +96,8 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     op_name="mm",
 )
 # Register on CUDA (both NVIDIA and ROCm/HIP)
-# Runtime enablement is controlled by config.triton.num_decompose_k_splits (0 disables)
+# Runtime enablement is controlled by config.triton.num_decompose_k_splits (0 disables,
+# -1 resolves per device in utils.decompose_k_num_splits)
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
     "cuda",
