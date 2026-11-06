@@ -35,6 +35,7 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath_non_tensor_args,
     sigmoid_backward as decomp_sigmoid_backward,
     silu_backward as decomp_silu_backward,
+    softplus_backward as decomp_softplus_backward,
     tanh_backward as decomp_tanh_backward,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
@@ -171,6 +172,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.sgn,
     aten.silu_backward.default,
     aten.softplus.default,
+    aten.softplus_backward.default,
     aten.tanh_backward.default,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
@@ -668,7 +670,11 @@ def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
 def softplus(
     a: torch.Tensor, beta: float | None = None, threshold: float = 20
 ) -> torch.Tensor:
-    if not is_strict_cuda_triton(a.device) or a.dtype != torch.float32 or beta is None:
+    if (
+        not is_strict_cuda_triton(a.device)
+        or a.dtype not in (torch.float32, torch.float64)
+        or beta is None
+    ):
         return cast(torch.Tensor, decomp_softplus(a, beta, threshold))
     divisor = torch.ones((), dtype=a.dtype, device=a.device) * beta
     scaled = a * divisor
@@ -676,6 +682,21 @@ def softplus(
     zero = torch.full((), -0.0, dtype=a.dtype, device=a.device)
     result = torch.addcdiv(zero, torch.log1p(torch.exp(scaled)), divisor)
     return torch.where(scaled > threshold, a, result)
+
+
+@register_decomposition(aten.softplus_backward.default)
+def softplus_backward(
+    grad_output: torch.Tensor, self: torch.Tensor, beta: float, threshold: float
+) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(grad_output, self)
+    if inputs is None or inputs[2] != torch.float64:
+        return decomp_softplus_backward(grad_output, self, beta, threshold)
+    grad_output, self, dtype = inputs
+    scaled = self * beta
+    z = torch.exp(scaled)
+    # The native fused float64 kernel gives z priority when both factors are NaN.
+    result = z * grad_output / (z + 1.0)
+    return torch.where(scaled > threshold, grad_output, result).to(dtype)
 
 
 def _strict_pointwise_inputs(
