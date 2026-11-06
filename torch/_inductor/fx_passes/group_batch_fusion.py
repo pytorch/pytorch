@@ -560,6 +560,7 @@ class BatchLinearLHSFusion(BatchFusion):
         return group_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+        """Fuse linear nodes into one wide GEMM and materialize sensitive slices."""
         batch_nodes = []
         batch_input = None
         batch_weights, batch_weights_meta = [], []
