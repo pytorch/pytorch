@@ -76,6 +76,10 @@ SELECTION_VERSION = 1
 MAX_GREP_MODULES = 100
 # Longest chain of test modules importing each other that importers() follows.
 MAX_IMPORT_HOPS = 8
+# More edited failure-list classes than this are not looked up at all, so
+# everything runs for an inductor entry, the cpython/ tests for a CPython entry
+# and the dynamo_wrapped sweep for the others, as for a class that is not found.
+MAX_FAILURE_LIST_CLASSES = 50
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
@@ -131,6 +135,21 @@ DRIVER_MAPPINGS = {
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
+
+# One file per test, such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x.
+# Under dynamo (the dynamo_wrapped and dynamo_cpython configs) or inductor,
+# common_utils xfails or skips a test in the dynamo or inductor lists, and under
+# compiled autograd it runs a test in compiled_autograd_skips with it disabled.
+FAILURE_LIST_DIR_RE = re.compile(
+    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/"
+)
+FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
+# test_dynamic_shapes.py and test_inline_and_install.py name DynamicShapesFoo and
+# InlineAndInstallFoo after Foo (see make_test_cls_with_patches), but other
+# files define such classes under the full name.
+PATCHED_PREFIX_RE = re.compile(r"^(DynamicShapes|InlineAndInstall)(?=[A-Z])")
+# instantiate_device_type_tests names TestFooCPU after TestFoo.
+DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -296,6 +315,64 @@ def alts(names: Iterable[str]) -> str:
     )
 
 
+def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
+    """A `git grep -E` pattern for the definition of one of `classes` or of
+    the generic class instantiate_device_type_tests made it from, or with
+    `prefix` of a class whose name starts with one of them."""
+    stems = {c: DEVICE_SUFFIX_RE.sub("", c) for c in classes}
+    # TestCUDA is not made from a class Test.
+    names = alts([*stems, *(s for s in stems.values() if s not in ("", "Test"))])
+    end = "" if prefix else "([^[:alnum:]_]|$)"
+    return rf"^[[:space:]]*class[[:space:]]+({names}){end}"
+
+
+def failure_list_sources(
+    changed_files: list[str], grep: Callable[[str], list[str]] | None
+) -> tuple[list[str], set[str]]:
+    """The paths under test/ that define the classes named by the edited
+    failure-list entries (see FAILURE_LIST_RE, PATCHED_PREFIX_RE), and the
+    lists ("dynamo", "inductor", "compiled_autograd", or "dynamo_cpython" for
+    a CPython entry of the dynamo or compiled_autograd lists, which the
+    dynamo_cpython config runs) naming a class that is not looked up (no
+    `grep`, see importers, or more than MAX_FAILURE_LIST_CLASSES classes) or
+    that `grep` does not find in a .py file. Also the list ("dynamo",
+    "inductor" or "compiled_autograd", and "dynamo_cpython" for a CPython
+    entry of the dynamo or compiled_autograd lists) holding an entry it does
+    not look up: one in a subdirectory or, for the dynamo and inductor
+    lists, one without exactly one "." (dynamo_test_failures.py rejects both
+    at import, except in compiled_autograd_skips) or one edited in both the
+    expected failures and the skips (a clash it rejects at import, or a
+    move)."""
+    classes: dict[str, set[str]] = {}
+    unparsed: set[str] = set()
+    for f in changed_files:
+        if not (d := FAILURE_LIST_DIR_RE.match(f)):
+            continue
+        name = f[d.end() :]
+        both = {f"test/{d[1]}_{k}/{name}" for k in ("expected_failures", "skips")}
+        cpython = d[1] != "inductor" and re.match(r"CPython\d+-", name)
+        if "/" in name or (
+            d[1] != "compiled_autograd"
+            and (name.count(".") != 1 or both <= set(changed_files))
+        ):
+            unparsed.add(d[1])
+            if cpython:
+                unparsed.add("dynamo_cpython")
+        elif m := FAILURE_LIST_RE.match(f):
+            classes.setdefault(m[2], set()).add("dynamo_cpython" if cpython else m[1])
+    if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
+        return [], unparsed.union(*classes.values())
+    sources: list[str] = []
+    missing = unparsed
+    for c, lists in sorted(classes.items()):
+        names = [c, PATCHED_PREFIX_RE.sub("", c)]
+        found = [f for f in grep(class_pattern(names)) if f.endswith(".py")]
+        sources += found
+        if not found:
+            missing |= lists
+    return sources, missing
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -407,13 +484,20 @@ class Selection:
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
     ) -> Selection:
-        """Turn the model's structured output into a Selection.
+        """Turn the model's structured output into a Selection. Everything runs
+        when failure_list_sources reports the inductor list, that is for an
+        inductor entry it rejects or does not resolve to a file; dynamo_cpython,
+        a CPython entry it does not resolve, selects the cpython/ tests, and the
+        other lists it reports add the dynamo_wrapped sweep.
 
         A missing or malformed output, a change to test infrastructure, too
-        many import hops and a failed `grep` fall back to running everything;
-        only a missing or malformed output and a failed `grep` set error. Test
-        files the change edits and their drivers are always selected, and with
-        `grep` so are the test files that import them (see importers)."""
+        many import hops and a failed `grep` also fall back to running
+        everything; only a missing or malformed output and a failed `grep` set
+        error. Test files
+        the change edits and their drivers are always selected, and with
+        `grep` so are the test files that import them (see importers) and
+        those defining the tests that an edited failure list names (see
+        failure_list_sources), with their importers."""
         if out is None:
             return cls(
                 run_all=True,
@@ -444,13 +528,30 @@ class Selection:
             )
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
+        try:
+            sources, missing = failure_list_sources(changed_files, grep)
+        except GREP_ERRORS as e:
+            return grep_failure(e)
+        if "inductor" in missing:
+            return cls(
+                run_all=True,
+                reason="an edited inductor failure list entry was rejected or not resolved to the file defining its test class",
+            )
+        before = len(files), len(sweeps)
+        # The dynamo_cpython config runs only the tests under test/cpython/.
+        if "dynamo_cpython" in missing:
+            files |= {c for c in candidates if c.startswith("cpython/")}
+        # dynamo_wrapped also runs with compiled autograd on (see common_utils).
+        if missing & {"dynamo", "compiled_autograd"}:
+            sweeps.add("dynamo_wrapped")
+        fallback = (len(files), len(sweeps)) != before
         edited = edited_tests(changed_files, candidates)
         files |= edited
         if grep is not None:
             # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
             drivers = [f"test/{t}.py" for t in sorted(edited)]
             try:
-                found = importers(changed_files + drivers, candidates, grep)
+                found = importers(changed_files + sources + drivers, candidates, grep)
             except GREP_ERRORS as e:
                 return grep_failure(e)
             if found is None:
@@ -460,6 +561,8 @@ class Selection:
                 )
             files |= found
         run_all, reason = out["run_all"], str(out["reason"])
+        if fallback:
+            reason = f"{reason} [failure list fallback]".lstrip()
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
     def covers(self, test_file: str, test_config: str) -> bool:
