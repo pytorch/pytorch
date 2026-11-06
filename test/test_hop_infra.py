@@ -6,14 +6,19 @@ import enum
 import importlib
 import logging
 import pkgutil
+import re
 import types
 from unittest import mock
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
+    _may_overlap,
+    _rows_disjoint,
     CUTEDSL_CONSTANT_RULES,
+    cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHostFnInfo,
+    CuteDSLKernel,
     python_scalar,
 )
 from torch._higher_order_ops.user_kernel_hop import (
@@ -21,8 +26,11 @@ from torch._higher_order_ops.user_kernel_hop import (
     constant_key,
     KernelSideTable,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -222,8 +230,9 @@ class TestHOPInfra(TestCase):
 class TestCuteDSLHOPHelpers(TestCase):
     """The parts of the CuTeDSL user-kernel HOPs that need neither CUDA nor
     nvidia-cutlass-dsl: how the side table keys and stores constants, how a call is
-    split, and who owns their reinplacing trigger. The tests that compile and launch
-    host functions are in test/inductor/test_cutedsl_kernels.py."""
+    split, the overlap checks of functionalization, and who owns their reinplacing
+    trigger. The tests that compile and launch host functions are in
+    test/inductor/test_cutedsl_kernels.py."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -696,6 +705,230 @@ class TestCuteDSLHOPHelpers(TestCase):
             self.assertIs(type(converted), type(expected))
             self.assertEqual(converted, expected)
 
+    def test_overlap_check_on_symbolic_sizes(self):
+        # Views of one element size are compared by compute_overlapping_tensors,
+        # which decides by the size hints and guards on the decision: x[:n] and x[m:]
+        # (n = 10, m = 20) are disjoint while n <= m. Views of different element sizes
+        # are compared by their byte ranges, without guards: x[:n] ends where the
+        # float16 view from element 2n starts, and may overlap the one from 2m, while
+        # empty views from element n, inside the bytes of x[:n], overlap nothing,
+        # whatever their strides. An unbacked size, which cannot be guarded on,
+        # counts as an overlap, even in x[:u] and x[u:], and so does a tensor whose
+        # emptiness depends on one.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        results = []
+
+        def f(x, y, z):
+            n, m = y.shape[0], z.shape[0]
+            halves = x.view(torch.float16)
+            head, tail = x[:n], x[m:]
+            halves_n, halves_m = halves[2 * n :], halves[2 * m :]
+            empty = (halves[n:n], halves.as_strided((5, 0), (n, 1), n))
+            shape_env = n.node.shape_env
+            guards = len(shape_env.guards)
+            results.extend(_may_overlap(head, h) for h in (halves_n, halves_m, *empty))
+            self.assertEqual(len(shape_env.guards), guards)
+            results.append(_may_overlap(head, tail))
+            return x
+
+        sizes = (100, 10, 20)
+        gm = make_fx(f, tracing_mode="symbolic")(*map(torch.randn, sizes))
+        self.assertEqual(results, [False, True, False, False, False])
+        inputs = [node.meta["val"] for node in gm.graph.find_nodes(op="placeholder")]
+        holds = gm.shape_env.evaluate_guards_for_args
+        self.assertTrue(holds(inputs, list(map(torch.randn, sizes))))
+        self.assertFalse(holds(inputs, list(map(torch.randn, (100, 20, 10)))))
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u = shape_env.create_unbacked_symint()
+            x = torch.empty(100)
+            self.assertTrue(_may_overlap(x[:u], x[u:]))
+            self.assertTrue(_may_overlap(x[:u], x.view(torch.uint8)[:4]))
+
+    def test_overlap_check_rechecks_2d_rows(self):
+        # TODO(zoranzhao): remove with _rows_disjoint once
+        # https://github.com/pytorch/pytorch/pull/202848 lands. Without that fix,
+        # compute_overlapping_tensors answers "disjoint" for 2-D views whose rows
+        # start inside the other's rows other than the first, such as base[:4, :3]
+        # and base[1:5, 2:5]. With its answer forced to "disjoint" for every pair,
+        # _may_overlap still finds exactly the views that overlap, in either order,
+        # with real and symbolic sizes. The pairs marked * overlap in a way the real
+        # function finds itself, so only the forced answer has _rows_disjoint decide.
+        def pairs(base):
+            s, (n, d) = base.stride(0), base.shape
+            qkv = base.new_empty(n, 3 * d)
+            q, k, v = (qkv.narrow(1, i * d, d) for i in range(3))
+            # Rows that start past the other's rows but run into their next row.
+            narrow, wide = (base.as_strided((4, w), (s, 1), s - 2) for w in (3, 5))
+            row = base[0]
+            return (
+                ("starts in a later row", base[:4, :3], base[1:5, 2:5], True),
+                ("starts in a later row, swapped", base[1:5, 2:5], base[:4, :3], True),
+                ("runs into the next row*", narrow, base[:4, :3], True),
+                ("expanded rows*", row[:3].expand(4, 3), row[2:5].expand(4, 3), True),
+                ("wider first*", base[:4, :5], base[:4, 3:5], True),
+                ("wider second*", base[:4, :1], wide, True),
+                ("unequal widths", base[:4, :3], base[:4, 3:8], False),
+                ("empty", base[:4, :3], base[1:3, 0:0], False),
+                ("ranges do not meet", base[:2, :5], base[2:4, :5], False),
+                ("ranges do not meet, swapped", base[2:4, :5], base[:2, :5], False),
+                ("q and k", q, k, False),
+                ("k and v", k, v, False),
+                ("q and v", q, v, False),
+            )
+
+        results = []
+
+        def f(base):
+            for name, a, b, overlap in pairs(base):
+                results.append((name, _may_overlap(a, b), overlap))
+            return base
+
+        with mock.patch.object(
+            torch._C._dynamo.guards, "compute_overlapping_tensors", return_value=set()
+        ) as overlapping:
+            f(torch.randn(10, 25))
+            make_fx(f, tracing_mode="symbolic")(torch.randn(10, 25))
+        # Every pair but the empty one, which _may_overlap answers before it asks,
+        # goes to the mock, once with real and once with symbolic sizes.
+        self.assertEqual(overlapping.call_count, len(results) - 2)
+        self.assertEqual(len(results), 26)
+        for name, overlaps, expected in results:
+            self.assertEqual(overlaps, expected, name)
+        # An empty view can still reach _rows_disjoint through _may_overlap when its
+        # emptiness is not statically known (a size that is 0 only by its hint), so
+        # _rows_disjoint's own emptiness condition is checked directly here.
+        base = torch.randn(10, 25)
+        self.assertTrue(_rows_disjoint(base[:4, :3], base[1:3, 0:0]))
+
+    @parametrize("api", ["python", "cpp", "cpp_view_copies"])
+    def test_functionalization_refuses_writes_that_may_overlap(self, api):
+        # Each written argument is cloned and written back on its own, so two written
+        # arguments that may overlap would lose a write: functionalization refuses the
+        # same tensor twice and views that overlap whatever their shapes, offsets and
+        # dtypes. Views of one base that do not overlap are accepted, unless
+        # functionalization copies views (remove="mutations_and_views"): the copies do
+        # not show where the views sit, so any two views are refused, with a message
+        # of their own, unless one of them is empty. An empty tensor overlaps nothing,
+        # not even itself, and the copy of an empty view is empty too, so in every mode
+        # an empty view is accepted next to its base, in either order, next to another
+        # empty view, and twice. With mutates_args="unknown" the record needs no
+        # signature, and with fake tensors the kernel never runs, so a plain function
+        # stands for a host function. test/inductor/test_cutedsl_kernels.py runs the
+        # accepted calls and the refusals under an explicit mutates_args.
+        def add_kernel(mX, mY, mOut, n, stream):
+            raise AssertionError("never launched")
+
+        table = cutedsl_kernel_side_table
+        kidx = table.add_kernel(CuteDSLKernel(add_kernel, "unknown"))
+        cidx = table.add_constant_args({})
+
+        def launch(x, y, out):
+            kwargs = {"mX": x, "mY": y, "mOut": out, "n": out.numel()}
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=kwargs
+            )
+
+        def trace(f, *args):
+            if api == "python":
+                from torch._subclasses.functional_tensor import (
+                    FunctionalTensorMode,
+                    PythonFunctionalizeAPI,
+                )
+
+                with FunctionalTensorMode():
+                    f_func = PythonFunctionalizeAPI().functionalize(f)
+                    return make_fx(f_func, tracing_mode="fake")(*args)
+            remove = "mutations_and_views" if api == "cpp_view_copies" else "mutations"
+            f_func = torch.func.functionalize(f, remove=remove)
+            return make_fx(f_func, tracing_mode="fake")(*args)
+
+        def in_place(x, y):
+            launch(x, y, x)
+            return x
+
+        def reshaped(x, y):
+            launch(x, y, x.view(10, 100))
+            return x
+
+        def shifted(x, y):
+            launch(x[1:], y[1:], x[:-1])
+            return x
+
+        def retyped(x, y):
+            launch(x, y, x.view(torch.float16)[1000:])  # the bytes of x[500:]
+            return x
+
+        def overlapping_columns(x, y):
+            # Rows 1 to 3 of column 2 are in both: each row of out starts inside a
+            # row of the other, though not inside the first one.
+            base = x.view(10, 100)
+            launch(base[:4, :3], y[:12].view(4, 3), base[1:5, 2:5])
+            return x
+
+        def views(base, y):
+            launch(base[0], y, base[1])
+            return base
+
+        def columns(qkv):
+            d = qkv.shape[1] // 3
+            launch(*(qkv.narrow(1, i * d, d) for i in range(3)))
+            return qkv
+
+        def empty(x, y):
+            launch(x, y, x[500:500])  # an empty view overlaps nothing,
+            launch(x[500:500], y, x)  # in either order,
+            return x
+
+        def empty_views(x, y):
+            launch(x[100:100], y, x[500:500])  # nor another empty view,
+            return x
+
+        def empty_twice(x, y):
+            view = x[500:500]
+            launch(view, y, view)  # nor even itself
+            return x
+
+        written = (
+            ", and both count as written (mutates_args='unknown'). PT2 clones each "
+            "written argument and writes it back on its own, so one write could be "
+            "lost. "
+        )
+        narrow = " Or give mutates_args naming only the parameters it writes."
+        overlap = (
+            "CuTeDSL kernel add_kernel: 'mX' and 'mOut' are the same tensor or views "
+            f"that may overlap{written}Pass tensors that do not overlap.{narrow}"
+        )
+        copied = (
+            "CuTeDSL kernel add_kernel: 'mX' and '{}' are views of one tensor, which "
+            'functionalization with remove="mutations_and_views" copied, so PT2 '
+            f"cannot tell whether they overlap{written}Functionalize with "
+            'remove="mutations" (the default), which keeps views, or pass tensors '
+            f"that are not views of one tensor.{narrow}"
+        )
+        x, y = torch.randn(1000), torch.randn(1000)
+        with self.assertRaisesRegex(RuntimeError, re.escape(overlap)):
+            trace(in_place, x.clone(), y)
+        view_copies = api == "cpp_view_copies"
+        msg = copied.format("mOut") if view_copies else overlap
+        for f in (reshaped, shifted, retyped, overlapping_columns):
+            with self.assertRaisesRegex(RuntimeError, re.escape(msg)):
+                trace(f, x.clone(), y)
+        base, qkv = torch.stack([x, x]), torch.randn(40, 75)
+        if view_copies:
+            for f, args, name in ((views, (base, y), "mOut"), (columns, (qkv,), "mY")):
+                msg = re.escape(copied.format(name))
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    trace(f, *args)
+        else:
+            trace(views, base, y)
+            trace(columns, qkv)
+        for f in (empty, empty_views, empty_twice):
+            trace(f, x, y)
+
     def test_cutedsl_trigger_refused_to_other_dsls(self):
         # ReInplaceTrigger.CUTEDSL_OPS belongs to the cutedsl DSL (TRIGGER_DSLS)
         # whether or not CuTeDSL has registered yet (it registers when
@@ -716,6 +949,9 @@ class TestCuteDSLHOPHelpers(TestCase):
             with self.assertRaisesRegex(ValueError, msg):
                 register_user_kernel_hop(dataclasses.replace(info, dsl="toy"))
             self.assertEqual(_user_kernel_hops, {})
+
+
+instantiate_parametrized_tests(TestCuteDSLHOPHelpers)
 
 
 if __name__ == "__main__":
