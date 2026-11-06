@@ -22,7 +22,6 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/ThreadLocalState.h>
 
@@ -92,6 +91,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
     uint64_t getSequencenumber() const override;
     std::chrono::milliseconds getTimeout() const override;
+    // These three are not read in-tree; kept for out-of-tree subclasses.
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
@@ -103,10 +103,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
    protected:
     friend class ProcessGroupGloo;
-    // unique id used to tell the trace buffer that this
-    // work has completed
-    std::optional<uint64_t> trace_id_;
-    std::optional<uint64_t> trace_reset_epoch_;
     std::shared_ptr<gloo::Context> context_;
     const std::chrono::milliseconds timeout_;
 
@@ -542,10 +538,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
-  size_t local_id_;
   mutable std::vector<uint64_t> defaultRanks_;
-  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
-      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d

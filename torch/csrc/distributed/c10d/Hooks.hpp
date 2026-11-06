@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include <ATen/core/Tensor.h>
+#include <c10/core/Device.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <torch/csrc/distributed/c10d/Window.hpp>
@@ -57,6 +59,9 @@ struct PreHookArgs {
   int64_t root = -1;
   // Correlates a pre-hook call with its matching post-hook call.
   int64_t op_id = 0;
+  // Device type (index unset) the op was dispatched for, set only for barrier;
+  // unset for other ops, including tensorless lifecycle ops.
+  std::optional<c10::Device> device;
 };
 
 using PreHook = std::function<void(const PreHookArgs&)>;

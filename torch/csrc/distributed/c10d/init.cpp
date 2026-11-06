@@ -1660,7 +1660,11 @@ instead.)")
       .def_readwrite(
           "op_id",
           &::c10d::PreHookArgs::op_id,
-          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.")
+      .def_readwrite(
+          "device",
+          &::c10d::PreHookArgs::device,
+          "Device type (index unset) the operation was dispatched for, set only for ``barrier``; ``None`` otherwise, including tensorless lifecycle ops.");
 
   py::class_<::c10d::PostHookArgs>(
       module,
@@ -5519,8 +5523,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 Records the operations of a process group into the flight recorder using
 pre/post hooks, for backends without a native flight recorder. Attached
-automatically to new process groups unless the buffer size
-(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
+automatically to groups from init_process_group, new_group and
+torch.distributed.split_group (see attach) unless the buffer size
+(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is <= 0 or
 every backend of the group records natively.)")
       .def_static(
           "attach",
@@ -5530,9 +5535,13 @@ every backend of the group records natively.)")
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
-with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
-backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected. If the backend times
+with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
+that records natively: "nccl" (stock ProcessGroupNCCL, not nccl2) and "xccl".
+Groups from init_process_group, new_group and torch.distributed.split_group
+already have one attached, unless the default group provides its own
+new_group; attaching another records each op twice, under separate pg_ids.
+The hook detaches when remove() is called or the returned handle is garbage
+collected. If the backend times
 collectives the hook holds each Work (and its output tensors) until its
 result and the group's next collective; call remove() rather than dropping
 the handle, so pending result callbacks don't destroy it, with those Works,
@@ -5603,7 +5612,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5629,7 +5638,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo".
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.

@@ -2896,18 +2896,17 @@ def _get_backend_name_for_device(
     return result
 
 
-# Backends that feed a FlightRecorder without any help: ProcessGroupGloo
-# unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
-# integrations. "fake" and "undefined" never communicate, so recording them is
-# pure noise. Everything else -- nccl2, nccl-lazy, mpi, ucc, out-of-tree
-# plugins -- is invisible to the flight recorder unless a hook is attached.
+# Backends that feed a FlightRecorder without any help: ProcessGroupNCCL and
+# ProcessGroupXCCL through their own integrations. "fake" and "undefined" never
+# communicate, so recording them is pure noise. Everything else -- gloo, nccl2,
+# nccl-lazy, mpi, ucc, out-of-tree plugins -- is invisible to the flight
+# recorder unless a hook is attached.
 #
 # Backend.NCCL is not in here by construction: which implementation the name
 # builds is a runtime choice, so its registrar puts it in or takes it out when
 # it makes that choice, and this stays the single answer to "does this backend
 # record itself".
 _FR_SELF_RECORDING_BACKENDS = {
-    Backend.GLOO,
     "nccl-legacy",
     Backend.XCCL,
     Backend.FAKE,
@@ -2933,9 +2932,10 @@ def _maybe_attach_flight_recorder(
     # A hook is attached per ProcessGroup but backends are per device, and the
     # hook now resolves per op: it skips whatever a self-recording backend
     # serves and records the rest into that backend's own recorder instance. So
-    # a mixed group ("cpu:gloo,cuda:nccl2") gets its nccl2 half without
-    # duplicating gloo's native entries, and only a group that is self-recording
-    # on every device is still skipped -- a hook there would record nothing.
+    # a mixed group ("cpu:gloo,cuda:nccl-legacy") gets its gloo half without
+    # duplicating nccl-legacy's native entries, and only a group that is
+    # self-recording on every device is still skipped -- a hook there would
+    # record nothing.
     if all(
         backend_str in _FR_SELF_RECORDING_BACKENDS
         for backend_str in backend_config.get_device_backend_map().values()

@@ -41,11 +41,11 @@
 //
 // Because the hooks fire from the dispatcher kernels in Ops.cpp, this works for
 // any backend routed through c10d ops -- including backends with no native
-// FlightRecorder support (nccl2, custom backends) -- and the traces are dumped
-// with the existing _dump_fr_trace{,_json,_file} APIs or the "fr_dump_file"
-// control plane handler, naming the backend whose instance to read. attach()
-// also tells the recorder this process's global rank, which is what names the
-// per-rank dump file.
+// FlightRecorder support (nccl2, gloo, custom backends) -- and the traces are
+// dumped with the existing _dump_fr_trace{,_json,_file} APIs or the
+// "fr_dump_file" control plane handler, naming the backend whose instance to
+// read. attach() also tells the recorder this process's global rank, which is
+// what names the per-rank dump file.
 //
 // Ops served by a backend with its own FlightRecorder are skipped, so the hook
 // can be attached to a group of any composition without duplicating what a
@@ -130,8 +130,8 @@ class TORCH_API FlightRecorderHook
   FlightRecorderHook(
       c10::intrusive_ptr<ProcessGroup> pg,
       std::vector<uint64_t> global_ranks);
-  // The target serving an op, or the group's default backend for ops the
-  // dispatcher gives us no tensors for (barrier).
+  // The target serving an op, or the group's default backend for an op that
+  // names no device.
   const BackendTarget& targetFor(std::optional<c10::Device> device) const;
   // Whether a graph capture is active on the stream the op would be issued on.
   // nullopt when that cannot be established, which onPre reads as "capturing":
