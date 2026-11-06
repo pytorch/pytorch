@@ -41,8 +41,8 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self, TypedDict
+from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import override, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
