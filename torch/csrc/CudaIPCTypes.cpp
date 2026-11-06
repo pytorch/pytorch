@@ -1,5 +1,5 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <atomic>
 #include <map>
@@ -151,46 +151,26 @@ CudaIPCSentData::CudaIPCSentData(
       offset_(offset),
       counter_ptr_(counter_ptr),
       device_(device) {
-#if !defined(USE_ROCM)
-  // CUDA have the unofficial limit on the number of recorded blocking
-  // interprocess events, to prevent using of all events, we are switching to
-  // StreamSync before limit reached.
-  //
-  //  ```python
-  //  import torch
-  //  a = [ torch.cuda.Event(
-  //      enable_timing=False, blocking=True, interprocess=True) for i in
-  //      range(30000) ]
-  //  [i.record() for i in a]
-  //  ```
-  //
+  auto stream = at::accelerator::getCurrentStream(device_.index());
+  // Backends may limit the number of live interprocess events, so fall back to
+  // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
   if (cuda_ipc_global_entities.sync_events_used_.load() <
       CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
+    event_.emplace(
+        device_.type(),
+        c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
+    event_->record(stream);
     cuda_ipc_global_entities.sync_events_used_++;
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(
-        &event_,
-        cudaEventDisableTiming | cudaEventInterprocess |
-            cudaEventBlockingSync));
-    C10_CUDA_CHECK(cudaEventRecord(
-        event_, c10::cuda::getCurrentCUDAStream(device.index())));
     event_sync_required_ = true;
   } else {
-    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    at::cuda::stream_synchronize(stream);
-    event_ = nullptr;
+    stream.synchronize();
+    event_ = std::nullopt;
     event_sync_required_ = false;
   }
-#else
-  // cuIpcGetEventHandle with HIP is not supported, so we have to sync
-  // stream instead of passing event
-  auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  at::cuda::stream_synchronize(stream);
-  event_sync_required_ = false;
-#endif
 }
 
 CudaIPCSentData::~CudaIPCSentData() {
@@ -198,11 +178,9 @@ CudaIPCSentData::~CudaIPCSentData() {
     original_ptr_.release_context();
   }
   ReturnRefCounter(handle_, offset_);
-#if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
-      at::cuda::CUDAGuard device_guard(device_.index());
-      C10_CUDA_CHECK(cudaEventDestroy(event_));
+      event_.reset();
       if (!CudaIPCGlobalEntities::alive) {
         return;
       }
@@ -211,7 +189,6 @@ CudaIPCSentData::~CudaIPCSentData() {
     // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
-#endif
 }
 
 uint64_t CudaIPCSentData::counter_value() {
