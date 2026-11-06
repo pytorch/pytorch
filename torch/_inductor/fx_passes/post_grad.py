@@ -1724,7 +1724,9 @@ def _collect_output_storage(
     )
 
 
-def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
+def _depends_on_storage_offset(
+    node: torch.fx.Node, *, strict_cuda_mul: bool = False
+) -> bool:
     """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
 
     This is a denylist of consumers known to observe placement: ``as_strided``, whose
@@ -1733,6 +1735,9 @@ def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     descriptor on the host or on the device. Other opaque consumers, such as custom
     ops and extern fallback kernels, are intentionally not included. Views are
     followed through single- and multi-output view ops.
+
+    ``strict_cuda_mul`` checks only native CUDA FP64 multiplication, which also
+    observes runtime pointer alignment when selecting NaN payloads.
     """
     storage = get_node_storage(node)
     if storage is None:
@@ -1742,9 +1747,24 @@ def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     while pending:
         current = pending.pop()
         for user in current.users:
-            if user.target is aten.as_strided.default:
+            if not strict_cuda_mul and (
+                user.target is aten.as_strided.default
+                or is_user_kernel_functional_hop(user.target)
+            ):
                 return True
-            if is_user_kernel_functional_hop(user.target):
+            if (
+                strict_cuda_mul
+                and user.target == aten.mul.Tensor
+                and user.meta.get("original_aten", user.target)
+                in (aten.mul.Tensor, aten.mul_.Tensor)
+                and all(
+                    isinstance(arg, torch.fx.Node)
+                    and isinstance(value := arg.meta.get("val"), torch.Tensor)
+                    and value.dtype == torch.float64
+                    and is_strict_cuda_triton(value.device)
+                    for arg in user.args[:2]
+                )
+            ):
                 return True
             if user.op != "call_function" or user in seen:
                 continue
@@ -1833,6 +1853,14 @@ def remove_noop_ops(graph: torch.fx.Graph):
             node_storage = get_node_storage(node)
             src_storage = get_node_storage(src)
             node_is_view = node_storage == src_storage
+            # Strict CUDA mul observes fresh allocation alignment even when the
+            # source is aligned while tracing; later calls can change its pointer.
+            if (
+                config.strict_pointwise
+                and not node_is_view
+                and _depends_on_storage_offset(node, strict_cuda_mul=True)
+            ):
+                continue
             if (
                 not node_is_view
                 and node_storage in output_storages

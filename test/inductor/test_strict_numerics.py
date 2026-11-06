@@ -1276,6 +1276,68 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("producer", ("clone", "mutate_clone", "slice"))
+    def test_mul_nan_payload_observable_clone(self, device, dtype, numerics, producer):
+        from torch._inductor.graph import GraphLowering
+
+        values = torch.tensor(
+            [0x7FF8000000000011, 0x7FF8000000000001, 0x7FF8000000000033],
+            dtype=torch.int64,
+            device=device,
+        ).view(dtype)
+
+        def fn(a, b):
+            if producer == "slice":
+                return a[1:].mul_(b[1:])
+            if producer == "mutate_clone":
+                a.add_(0)
+            return a.clone().mul_(b)
+
+        def operands(offset):
+            length = 1026 if producer == "slice" else 1025
+            return (
+                values[0:1].repeat(length + offset)[offset:],
+                values[1:2].repeat(length).requires_grad_(),
+            )
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            for iteration, offset in enumerate((0, 1, 0, 1)):
+                eager_args, args = operands(offset), operands(offset)
+                storage = args[0].untyped_storage()
+                eager = fn(*eager_args)
+                if iteration == 0:
+                    actual, codes = run_and_get_code(compiled, *args)
+                    self.assertIn("@triton.jit", "\n".join(codes))
+                else:
+                    actual = compiled(*args)
+                self.assertEqual(actual.view(torch.int64), eager.view(torch.int64))
+                self.assertEqual(
+                    args[0].view(torch.int64), eager_args[0].view(torch.int64)
+                )
+                self.assertEqual(args[0].untyped_storage(), storage)
+                self.assertEqual(
+                    actual.untyped_storage() == storage, producer == "slice"
+                )
+                before_backward = args[0].view(torch.int64).clone()
+                grad_output = values[2:3].repeat(1025)
+                expected_grad = torch.autograd.grad(eager, eager_args[1], grad_output)[
+                    0
+                ]
+                codes = []
+                with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+                    grads = torch.autograd.grad(actual, args[1], grad_output)
+                if iteration == 0:
+                    self.assertIn("@triton.jit", "\n".join(codes))
+                self.assertEqual(
+                    grads[0].view(torch.int64), expected_grad.view(torch.int64)
+                )
+                self.assertEqual(args[0].view(torch.int64), before_backward)
+        self.assertEqual(counter.frame_count, 1)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("cpu_scalar", (False, True))
     @parametrize("producer", ("inplace", "out"))
     def test_mul_nan_payload_mutation_backward(
