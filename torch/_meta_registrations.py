@@ -3243,6 +3243,18 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
+    @register_meta(torch.ops.onednn.woq_scaled_mm.default)
+    def meta_woq_scaled_mm(
+        mat_a,
+        mat_b,
+        scale_b_list,
+        scale_recipe_b,
+        bias,
+    ):
+        output_shape = list(mat_a.shape)
+        output_shape[-1] = mat_b.shape[1]
+        return mat_a.new_empty(output_shape)
+
     @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
     @register_meta(torch.ops.onednn.linear_relu_dynamic_fp16.default)
     def meta_linear_dynamic_fp16(

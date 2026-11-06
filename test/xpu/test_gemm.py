@@ -2024,7 +2024,8 @@ def forward(self, x_1, w_1):
     @parametrize("mat_a_dtype", [torch.bfloat16, torch.half, torch.float32])
     @parametrize("with_bias", [True, False])
     @parametrize("m", [0, 128])
-    def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias, m):
+    @parametrize("compile", [False, True])
+    def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias, m, compile):
         from torch.nn.functional import ScalingType
 
         torch.manual_seed(0)
@@ -2052,13 +2053,15 @@ def forward(self, x_1, w_1):
 
         bias = torch.rand(N, device=device, dtype=mat_a.dtype) if with_bias else None
 
-        out = torch.ops.onednn.woq_scaled_mm(
-            mat_a,
-            mat_b,
-            [scale_b],
-            [scale_recipe],
-            bias,
-        )
+        def woq_scaled_mm(mat_a, mat_b, scale_b, bias):
+            return torch.ops.onednn.woq_scaled_mm(
+                mat_a, mat_b, [scale_b], [scale_recipe], bias
+            )
+
+        if compile:
+            woq_scaled_mm = torch.compile(woq_scaled_mm, fullgraph=True)
+
+        out = woq_scaled_mm(mat_a, mat_b, scale_b, bias)
         self.assertEqual(out.dtype, mat_a.dtype)
 
         out_emulated = mat_a.float() @ weight_dq.t()
