@@ -5817,11 +5817,11 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                if config.avoid_modular_indexing:
-                    # the dim-aligned split of var_mean changes the kernels
-                    continue
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 3 generated kernels (first one for var_mean, last two for
+                # result); the realized view of the low-precision input's
+                # float32 cast adds kernels
+                if dtype == torch.float32 or not config.avoid_modular_indexing:
+                    check_metrics_vec_kernel_count(3)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
