@@ -99,9 +99,10 @@ def key_constants(
     """The constant_key of each of ``constant_args``, constants of kernel ``name`` by
     parameter, taking the ones in ``keys`` as given. A constant that constant_key
     refuses raises its TypeError or ValueError, naming the kernel and the parameter:
-    the eager launch, a launcher and Inductor report it alike. Inductor keys the
-    defaults a call leaves out when it defines the call's launcher, or first, in
-    ir.UserDefinedCuteDSLKernel.split_args, if one of them cannot be copied."""
+    the eager launch, a launcher and the definition of a kernel in Inductor's Python
+    or C++ wrapper report it alike. Inductor keys the defaults a call leaves out when
+    it defines the call's kernel, or first, in ir.UserDefinedCuteDSLKernel.split_args,
+    if one of them cannot be copied."""
     from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
     from torch._higher_order_ops.user_kernel_hop import constant_key
 

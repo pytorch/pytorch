@@ -2419,6 +2419,9 @@ class PythonWrapperCodegen(CodeGen):
         # the generated Python module is loaded with.
         self.user_defined_cutedsl_kernel_cache: dict[tuple[Any, ...], str] = {}
         self.user_defined_cutedsl_launchers: dict[str, Any] = {}
+        # and the C++ wrapper's exports of them (prefix -> header + object), linked
+        # into the model .so or the JIT module (see CppWrapperGpu.cutedsl_link_args).
+        self.cutedsl_exported_kernels: dict[str, Any] = {}
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol
@@ -5133,13 +5136,16 @@ class PythonWrapperCodegen(CodeGen):
         *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
+        device: torch.device,
     ) -> str:
         """Define a user CuTeDSL kernel (a ``CuteDSLKernel`` side-table record) and
         return its name in the generated code: the counterpart of
         define_user_defined_triton_kernel. ``constant_args`` are the constants it
         binds and ``runtime_args`` the arguments each launch passes, by name in
-        signature order (see ir.UserDefinedCuteDSLKernel.split_args). This wrapper
-        uses only the names of the runtime arguments.
+        signature order (see ir.UserDefinedCuteDSLKernel.split_args), on ``device``.
+        This wrapper uses only the names of the runtime arguments; the C++ wrapper
+        also needs their layouts and types, and the device, to compile the kernel
+        when it defines it.
 
         The host function cannot be written out as source, so the generated module
         gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
@@ -5190,7 +5196,8 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Launch ``kernel_name``, defined by define_user_defined_cutedsl_kernel for
         ``kernel``, with ``runtime_args`` on the current stream of ``device``. This
-        wrapper uses ``kernel`` only to name it in errors."""
+        wrapper uses ``kernel`` only to name it in errors; the C++ wrapper also reads
+        the host function's signature from it."""
 
         def arg_str(arg: Any) -> str:
             if isinstance(arg, ir.IRNode):
@@ -5218,6 +5225,11 @@ class PythonWrapperCodegen(CodeGen):
         args = ", ".join(arg_strs.values())
         with debug_printer_manager:
             self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+
+    def cutedsl_link_args(self) -> list[str]:
+        """Link arguments for the user CuTeDSL kernels the C++ wrapper exported (see
+        CppWrapperGpu); the Python wrapper launches them from Python."""
+        return []
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
