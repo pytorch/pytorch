@@ -272,6 +272,35 @@ void returnFutureWithOutput(
   }
   future->markCompleted(c10::IValue(outputTensors[0]));
 }
+
+c10::intrusive_ptr<c10::ivalue::Future> createResultFuture() {
+  return c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
+}
+
+c10::IValue resultValue(WorkResult result) {
+  return c10::IValue(static_cast<uint8_t>(result));
+}
+
+void markResult(c10::ivalue::Future& future, WorkResult result) {
+  future.markCompleted(resultValue(result));
+}
+
+// p2p results are only known in wait(), which may run more than once, possibly
+// concurrently. A wait() interrupted by abort() leaves the op pending, so it
+// publishes nothing.
+void markP2PResult(
+    std::atomic<bool>& marked,
+    c10::ivalue::Future& future,
+    bool completed,
+    const std::exception_ptr& exception) {
+  if (!completed && !exception) {
+    return;
+  }
+  if (marked.exchange(true)) {
+    return;
+  }
+  markResult(future, exception ? WorkResult::COMM_ERROR : WorkResult::SUCCESS);
+}
 } // namespace
 
 // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -322,6 +351,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
       timeout_(timeout == kUnsetTimeout ? context_->getTimeout() : timeout),
       outputTensors_(std::move(outputTensors)),
       future_(createFutureAsOutput(outputTensors_)),
+      resultFuture_(createResultFuture()),
       seq_(seq) {
   if (profilingTitle != nullptr) {
     recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
@@ -337,11 +367,18 @@ void ProcessGroupGloo::AsyncWork::finishWorkGlooError(
     const std::exception_ptr& eptr) {
   future_->setError(eptr);
   finish(eptr);
+  markResult(*resultFuture_, WorkResult::COMM_ERROR);
 }
 
 void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
   returnFutureWithOutput(future_, outputTensors_);
   finish();
+  markResult(*resultFuture_, WorkResult::SUCCESS);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
+    getFutureResult() {
+  return resultFuture_;
 }
 
 ProcessGroupGloo::SendWork::SendWork(
@@ -355,7 +392,8 @@ ProcessGroupGloo::SendWork::SendWork(
           std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
-      seq_(seq) {}
+      seq_(seq),
+      resultFuture_(createResultFuture()) {}
 
 uint64_t ProcessGroupGloo::SendWork::getSequencenumber() const {
   return seq_;
@@ -374,14 +412,22 @@ bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
     exception = std::current_exception();
   }
 
-  // Completes the Work object and throws the exception.
-  finishAndThrow(exception);
+  finish(exception);
+  markP2PResult(resultMarked_, *resultFuture_, sendCompleted, exception);
+  if (exception) {
+    std::rethrow_exception(exception);
+  }
   if (c10d::allow_inflight_collective_as_graph_input()) {
     c10d::unregister_work(
         c10::intrusive_ptr<
             ProcessGroupGloo::SendWork>::unsafe_reclaim_from_nonowning(this));
   }
   return sendCompleted;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::SendWork::
+    getFutureResult() {
+  return resultFuture_;
 }
 
 void ProcessGroupGloo::SendWork::abort() {
@@ -401,8 +447,8 @@ ProcessGroupGloo::RecvWork::RecvWork(
           std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
-
-      seq_(seq) {}
+      seq_(seq),
+      resultFuture_(createResultFuture()) {}
 
 uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
   return seq_;
@@ -426,14 +472,22 @@ bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
     exception = std::current_exception();
   }
 
-  // Completes the Work object and throws the exception.
-  finishAndThrow(exception);
+  finish(exception);
+  markP2PResult(resultMarked_, *resultFuture_, recvCompleted, exception);
+  if (exception) {
+    std::rethrow_exception(exception);
+  }
   if (c10d::allow_inflight_collective_as_graph_input()) {
     c10d::unregister_work(
         c10::intrusive_ptr<
             ProcessGroupGloo::RecvWork>::unsafe_reclaim_from_nonowning(this));
   }
   return recvCompleted;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::RecvWork::
+    getFutureResult() {
+  return resultFuture_;
 }
 
 void ProcessGroupGloo::RecvWork::abort() {
@@ -1543,15 +1597,48 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 // composing multiple works together.
 class LambdaWork : public Work {
  public:
-  LambdaWork(std::function<void(void)> fn) : fn_(std::move(fn)) {}
+  LambdaWork(
+      std::function<void(void)> fn,
+      const std::vector<c10::intrusive_ptr<Work>>& works)
+      : fn_(std::move(fn)), resultFuture_(collectResults(works)) {}
 
   bool wait(std::chrono::milliseconds /* unused */) override {
     fn_();
     return true;
   }
 
+  // Completes once all composed works do, with the first failure if any.
+  // Outputs that fn_ copies are only written by wait().
+  c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+    return resultFuture_;
+  }
+  bool hasFutureResult() const override {
+    return true;
+  }
+
  private:
+  static c10::intrusive_ptr<c10::ivalue::Future> collectResults(
+      const std::vector<c10::intrusive_ptr<Work>>& works) {
+    c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(
+        c10::FutureType::create(c10::AnyEnumType::get()));
+    for (const auto& work : works) {
+      futures.push_back(work->getFutureResult());
+    }
+    return c10::collectAll(futures)->then(
+        [](c10::ivalue::Future& all) {
+          for (const auto& future : all.value().toList()) {
+            auto result = future.get().toFuture()->value();
+            if (result.toInt() != static_cast<uint8_t>(WorkResult::SUCCESS)) {
+              return result;
+            }
+          }
+          return resultValue(WorkResult::SUCCESS);
+        },
+        c10::AnyEnumType::get());
+  }
+
   std::function<void(void)> fn_;
+  c10::intrusive_ptr<c10::ivalue::Future> resultFuture_;
 };
 
 } // namespace
@@ -1595,13 +1682,13 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
         std::vector<at::Tensor> inp = {buffer};
         return allreduce(inp, arOpts);
       });
-  return c10::make_intrusive<LambdaWork>(
-      [rank, worldSize, buffers, outputTensors, works = std::move(works)]() {
-        for (const auto i : c10::irange(outputTensors.size())) {
-          works[i]->wait();
-          outputTensors[i].copy_(buffers[i].chunk(worldSize)[rank]);
-        }
-      });
+  auto fn = [rank, worldSize, buffers, outputTensors, works]() {
+    for (const auto i : c10::irange(outputTensors.size())) {
+      works[i]->wait();
+      outputTensors[i].copy_(buffers[i].chunk(worldSize)[rank]);
+    }
+  };
+  return c10::make_intrusive<LambdaWork>(std::move(fn), works);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single(
@@ -2278,12 +2365,12 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
         std::vector<at::Tensor> inp = {buffer};
         return allreduce(inp, arOpts);
       });
-  return c10::make_intrusive<LambdaWork>(
-      [worldSize, works = std::move(works)]() {
-        for (const auto i : c10::irange(worldSize)) {
-          works[i]->wait();
-        }
-      });
+  auto fn = [worldSize, works]() {
+    for (const auto i : c10::irange(worldSize)) {
+      works[i]->wait();
+    }
+  };
+  return c10::make_intrusive<LambdaWork>(std::move(fn), works);
 }
 
 namespace {

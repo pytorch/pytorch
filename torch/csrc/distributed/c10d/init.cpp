@@ -5078,6 +5078,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
             Raises ``NotImplementedError`` if the backend's work does not support it.
 
+            Gloo send/recv works complete the future only in ``wait()``; it stays
+            pending until the work is waited on.
+
             Python ``Work`` subclasses may override this to return a
             ``torch.futures.Future``. FlightRecorder calls it once per op as
             the op is issued, so overrides must be cheap and must not block.
