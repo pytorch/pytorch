@@ -168,14 +168,14 @@ CudaIPCSentData::CudaIPCSentData(
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
-    cuda_ipc_global_entities.sync_events_used_++;
     event_.emplace(
         acc_type, c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
     event_->record(stream);
+    cuda_ipc_global_entities.sync_events_used_++;
     event_sync_required_ = true;
   } else {
     stream.synchronize();
-    event_ = nullptr;
+    event_ = std::nullopt;
     event_sync_required_ = false;
   }
 }
@@ -185,7 +185,6 @@ CudaIPCSentData::~CudaIPCSentData() {
     original_ptr_.release_context();
   }
   ReturnRefCounter(handle_, offset_);
-#if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
       event_.reset();
@@ -197,7 +196,6 @@ CudaIPCSentData::~CudaIPCSentData() {
     // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
-#endif
 }
 
 uint64_t CudaIPCSentData::counter_value() {
