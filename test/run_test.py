@@ -566,15 +566,6 @@ def run_test(
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
 
     env = env or os.environ.copy()
-    if IS_S390X:
-        env["PYTORCH_TEST_SKIP_PROFILER_CAPTURE"] = "Profiler tests disabled on s390x"
-    elif IS_WINDOWS and not options.ignore_win_blocklist:
-        from torch.testing._internal.common_cuda import SM89OrLater
-
-        if SM89OrLater:
-            env["PYTORCH_TEST_SKIP_PROFILER_CAPTURE"] = (
-                "Profiler tests disabled on Windows SM89 and later"
-            )
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name
