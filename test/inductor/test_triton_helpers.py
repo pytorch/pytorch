@@ -487,7 +487,7 @@ class Random4xTest(TestCase):
 
 
 class MinimumMaximumTest(TestCase):
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/PLACEHOLDER")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6060")
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
         a = torch.tensor(
             [
