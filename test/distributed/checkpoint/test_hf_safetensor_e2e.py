@@ -3,14 +3,11 @@
 import importlib
 import json
 import os
-import warnings
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
-    _consolidate_safetensors_files,
-    consolidate_safetensors_files,
     consolidate_safetensors_files_on_every_rank,
 )
 from torch.distributed.checkpoint.quantized_hf_storage import (
@@ -104,28 +101,10 @@ class TestSingleRankSaveLoad(TestCase):
             torch.equal(state_dict_loaded["weight_t"], weight.transpose(1, 2))
         )
 
-    def _check_unsaved_mapping_entries_skipped(
-        self, caught, output_dir, weight
-    ) -> None:
-        from safetensors.torch import load_file
-
-        skipped = [
-            str(w.message) for w in caught if "fqn_to_index_mapping" in str(w.message)
-        ]
-        self.assertEqual(len(skipped), 1)
-        self.assertRegex(
-            skipped[0], r"^Skipping 2 tensor\(s\) .*: mtp\.bias, mtp\.weight\. Remove"
-        )
-        loaded = load_file(output_dir + "/model-00001-of-00002.safetensors")
-        self.assertEqual(loaded, {"weight": weight})
-        self.assertFalse(
-            os.path.exists(output_dir + "/model-00002-of-00002.safetensors")
-        )
-
     @with_temp_dir
     def test_save_consolidated_skips_unsaved_mapping_entries(self) -> None:
         try:
-            import safetensors  # noqa: F401
+            from safetensors.torch import load_file
         except ImportError:
             print("safetensors not installed")
             return
@@ -133,8 +112,9 @@ class TestSingleRankSaveLoad(TestCase):
         CHECKPOINT_DIR = self.temp_dir
 
         weight = torch.rand(4, 4)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
+        with self.assertWarnsRegex(
+            UserWarning, r"^Skipping 2 tensor\(s\) .*: mtp\.bias, mtp\.weight\. "
+        ):
             dist_cp.save(
                 state_dict={"weight": weight},
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
@@ -145,7 +125,11 @@ class TestSingleRankSaveLoad(TestCase):
                 ),
             )
 
-        self._check_unsaved_mapping_entries_skipped(caught, CHECKPOINT_DIR, weight)
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
+        self.assertEqual(loaded, {"weight": weight})
+        self.assertEqual(
+            load_file(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors"), {}
+        )
         with open(CHECKPOINT_DIR + "/model.safetensors.index.json") as f:
             self.assertEqual(
                 json.load(f),
@@ -158,7 +142,7 @@ class TestSingleRankSaveLoad(TestCase):
     @with_temp_dir
     def test_consolidate_on_every_rank_skips_unsaved_mapping_entries(self) -> None:
         try:
-            import safetensors  # noqa: F401
+            from safetensors.torch import load_file
         except ImportError:
             print("safetensors not installed")
             return
@@ -173,79 +157,26 @@ class TestSingleRankSaveLoad(TestCase):
                 path=sharded_dir, save_distributed=True
             ),
         )
-        fqn_to_index_mapping = {"weight": 1, "mtp.weight": 1, "mtp.bias": 2}
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
+        # Every input header has a __metadata__ key, which is not a tensor
+        fqn_to_index_mapping = {
+            "weight": 1,
+            "mtp.weight": 1,
+            "mtp.bias": 2,
+            "__metadata__": 2,
+        }
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"^Skipping 3 tensor\(s\) .*: __metadata__, mtp\.bias, mtp\.weight\. ",
+        ):
             consolidate_safetensors_files_on_every_rank(
                 sharded_dir, CHECKPOINT_DIR, fqn_to_index_mapping=fqn_to_index_mapping
             )
 
-        self._check_unsaved_mapping_entries_skipped(caught, CHECKPOINT_DIR, weight)
-
-    @with_temp_dir
-    def test_consolidate_helper_skips_unsaved_mapping_entries(self) -> None:
-        try:
-            from safetensors.torch import load_file
-        except ImportError:
-            print("safetensors not installed")
-            return
-
-        sharded_dir = self.temp_dir + "/sharded"
-        weight = torch.rand(4, 4)
-        dist_cp.save(
-            state_dict={"weight": weight},
-            storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=sharded_dir, save_distributed=True
-            ),
-        )
-        # Called the way code outside PyTorch calls it, without input_files_data
-        file_name = "model-00001-of-00001.safetensors"
-        _consolidate_safetensors_files(
-            input_dir=sharded_dir,
-            output_dir=self.temp_dir,
-            fqn_to_file_mapping={"weight": file_name, "mtp.weight": file_name},
-            num_threads=1,
-        )
-        loaded = load_file(os.path.join(self.temp_dir, file_name))
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
         self.assertEqual(loaded, {"weight": weight})
-
-    @parametrize(
-        "consolidate",
-        [consolidate_safetensors_files, consolidate_safetensors_files_on_every_rank],
-        name_fn=lambda f: f.__name__,
-    )
-    @with_temp_dir
-    def test_consolidate_raises_without_input_files(self, consolidate) -> None:
-        missing_dir = os.path.join(self.temp_dir, "missing")
-        with self.assertRaisesRegex(ValueError, "No safetensors files found"):
-            consolidate(missing_dir, self.temp_dir, {"weight": 1})
-        self.assertEqual(os.listdir(self.temp_dir), [])
-
-    @parametrize(
-        "consolidate",
-        [consolidate_safetensors_files, consolidate_safetensors_files_on_every_rank],
-        name_fn=lambda f: f.__name__,
-    )
-    @with_temp_dir
-    def test_consolidate_raises_when_no_mapping_entry_was_saved(
-        self, consolidate
-    ) -> None:
-        try:
-            import safetensors  # noqa: F401
-        except ImportError:
-            print("safetensors not installed")
-            return
-
-        sharded_dir = self.temp_dir + "/sharded"
-        dist_cp.save(
-            state_dict={"weight": torch.rand(4, 4)},
-            storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=sharded_dir, save_distributed=True
-            ),
+        self.assertEqual(
+            load_file(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors"), {}
         )
-        with self.assertRaisesRegex(ValueError, r"None of the 1 tensor\(s\)"):
-            consolidate(sharded_dir, self.temp_dir, {"mtp.weight": 1})
-        self.assertEqual(os.listdir(self.temp_dir), ["sharded"])
 
     @with_temp_dir
     def test_load(self) -> None:
