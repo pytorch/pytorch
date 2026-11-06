@@ -2115,7 +2115,7 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         self.compile_region_name,
                         graph_kwargs,
-                        inputs_to_check,
+                        graph.inputs_to_check or (),
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,
@@ -3045,6 +3045,20 @@ def compile_fx_backward(
         # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
         # which can already be channels-last for convolution_backward (#197514).
         _recursive_record_original_output_strides(gm)
+        if config.strict_pointwise:
+            # A backward input returned as a gradient keeps its runtime layout.
+            input_strides = {
+                node: arg.stride()
+                for node, arg in zip(placeholders, example_inputs)
+                if isinstance(arg, torch.Tensor)
+            }
+            output_strides = model_outputs_node.meta["original_output_strides"].copy()
+            for idx, node in enumerate(
+                pytree.arg_tree_leaves(*model_outputs_node.args)
+            ):
+                if node in input_strides:
+                    output_strides[idx] = input_strides[node]
+            model_outputs_node.meta["original_output_strides"] = output_strides
 
         with (
             (
