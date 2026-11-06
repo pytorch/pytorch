@@ -4796,7 +4796,10 @@ Example::
               "_set_default_timeout",
               &::c10d::ProcessGroupXCCL::setTimeout,
               py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "perform_nocolor_split",
+              &::c10d::ProcessGroupXCCL::performNocolorSplit);
 
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL, "Options", backendOptions)
