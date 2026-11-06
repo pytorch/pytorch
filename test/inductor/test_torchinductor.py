@@ -20997,6 +20997,58 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual = torch.compile(fn)(torch.zeros(1, device=self.device))
         self.assertEqual(expected, actual)
 
+    def test_clones_of_one_tensor_output_distinct(self):
+        # remove_noop_ops may drop some of these copies, but not all, or the
+        # outputs share one storage while eager returns independent tensors.
+        def clone_twice(x):
+            base = x + 1
+            return base.clone(), base.clone()
+
+        def clone_chain(x):
+            c = (x + 1).clone()
+            return c, c.clone()
+
+        def clone_and_noop_view_clone(x):
+            base = x + 1
+            return base.clone(), base.view(-1).clone()
+
+        def clone_and_noop_view_of_clone(x):
+            c = (x + 1).clone()
+            return c, c.view(-1).clone()
+
+        def three_clones(x):
+            base = x + 1
+            return base.clone(), base.clone(), base.view(-1).clone()
+
+        def clone_and_noop_to_copy(x):
+            base = x + 1
+            return base.clone(), base.to(base.dtype, copy=True)
+
+        def view_of_erased_clone(x):
+            base = x + 1
+            p = base.clone()
+            return base.clone(), p.view(2, 2).clone()
+
+        def view_of_erased_clone_reversed(x):
+            base = x + 1
+            p = base.clone()
+            return p.view(2, 2).clone(), base.clone()
+
+        for fn in (
+            clone_twice,
+            clone_chain,
+            clone_and_noop_view_clone,
+            clone_and_noop_view_of_clone,
+            three_clones,
+            clone_and_noop_to_copy,
+            view_of_erased_clone,
+            view_of_erased_clone_reversed,
+        ):
+            with self.subTest(fn.__name__):
+                outs = torch.compile(fn)(torch.zeros(4, device=self.device))
+                ptrs = [out.untyped_storage().data_ptr() for out in outs]
+                self.assertEqual(len(set(ptrs)), len(ptrs))
+
     def test_no_op_view_output_identity(self):
         # https://github.com/pytorch/pytorch/issues/191449
         # A no-op view returned alongside its base must stay a distinct
