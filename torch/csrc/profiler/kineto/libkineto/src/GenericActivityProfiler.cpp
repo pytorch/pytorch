@@ -567,7 +567,9 @@ void GenericActivityProfiler::configure(
 void GenericActivityProfiler::flushWarmupBuffers(
     int64_t currentIter,
     const time_point<system_clock>& nextWakeupTime) {
-  if (!shouldTraceGpu()) {
+  // This runs without mutex_, so it reads the armed flag rather than config_,
+  // which a sync trace that preempts this one may replace.
+  if (!gpuTracingArmed_.load()) {
     return;
   }
   // Flushing GPU activities can take a while so avoid doing it close to
