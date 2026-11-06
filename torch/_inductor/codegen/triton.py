@@ -2691,10 +2691,14 @@ class TritonKernelOverrides(TritonOverrides):
             torch.float16,
             torch.bfloat16,
             torch.float32,
+            torch.float64,
         ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i0(ops.to_dtype(x, torch.float32)).value
+            dtype = (
+                torch.float64 if triton_arg_dtype(x) == torch.float64 else torch.float32
+            )
+            return OpDecompositions._strict_i0(ops.to_dtype(x, dtype), dtype).value
         return _triton_cyl_bessel_i(0, x)
 
     @staticmethod
@@ -2715,10 +2719,16 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def modified_bessel_i0(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and (dtype := triton_arg_dtype(x)) in (
+            torch.float32,
+            torch.float64,
+        ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i0(x).value
+            # CUDA's modified i0 leaves the final FP64 recurrence unfused.
+            return OpDecompositions._strict_i0(
+                x, cast(torch.dtype, dtype), fuse_final=dtype != torch.float64
+            ).value
         return _triton_cyl_bessel_i(0, x)
 
     @staticmethod

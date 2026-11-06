@@ -1123,13 +1123,20 @@ class OpDecompositions:
 
     @staticmethod
     def _chbevl(
-        x: OpVarT, coefficients: tuple[float, ...], dtype: torch.dtype = torch.float32
+        x: OpVarT,
+        coefficients: tuple[float, ...],
+        dtype: torch.dtype = torch.float32,
+        *,
+        fuse_final: bool = True,
     ) -> OpsValue:
         b0 = ops.constant(coefficients[0], dtype)
         b1 = b2 = ops.constant(0.0, dtype)
-        for coefficient in coefficients[1:]:
+        for index, coefficient in enumerate(coefficients[1:], 1):
             b2, b1 = b1, b0
-            b0 = ops.fma(x, b1, ops.neg(b2))
+            if fuse_final or index != len(coefficients) - 1:
+                b0 = ops.fma(x, b1, ops.neg(b2))
+            else:
+                b0 = ops.sub(ops.mul(x, b1), b2)
             b0 = ops.add(b0, ops.constant(coefficient, dtype))
         return ops.mul(
             ops.constant(0.5, dtype),
@@ -1137,7 +1144,9 @@ class OpDecompositions:
         )
 
     @staticmethod
-    def _strict_i0(x: OpVarT) -> OpsValue:
+    def _strict_i0(
+        x: OpVarT, dtype: torch.dtype = torch.float32, *, fuse_final: bool = True
+    ) -> OpsValue:
         a = (
             -4.41534164647933937950e-18,
             3.33079451882223809783e-17,
@@ -1198,17 +1207,21 @@ class OpDecompositions:
             8.04490411014108831608e-1,
         )
         abs_x = ops.abs(x)
-        two = ops.constant(2.0, torch.float32)
+        two = ops.constant(2.0, dtype)
         small_z = ops.sub(ops.truediv(abs_x, two), two)
-        small = ops.mul(ops.exp(abs_x), OpDecompositions._chbevl(small_z, a))
-        large_z = ops.sub(ops.truediv(ops.constant(32.0, torch.float32), abs_x), two)
+        small = ops.mul(
+            ops.exp(abs_x),
+            OpDecompositions._chbevl(small_z, a, dtype, fuse_final=fuse_final),
+        )
+        large_z = ops.sub(ops.truediv(ops.constant(32.0, dtype), abs_x), two)
         large = ops.truediv(
-            ops.mul(ops.exp(abs_x), OpDecompositions._chbevl(large_z, b)),
+            ops.mul(
+                ops.exp(abs_x),
+                OpDecompositions._chbevl(large_z, b, dtype, fuse_final=fuse_final),
+            ),
             ops.sqrt(abs_x),
         )
-        result = ops.where(
-            ops.le(abs_x, ops.constant(8.0, torch.float32)), small, large
-        )
+        result = ops.where(ops.le(abs_x, ops.constant(8.0, dtype)), small, large)
         return ops.where(ops.isinf(abs_x), ops.sub(x, x), result)
 
     @staticmethod
