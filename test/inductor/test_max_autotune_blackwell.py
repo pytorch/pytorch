@@ -36,6 +36,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -167,20 +168,52 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not("tl.make_tensor_descriptor")
         else:
             fc.check("tl.make_tensor_descriptor")
         fc.check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count("tl.make_tensor_descriptor", 1, exactly=True).run(
                 code[0]
             )
             FileCheck().check("tl.make_tensor_descriptor(out_ptr0").run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @largeTensorTest("20 GB", device=GPU_TYPE)
+    def test_blackwell_mm_tma_store_large_output_int64_indexing(self):
+        """An output past 2^31 elements makes the kernel index in int64; the
+        Blackwell template must still be offered with its TMA store."""
+        M, N, K = 5592406, 384, 128
+        self.assertGreater(M * N, 2**31 - 1)
+        # Entries in {-1, 0, 1} keep every partial sum exact, so any config must match bitwise.
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": True,
+                "triton.num_decompose_k_splits": 0,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "tma_descriptor0.store("
+        ).run(code[0])
+        self.assertEqual(actual, torch.mm(a, b), atol=0, rtol=0)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -289,8 +322,65 @@ class TestMaxAutotuneBlackwell(TestCase):
             fc.check("tl.make_tensor_descriptor(base=")
         fc.run(code[0])
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_host_side_tma_one_dynamic_operand(self):
+        # Only A has a dynamic dim, so A falls back to a device-side descriptor
+        # while B keeps its host-side one in the same kernel.
+        M, N, K = 1024, 256, 512
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+        torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused_mm").check_count(
+            "tl.make_tensor_descriptor(base=A", 1, exactly=True
+        ).check_not("tl.make_tensor_descriptor(base=B").run(code[0])
+        FileCheck().check("'host_tma_descriptor_args': {'arg_B'").run(code[0])
+
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_host_side_tma_aliased_dynamic_operand(self):
+        # Both operands view x, so def_kernel passes them as one arg. A is
+        # dynamic, so B must also take a device-side descriptor: the launcher
+        # can't pass the shared arg as a host TensorDescriptor to only one.
+        x = torch.randint(-2, 3, (256, 64)).to(torch.float16).to(GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def mm(x):
+            return x @ x[:64].t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm), x)
+        torch.testing.assert_close(c_actual, mm(x), atol=0, rtol=0)
+        FileCheck().check_not("host_tma_descriptor_args").run(code[0])
+        FileCheck().check("tl.make_tensor_descriptor(base=A").check(
+            "tl.make_tensor_descriptor(base=B"
+        ).run(code[0])
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -349,7 +439,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -421,7 +512,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -515,14 +607,15 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         # Verify that we are using a TMA implementation
         fc = FileCheck().check("triton_tem_fused_addmm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not(make_desc_api)
         else:
             fc.check(make_desc_api)
         fc.check(read_api).check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
