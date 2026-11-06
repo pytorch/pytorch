@@ -3,14 +3,17 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/DeviceUtils.cuh>
 
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/Load.h>
 #include <limits>
 #include <cmath>
+
+#if defined(USE_ROCM)
+#include <ATen/cuda/DeviceUtils.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/macros/Macros.h>
 #include <cstring>
+#endif
 
 namespace at::native {
 
@@ -392,6 +395,7 @@ __global__ void tensor_kernel_scan_innermost_dim(
   }
 }
 
+#if defined(USE_ROCM)
 /* Row-parallel inclusive scan along the innermost dimension.
  *
  * Each thread loads kItems contiguous elements (vectorized when aligned), scans
@@ -875,7 +879,6 @@ void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, Bi
 
 } // namespace inner_scan
 
-#if defined(USE_ROCM)
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define AT_OUTER_SCAN_TDM 1
 #if defined(__has_builtin)
