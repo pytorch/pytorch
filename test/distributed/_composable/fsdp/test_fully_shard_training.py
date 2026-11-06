@@ -43,7 +43,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     TrainingState,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import with_tf32_off
@@ -516,16 +519,11 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "use_shard_placement_fn": [True],
                 # False tests Shard(1)-only weights; True adds Shard(0) biases.
                 "bias": [False, True],
-            },
-            self._test_train_parity_single_group,
-        )
-        # The native reduce-scatter copy-in needs even nonzero-dim sharding
-        self.run_subtests(
-            {
-                "lin_shapes": [[(32, 16), (16, 8)]],
-                "use_shard_placement_fn": [True],
-                "bias": [False, True],
-                "reduce_scatter_input_fn": [reduce_scatter_input_fn_with_native_copy],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
+                "all_gather_output_fn": [None, all_gather_output_fn_with_native_copy],
             },
             self._test_train_parity_single_group,
         )
@@ -536,6 +534,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         use_shard_placement_fn: bool,
         bias: bool = True,
         reduce_scatter_input_fn: Callable | None = None,
+        all_gather_output_fn: Callable | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -553,6 +552,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
         model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
+        if all_gather_output_fn is not None:
+            # FSDPModule has no setter for the all-gather copy-out yet
+            group = fully_shard.state(model)._fsdp_param_group
+            group._all_gather_output_fn = all_gather_output_fn
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
@@ -1670,12 +1673,16 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
                 )
             )
         self.run_subtests(
-            {"mesh": meshes, "reshard_after_forward": [True, False, 2]},
+            {
+                "mesh": meshes,
+                "reshard_after_forward": [True, False, 2],
+                "native_copy": [False, True],
+            },
             self._test_train_parity_uneven_shard_dim1,
         )
 
     def _test_train_parity_uneven_shard_dim1(
-        self, mesh: DeviceMesh, reshard_after_forward: bool | int
+        self, mesh: DeviceMesh, reshard_after_forward: bool | int, native_copy: bool
     ):
         class FeedForward(nn.Module):
             # Stacked gate and up projections, sharded on F like w2. Scaled like
@@ -1704,7 +1711,13 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         )
         for layer in model:
             fully_shard_fn(layer)
+            if native_copy:
+                # FSDPModule has no setter for the all-gather copy-out yet
+                group = fully_shard.state(layer)._fsdp_param_group
+                group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         fully_shard_fn(model)
+        if native_copy:
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         # Unlike foreach, fused requires each gradient to have its parameter's
         # strides, including the empty shards of rank 7
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
@@ -3418,6 +3431,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            **kwargs,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3429,6 +3443,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                **kwargs,
             )
 
         orig_foreach_reduce = foreach_reduce

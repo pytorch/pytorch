@@ -347,35 +347,77 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
+    *,
+    needs_nonzero_dim_padding: bool = False,
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+        if needs_nonzero_dim_padding and _can_pad_in_copy_in(fsdp_params):
+            # One native copy casts and pads every shard into the all-gather
+            # input, instead of a foreach cast, a fill and a copy per padded
+            # shard, and a foreach copy
+            fsdp_param_0 = fsdp_params[0]
+            dtype = fsdp_param_0.param_dtype or fsdp_param_0._sharded_param_data.dtype
+            inputs, num_leading_dims, padded_dim_sizes = [], [], []
+            for fsdp_param in fsdp_params:
+                data = fsdp_param._sharded_param_data
+                if fsdp_param.needs_nonzero_dim_padding:
+                    dim = fsdp_param.fsdp_placement.dim
+                    inputs.append(data.view(fsdp_param.sharded_size))
+                    num_leading_dims.append(dim)
+                    padded_dim_sizes.append(fsdp_param.padded_sharded_param_size[dim])
+                else:
+                    inputs.append(data)
+                    num_leading_dims.append(0)
+                    padded_dim_sizes.append(data.numel())
+            inp_split_sizes = [
+                fsdp_param.padded_sharded_param_size.numel()
+                for fsdp_param in fsdp_params
             ]
+            param_all_gather_input_dtypes = [[dtype] for _ in fsdp_params]
+            param_all_gather_input_numels = [[numel] for numel in inp_split_sizes]
+            all_gather_input_numel = sum(inp_split_sizes)
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            all_gather_input = all_gather_output.narrow(
+                0, all_gather_input_numel * rank, all_gather_input_numel
+            )
+            torch.ops.fsdp.chunk_cat_mixed_dtype(
+                inputs,
+                0,
+                1,
+                out=all_gather_input.view(1, -1),
+                num_leading_dims=num_leading_dims,
+                padded_dim_sizes=padded_dim_sizes,
+            )
         else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs
+            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+            (
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+            if dtype == torch.uint8:
+                all_gather_inputs = [
+                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+                ]
+            else:
+                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+            inp_split_sizes = [t.numel() for t in all_gather_inputs]
+            all_gather_input_numel = sum(inp_split_sizes)
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+                all_gather_inputs,
+                all_gather_output,
+                inp_split_sizes,
+                all_gather_input_numel,
+                rank,
+            )
+            del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
@@ -393,6 +435,22 @@ def foreach_all_gather(
             param_all_gather_input_numels,
             inp_split_sizes,
         )
+
+
+def _can_pad_in_copy_in(fsdp_params: list[FSDPParam]) -> bool:
+    """Whether the all-gather copy-in can read every shard as stored: no
+    all-gather extensions, CPU offloading or post-forward shards, and one
+    all-gather dtype."""
+    dtypes = set()
+    for fsdp_param in fsdp_params:
+        if (
+            fsdp_param.offload_to_cpu
+            or fsdp_param.sharded_state != ShardedState.SHARDED
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+        ):
+            return False
+        dtypes.add(fsdp_param.param_dtype or fsdp_param._sharded_param_data.dtype)
+    return len(dtypes) == 1
 
 
 @torch.no_grad()
