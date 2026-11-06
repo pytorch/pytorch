@@ -476,14 +476,19 @@ class _PyLibCupti:
         cuptiActivityEnableHWTrace when the attribute is unavailable or rejected, so an
         unsupported platform still reports CUPTI_ERROR_NOT_SUPPORTED."""
         attr = getattr(ActivityAttr, "ENABLE_HES", None)
-        if attr is not None:
+        set_attribute = getattr(self._lib, "cuptiActivitySetAttribute_v2", None)
+        if attr is not None and set_attribute is not None:
             enabled = ctypes.c_uint8(1)
             size = ctypes.c_size_t(1)
-            rc = self._lib.cuptiActivitySetAttribute_v2(
-                None, attr, ctypes.byref(size), ctypes.byref(enabled)
-            )
+            rc = set_attribute(None, attr, ctypes.byref(size), ctypes.byref(enabled))
             if rc == CUPTI_SUCCESS:
                 return
+            logger.warning(
+                "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with %s; falling back "
+                "to cuptiActivityEnableHWTrace, after which libcupti >= 13.5 rejects "
+                "user-defined records",
+                self._result_string(rc),
+            )
         self.activity_enable_hw_trace(True)
 
     def finalize(self) -> None:
