@@ -62,7 +62,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_TRITON,
+    IS_BIG_GPU,
+)
 from torch.utils._triton import has_triton_package
 
 
@@ -1163,9 +1167,7 @@ class TestPrecompile(TestCase):
         for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             self.assertEqual(f_c(m, x), m(x))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
-    )
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "needs CUDA + Triton for kernel cache")
     @torch._inductor.config.patch({"compile_threads": 1})
     def test_cache_reload_without_eager_static_launcher_rehydration(self):
         # A cold load should use JIT instead of eagerly rehydrating the static launcher.
@@ -1197,7 +1199,7 @@ class TestPrecompile(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "needs CUDA + Triton for autotuning")
     def test_cache_bundles_autotune_artifacts(self):
         from torch._inductor.utils import fresh_cache
 
@@ -3752,6 +3754,11 @@ class TestPrecompileCaptureFiles(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
+    def setUp(self):
+        super().setUp()
+        if self.device_type == "cuda" and not HAS_CUDA_AND_TRITON:
+            self.skipTest("requires cuda and triton")
 
     def test_plain_function(self, device):
         def f(x, y):

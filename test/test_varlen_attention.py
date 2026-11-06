@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -1273,6 +1274,8 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     ):
         if backend == "fa2" and page_size % 256 != 0:
             self.skipTest("FA2 paged KV requires page_size divisible by 256")
+        if compile and not HAS_CUDA_AND_TRITON:
+            self.skipTest("requires cuda and triton")
 
         # varlen_attn lives in a Dynamo skipfile, so torch.compile wraps it onto
         # the process-global wrap_inline "inner" frame - the same code object the
