@@ -3579,13 +3579,11 @@ class TestHardwareClassifications(TestCase):
         # runs test files, in place under test/ so test/conftest.py and pytest.ini apply.
         env = _FIXTURE_CHILD_ENV | {"PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION": "GENERIC,CPU"}
         fixture = _HW_CLASSIFICATION_TESTDATA / "hw_classification_suite.py"
-        for runner, extra_args, summaries in [
-            ("unittest", [], [r"\bRan 2 tests\b"]),
-            ("pytest", ["--use-pytest", "-p", "no:cacheprovider"], [r"\b2 passed\b", r"\b2 deselected\b"]),
-        ]:
+        runners = [("unittest", [], [r"\bRan 2 tests\b"])]
+        if _fixture_child_versions()["pytest"] is not None:
+            runners.append(("pytest", ["--use-pytest", "-p", "no:cacheprovider"], [r"\b2 passed\b", r"\b2 deselected\b"]))
+        for runner, extra_args, summaries in runners:
             with self.subTest(runner=runner):
-                if runner == "pytest" and _fixture_child_versions()["pytest"] is None:
-                    self.skipTest("needs pytest")
                 result = subprocess.run(
                     [sys.executable, str(fixture.relative_to(fixture.parents[1])), "-v", *extra_args],
                     cwd=fixture.parents[1],
