@@ -871,25 +871,14 @@ class FSDPParam:
                 "requires fsdp_pre_all_gather and fsdp_post_all_gather to be "
                 f"defined: {inner_tensor}"
             )
-        shard_dim = self.fsdp_placement.dim
-        if (
-            has_fsdp_pre_all_gather
-            and shard_dim != 0
-            and isinstance(self.mesh_info, FSDPMeshInfo)
-            and self._orig_size[shard_dim] % self.mesh_info.shard_mesh_size != 0
-        ):
-            # pyrefly: ignore [missing-attribute]
-            signature = inspect.signature(inner_tensor.fsdp_pre_all_gather)
-            # Only the 5-argument hook gets outer_size to pad with (#137005)
-            if len(signature.parameters) == 1:
-                raise NotImplementedError(
-                    f"FSDP does not support uneven sharding on dim {shard_dim} for "
-                    "all-gather extensions whose fsdp_pre_all_gather takes only "
-                    f"mesh: {self._orig_size} (world size: "
-                    f"{self.mesh_info.shard_mesh_size}). Use fsdp_pre_all_gather("
-                    "self, mesh, outer_size, outer_stride, module, mp_policy) to "
-                    "get the unsharded size to pad the shard with."
-                )
+        if has_fsdp_pre_all_gather and isinstance(self.mesh_info, FSDPMeshInfo):
+            _validate_uneven_shard_pre_all_gather(
+                # pyrefly: ignore [missing-attribute]
+                inner_tensor.fsdp_pre_all_gather,
+                self._orig_size,
+                shard_dim=self.fsdp_placement.dim,
+                shard_world_size=self.mesh_info.shard_mesh_size,
+            )
         self._all_gather_metadata = None
         self._extension_all_gather_output_layouts = None
         self._extension_layouts_by_key = {}
@@ -1725,3 +1714,26 @@ def set_requires_grad_if_needed(
     # switch overhead
     if src_tensor.requires_grad != dst_tensor.requires_grad:
         dst_tensor.requires_grad_(src_tensor.requires_grad)
+
+
+def _validate_uneven_shard_pre_all_gather(
+    pre_all_gather: Callable[..., Any],
+    orig_size: torch.Size,
+    *,
+    shard_dim: int,
+    shard_world_size: int,
+) -> None:
+    """
+    Raises if the parameter is unevenly sharded on a nonzero dim and its
+    ``fsdp_pre_all_gather`` takes only ``mesh``: only the 5-argument hook gets
+    ``outer_size`` to pad its shard with (#137005).
+    """
+    uneven = shard_dim != 0 and orig_size[shard_dim] % shard_world_size != 0
+    if uneven and len(inspect.signature(pre_all_gather).parameters) == 1:
+        raise NotImplementedError(
+            f"FSDP does not support uneven sharding on dim {shard_dim} for "
+            "all-gather extensions whose fsdp_pre_all_gather takes only "
+            f"mesh: {orig_size} (world size: {shard_world_size}). Use "
+            "fsdp_pre_all_gather(self, mesh, outer_size, outer_stride, module, "
+            "mp_policy) to get the unsharded size to pad the shard with."
+        )

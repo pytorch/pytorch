@@ -584,15 +584,15 @@ def _default_all_gather_output_fn(
             torch.cat(chunks.unbind(0), dim=1, out=rows)
         else:
             # torch.chunk gives full chunks, at most one short chunk, then empty ones,
-            # so each row is num_full whole chunks and then a tail of the short chunk
+            # so each row is num_full whole chunks and then the short chunk, if any
             chunk_size = chunks.size(2)
-            num_full, tail = divmod(rows.size(1), chunk_size)
+            num_full, short_size = divmod(rows.size(1), chunk_size)
             full_size = num_full * chunk_size
             rows[:, :full_size].view(outer_size, num_full, chunk_size).copy_(
                 chunks[:num_full].transpose(0, 1)
             )
-            if tail:
-                rows[:, full_size:].copy_(chunks[num_full, :, :tail])
+            if short_size:
+                rows[:, full_size:].copy_(chunks[num_full, :, :short_size])
 
 
 def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
@@ -689,16 +689,16 @@ def _pad_and_reorder_by_rank(
     size = grad.shape[shard_dim]
     chunk_size = math.ceil(size / world_size)
     # Full chunks come first, then at most one short chunk, then empty ones
-    num_full, tail = divmod(size, chunk_size)
+    num_full, short_size = divmod(size, chunk_size)
     shard_shape = (*grad.shape[:shard_dim], chunk_size, *grad.shape[shard_dim + 1 :])
     shards = grad.new_zeros(world_size, *shard_shape)
-    # One copy moves the full chunks to a leading rank dim, and a second the tail
+    # One copy moves the full chunks to a leading rank dim, a second the short chunk
     full = grad.narrow(shard_dim, 0, num_full * chunk_size)
     full = full.unflatten(shard_dim, (num_full, chunk_size)).movedim(shard_dim, 0)
     shards[:num_full].copy_(full)
-    if tail:
-        tail_chunk = grad.narrow(shard_dim, num_full * chunk_size, tail)
-        shards[num_full].narrow(shard_dim, 0, tail).copy_(tail_chunk)
+    if short_size:
+        short_chunk = grad.narrow(shard_dim, num_full * chunk_size, short_size)
+        shards[num_full].narrow(shard_dim, 0, short_size).copy_(short_chunk)
     return shards.flatten(0, 1)
 
 
