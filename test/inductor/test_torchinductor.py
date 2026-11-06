@@ -19864,6 +19864,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(a, b), torch.compile(fn)(a, b))
 
     @requires_gpu_and_triton
+    def test_cpu_scalar_with_gpu_tensor_cudagraphs(self):
+        # The scalar changes between calls, so the kernel that reads it by
+        # value must not be recorded in the CUDA graph.
+        def fn(a, b):
+            return a * ((1.0 - b.float().squeeze()) * 2.5) + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        fn_c = torch.compile(fn, mode="reduce-overhead")
+        for v in (0.1, 0.2, 0.3, 0.4):
+            b = torch.tensor([v], dtype=torch.float64)
+            self.assertEqual(fn(a, b), fn_c(a, b))
+
+    @requires_gpu_and_triton
     @config.patch(implicit_fallbacks=True)
     def test_cpu_scalar_expr_from_custom_op_with_gpu_tensor(self):
         @torch.library.custom_op("test_inductor::lr_schedule", mutates_args=())
