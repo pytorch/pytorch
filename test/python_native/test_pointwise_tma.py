@@ -191,8 +191,9 @@ class TestPointwiseTma(TestCase):
     @parametrize(
         "route", ("jit", subtest("aot", decorators=[skipIfNoNativeAot("gt.Tensor")]))
     )
+    @parametrize("layout", ("mixed", "scalar", "singleton"))
     def test_tma_bool_output_and_capture(
-        self, device: str, dtype: torch.dtype, route: str
+        self, device: str, dtype: torch.dtype, route: str, layout: str
     ) -> None:
         from torch._native.ops.pointwise import kernel
 
@@ -201,6 +202,16 @@ class TestPointwiseTma(TestCase):
         x[0, :3] = torch.tensor(
             (float("nan"), float("inf"), -float("inf")), device=device, dtype=dtype
         )
+        scalar_contiguous = layout != "mixed"
+        if scalar_contiguous:
+            x = x.contiguous()
+            x[1, :3] = 1.5
+            y = torch.full(
+                (1,) if layout == "singleton" else (),
+                1.499,
+                device=device,
+                dtype=torch.float32,
+            )
         out = torch.empty(x.shape, device=device, dtype=torch.bool)
         with torch.backends.python_native.cutedsl.disabled():
             expected = torch.gt(x, y)
@@ -225,7 +236,108 @@ class TestPointwiseTma(TestCase):
         else:
             launch.assert_not_called()
             self.assertTrue(
-                any("ElementwiseTma2D" in event.name for event in profiler.events())
+                any(
+                    (
+                        "ElementwiseScalarVector"
+                        if scalar_contiguous
+                        else "ElementwiseTma2D"
+                    )
+                    in event.name
+                    for event in profiler.events()
+                )
+            )
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("numel,offset", ((511, 1), (512, 1), (2053, 2), (2055, 4), (2057, 8)))
+    @parametrize(
+        "route", ("jit", subtest("aot", decorators=[skipIfNoNativeAot("mul")]))
+    )
+    def test_scalar_vector_unaligned(
+        self, device: str, numel: int, offset: int, route: str
+    ) -> None:
+        from torch._native.ops.pointwise import kernel
+
+        x = torch.full((numel + offset,), 1.5, device=device, dtype=torch.bfloat16)[
+            offset:
+        ]
+        scalar = torch.tensor(1.003, device=device)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.mul(x, scalar)
+        with _execution_route(route), patch.object(kernel, "_ENABLED", True):
+            actual = torch.mul(x, scalar)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("scalar_dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("scalar_first", (False, True))
+    @parametrize(
+        "route", ("jit", subtest("aot", decorators=[skipIfNoNativeAot("sub")]))
+    )
+    @parametrize("contiguous", (False, True))
+    def test_tma_device_scalar(
+        self,
+        device: str,
+        dtype: torch.dtype,
+        scalar_dtype: torch.dtype,
+        scalar_first: bool,
+        route: str,
+        contiguous: bool,
+    ) -> None:
+        from torch._native.ops.pointwise import kernel
+
+        if route == "aot" and torch.float16 in (dtype, scalar_dtype):
+            self.skipTest("FP16 pointwise kernels are JIT-only")
+        x = torch.full((160, 160), 1.5, device=device, dtype=dtype)[32:, :128].t()
+        if contiguous:
+            x = x.contiguous()
+        scalar = torch.full((2,), 1.003, device=device, dtype=scalar_dtype)[1]
+        if scalar_first:
+            # Retain zero-dim coverage when scalar_first=False, and exercise singleton
+            # strides, ranks and a nonzero storage offset here.
+            shape = (1, 1, 1)
+            scalar = scalar.as_strided(
+                shape, tuple(2 + 3 * i for i in range(len(shape)))
+            )
+        args = (scalar, x) if scalar_first else (x, scalar)
+        result_dtype = torch.result_type(*args)
+        shape = torch.broadcast_shapes(x.shape, scalar.shape)
+        out = torch.empty(shape, device=device, dtype=result_dtype)
+        profiler = profile(activities=[ProfilerActivity.CUDA])
+        with (
+            _execution_route(route),
+            profiler if route == "aot" else nullcontext(),
+            patch.object(kernel, "_ENABLED", True),
+            patch.object(kernel, "run", wraps=kernel.run) as launch,
+        ):
+            actual = torch.sub(*args)
+            actual_mul = torch.mul(*args)
+            with torch.backends.python_native.cutedsl.disabled():
+                expected = torch.sub(*args)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(actual.stride(), expected.stride())
+                self.assertEqual(actual_mul, torch.mul(*args), atol=0, rtol=0)
+            torch.sub(*args, out=out)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                torch.sub(*args, out=out)
+            for value in (1.003, 1.007):
+                scalar.fill_(value)
+                graph.replay()
+                with torch.backends.python_native.cutedsl.disabled():
+                    self.assertEqual(out, torch.sub(*args), atol=0, rtol=0)
+        if route == "jit":
+            launch.assert_called()
+        else:
+            launch.assert_not_called()
+            self.assertTrue(
+                any(
+                    ("ElementwiseScalarVector" if contiguous else "ElementwiseTma2D")
+                    in event.name
+                    for event in profiler.events()
+                )
             )
 
     @onlyCUDA
@@ -241,6 +353,7 @@ class TestPointwiseTma(TestCase):
             "alias",
             "misaligned",
             "float64",
+            "float64_scalar",
         ),
     )
     @parametrize(
@@ -256,6 +369,8 @@ class TestPointwiseTma(TestCase):
             x = torch.randn(4097, device=device)[1:].view(64, 64).t()
         elif layout == "float64":
             x = x.double().t()
+        elif layout == "float64_scalar":
+            x = x.t()
         elif layout in ("broadcast", "scalar", "tail", "alias"):
             x = x.t()
         shape = (x.shape[-1],) if layout == "broadcast" else x.shape
@@ -264,6 +379,8 @@ class TestPointwiseTma(TestCase):
             if layout == "scalar"
             else torch.randn(shape, device=device, dtype=x.dtype)
         )
+        if layout == "float64_scalar":
+            y = torch.tensor(0.5, device=device, dtype=torch.float64)
         with torch.backends.python_native.cutedsl.disabled():
             expected = x + y
         if layout == "alias":

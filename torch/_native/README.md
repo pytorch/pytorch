@@ -376,22 +376,34 @@ This will test all triton-based binary operators.
 
 On compute capability 10.x devices, pointwise CuTeDSL overrides serve eligible
 transposed and outer-strided CUDA inputs. These cases are significantly
-accelerated compared to ATen's legacy unrolled kernel. Fully contiguous calls
-retain ATen's CUDA vectorized kernels.
+accelerated compared to ATen's legacy unrolled kernel. Contiguous calls without
+CUDA scalars retain ATen's CUDA vectorized kernels.
 
 The TMA path accepts matching-shape, matching-dtype float16, bfloat16 and
 float32 operands, plus Boolean comparison outputs. It supports aligned row
 pitches and aligned nonzero-offset views. Higher-rank permutations are supported
 when their dense dimension groups collapse to a 2-D transpose, optionally with
 an outer batch group, with complete TMA tiles. Inner strides greater than one,
-broadcasting, in-place operations, and unsupported layouts or output
+other broadcasts, in-place operations, and unsupported layouts or output
 buffers fall back to ATen.
 Outputs retain ATen's dense physical dimension order. TMA eligibility is checked
 relative to that order, rather than requiring a contiguous output.
-No CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
+No general CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
 The registry scalar-coercion fix is retained so calls with Python-number
 operands can still fall back to ATen correctly.
 
+Single-element CUDA operands may use any rank, singleton strides, storage
+offset, and any of the three supported floating dtypes. Like ATen, they are read
+on the device and rounded to the common input dtype before FP32 computation.
+Results are converted to the output dtype on store. Dimensioned single-element
+tensors retain ATen's broadcast shape and output dtype promotion. Named
+parameters such as `alpha` remain host scalars.
+
+Contiguous inputs with CUDA scalar operands use a separate vector kernel that
+shares the TMA operation math, launch wrappers and plan cache. Aligned complete
+vectors follow ATen's vector-width and elements-per-thread heuristics, including
+the larger-work-per-thread policy for large inputs on compute capability 10.7.
+Pointer alignment selects narrower vectors; partial blocks use scalar loads.
 
 Pointwise AOT declarations cover floating arithmetic, rounding, transcendental
 functions, and all six Tensor comparisons.
@@ -399,9 +411,10 @@ They use the `sm_100f` target for the 10.x architecture family, for bfloat16 and
 float32 operands only. They reuse the TMA executor with dynamic sizes and aligned
 outer pitches for 2-D inputs and dense outputs (including transposed outputs
 allocated by ATen meta). The structured AOT hook returns false for contiguous
-calls, partial TMA tiles, broadcasting, inner strides,
+calls without CUDA scalars, partial TMA tiles, other broadcasts, inner strides,
 aliasing outputs and unsupported instantiations, retaining ATen's CUDA kernel.
-No general vectorized or unrolled fallback kernel is registered. The
+The five original binary operations also export contiguous CUDA-scalar vector variants;
+no general vectorized or unrolled fallback kernel is registered. The
 architecture-family exporter selects `sm_100f` for compatible build
 architectures, including `10.0` and `10.7`.
 `addcmul` exports require matching-shape tensors, with other cases retaining
