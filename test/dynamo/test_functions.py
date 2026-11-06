@@ -7003,6 +7003,83 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x)[1:3], ("Renamed.get", "Renamed.fromkeys"))
 
+    @parametrize("kind", ("getset", "method"))
+    def test_assume_constant_result_tensor_descriptor(self, kind):
+        @torch._dynamo.assume_constant_result
+        def target():
+            if kind == "getset":
+                return torch.Tensor.shape.__get__
+            return torch.Tensor.numel
+
+        def fn(x):
+            return x + 1, target()(x)
+
+        x = torch.ones(2, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x + 2), fn(x + 2))
+
+    @parametrize(
+        "method", (torch.Tensor.dim, torch.Tensor.is_complex, torch.Tensor.sum)
+    )
+    def test_tensor_method_descriptor_guard(self, method):
+        def fn(x, method):
+            return x + 1, method(x)
+
+        x = torch.randn(2, 3)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for target in (torch.Tensor.numel, method, torch.Tensor.numel, method):
+            self.assertEqual(opt_fn(x, target), fn(x, target))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("attribute", ("dtype", "device"))
+    def test_tensor_getter_wrapper_guard(self, attribute):
+        def fn(x, getter):
+            return x + 1, getter(x)
+
+        descriptors = (torch.Tensor.shape, getattr(torch.Tensor, attribute))
+        x = torch.randn(2, 3)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for descriptor in descriptors * 2:
+            getter = descriptor.__get__
+            self.assertEqual(opt_fn(x, getter), fn(x, getter))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_member_getter_wrapper_guard(self):
+        class Holder:
+            __slots__ = ("first", "second")
+
+        holder = Holder()
+        holder.first, holder.second = 3, 7
+
+        def fn(x, getter):
+            return x + getter(holder)
+
+        x = torch.randn(2, 3)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for descriptor in (Holder.first, Holder.second) * 2:
+            getter = descriptor.__get__
+            self.assertEqual(opt_fn(x, getter), fn(x, getter))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_member_wrapper_operation_guard(self):
+        class Holder:
+            __slots__ = ("value",)
+
+        def fn(x, wrapper):
+            return x + 1, wrapper.__name__
+
+        x = torch.randn(2, 3)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for name in ("__get__", "__delete__") * 2:
+            wrapper = getattr(Holder.value, name)
+            self.assertEqual(opt_fn(x, wrapper), fn(x, wrapper))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_unbound_method_descriptor_call(self):
         # list.count read off the type inside the frame is a method_descriptor;
         # calling it runs the C method even when the receiver's class overrides
