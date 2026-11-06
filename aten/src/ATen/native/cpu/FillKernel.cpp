@@ -28,7 +28,7 @@ void fill_non_native_type(TensorIterator& iter, const Scalar& value_scalar) {
 template <>
 void fill_non_native_type<c10::complex<at::Half>>(TensorIterator& iter, const Scalar& value_scalar) {
   static_assert(sizeof(c10::complex<at::Half>) == sizeof(int32_t), "Size of ComplexHalf should be 32-bits");
-  // Unchecked: overflow gives inf, as it did through complex<float>.
+  // Unlike Scalar::to, c10::convert gives inf on overflow rather than raising.
   auto value = c10::convert<c10::complex<at::Half>>(
       value_scalar.to<c10::complex<double>>());
   auto val = *reinterpret_cast<int32_t*>(std::addressof(value));
