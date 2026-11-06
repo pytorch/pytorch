@@ -871,6 +871,25 @@ class FSDPParam:
                 "requires fsdp_pre_all_gather and fsdp_post_all_gather to be "
                 f"defined: {inner_tensor}"
             )
+        shard_dim = self.fsdp_placement.dim
+        if (
+            has_fsdp_pre_all_gather
+            and shard_dim != 0
+            and isinstance(self.mesh_info, FSDPMeshInfo)
+            and self._orig_size[shard_dim] % self.mesh_info.shard_mesh_size != 0
+        ):
+            # pyrefly: ignore [missing-attribute]
+            signature = inspect.signature(inner_tensor.fsdp_pre_all_gather)
+            # Only the 5-argument hook gets outer_size to pad with (#137005)
+            if len(signature.parameters) == 1:
+                raise NotImplementedError(
+                    f"FSDP does not support uneven sharding on dim {shard_dim} for "
+                    "all-gather extensions whose fsdp_pre_all_gather takes only "
+                    f"mesh: {self._orig_size} (world size: "
+                    f"{self.mesh_info.shard_mesh_size}). Use fsdp_pre_all_gather("
+                    "self, mesh, outer_size, outer_stride, module, mp_policy) to "
+                    "get the unsharded size to pad the shard with."
+                )
         self._all_gather_metadata = None
         self._extension_all_gather_output_layouts = None
         self._extension_layouts_by_key = {}
