@@ -744,6 +744,28 @@ class TestDecomp(TestCase):
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
+    @ops(
+        [op for op in op_db if op.name == "_native_batch_norm_legit"],
+        allowed_dtypes=(torch.float16, torch.bfloat16),
+    )
+    def test_batch_norm_functional_stat_dtype(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            if len(sample.args) != 7:
+                continue
+            args = (sample.input, *sample.args)
+            functions = [aten._native_batch_norm_legit_functional.default]
+            if args[5]:
+                functions.append(aten._batch_norm_with_update_functional.default)
+            for functional_op in functions:
+                call_args = (
+                    args if functional_op == functions[0] else (*args[:5], *args[6:])
+                )
+                expected = functional_op(*call_args)
+                actual = torch._decomp.decomposition_table[functional_op](*call_args)
+                self.assertEqual([t.dtype for t in actual], [t.dtype for t in expected])
+                if not args[5]:
+                    self.assertEqual(actual[-2:], args[3:5])
+
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
         shape = (1, 3, 2, 2)
