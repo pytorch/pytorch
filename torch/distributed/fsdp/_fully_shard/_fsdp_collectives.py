@@ -933,7 +933,9 @@ def _cast_and_view_sharded_grads(
                 # The shard arrives padded on its shard dim, like the all-gather
                 # input: rank 2 of a (2, 5) gradient on Shard(1) over 4 ranks gets
                 # [[g04, 0], [g14, 0]]. The padded strides view its data,
-                # [[g04], [g14]], which is copied into a compact gradient.
+                # [[g04], [g14]], which is copied into a compact gradient. Not
+                # with contiguous(): it would return rank 3's empty view as is,
+                # whose padded strides fused optimizers reject.
                 padded_stride = make_contiguous_strides_for(
                     fsdp_param.padded_sharded_param_size
                 )
@@ -942,7 +944,7 @@ def _cast_and_view_sharded_grads(
                     size=fsdp_param.sharded_size,
                     stride=padded_stride,
                     storage_offset=group_offset,
-                ).contiguous()
+                ).clone(memory_format=torch.contiguous_format)
                 record_grad_output_stream(grad, consumer_stream)
             else:
                 grad = torch.as_strided(

@@ -1695,7 +1695,7 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         # empty
         model = nn.Sequential(*(FeedForward(8, 13) for _ in range(2)))
         ref_model = copy.deepcopy(model).to(device_type)
-        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2, fused=True)
         fully_shard_fn = functools.partial(
             fully_shard,
             mesh=mesh,
@@ -1705,7 +1705,9 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         for layer in model:
             fully_shard_fn(layer)
         fully_shard_fn(model)
-        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+        # Unlike foreach, fused requires each gradient to have its parameter's
+        # strides, including the empty shards of rank 7
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
 
         torch.manual_seed(42 + self.rank)
         num_microbatches = 2
