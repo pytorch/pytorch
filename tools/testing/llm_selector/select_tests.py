@@ -10,8 +10,8 @@ CI can run annotated with its CI cost. Nothing from the change is executed:
 in CI this script runs from the default branch and only reads the PR through git. The model answers through `claude -p`
 with a JSON schema; on Bedrock set CLAUDE_CODE_USE_BEDROCK=1 and AWS
 credentials. A failure of git, the model call or its output, or the test times
-yields a run_all selection, so CI never skips tests because the selector broke;
-a bad LLM_SELECTOR_EFFORT or a failed write of --output writes no file.
+yields a run_all selection that is never enforced; a bad LLM_SELECTOR_EFFORT or a
+failed write of --output writes no file. Either way run_test.py keeps TD's split.
 """
 
 from __future__ import annotations
@@ -361,20 +361,22 @@ def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
     return {t for t in tests if not t.startswith(blocked) and t not in listed}
 
 
-def select(args: argparse.Namespace, record: dict) -> Selection | None:
-    """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
+def select(args: argparse.Namespace, record: dict) -> tuple[Selection | None, bool]:
+    """Make the selection and say whether it may be enforced, filling `record`
+    with diagnostics; no selection after --print-prompt."""
     head = git("rev-parse", args.head).strip()
     record["head"] = head
     merge_base = git("merge-base", args.base, head).strip()
     record["merge_base"] = merge_base
     changed = changed_files(merge_base, head)
     if (reason := run_all_reason(changed)) and not args.print_prompt:
-        return Selection(run_all=True, reason=reason)
+        return Selection(run_all=True, reason=reason), True
     # get_test_times reports its download on stdout, where --print-prompt writes.
     with contextlib.redirect_stdout(sys.stderr):
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
-        return Selection(run_all=True, reason="no test times", error="no test times")
+        error = "no test times"
+        return Selection(run_all=True, reason=error, error=error), True
     diffstat, diff = diffstat_and_diff(merge_base, head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
@@ -392,7 +394,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     prompt = build_prompt(title, body, diffstat, diff, candidates, minutes, new)
     if args.print_prompt:
         print(prompt)
-        return None
+        return None, False
 
     result = query_model(prompt, args.model, args.effort)
     out = None if result.get("is_error") else result.get("structured_output")
@@ -428,9 +430,10 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     # its sweeps' configs: never enforce.
     keys = ("tests", "dirs")
     picked = selection.run_all or out is None or any(out[k] for k in keys)
-    if not picked and any(not f.startswith("test/") for f in changed):
+    enforceable = picked or all(f.startswith("test/") for f in changed)
+    if not enforceable:
         record["not_enforced"] = "the model chose no tests for a change outside test/"
-    return selection
+    return selection, enforceable
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -495,7 +498,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.print_prompt:
         args.output.unlink(missing_ok=True)
     try:
-        selection = select(args, record)
+        selection, enforceable = select(args, record)
     except Exception as e:
         if args.print_prompt:
             raise
@@ -507,11 +510,18 @@ def main(argv: list[str] | None = None) -> None:
         selection = Selection(
             run_all=True, reason=f"selector failed: {error[:500]}", error=error[:2000]
         )
-    if record["not_enforced"] is not None:
-        args.enforce = False
+        enforceable = False
     if selection is None:
         return
-    selection.enforce = args.enforce
+    # A deliberate run_all (no changed files, test infrastructure, too many
+    # changed files, an inductor failure list naming an unknown class, too many
+    # edited files under test/ that are not tests, too many import hops, an
+    # edited file under test/ that nothing reads, or the model) is enforced once
+    # selection.ENFORCEMENT_ENABLED is flipped; a broken selector, or a
+    # not_enforced answer (see select), never is.
+    refused = selection.error is not None or not enforceable
+    selection.enforce = args.enforce and not refused
+    selection.enforce_requested = args.enforce
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
     )

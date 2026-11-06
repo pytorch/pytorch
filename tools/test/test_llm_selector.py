@@ -1043,6 +1043,7 @@ g () {
                 {**valid, "files": [1]},
                 {**valid, "run_all": "false"},
                 {**valid, "enforce": "false"},
+                {**valid, "enforce_requested": "false"},
                 {**valid, "reason": 1},
                 {**valid, "candidates": [1]},
                 {**valid, "candidates": None},
@@ -1075,10 +1076,25 @@ g () {
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
+            # A version-1 file from a selector predating enforce_requested,
+            # where enforce means it was requested.
+            enforced = Selection({"test_nn"}, enforce=True, candidates={"test_nn"})
+            for s in (sel, enforced):
+                old = {k: v for k, v in s.to_json().items() if k != "enforce_requested"}
+                p.write_text(json.dumps(old))
+                loaded = Selection.load(p)
+                self.assertEqual(loaded, s)
+                self.assertEqual(getattr(loaded, "enforce_requested", None), s.enforce)
 
     def test_covers(self) -> None:
-        with self.assertRaisesRegex(ValueError, "must be run_all"):
-            Selection()
+        for kw, msg in [
+            ({}, "must be run_all"),
+            ({"candidates": set(), "error": "e"}, "must be run_all"),
+            ({"files": {"test_nn"}, "candidates": {"test_ops"}}, "must be candidates"),
+            ({"sweeps": {"default"}, "candidates": set()}, "unknown sweeps"),
+        ]:
+            with self.assertRaisesRegex(ValueError, msg):
+                Selection(**kw)
         cands = {"test_nn", "test_ops", "test_torch"}
         sel = Selection({"test_nn"}, {"dynamo_wrapped"}, candidates=cands)
         # The model was not shown test_openreg, so it always runs.
@@ -1666,7 +1682,8 @@ class TestMain(unittest.TestCase):
         with mock.patch.object(select_tests, "git", side_effect=error):
             record = self.run_main("--enforce")
         self.assertTrue(record["run_all"])
-        self.assertTrue(record["enforce"])
+        self.assertFalse(record["enforce"])
+        self.assertTrue(record["enforce_requested"])
         self.assertIn("selector failed", record["reason"])
         self.assertEqual(record["error"], f"CalledProcessError: {error}")
         self.assertIsNone(record["diagnostics"]["merge_base"])
@@ -1758,8 +1775,8 @@ class TestMain(unittest.TestCase):
                 self.assertEqual(select_tests.pr_text(args, "h"), ("subject", "body\n"))
             self.assertEqual({c.args[3] for c in git.call_args_list}, {"h"})
 
-    def run_cli(self, result: dict, reason: str | None = None) -> tuple[dict, str]:
-        """main on a docs-only change with `result` as the CLI's result, or with a selection of `reason`; the record and stdout."""
+    def run_cli(self, result: dict) -> tuple[dict, str]:
+        """main on a docs-only change with `result` as the CLI's result; the record and stdout."""
         stdout = io.StringIO()
         with (
             tempfile.TemporaryDirectory() as tmp,
@@ -1774,13 +1791,7 @@ class TestMain(unittest.TestCase):
             mock.patch("sys.stdout", stdout),
         ):
             output = Path(tmp) / "out.json"
-            if reason is None:
-                select_tests.main(["--title", "t", "--output", str(output)])
-            else:
-                with mock.patch.object(
-                    select_tests, "select", return_value=Selection(reason=reason)
-                ):
-                    select_tests.main(["--title", "t", "--output", str(output)])
+            select_tests.main(["--title", "t", "--output", str(output)])
             self.assertIsNotNone(selection.Selection.load(output))
             return json.loads(output.read_text()), stdout.getvalue()
 
@@ -1899,6 +1910,7 @@ class TestMain(unittest.TestCase):
                 record = json.loads(out.read_text())
             self.assertIsNone(record["error"], changed)
             self.assertEqual(record["enforce"], enforced, (changed, answer))
+            self.assertTrue(record["enforce_requested"])
             self.assertEqual(record["diagnostics"]["not_enforced"] is None, enforced)
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
@@ -1991,6 +2003,58 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
         self.assertIsNone(record["error"])
+
+    def test_only_a_deliberate_run_all_is_enforced(self) -> None:
+        def run(changed: str, answer: dict, times: dict, *argv: str) -> dict:
+            with tempfile.TemporaryDirectory() as tmp, clean_env():
+                output = Path(tmp) / "out.json"
+                with (
+                    mock.patch.object(select_tests, "git", return_value=changed),
+                    mock.patch.object(
+                        select_tests, "get_test_times", return_value=times
+                    ),
+                    mock.patch.object(select_tests, "query_model", return_value=answer),
+                    mock.patch.object(select_tests, "git_grep", return_value=[]),
+                    mock.patch.object(select_tests, "REPO_ROOT", Path(tmp)),
+                ):
+                    select_tests.main(["--title", "t", "--output", str(output), *argv])
+                return json.loads(output.read_text())
+
+        times = {"env": {"default": {"test_nn": 1.0}}}
+        model_run_all = {
+            "structured_output": {
+                "run_all": True,
+                "reason": "",
+                "sweeps": [],
+                "dirs": [],
+                "tests": [],
+            }
+        }
+        normal = {
+            "structured_output": {
+                "run_all": False,
+                "reason": "",
+                "sweeps": [],
+                "dirs": [],
+                "tests": [{"file": "test_nn", "confidence": "high"}],
+            }
+        }
+        error = {"is_error": True, "result": "overloaded"}
+        malformed = {"structured_output": {"run_all": False, "tests": "test_nn"}}
+        for changed, answer, t, enforced, argv in [
+            ("test/run_test.py\0", error, times, True, ["--enforce"]),
+            ("docs/a.md\0", model_run_all, times, True, ["--enforce"]),
+            ("docs/a.md\0", normal, times, True, ["--enforce"]),
+            ("docs/a.md\0", normal, times, False, []),
+            ("docs/a.md\0", error, times, False, ["--enforce"]),
+            ("docs/a.md\0", malformed, times, False, ["--enforce"]),
+            ("docs/a.md\0", model_run_all, {}, False, ["--enforce"]),
+            ("", model_run_all, times, True, ["--enforce"]),
+        ]:
+            record = run(changed, answer, t, *argv)
+            self.assertEqual(record["run_all"], answer is not normal)
+            self.assertEqual(record["enforce"], enforced, (changed, answer, t, argv))
+            self.assertEqual(record["enforce_requested"], bool(argv))
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
         env = {
