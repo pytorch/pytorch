@@ -10,6 +10,12 @@ import torch
 from torch.utils._triton import has_triton_package
 
 
+# The python wrapper global mapping a module-level kernel's name to the config it
+# launches with (written by _KernelConfigs in codegen/wrapper.py, read by
+# cached_autotune).
+KERNEL_CONFIGS_NAME = "KERNEL_CONFIGS"
+
+
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
@@ -333,6 +339,7 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
     min_split_scan_rblock: int

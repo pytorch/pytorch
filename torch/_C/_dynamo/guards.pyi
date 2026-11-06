@@ -274,6 +274,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_fake_tensor_match_guard(
+        self,
+        expected: bool,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
@@ -362,6 +368,12 @@ class GuardManager:
     def add_dual_level_match_guard(
         self,
         level: int,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def add_autograd_saved_tensors_hooks_guard(
+        self,
+        graph_module_type: type[torch.fx.GraphModule],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...

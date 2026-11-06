@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -473,7 +473,7 @@ class CodeGen:
         else:
             return f"return {repr_fn(output_args)}"
 
-    def process_inputs(self, *args: Unpack[_InputArgs]) -> tuple[Unpack[_InputArgs]]:
+    def process_inputs(self, *args: *_InputArgs) -> tuple[*_InputArgs]:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being
@@ -661,11 +661,17 @@ class CodeGen:
             else:
                 return blue(repr(arg))
 
+        def _format_kwarg(name: str, value: Argument) -> str:
+            value_repr = _get_repr(value)
+            if name.isidentifier() and not keyword.iskeyword(name):
+                return f"{name} = {value_repr}"
+            return f"**{{{name!r}: {value_repr}}}"
+
         def _format_args(
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
             res = [_get_repr(a) for a in args]
-            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
+            res.extend(_format_kwarg(k, v) for k, v in kwargs.items())
             return ", ".join(res)
 
         # Run through reverse nodes and record the first instance of a use
@@ -985,7 +991,7 @@ class CodeGen:
                     call_args = [_get_repr(arg) for arg in node.args]
                     for i, name in boxed_arg_names.items():
                         call_args[i] = name
-                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
+                    call_args.extend(_format_kwarg(k, v) for k, v in kwargs)
                     formatted_args_str = ", ".join(call_args)
                 else:
                     formatted_args_str = _format_args(node.args, node.kwargs)

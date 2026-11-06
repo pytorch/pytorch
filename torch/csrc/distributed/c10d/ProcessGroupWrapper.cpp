@@ -107,17 +107,17 @@ struct CollectiveFingerPrint {
       sizes.reserve(num_tensors);
 
       // 3. Tensor dtypes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         dtypes.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 4. Device types
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         device_types.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 5. Tensor shapes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         // 5a. Shape size
         int size = serialized_tensor[index].item<int>();
         index++;
@@ -524,7 +524,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
 void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-  return backend_->monitoredBarrier(opts, waitAllRanks);
+  backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
@@ -579,7 +579,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_single_coalesced(
 }
 
 void ProcessGroupWrapper::startCoalescing() {
-  return backend_->startCoalescing();
+  backend_->startCoalescing();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {

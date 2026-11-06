@@ -687,7 +687,7 @@ __all__ += ["nll_loss"]
 def normalize(
     input: Tensor,
     p: float = ...,
-    dim: int = ...,
+    dim: int | _size = ...,
     eps: float = ...,
     out: Tensor | None = ...,
 ) -> Tensor: ...

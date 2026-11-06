@@ -3,6 +3,8 @@ import functools
 import itertools
 import math
 import os
+import re
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -13,11 +15,15 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -27,9 +33,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    RUN_CPU,
 )
 
 
@@ -1924,6 +1930,33 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             f"vs no caching ({copy_count_uncached})",
         )
 
+    def _test_sdpa_constraint_flexible_kv_layout(self):
+        # kv has two SDPA users, so it is realized with a FlexibleLayout before the
+        # first SDPA is lowered, and its reads favor a layout with stride(-1) != 1.
+        if not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            self.skipTest("requires flash attention")
+
+        def pma_attention(query, a, b, weight):
+            x = torch.nn.functional.silu(a).transpose(1, 2) + b.transpose(1, 2)
+            x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-5) * weight
+            kv = x.unsqueeze(1).contiguous()
+            sdpa = torch.nn.functional.scaled_dot_product_attention
+            return sdpa(query, kv, kv) + sdpa(query * 2, kv, kv)
+
+        dtype = torch.float16
+        query = torch.randn(4, 1, 8, 64, device=self.device, dtype=dtype)
+        a = torch.randn(4, 64, 32, device=self.device, dtype=dtype)
+        b = torch.randn(4, 64, 32, device=self.device, dtype=dtype)
+        weight = torch.rand(64, device=self.device, dtype=dtype) + 0.5
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            out_eager = pma_attention(query, a, b, weight)
+            compiled = torch.compile(pma_attention, fullgraph=True)
+            out_compiled, (code,) = run_and_get_code(compiled, query, a, b, weight)
+        self.assertEqual(out_eager, out_compiled, atol=2e-2, rtol=2e-2)
+        # kv gets one buffer (no copy for either SDPA), with stride(-1) == 1.
+        kv_strides = re.findall(r"empty_strided_\w+\(\(4, 1, 32, 64\), \((.*?)\)", code)
+        self.assertEqual(kv_strides, ["2048, 2048, 64, 1"])
+
     def _test_sdpa_rewriter_26(self):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -2145,6 +2178,75 @@ class TestSDPAPatternRegistration(TestCase):
         self.assertEqual([], missing_inference_names)
 
 
+class TestAttentionFusionDeviceRouting(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _match_for(self, device):
+        dev = torch.device(device)
+        tensor = SimpleNamespace(dtype=torch.float32, device=dev)
+        node = SimpleNamespace(meta={"val": tensor})
+        return SimpleNamespace(
+            kwargs={"query": node, "key": node, "value": node},
+            nodes=[],
+        )
+
+    def test_keep_attention_on_math_path(self, device):
+        from torch._inductor.fx_passes import fuse_attention
+
+        tensor_shape = (4, 16, 2, 32)
+        query = torch.randn(tensor_shape, device=device)
+        key = torch.randn(tensor_shape, device=device)
+        value = torch.randn(tensor_shape, device=device)
+        attn_mask = torch.zeros(1, 1, 16, 16, device=device)
+        inv_scale = 3.0
+        dropout_p = 0.4
+
+        sdpa_calls = 0
+
+        def fake_sdpa(*args, **kwargs):
+            nonlocal sdpa_calls
+            sdpa_calls += 1
+            return torch.empty_like(query.transpose(1, 2))
+
+        counters.clear()
+        with mock.patch.object(
+            fuse_attention, "_scaled_dot_product_attention", fake_sdpa
+        ):
+            fuse_attention._sfdp_replacement_16(
+                query, key, value, attn_mask, inv_scale, dropout_p
+            )
+
+        # CUDA keeps pattern 16 on the explicit math path (no fused SDPA call);
+        # every other device calls fused SDPA.
+        self.assertEqual(counters["inductor"]["fuse_attention"], 1)
+        on_cuda = torch.device(device).type == "cuda" and torch.version.hip is None
+        self.assertEqual(sdpa_calls, 0 if on_cuda else 1)
+
+    def test_fp32_fusion_gated_by_precision(self, device):
+        from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check
+
+        match = self._match_for(device)
+        matmul = torch.backends.cuda.matmul
+        saved = matmul.fp32_precision
+        try:
+            if torch.device(device).type == "cuda":
+                # CUDA blocks fp32 fusion under "ieee" and allows it under "tf32".
+                matmul.fp32_precision = "ieee"
+                self.assertFalse(_sfdp_params_check(match))
+                matmul.fp32_precision = "tf32"
+                self.assertTrue(_sfdp_params_check(match))
+            else:
+                # Non-CUDA inherits the base fall-through and fuses regardless.
+                for precision in ("tf32", "ieee"):
+                    matmul.fp32_precision = precision
+                    self.assertTrue(_sfdp_params_check(match))
+        finally:
+            matmul.fp32_precision = saved
+
+
+instantiate_device_type_tests(TestAttentionFusionDeviceRouting, globals())
+
+
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
@@ -2257,6 +2359,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_cache_sdpa_constraint_shared_kv_gpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
         )
+        test_sdpa_constraint_flexible_kv_layout_gpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_constraint_flexible_kv_layout
+        )
         test_sdpa_rewriter_28_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
         )
@@ -2318,9 +2423,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         use_static_shapes = False
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
         test_pattern_fails_with_reuse_cpu = (
@@ -2422,6 +2528,7 @@ if HAS_CPU:
         use_static_shapes = False
 
     class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,

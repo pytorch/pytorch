@@ -1,8 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+from concurrent.futures import Future
 from unittest import skipIf
-from unittest.mock import Mock, patch, PropertyMock
+from unittest.mock import call, Mock, patch, PropertyMock
 
 import sympy
 
@@ -29,13 +30,16 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
+    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
     FusionMemoryState,
+    FusionResult,
     MemoryDepMatch,
     NestedReduction,
+    NodeUser,
     OrderedParentNodes,
     PendingFusion,
     Scheduler,
@@ -44,9 +48,14 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    WhyNoFuse,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -62,6 +71,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfMPS,
     skipIfXpu,
+    subtest,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -122,6 +132,21 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_why_no_fuse_names_are_lazy(self):
+        node1 = Mock()
+        node2 = Mock()
+        node1.get_name.return_value = "node1"
+        node2.get_name.return_value = "node2"
+
+        why = WhyNoFuse(node1, node2)
+        with patch("torch._inductor.scheduler.fusion_log.debug") as debug:
+            why("reason %s", "details")
+        debug.assert_called_once_with(why)
+        node1.get_name.assert_not_called()
+        node2.get_name.assert_not_called()
+
+        self.assertEqual(str(why), "cannot fuse node1 with node2: reason details")
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -141,6 +166,32 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
+
+    @skipIf(not HAS_GPU, "candidate_tilings is used by the GPU scheduling backends")
+    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
+    def test_candidate_tilings_cache_cleared_after_codegen(self):
+        # The cache is keyed on scheduler nodes; leaving entries behind keeps
+        # the compiled graph (and e.g. frozen constants) alive after compile.
+        def fn(x):
+            return x.t() + x
+
+        # Record the cache size after each codegen, before it is cleared, to
+        # check that the tiling analysis actually ran in this compile.
+        sizes_before_clear = []
+        orig_codegen = Scheduler._codegen
+
+        def codegen(self, *args, **kwargs):
+            out = orig_codegen(self, *args, **kwargs)
+            info = SIMDScheduling.candidate_tilings.cache_info()
+            sizes_before_clear.append(info.currsize)
+            return out
+
+        torch._dynamo.reset()
+        # A warm FX graph cache would skip scheduler codegen entirely.
+        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
+            torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        self.assertGreater(max(sizes_before_clear, default=0), 0)
+        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
 
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
@@ -293,6 +344,335 @@ class TestScheduler(TestCase):
                 required_post_reduction_index=1,
             )
 
+    def _make_pointwise_node(self, name, numel, ancestors=(), reads=()):
+        """Create a minimal pointwise scheduler node for domain classification."""
+        node = SchedulerNode.__new__(SchedulerNode)
+        node.group = (None, (sympy.Integer(numel), sympy.Integer(1)))
+        node.ancestors = OrderedSet(ancestors)
+        node.read_writes = ReadWrites(
+            OrderedSet(StarDep(read) for read in reads), OrderedSet(), OrderedSet()
+        )
+        node.is_reduction = Mock(return_value=False)
+        node.get_operation_names = Mock(return_value=OrderedSet([name]))
+        node.get_buffer_names = Mock(return_value=OrderedSet())
+        node.get_ranges = Mock(return_value=([sympy.Integer(numel)], []))
+        return node
+
+    @parametrize(
+        "kwargs",
+        [
+            {},
+            {"should_fuse": True, "callable_fn": Mock(return_value=True)},
+        ],
+    )
+    def test_fusion_result_requires_exactly_one_result(self, kwargs):
+        """A result must hold exactly one immediate or deferred decision."""
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Fusion result should contain either fusion decision or callable_fn",
+        ):
+            FusionResult(**kwargs)
+
+    def test_node_user_identity(self):
+        """User identity should include the node name and usage properties."""
+        node = Mock(spec=BaseSchedulerNode)
+        node.get_name.return_value = "node"
+        same_name_node = Mock(spec=BaseSchedulerNode)
+        same_name_node.get_name.return_value = "node"
+
+        user = NodeUser(node, can_inplace=True, is_weak=False)
+        equivalent_user = NodeUser(same_name_node, can_inplace=True, is_weak=False)
+
+        self.assertEqual(user.get_name(), "node")
+        self.assertEqual(user, equivalent_user)
+        self.assertEqual(hash(user), hash(equivalent_user))
+
+    @parametrize(
+        "other",
+        [
+            NodeUser(Mock(get_name=Mock(return_value="other")), True, False),
+            NodeUser(Mock(get_name=Mock(return_value="node")), False, False),
+            NodeUser(Mock(get_name=Mock(return_value="node")), True, True),
+            "node",
+        ],
+    )
+    def test_node_user_inequality(self, other):
+        """Changing any usage property should produce a different user."""
+        node = Mock(spec=BaseSchedulerNode)
+        node.get_name.return_value = "node"
+
+        self.assertNotEqual(NodeUser(node, True, False), other)
+
+    @parametrize(
+        "lhs,rhs,expected",
+        [
+            ((True, True), (True, True), (True, True)),
+            ((True, True), (False, True), (False, True)),
+            ((True, True), (True, False), (True, False)),
+            ((False, False), (True, True), (False, False)),
+        ],
+    )
+    def test_node_user_merge_is_conservative(self, lhs, rhs, expected):
+        """Merged permissions should survive only when both users allow them."""
+        node = Mock(spec=BaseSchedulerNode)
+
+        merged = NodeUser(node, *lhs).merge(NodeUser(node, *rhs))
+
+        self.assertIs(merged.node, node)
+        self.assertEqual((merged.can_inplace, merged.is_weak), expected)
+
+    def test_node_user_merge_requires_same_node(self):
+        """Users of distinct node objects cannot be merged."""
+        node1 = Mock(spec=BaseSchedulerNode)
+        node2 = Mock(spec=BaseSchedulerNode)
+
+        with self.assertRaisesRegex(
+            AssertionError, "expected self.node to be other.node"
+        ):
+            NodeUser(node1).merge(NodeUser(node2))
+
+    @parametrize(
+        "enabled,dependent,rnumel1,rnumel2,expected",
+        [
+            subtest((True, True, 512, 16, True), name="valid"),
+            subtest((False, True, 512, 16, False), name="disabled"),
+            subtest((True, False, 512, 16, False), name="independent"),
+            subtest((True, True, 16, 16, False), name="same_reduction_size"),
+        ],
+    )
+    def test_nested_reduction_candidate(
+        self, enabled, dependent, rnumel1, rnumel2, expected
+    ):
+        """Candidates must be enabled dependent reductions of different sizes."""
+        node1 = Mock(spec=BaseSchedulerNode)
+        node2 = Mock(spec=BaseSchedulerNode)
+        node1.group = (None, (128, rnumel1))
+        node2.group = (None, (128, rnumel2))
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=enabled),
+            patch.object(
+                NestedReduction,
+                "_is_dependent_reduction_pair",
+                return_value=dependent,
+            ),
+        ):
+            self.assertEqual(NestedReduction.is_candidate(node1, node2), expected)
+
+    @parametrize(
+        "outer_group,grouped_group,group_size,expected",
+        [
+            subtest(((8, 128), (64, 16), 16, True), name="valid"),
+            subtest(
+                ((8, 16), (8, 16), 16, False),
+                name="same_reduction_size",
+            ),
+            subtest(
+                ((8, 128), (63, 16), 16, False),
+                name="different_total",
+            ),
+            subtest(
+                ((8, 120), (80, 12), 12, False),
+                name="non_power_of_two_group",
+            ),
+        ],
+    )
+    def test_nested_reduction_can_fuse_legality(
+        self, outer_group, grouped_group, group_size, expected
+    ):
+        """Nested fusion requires compatible geometry and a valid staged plan."""
+        outer_node = Mock(spec=BaseSchedulerNode)
+        outer_node.group = (None, outer_group)
+        grouped_node = Mock(spec=BaseSchedulerNode)
+        grouped_node.group = (None, grouped_group)
+        grouped_reduction = Mock(spec=SchedulerNode)
+        grouped_reduction.get_ranges.return_value = (
+            [outer_group[0], outer_group[1] // group_size],
+            [group_size],
+        )
+        grouped_info = (grouped_reduction, sympy.Integer(group_size))
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=True),
+            patch.object(
+                NestedReduction,
+                "_is_dependent_reduction_pair",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_get_grouped_reduction_and_size",
+                return_value=grouped_info,
+            ),
+            patch.object(
+                NestedReduction,
+                "get_grouped_axis",
+                return_value=NestedReduction.GroupedAxis.R,
+            ),
+            patch.object(
+                NestedReduction,
+                "_min_block_unprofitable_for_kernel",
+                return_value=False,
+            ),
+            patch.object(NestedReduction, "plan_from_topology", return_value=Mock()),
+        ):
+            self.assertEqual(
+                NestedReduction.can_fuse(outer_node, grouped_node), expected
+            )
+
+    @parametrize(
+        "name,numel,ancestors,reads,group_size,expected_domain",
+        [
+            subtest(
+                (
+                    "producer",
+                    128,
+                    (),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT,
+                ),
+                name="producer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    8,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.REDUCED,
+                ),
+                name="reduced_consumer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    128,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.PARENT_FULL,
+                ),
+                name="parent_consumer",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    8,
+                    (),
+                    ("reduction_buffer",),
+                    16,
+                    NestedReduction.PointwiseDomain.REDUCED,
+                ),
+                name="reduced_consumer_via_read",
+            ),
+            subtest(
+                (
+                    "consumer",
+                    64,
+                    ("reduction",),
+                    (),
+                    16,
+                    NestedReduction.PointwiseDomain.SUB_PARENT,
+                ),
+                name="sub_parent_consumer",
+            ),
+            subtest(
+                ("consumer", 8, ("reduction",), (), 2, None),
+                name="reduced_and_sub_parent_compatible",
+            ),
+            subtest(("producer", 128, ("reduction",), (), 16, None), name="ambiguous"),
+            subtest(("unrelated", 128, (), (), 16, None), name="unrelated"),
+            subtest(
+                ("consumer", 7, ("reduction",), (), 16, None), name="incorrect_size"
+            ),
+        ],
+    )
+    def test_nested_reduction_classifies_pointwise_domains(
+        self, name, numel, ancestors, reads, group_size, expected_domain
+    ):
+        """Pointwise nodes should be placed on their nested pipeline stage."""
+        grouped_reduction = SchedulerNode.__new__(SchedulerNode)
+        grouped_reduction.ancestors = OrderedSet(["producer"])
+        grouped_reduction.read_writes = ReadWrites(
+            OrderedSet(), OrderedSet(), OrderedSet()
+        )
+        grouped_reduction.is_reduction = Mock(return_value=True)
+        grouped_reduction.get_operation_names = Mock(
+            return_value=OrderedSet(["reduction"])
+        )
+        grouped_reduction.get_buffer_names = Mock(
+            return_value=OrderedSet(["reduction_buffer"])
+        )
+        grouped_reduction.get_ranges = Mock(return_value=([8], [group_size]))
+        context = NestedReduction.PointwiseDomainContext(
+            grouped_reduction=grouped_reduction,
+            grouped_numel=sympy.Integer(8),
+            grouped_rnumel=sympy.Integer(group_size),
+            local_reduction_domain=(8, group_size),
+            parent_full_domain=(8, group_size),
+            grouped_axis=NestedReduction.GroupedAxis.R,
+            group_size=group_size,
+        )
+        node = self._make_pointwise_node(name, numel, ancestors, reads)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            result = NestedReduction._classify_grouped_pointwise_nodes(context, [node])
+        expected = None if expected_domain is None else [(node, expected_domain)]
+        self.assertEqual(result, expected)
+
+    @parametrize(
+        "case,expected",
+        [
+            subtest(("exact", True), name="exact"),
+            subtest(("reordered_loops", True), name="reordered_loops"),
+            subtest(("merged_loops", True), name="merged_loops"),
+            subtest(("different_offset", False), name="different_offset"),
+            subtest(("different_buffer", False), name="different_buffer"),
+            subtest(
+                ("non_memory_second_dependency", False),
+                name="non_memory_second_dependency",
+            ),
+            subtest(
+                ("non_memory_first_dependency", False),
+                name="non_memory_first_dependency",
+            ),
+        ],
+    )
+    def test_deps_match_normalized(self, case, expected):
+        """Equivalent memory accesses should match after loop normalization."""
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        dense_2d = MemoryDep("buf", 4 * d0 + d1, (d0, d1), (3, 4))
+        deps = {
+            "exact": (dense_2d, dense_2d),
+            "reordered_loops": (
+                dense_2d,
+                MemoryDep("buf", d0 + 4 * d1, (d0, d1), (4, 3)),
+            ),
+            "merged_loops": (dense_2d, MemoryDep("buf", d2, (d2,), (12,))),
+            "different_offset": (
+                dense_2d,
+                MemoryDep("buf", 4 * d0 + d1 + 1, (d0, d1), (3, 4)),
+            ),
+            "different_buffer": (
+                dense_2d,
+                MemoryDep("other", 4 * d0 + d1, (d0, d1), (3, 4)),
+            ),
+            "non_memory_second_dependency": (dense_2d, StarDep("buf")),
+            "non_memory_first_dependency": (StarDep("buf"), dense_2d),
+        }
+        dep1, dep2 = deps[case]
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            self.assertEqual(Scheduler.deps_match_normalized(dep1, dep2), expected)
+
     def test_get_benchmarkable_extern_fn_uses_op_overload(self):
         self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
         self.assertIs(
@@ -419,6 +799,50 @@ class TestScheduler(TestCase):
         expected = current if memory_guard_enabled else retired
         scheduler.fuse_if_speedup.assert_called_once_with(
             template, expected, speedup, fused_nodes
+        )
+
+    def test_pending_template_fusions_sharing_a_compile_future(self):
+        # Two identical template + epilogue pairs render the same fused kernel
+        # source, so async compile hands both pending fusions one future.
+        scheduler = object.__new__(Scheduler)
+        nodes = {
+            name: self._mock_base_snode(name)
+            for name in ("template1", "epilogue1", "template2", "epilogue2")
+        }
+        for name in ("template1", "template2"):
+            nodes[name].is_template.return_value = True
+            nodes[name].get_template_node.return_value = None
+        scheduler.name_to_fused_node = dict(nodes)
+        scheduler._fusion_memory_state = None
+        scheduler.fuse_if_speedup = Mock(return_value=True)
+        future = Future()
+        future.set_result(None)
+        pending = {
+            i: PendingFusion(
+                Mock(),
+                nodes[f"template{i}"],
+                nodes[f"epilogue{i}"],
+                Mock(future=future),
+            )
+            for i in (1, 2)
+        }
+        fused_nodes = OrderedSet(nodes.values())
+
+        scheduler._evaluate_pending_template_fusions(
+            {nodes[f"epilogue{i}"]: [pending[i]] for i in (1, 2)}, fused_nodes
+        )
+
+        self.assertEqual(scheduler.fuse_if_speedup.call_count, 2)
+        scheduler.fuse_if_speedup.assert_has_calls(
+            [
+                call(
+                    nodes[f"template{i}"],
+                    nodes[f"epilogue{i}"],
+                    pending[i].callable_fn,
+                    fused_nodes,
+                )
+                for i in (1, 2)
+            ]
         )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
@@ -693,6 +1117,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._loop_mutation_trackers = []
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
@@ -883,11 +1308,9 @@ class TestScheduler(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
             resolver.resolve_load("buf0", sympy.Integer(0))
-        kernel.cse.contains_value.return_value = True
         resolver._values = {"buf0": [Mock(shape=("X", "GROUP"))]}
-        resolver._materialize = Mock(return_value=None)
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
-            resolver.materialize_sources((relation,))
+            resolver.check_sources((relation,))
 
     def test_sub_parent_resolver_uses_masked_load_ownership(self):
         d0 = sympy.Symbol("d0", integer=True)
@@ -1384,15 +1807,21 @@ class TestScheduler(TestCase):
 
     @parametrize(
         "write_kind,planned_name",
-        (("dense", "buf"), ("alias", "buf"), ("dense", "other")),
+        (("dense", "buf"), ("alias", "buf"), ("dense", "other"), ("pitched", "buf")),
     )
     def test_nested_dependency_matches_require_injective_producer(
         self, write_kind, planned_name
     ):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
-        index = 2 * d0 + d1 if write_kind == "dense" else d0 + d1
+        index = {"dense": 2 * d0 + d1, "alias": d0 + d1, "pitched": 4 * d0 + d1}[
+            write_kind
+        ]
         write = MemoryDep("buf", index, (d0, d1), (2, 2))
-        read = MemoryDep("buf", d0 + 1, (d0,), (4,))
+        read = (
+            MemoryDep("buf", 4 * d0, (d0,), (2,))
+            if write_kind == "pitched"
+            else MemoryDep("buf", d0 + 1, (d0,), (4,))
+        )
         planned_write = write.rename({"buf": planned_name})
         planned_read = read.rename({"buf": planned_name})
         producer = Mock()
@@ -1403,6 +1832,7 @@ class TestScheduler(TestCase):
         consumer.unmet_dependencies = OrderedSet([read])
         relation = SubParentAccessRelation((planned_write,), planned_read, None, True)
         plan = Mock(
+            requires_persistent=False,
             nested_stage=None,
             sub_parent_stages=(
                 Mock(access_relations=(relation,), epilogue_nodes=(consumer,)),
@@ -1425,10 +1855,28 @@ class TestScheduler(TestCase):
                     read.rename(scheduler.mutation_renames),
                 ),
             )
-            if write_kind == "dense" and planned_name == "buf"
+            if write_kind in ("dense", "pitched") and planned_name == "buf"
             else None
         )
         self.assertEqual(matches, expected)
+
+    def test_pitched_write_still_requires_matching_read(self):
+        s0, s1, d0, d1 = sympy.symbols("s0 s1 d0 d1", integer=True, nonnegative=True)
+        write = MemoryDep("buf", 8 * s0 + s1, (s0, s1), (2, 4))
+        scheduler = Scheduler.__new__(Scheduler)
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            self.assertTrue(write.is_non_overlapping())
+            for index, expected in (
+                (8 * d0 + FloorDiv(d1, 2), True),
+                (8 * d0 + FloorDiv(d1, 2) + 1, False),
+                (8 * (1 - d0) + FloorDiv(d1, 2), False),
+                (8 * FloorDiv(d1, 4) + d0, False),
+            ):
+                read = MemoryDep("buf", index, (d0, d1), (2, 8))
+                self.assertEqual(
+                    scheduler._fusable_read_after_index_equivalence(read, write),
+                    expected,
+                )
 
     @parametrize("ownership", ["nested", "both", "none"])
     def test_nested_dependency_matches_scope_index_equivalence(self, ownership):
@@ -1442,7 +1890,8 @@ class TestScheduler(TestCase):
         consumer.read_writes.reads = OrderedSet([read])
         consumer.unmet_dependencies = OrderedSet([read])
         plan = Mock(
-            nested_stage=Mock(grouped_nodes=(consumer,))
+            requires_persistent=False,
+            nested_stage=Mock(grouped_nodes=(consumer,), lane_accesses=())
             if ownership != "none"
             else None,
             sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),)
@@ -1460,10 +1909,44 @@ class TestScheduler(TestCase):
         expected = (MemoryDepMatch(write, read),) if ownership == "nested" else None
         self.assertEqual(matches, expected)
 
-    @parametrize("reason", ["multiwrite", "tmp", "atomic"])
+    @parametrize("planned_lanes", [(3,), (4,), ()])
+    def test_nested_dependency_matches_require_planned_lane(self, planned_lanes):
+        d0, w0 = sympy.symbols("d0 w0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", w0, (w0,), (64,))
+        read = MemoryDep("buf", 16 * d0 + 3, (d0,), (4,))
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
+        lanes = tuple(
+            SubParentAccessRelation(
+                (write,), MemoryDep("buf", 16 * d0 + lane, (d0,), (4,)), lane, True
+            )
+            for lane in planned_lanes
+        )
+        plan = Mock(
+            requires_persistent=False,
+            nested_stage=Mock(grouped_nodes=(consumer,), lane_accesses=lanes),
+            sub_parent_stages=(),
+        )
+        plan.sub_parent_access_pairs.return_value = ()
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            matches = scheduler._prove_staged_fusion_dependencies(
+                producer, consumer, plan
+            )
+        expected = (MemoryDepMatch(write, read),) if planned_lanes == (3,) else None
+        self.assertEqual(matches, expected)
+
+    @parametrize("reason", ["multiwrite", "tmp", "atomic", "missing_axis"])
     def test_planned_dependency_matches_reject_unsafe_write(self, reason):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         index = make_symbol(SymT.TMP, 0) if reason == "tmp" else d0
+        if reason == "missing_axis":
+            index = sympy.S.Zero
         mode = "atomic_add" if reason == "atomic" else None
         write = MemoryDep("buf", index, (d0,), (4,), mode)
         read = MemoryDep("buf", index + 1, (d0,), (4,), mode)
@@ -1478,6 +1961,7 @@ class TestScheduler(TestCase):
         consumer.read_writes.reads = OrderedSet([read])
         consumer.unmet_dependencies = OrderedSet([read])
         plan = Mock(
+            requires_persistent=False,
             nested_stage=None,
             sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),),
         )
@@ -1672,9 +2156,152 @@ class TestScheduler(TestCase):
         grouped.get_nodes.return_value = (grouped,)
         context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
 
-        self.assertFalse(
-            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        self.assertIsNone(
+            NestedReduction._try_get_r_grouped_lane_accesses(
+                outer, grouped, context, ()
+            )
         )
+
+    @parametrize(
+        "case",
+        [
+            "local_writer",
+            "parent_writer",
+            "early_parent_writer",
+            "unaligned_base",
+            "strided_write",
+            "not_reduced",
+            "two_writes",
+            "atomic",
+            "reduction_writer",
+            "lane_out_of_range",
+            "symbolic_lane",
+            "row_boundary",
+        ],
+    )
+    def test_nested_grouped_lane_access_conditions(self, case):
+        # Parent [4, 64] in groups of 16; the consumer reads lane 3 of each group.
+        d0, d1, d2, e0, e1 = sympy.symbols("d:3 e:2", integer=True, nonnegative=True)
+        local_ranges, reduced_ranges = {d0: 4, d1: 4, d2: 16}, {d0: 4, d1: 4}
+        base = 64 * d0 + 16 * d1
+        write_index, read_index = {
+            "unaligned_base": (base + d2 + 1, base + 4),
+            "strided_write": (2 * (base + d2), 2 * base + 6),
+            "lane_out_of_range": (base + d2, base + 16),
+            "symbolic_lane": (base + d2, 64 * d0 + 17 * d1),
+        }.get(case, (base + d2, base + 3))
+        mode = "atomic_add" if case == "atomic" else None
+        write = MemoryDep("src", write_index, (d0, d1, d2), (4, 4, 16), mode)
+        writes, writer_ranges = [write], local_ranges
+        if case == "two_writes":
+            writes.append(MemoryDep("src", write_index + 256, (d0, d1, d2), (4, 4, 16)))
+        elif case in ("parent_writer", "early_parent_writer"):
+            write = MemoryDep("src", 64 * e0 + e1, (e0, e1), (4, 64))
+            writes, writer_ranges = [write], {e0: 4, e1: 64}
+        read = MemoryDep("src", read_index, (d0, d1), (4, 4))
+        consumer_ranges = local_ranges if case == "not_reduced" else reduced_ranges
+        if case == "row_boundary":
+            read = MemoryDep("src", 128 * d0 + 16 * d1 + 3, (d0, d1), (2, 8))
+            consumer_ranges = {d0: 2, d1: 8}
+
+        read_writes = {}
+
+        def snode(name, var_ranges, reads, writes, is_reduction=False):
+            node = self._mock_base_snode(name)
+            node.__class__ = SchedulerNode
+            node.node = Mock(spec=ir.ComputedBuffer)
+            node._sizes = ()
+            node.mutation_renames = {}
+            node.is_reduction.return_value = is_reduction
+            node.get_buffer_names.return_value = OrderedSet(dep.name for dep in writes)
+            deps = (OrderedSet(reads), OrderedSet(writes), OrderedSet())
+            read_writes[node._body] = ReadWrites(*deps, var_ranges=var_ranges)
+            return node
+
+        writer = snode("writer", writer_ranges, (), writes, case == "reduction_writer")
+        grouped_read = MemoryDep("src", write_index, (d0, d1, d2), (4, 4, 16))
+        grouped = snode("grouped", local_ranges, (grouped_read,), (), True)
+        grouped.get_ranges.return_value = ([4, 4], [16])
+        consumer = snode("consumer", consumer_ranges, (read,), ())
+        Domain = NestedReduction.PointwiseDomain
+        local, reduced = Domain.LOCAL_REDUCTION_INPUT, Domain.REDUCED
+        domains = [(consumer, local if case == "not_reduced" else reduced)]
+        outer, grouped_node = Mock(), Mock()
+        if case == "parent_writer":
+            outer.get_nodes.return_value = ()
+            grouped_node.get_nodes.return_value = (writer, grouped, consumer)
+            domains.append((writer, Domain.PARENT_FULL))
+        else:
+            outer.get_nodes.return_value = (writer,)
+            grouped_node.get_nodes.return_value = (grouped, consumer)
+            if case != "early_parent_writer":
+                domains.append((writer, local))
+        context = Mock(
+            grouped_axis=NestedReduction.GroupedAxis.R,
+            grouped_reduction=grouped,
+            parent_full_domain=(4, 64),
+            group_size=16,
+        )
+
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch(
+                "torch._inductor.dependencies.extract_read_writes",
+                side_effect=lambda body, *sizes, normalize: read_writes[body],
+            ),
+        ):
+            result = NestedReduction._try_get_r_grouped_lane_accesses(
+                outer, grouped_node, context, domains
+            )
+
+        if case in ("local_writer", "parent_writer"):
+            self.assertEqual(
+                result, (SubParentAccessRelation((write,), read, 3, True),)
+            )
+        else:
+            self.assertIsNone(result)
+
+    @parametrize("case", ["local_source", "sub_parent", "sub_parent_no_lanes"])
+    def test_nested_plan_restricts_lane_sources(self, case):
+        writer = self._mock_schedule_node("writer", writes=("src",))
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        outer = Mock(group=(None, (4, 64)))
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("src",), writes=("amax",), is_reduction=True
+        )
+        consumer = self._mock_schedule_node("consumer", reads=("src", "amax"))
+        epilogue = self._mock_schedule_node("epilogue", reads=("amax",))
+        grouped_node = Mock(group=(None, (16, 16)))
+        grouped_node.get_nodes.return_value = (grouped, consumer, epilogue)
+        Domain = NestedReduction.PointwiseDomain
+        domains = [(consumer, Domain.REDUCED), (writer, Domain.LOCAL_REDUCTION_INPUT)]
+        if case.startswith("sub_parent"):
+            domains.append((epilogue, Domain.SUB_PARENT))
+        lanes = () if case == "sub_parent_no_lanes" else (Mock(),)
+
+        with (
+            patch.object(NestedReduction.PointwiseDomainContext, "create"),
+            patch.object(
+                NestedReduction,
+                "_classify_nested_pointwise_nodes",
+                return_value=domains,
+            ),
+            patch.object(
+                NestedReduction, "_try_get_r_grouped_lane_accesses", return_value=lanes
+            ),
+            patch.object(NestedReduction, "_plan_nested_sub_parent_stage"),
+        ):
+            plan = NestedReduction.plan_from_topology(
+                outer, grouped_node, grouped, 16, NestedReduction.GroupedAxis.R
+            )
+
+        if case in ("local_source", "sub_parent_no_lanes"):
+            self.assertEqual(plan.nested_stage.lane_accesses, lanes)
+        else:
+            self.assertIsNone(plan)
 
     @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
     def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
@@ -1951,6 +2578,41 @@ class TestScheduler(TestCase):
             None,
         )
 
+    @inductor_config.patch(reorder_for_peak_memory=True)
+    @parametrize("cpp_wrapper", (False, True))
+    @dtypes(torch.complex64, torch.complex128)
+    @xfailIfNoAcceleratorTriton
+    def test_mutating_fallback_returned_alias_ordering(
+        self, device, dtype, cpp_wrapper
+    ):
+        def fn(x, index, values, replacement):
+            x.index_put_((index,), values)
+            result = x.real[:, None].expand(-1, 128).square()
+            x.copy_(torch.cat((replacement, replacement)))
+            return result, x
+
+        args = (
+            torch.zeros(32, device=device, dtype=dtype),
+            torch.arange(0, 32, 2, device=device),
+            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
+            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
+        )
+        expected = fn(*(arg.clone() for arg in args))
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
+            )
+        self.assertEqual(actual, expected)
+        fallback_call = (
+            'findSchemaOrThrow("aten::index_put_", "")'
+            if cpp_wrapper
+            else "= torch.ops.aten.index_put_.default("
+        )
+        self.assertIn(fallback_call, "\n".join(code))
+
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)
 
@@ -2180,6 +2842,35 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @parametrize(
+        "prologue_enabled,epilogue_enabled,expected",
+        (
+            (True, True, ("load", "both", "store")),
+            (True, False, ("load",)),
+            (False, True, ("store",)),
+            (False, False, ()),
+        ),
+    )
+    def test_producer_fusion_allowed_inputs_respect_placement_flags(
+        self,
+        prologue_enabled: bool,
+        epilogue_enabled: bool,
+        expected: tuple[str, ...],
+    ):
+        template = Mock()
+        template.allow_prologue_fusion = prologue_enabled
+        template.allow_epilogue_fusion = epilogue_enabled
+        template.load_input_fusion_allowed_inputs = OrderedSet(("load", "both"))
+        template.store_output_fusion_allowed_inputs = OrderedSet(("store", "both"))
+
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
+
+        self.assertEqual(
+            _producer_fusion_enabled_inputs(template_node),
+            OrderedSet(expected),
+        )
+
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
             prologue_node = Mock()
@@ -2206,8 +2897,10 @@ class TestScheduler(TestCase):
             input_node.get_name.return_value = "x"
             template.inputs = [input_node]
             template.allow_prologue_fusion = True
-            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
-            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+            template.allow_epilogue_fusion = False
+            template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
+            template.store_output_fusion_allowed_inputs = OrderedSet()
+            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2250,7 +2943,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()
@@ -2401,6 +3094,29 @@ class TestScheduler(TestCase):
         self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
         self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyAccelerator
+    @parametrize("width,kernel_count", [(32, 1), (512, 2)])
+    def test_wide_broadcast_realizes_expensive_producer(self, width, kernel_count):
+        def fn(x, logits, idx):
+            weight = torch.softmax(logits.float(), dim=-1).to(x.dtype).view(-1)[idx]
+            return x * weight.unsqueeze(-1)
+
+        device = GPU_TYPE
+        x = torch.randn((256, width), dtype=torch.bfloat16, device=device)
+        logits = torch.randn((64, 4), dtype=torch.bfloat16, device=device)
+        idx = torch.randperm(256, device=device)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                x, logits, idx
+            )
+
+        self.assertEqual(actual, fn(x, logits, idx))
+        self.assertEqual(metrics.generated_kernel_count, kernel_count)
 
     @xfailIfNoAcceleratorTriton
     @onlyAccelerator
