@@ -3071,6 +3071,8 @@ def group_norm(
         raise RuntimeError(
             f"Expected at least 2 dimensions for input tensor but received {input.dim()}"
         )
+    if num_groups <= 0:
+        raise ValueError("Expected num_groups to be greater than 0")
     _verify_batch_size(
         [input.size(0) * input.size(1) // num_groups, num_groups]
         + list(input.size()[2:])
