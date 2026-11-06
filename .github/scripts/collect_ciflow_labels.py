@@ -13,7 +13,8 @@ GITHUB_DIR = Path(__file__).parent.parent
 def get_workflows_push_tags() -> set[str]:
     "Extract all known push tags from workflows"
     rc: set[str] = set()
-    for fname in (GITHUB_DIR / "workflows").glob("*.yml"):
+    workflows = GITHUB_DIR / "workflows"
+    for fname in (*workflows.glob("*.yml"), *workflows.glob("*.yaml")):
         with fname.open("r") as f:
             wf_yml = yaml.safe_load(f)
         # "on" is alias to True in yaml

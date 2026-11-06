@@ -1923,7 +1923,7 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: TEST_CONFIG == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG in ("periodic", "periodic_daily"),
 )
 # Runs inductor's RUN_CPU test classes even when ONLY_FOR leaves out cpu (unless
 # EXCEPT_FOR excludes it); see inductor_utils.RUN_CPU
@@ -3053,29 +3053,53 @@ def requires_multigpu(fn):
     return unittest.skipIf(skip, reason)(wrapper)
 
 
-def periodic(fn):
+def periodic(fn=None, *, hours=4):
     """Marks a test that CI runs only in periodic test mode.
 
-    The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
-    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    Plain @periodic runs every four hours in periodic-strict.
+    @periodic(hours=24) runs daily in the separate daily workflow. Both use
+    periodic-strict.yml for the same CPU/CUDA environments and runner labels.
+    They select the periodic and periodic_daily pytest markers, respectively.
+    Whenever effective markers combine,
+    including through class/method decoration, stacking or inheritance,
+    periodic_daily takes precedence over periodic. Both reuse
+    PYTORCH_TEST_WITH_PERIODIC to enable tests in periodic mode.
+
+    The periodic test config selects "periodic and not periodic_daily";
+    periodic_daily selects "periodic_daily". Both set PYTORCH_TEST_WITH_PERIODIC.
+    Other periodic jobs setting that flag without a marker filter run both
+    groups on their own cadence; hours does not enforce timing in those jobs.
+    The daily workflow runs at 00:45 UTC and can be requested with
+    ciflow/daily or manual dispatch. The strict workflow selects only the
+    four-hour group, including on non-scheduled runs.
     Tests in files outside the default Python test sweep (e.g. distributed or
     quantization) never run in CI unless such a job runs those files.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.
 
-    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
+    Composes with @slowTest: both workflows set PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
     while the periodic gate keeps a test marked both out of the slow shards.
-    Such a test runs only in jobs that set both flags, like periodic-strict.
+    Such a test runs only in jobs that set both flags.
     """
+    if fn is not None and not callable(fn):
+        raise TypeError(
+            f"periodic() expects a test function or class, got {type(fn).__name__}; "
+            "pass hours by keyword (hours=4 or hours=24)"
+        )
+    if hours not in (4, 24):
+        raise ValueError("periodic supports only hours=4 or hours=24")
+    if fn is None:
+        return partial(periodic, hours=hours)
+
+    marker = "periodic_daily" if hours == 24 else "periodic"
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
-            fn = pytest.mark.periodic(fn)
+            fn = getattr(pytest.mark, marker)(fn)
         return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
@@ -3085,7 +3109,7 @@ def periodic(fn):
         return fn(*args, **kwargs)
 
     if has_pytest:
-        wrapper = pytest.mark.periodic(wrapper)
+        wrapper = getattr(pytest.mark, marker)(wrapper)
 
     return unittest.skipIf(skip, reason)(wrapper)
 

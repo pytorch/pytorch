@@ -1,0 +1,34 @@
+# Owner(s): ["module: ci"]
+name: daily
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/daily.yaml
+      - .github/workflows/periodic-strict.yml
+  schedule:
+    - cron: 45 0 * * *
+  push:
+    tags:
+      - ciflow/daily/*
+    branches:
+      - release/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-caller
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+# Separate workflow identity keeps the daily signal out of periodic-strict.
+jobs:
+  periodic-tests:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/periodic-strict.yml
+    with:
+      test-config: periodic_daily
+    secrets: inherit

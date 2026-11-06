@@ -13,6 +13,13 @@ on:
     branches:
       - release/*
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      test-config:
+        required: false
+        type: string
+        default: periodic
+        description: Test group to run, either periodic or periodic_daily.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
@@ -23,6 +30,8 @@ permissions:
   contents: read
   actions: read
 
+# Keep environments, runner labels and matrices here so daily.yaml gets the
+# same hardware coverage. Reusable calls retain the caller's workflow identity.
 jobs:
   get-label-type:
     name: get-label-type
@@ -35,10 +44,48 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
+  test-matrices:
+    needs: get-label-type
+    runs-on: ubuntu-24.04
+    outputs:
+      cuda: ${{ steps.matrices.outputs.cuda }}
+      cpu: ${{ steps.matrices.outputs.cpu }}
+    steps:
+      - name: Select periodic test group and shards
+        id: matrices
+        env:
+          TEST_CONFIG: ${{ inputs.test-config || 'periodic' }}
+          RUNNER_PREFIX: ${{ needs.get-label-type.outputs.label-type }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          config = os.environ["TEST_CONFIG"]
+          shards = {"periodic": 2, "periodic_daily": 1}
+          if config not in shards:
+              raise ValueError("test-config must be periodic or periodic_daily")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for platform, runner in {
+                  "cuda": "l-x86aavx2-11-41-l4",
+                  "cpu": "l-x86iavx512-8-64",
+              }.items():
+                  matrix = {"include": [
+                      {
+                          "config": config,
+                          "shard": shard,
+                          "num_shards": shards[config],
+                          "runner": os.environ["RUNNER_PREFIX"] + runner,
+                      }
+                      for shard in range(1, shards[config] + 1)
+                  ]}
+                  output.write(f"{platform}={json.dumps(matrix)}\n")
+          PY
+
   linux-jammy-cuda13_2-py3_11-gcc11-build:
     name: linux-jammy-cuda13.2-py3.11-gcc11
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, test-matrices]
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
@@ -46,11 +93,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.6 8.9'
-      test-matrix: |
-        { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
-        ]}
+      test-matrix: ${{ needs.test-matrices.outputs.cuda }}
       python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
@@ -74,18 +117,14 @@ jobs:
   linux-jammy-py3_11-clang21-build:
     name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, test-matrices]
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: |
-        { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-        ]}
+      test-matrix: ${{ needs.test-matrices.outputs.cpu }}
       python-version: "3.11"
       compiler: clang21
     secrets: inherit
