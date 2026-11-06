@@ -21,7 +21,7 @@ class _AotTma:
         self.op = kernel._ElementwiseTma2D(
             fn=ops.get_fn(fn),
             ninputs=len(mask),
-            nconsts=1 if fn in ("_add", "_sub") else 0,
+            nconsts=1 if fn in ("_add", "_sub", "_addcmul") else 0,
             comp_type=self.comp_type,
             out_type=cutlass.Int8 if boolean else dtype,
             in_type=dtype,
@@ -63,12 +63,23 @@ class _AotTma:
             stream,
         )
 
+    @cute.jit
+    def ternary(
+        self,
+        x: cute.Tensor,
+        y: cute.Tensor,
+        z: cute.Tensor,
+        out: cute.Tensor,
+        value: cutlass.Float32,
+        stream: cuda.CUstream,
+    ) -> None:
+        self.op([x, y, z], out, value, self.comp_type(1), self.comp_type(1), stream)
+
 
 def build(spec: dict[str, Any]) -> dict[str, Any]:
     dtype = getattr(
         cutlass,
         {
-            "float16": "Float16",
             "bfloat16": "BFloat16",
             "float32": "Float32",
         }[spec["dtype"]],
@@ -79,7 +90,7 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     shapes = (cute.sym_int(divisibility=box), cute.sym_int(divisibility=box))
     fakes = []
     tensor_args = []
-    names = ("x",) if len(mask) == 1 else ("x", "y")
+    names = ("x", "y", "z")[: len(mask)]
     for name, transposed in zip(names, mask):
         pitch = cute.sym_int64(divisibility=_MIN_ALIGNMENT // (dtype.width // 8))
         stride = (1, pitch) if transposed else (pitch, 1)
@@ -112,7 +123,7 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     tag = "".join("t" if value else "n" for value in mask)
     return {
         "kind": "cutedsl",
-        "fn": op.unary if len(mask) == 1 else op.binary,
+        "fn": (op.unary, op.binary, op.ternary)[len(mask) - 1],
         "prefix": f"pointwise_{spec['fn'].lstrip('_')}_{spec['dtype']}_{tag}",
         "fake_args": [*fakes, cutlass.Float32(1), cute.runtime.make_fake_stream()],
         "tensor_args": tensor_args,
