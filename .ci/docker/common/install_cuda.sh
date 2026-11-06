@@ -11,7 +11,7 @@ else
 fi
 
 NVSHMEM_VERSION=3.7.2
-CUDA_CUPTI_VERSION=13.3.75
+CUDA_CUPTI_VERSION=13.5.25
 
 function install_cuda {
   version=$1
@@ -98,8 +98,8 @@ function install_nvshmem {
 }
 
 function install_cupti_headers {
-  cupti_version=$1                  # e.g. "13.3.75"
-  major_minor=${cupti_version%.*}   # e.g. "13.3"
+  cupti_version=$1                  # e.g. "13.5.25"
+  major_minor=${cupti_version%.*}   # e.g. "13.5"
   target_dir="/usr/local/cupti-headers-${major_minor}"
 
   # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
