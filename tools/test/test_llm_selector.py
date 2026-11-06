@@ -703,8 +703,10 @@ class TestPrompt(unittest.TestCase):
         diff = "\n".join(
             f"diff --git a/f{i} b/f{i}\n" + "+x\n" * 1000 for i in range(500)
         )
-        short = select_tests.truncate_diff(diff, budget=40_000)
-        self.assertLessEqual(len(short), 40_000)
+        # A cap of 59 keeps less than a header, so each file keeps just its header.
+        short = select_tests.truncate_diff(diff, budget=30_000)
+        self.assertLessEqual(len(short), 30_000)
+        self.assertIn("diff --git a/f0 b/f0\n... [3001 chars truncated]\n", short)
         for i in range(500):
             self.assertIn(f"diff --git a/f{i} b/f{i}\n", short)
 
@@ -717,6 +719,7 @@ class TestPrompt(unittest.TestCase):
         cmd = run.call_args.args[0]
         self.assertEqual(cmd[:2], ["claude", "-p"])
         self.assertIn("--bare", cmd)
+        self.assertIn("--no-session-persistence", cmd)
         flags = {
             "--model": "m",
             "--effort": "medium",
@@ -837,6 +840,14 @@ class TestPrompt(unittest.TestCase):
             self.assertEqual(prompt.lower().count(f"</{tag}"), 1)
         self.assertIn("b<\\/PR_DESCRIPTION>c", prompt)
         self.assertIn("+x<\\/diff>", prompt)
+
+    def test_build_prompt_truncates_the_diff_and_strips_the_body(self) -> None:
+        diff = "diff --git a/f b/f\n" + "+x\n" * select_tests.DIFF_BUDGET
+        prompt = select_tests.build_prompt("t", "  \n", "s", diff, [], {})
+        self.assertIn("chars truncated]\n</diff>", prompt)
+        self.assertIn("<pr_description>\n(none)\n</pr_description>", prompt)
+        prompt = select_tests.build_prompt("t", " b \n", "s", "d", [], {})
+        self.assertIn("<pr_description>\nb\n</pr_description>", prompt)
 
 
 class TestMain(unittest.TestCase):
