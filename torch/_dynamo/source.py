@@ -20,6 +20,8 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
+import inspect
+import types
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
@@ -331,6 +333,66 @@ class AttrSource(ChainedSource):
         if not self.member.isidentifier():
             return f"getattr({{0}}, {_esc_str(self.member, apply_repr=True)})"
         return f"{{0}}.{_esc_str(self.member)}"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class CachedPropertySource(AttrSource):
+    def get_dict(self, value: Any) -> dict[Any, Any] | None:
+        cls = type(value)
+        descriptor = inspect.getattr_static(cls, self.member, None)
+        attrname = inspect.getattr_static(descriptor, "attrname", None)
+        if (
+            inspect.getattr_static(cls, "__getattribute__")
+            is not object.__getattribute__
+            or type(descriptor) is not functools.cached_property
+            or type(attrname) is not str
+            or attrname != self.member
+            or hasattr(type(descriptor), "__set__")
+            or hasattr(type(descriptor), "__delete__")
+        ):
+            return None
+        # Unbound C getsets bypass a shadowed __dict__ on the current receiver.
+        mro = type.__dict__["__mro__"].__get__(cls)
+        for base in mro:
+            namespace = type.__dict__["__dict__"].__get__(base)
+            dict_descriptor = namespace.get("__dict__")
+            if (
+                isinstance(dict_descriptor, types.GetSetDescriptorType)
+                and dict_descriptor.__name__ == "__dict__"
+                and any(dict_descriptor.__objclass__ is owner for owner in mro)
+            ):
+                instance_dict = dict_descriptor.__get__(value, cls)
+                if isinstance(instance_dict, dict):
+                    return instance_dict
+        return None
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            instance_dict = self.get_dict(base_value)
+            if instance_dict is not None:
+                descriptor = inspect.getattr_static(type(base_value), self.member)
+                value = dict.get(instance_dict, self.member, descriptor)
+                cache[self] = value
+                return value
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        value = AttrSource(self.base, self.member).get_value(
+            globals, locals, cache, on_error=on_error
+        )
+        cache[self] = value
+        return value
 
 
 @dataclass_with_cached_hash(frozen=True)
