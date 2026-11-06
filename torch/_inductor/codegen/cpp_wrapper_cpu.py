@@ -1752,10 +1752,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 continue
 
             if is_constant_buffer:
-                # See NOTE(return_constant) above.
+                # See NOTE(return_constant) above. A constant-folding output can be
+                # a non-dense view (e.g. a transposed weight slice) that kernels were
+                # compiled against, so the clone must keep its strides.
                 self.wrapper_call.writeline(
                     "AOTI_TORCH_ERROR_CODE_CHECK("
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                    f"aoti_torch_clone_preserve_strides({output}, &output_handles[{idx}]));"
                 )
             else:
                 if output in output2idx:
@@ -2459,6 +2461,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
+
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # Every multi-output extern kernel path declares an RAII handle per
+        # tensor output, but the scheduler never schedules a free for outputs it
+        # eliminated as dead, so they would otherwise stay alive until the
+        # wrapper returns.
+        unused = [
+            out.get_name()
+            for out in torch.utils._pytree.tree_leaves(node.outputs)
+            if isinstance(out, ir.MultiOutput)
+            and out.get_name() in V.graph.removed_buffers
+        ]
+        if unused:
+            self.writeline(self.make_free_by_names(unused))
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"

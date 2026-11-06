@@ -261,7 +261,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
-  # devices on expensive gpu machines
+  # devices on expensive gpu machines. The nogpu_NO_AVX2 job brings back
+  # inductor's RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
@@ -402,6 +403,11 @@ fi
 
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
+  # A CUDA build sets ONLY_FOR=cuda, which turns off inductor's RUN_CPU test
+  # classes; bring them back here, the only CI config that runs them without a
+  # vector ISA. nogpu_AVX512 deliberately leaves them off to save test time:
+  # pull.yml's CPU build already runs them on the same AVX-512 runners.
+  export PYTORCH_TEST_INDUCTOR_RUN_CPU=1
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx512
   # valgrind cannot decode AVX-512 instructions
@@ -852,6 +858,29 @@ test_inductor_core() {
   assert_git_not_dirty
 }
 
+# inductor_avx2 runs a subset of the inductor CPU tests on x86 AVX2 (Inductor and
+# ATen generate different code per ISA): the files whose CPU classes would
+# otherwise get AVX2 only from GPU jobs, without slow tests. Fail unless both
+# ATen's CPU capability and Inductor's vector ISA are AVX2, so the job can't
+# silently run on AVX-512/AMX hardware or without vectorized codegen. cd test,
+# because from the repo root the source torch/ dir shadows the installed wheel.
+assert_avx2_host() {
+  local isa
+  isa=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; from torch._inductor import cpu_vec_isa; print(torch.backends.cpu.get_cpu_capability(), cpu_vec_isa.pick_vec_isa())")
+  if [[ "$isa" != "AVX2 avx2" ]]; then
+    echo "inductor_avx2 needs ATen and Inductor to both pick AVX2, but they picked: $isa"
+    exit 1
+  fi
+}
+
+test_inductor_avx2_shard() {
+  # This job is itself periodic, so also run @periodic tests on AVX2.
+  PYTORCH_TEST_WITH_PERIODIC=1 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_cpu_select_algorithm inductor/test_torchinductor_dynamic_shapes inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_cpu_repro inductor/test_aot_inductor_arrayref inductor/test_fused_attention \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+}
+
 test_inductor_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -887,7 +916,11 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile &&
+    # CUDA graph capture must fail cleanly under the async allocator backend.
+    /usr/bin/env "${TEST_ENVS[@]}" PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync \
+      "${BUILD_BIN_DIR}/test_shim" --gtest_filter='*CudaMallocAsync*' \
+      --gtest_output=xml:test/test-reports/cpp/test_shim_cuda_malloc_async.xml
 }
 
 test_inductor_aoti_fallback_shard() {
@@ -957,20 +990,13 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune \
               inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
     --include test_torch \
     -k 'take' \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
-
-  # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
-  # Will drop this after AOTInductor also switches to lazy Triton compilation.
-  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 
@@ -1844,11 +1870,7 @@ test_libtorch_profiler() {
   # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
-  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
-    # Kineto's xpu tests compile SYCL device code through an ExternalProject,
-    # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
-    echo "Skipping Kineto C++ tests on XPU"
-  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+  if [[ "${TEST_CONFIG}" == *nogpu* ]]; then
     # CUDA builds link Kineto's tests against CUPTI, which segfaults without
     # a driver present rather than letting the tests skip.
     echo "Skipping Kineto C++ tests on nogpu"
@@ -1857,9 +1879,13 @@ test_libtorch_profiler() {
     local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
     local kineto_tests=()
     local kineto_test
+    local kineto_name
     for kineto_test in "${kineto_bin_dir}"/*; do
-      [[ -x "${kineto_test}" ]] || continue
-      kineto_tests+=("cpp/$(basename "${kineto_test}")")
+      kineto_name="${kineto_test##*/}"
+      # run_test.py leaves __pycache__ in this directory, and the xpu tests'
+      # SYCL kernel library sits next to them; shared libraries are executable.
+      [[ -f "${kineto_test}" && -x "${kineto_test}" && "${kineto_name}" != *.so* ]] || continue
+      kineto_tests+=("cpp/${kineto_name}")
     done
     if [[ ${#kineto_tests[@]} -eq 0 ]]; then
       echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
@@ -2736,6 +2762,12 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
     collect_tlparse_output
   fi
+elif [[ "${TEST_CONFIG}" == inductor_cpp_wrapper_cpu ]]; then
+  # All of CPUReproTests under cpp_wrapper. The default CPU jobs run only the
+  # curated subset in test_cpu_cpp_wrapper.
+  setup_torch_trace
+  TORCHINDUCTOR_CPP_WRAPPER=1 python test/run_test.py --include inductor/test_cpu_repro --verbose
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   setup_torch_trace
@@ -2759,6 +2791,12 @@ elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
+  collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == inductor_avx2 ]]; then
+  assert_avx2_host
+  install_torchvision
+  setup_torch_trace
+  test_inductor_avx2_shard "${SHARD_NUMBER}"
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
