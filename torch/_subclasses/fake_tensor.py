@@ -253,7 +253,9 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 
 
 @contextlib.contextmanager
-def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
+def unset_fake_temporarily() -> Generator[
+    TorchDispatchMode | CppFakeTensorMode | None, None, None
+]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
@@ -333,11 +335,23 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
+# Note [Fake mode lookups and CppFakeTensorMode]
+# maybe_get_fake_mode, detect_fake_mode and active_fake_mode can return a
+# CppFakeTensorMode, but stay annotated FakeTensorMode | None: widening the
+# annotation makes about 40 callers fail type checking, mostly ones that pass
+# the mode on to code typed for FakeTensorMode or call methods
+# CppFakeTensorMode does not have yet. Until those callers and the annotations
+# are updated together, such a caller fails on a C++ mode with AttributeError.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
+    """The fake mode of t, a Python FakeTensorMode or, for a C++ fake, a
+    CppFakeTensorMode (see Note [Fake mode lookups and CppFakeTensorMode])."""
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return t.fake_mode
+    if isinstance(t, Tensor) and torch._C._is_fake_tensor(t):
+        # pyrefly: ignore [bad-return]
+        return torch._C._maybe_get_fake_mode(t)
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
         mode: FakeTensorMode | None = None
@@ -775,7 +789,12 @@ class CppFakeTensorMode:
     # fake_tensor_tls.entered_cpp_fake_modes. See
     # Note [C++ FakeTensorMode Python wrapper lifetime] in
     # torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ("_cpp_mode", "enter_stack", "old_dispatch_mode_flags", "__weakref__")
+    __slots__ = (
+        "_cpp_mode",
+        "enter_stack",
+        "old_dispatch_mode_flags",
+        "__weakref__",
+    )
 
     def __init__(
         self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
@@ -789,6 +808,7 @@ class CppFakeTensorMode:
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         converter = FakeTensorConverter(copy_data=copy_data)
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
+        self._cpp_mode._stack_trace = traceback.extract_stack()
         self.allow_non_fake_inputs = allow_non_fake_inputs
 
     @classmethod
@@ -808,6 +828,11 @@ class CppFakeTensorMode:
     @property
     def shape_env(self) -> ShapeEnv | None:
         return self._cpp_mode.shape_env
+
+    # Like FakeTensorMode.stack, where the mode was created
+    @property
+    def stack(self) -> str:
+        return "".join(traceback.format_list(self._cpp_mode._stack_trace))
 
     @property
     def epoch(self) -> int:

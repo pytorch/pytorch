@@ -6112,6 +6112,46 @@ class TestCppFakeTensorModeBindings(TestCase):
                 raise ValueError
         self.assertFalse(mode.allow_non_fake_inputs)
 
+    def test_cpp_fake_tensor_mode_lookup(self):
+        from torch._guards import active_fake_mode, detect_fake_mode
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        def make_other():
+            return CppFakeTensorMode()
+
+        mode, other = CppFakeTensorMode(), make_other()
+        cpu = torch.device("cpu")
+
+        def make_fake(m):
+            meta = torch.empty(2, device="meta")
+            return torch._C._from_meta_and_device(meta, cpu, m._cpp_mode)
+
+        fake, other_fake = make_fake(mode), make_fake(other)
+        self.assertIs(maybe_get_fake_mode(fake), mode)
+        self.assertIs(maybe_get_fake_mode(TwoTensor(fake, make_fake(mode))), mode)
+        self.assertIsNone(maybe_get_fake_mode(torch.empty(2)))
+        self.assertIs(detect_fake_mode([fake]), mode)
+        self.assertIsNone(active_fake_mode())
+        with mode:
+            self.assertIs(active_fake_mode(), mode)
+            self.assertIs(detect_fake_mode(), mode)
+            # As for a Python mode, the inputs' mode must match the active one
+            msg = (
+                r"from active fake mode allocated at:\n  File [\s\S]*"
+                r"from fake tensor input 0 allocated at:\n[\s\S]*in make_other"
+            )
+            with self.assertRaisesRegex(AssertionError, msg):
+                detect_fake_mode([other_fake])
+        self.assertIsNone(active_fake_mode())
+
+        # Python modes are found as before, including under a user mode, and
+        # not inside unset_fake_temporarily()
+        with torch._subclasses.fake_tensor.FakeTensorMode() as python_mode:
+            with BaseTorchDispatchMode():
+                self.assertIs(active_fake_mode(), python_mode)
+            with unset_fake_temporarily():
+                self.assertIsNone(active_fake_mode())
+
     @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
@@ -6120,6 +6160,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         shape_env = ShapeEnv()
         mode = CppFakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
         cpp_mode, converter = mode._cpp_mode, mode.fake_tensor_converter
+        stack = mode.stack
         mode.epoch += 2
         epoch = mode.epoch
         meta = torch.empty((), device="meta")
@@ -6137,6 +6178,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(rebuilt.shape_env, shape_env)
         self.assertEqual(rebuilt.epoch, epoch)
         self.assertTrue(rebuilt.allow_non_fake_inputs)
+        self.assertEqual(rebuilt.stack, stack)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
         with rebuilt:
             self.assertEqual(self._installed(), (rebuilt, True))
