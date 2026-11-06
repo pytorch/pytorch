@@ -818,6 +818,24 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                 check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_legacy_uneven_shard_dim1(self):
+        def shard_dim1(in_features: int) -> None:
+            model = nn.Linear(in_features, 2, bias=False, device=device_type)
+            model.weight = nn.Parameter(TwoTensor(model.weight, model.weight.clone()))
+            fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+
+        # A (2, 9) weight over 8 ranks needs padded shards, and the 1-argument hook
+        # gets no outer_size to pad with, so every rank refuses it, including the
+        # full ranks 0-3. Even shards and the 5-argument hook pass.
+        msg = "FSDP does not support uneven sharding on dim 1 for all-gather extensions whose fsdp_pre_all_gather takes only mesh: torch.Size([2, 9]) (world size: 8)"
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
+            with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+                shard_dim1(9)
+            shard_dim1(16)
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=2):
+            shard_dim1(9)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_layout_cache(self):
         # FSDP caches layouts per kind, dim, size and dtype of the inputs. Shard(1)
         # reassembles a plain tensor's rows but concatenates a dim-0 record.
