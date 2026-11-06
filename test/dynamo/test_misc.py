@@ -3207,9 +3207,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-    @parametrize("make", [object, list, lambda: lambda: None])
-    def test_is_guards_identity_of_sourced_objects(self, make):
+    @parametrize("kind", ["object", "list", "function"])
+    def test_is_guards_identity_of_sourced_objects(self, kind):
         # https://github.com/pytorch/pytorch/issues/196173
+        make = {"object": object, "list": list, "function": lambda: lambda: None}[kind]
+
         class Holder:
             def __init__(self):
                 self.left = make()
@@ -3226,13 +3228,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.tensor([2.0, 3.0])
         ref, opt = Holder(), Holder()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt)
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         for _ in range(4):
             self.assertEqual(opt_fn(x, opt), fn(x, ref))
             self.assertIs(opt.current is opt.left, ref.current is ref.left)
         # One entry per identity relation, not per object address.
-        opt_fn(x, Holder())
+        self.assertEqual(opt_fn(x, Holder()), fn(x, Holder()))
         self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("kind", ["tuple_iterator", "list_reverseiterator"])
+    def test_is_guards_items_of_iterator_inputs(self, kind):
+        # These sources' names call guard helpers such as
+        # ___tuple_iterator_getitem, so resolving them needs those helpers.
+        p, q = object(), object()
+        make = {
+            "tuple_iterator": lambda: iter((p, q)),
+            "list_reverseiterator": lambda: reversed([q, p]),
+        }[kind]
+
+        def fn(x, it, target):
+            return x + 1 if next(it) is target else x - 1
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for target in [p, q, p, q]:
+            self.assertEqual(opt_fn(x, make(), target), fn(x, make(), target))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_id_of_tuple_iterator_item(self):
+        # Resolving the item's source ran into a NameError on
+        # ___tuple_iterator_getitem, an internal error during tracing.
+        p, q = object(), object()
+
+        def fn(x, it):
+            return x + id(next(it)) % 7
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for items in [(p, q), (q, p), (p, q)]:
+            self.assertEqual(opt_fn(x, iter(items)), fn(x, iter(items)))
 
     def test_is_guards_local_against_global_sentinel(self):
         def fn(x, opt=_IS_TEST_SENTINEL):
@@ -3241,29 +3276,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x - 1
 
         x = torch.ones(2)
-        opt_fn = torch.compile(fn, backend="eager")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         for arg in [(), (object(),), (), (_IS_TEST_SENTINEL,), (object(),)]:
             self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
-
-    def test_is_guard_against_global_is_global_for_filters(self):
-        # Filters like skip_guard_on_globals_unsafe and aot_compile's default
-        # drop global guards. A relation guard reads its second source too.
-        def fn(x, opt):
-            return x + 1 if opt is _IS_TEST_SENTINEL else x - 1
-
-        entries = []
-
-        def guard_filter_fn(guard_entries):
-            entries.extend(guard_entries)
-            return [True] * len(guard_entries)
-
-        opt_fn = torch.compile(
-            fn, backend="eager", options={"guard_filter_fn": guard_filter_fn}
-        )
-        opt_fn(torch.ones(2), object())
-        relation = [e for e in entries if e.guard_type == "IDENTITY_COMPARE"]
-        self.assertEqual(len(relation), 1)
-        self.assertTrue(relation[0].is_global)
+        # One entry per answer, not per object.
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_is_guards_local_against_tracked_global_sentinel(self):
         # A user-class instance is tracked, so the local and the global share
@@ -3274,13 +3292,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x - 1
 
         x = torch.ones(2)
-        opt_fn = torch.compile(fn, backend="eager")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         for arg in [(), (_IsTestMissing(),), (), (_IsTestMissing(),)]:
             self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
+        self.assertEqual(cnt.frame_count, 2)
 
-    def test_identity_guards_only_from_is(self):
-        # `in` and dict lookups also compare by identity internally, but only
-        # an explicit `is` should add a relation guard.
+    def test_type_is_global_class_adds_no_lambda_guard(self):
+        # type(L['o']) reuses the tracker of the global class, which needs a
+        # guard of its own, but a C++ one: no epilogue lambda.
+        def fn(x, o):
+            return x + 1 if type(o) is _IsTestMissing else x - 1
+
+        guards = []
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, guard_export_fn=guards.extend)(fn)
+        x = torch.ones(2)
+        for o in [_IsTestMissing(), _IsTestMissing(), object(), _IsTestMissing()]:
+            self.assertEqual(opt_fn(x, o), fn(x, o))
+        self.assertEqual(cnt.frame_count, 2)
+        relation = [g for g in guards if g.create_fn_name() == "IDENTITY_COMPARE"]
+        self.assertFalse(relation)
+
+    def test_in_adds_no_relation_guard(self):
+        # `in` and dict lookups also compare by identity, but only an explicit
+        # `is` adds a relation guard. Known limitation, not changed here: those
+        # identity checks fold unguarded, for list and dict membership alike.
         class Key:
             pass
 
@@ -3288,9 +3325,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + (key in items) + (key in table)
 
         guards = []
-        opt_fn = torch._dynamo.optimize(
-            "eager", guard_export_fn=lambda gs: guards.extend(gs)
-        )(fn)
+        opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
         x = torch.ones(2)
         args = (x, [Key(), Key()], {Key(): 0, Key(): 1}, Key())
         self.assertEqual(opt_fn(*args), fn(*args))
@@ -3305,27 +3340,49 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.ones(2)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt)
-        for _ in range(6):
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for c in [None, object(), None, object(), object()]:
             o = object()
-            self.assertEqual(opt_fn(x, o, o, None), fn(x, o, o, None))
+            self.assertEqual(opt_fn(x, o, o, c), fn(x, o, o, c))
             a, b = object(), object()
-            self.assertEqual(opt_fn(x, a, b, None), fn(x, a, b, None))
-        self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(opt_fn(x, a, b, c), fn(x, a, b, c))
+        # (a is b) x (c is None): four entries, however many objects.
+        self.assertEqual(cnt.frame_count, 4)
 
-    def test_is_on_rebuilt_values_compiles(self):
-        # Tuples and partials are rebuilt from their VTs, so the fold says
-        # `t is t` is False. A guard on that fold would fail on its own frame.
+    @parametrize("kind", ["tuple", "partial", "slice"])
+    def test_is_on_rebuilt_values_does_not_recompile(self, kind):
+        # These VTs rebuild their value, so the fold says `v is v` is False
+        # while the frame says True. A guard on that fold would fail on its
+        # own frame and recompile on every call.
+        v = {
+            "tuple": (1, 2),
+            "partial": functools.partial(int, base=2),
+            "slice": slice(1, 2),
+        }[kind]
+
         def fn(x, a, b):
             return x + 1 if a is b else x - 1
 
-        x = torch.ones(2)
-        for v in [(1, 2), functools.partial(int, base=2), slice(1, 2)]:
-            torch._dynamo.reset()
-            opt_fn = torch.compile(fn, backend="eager")
-            opt_fn(x, v, v)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for _ in range(3):
+            opt_fn(torch.ones(2), v, v)
+        self.assertEqual(cnt.frame_count, 1)
 
-    def test_is_on_assume_constant_result(self):
+    @unittest.expectedFailure
+    def test_is_on_rebuilt_tuple_matches_eager(self):
+        # Known limitation, older than the relation guards: the fold compares
+        # the rebuilt tuples, not the frame's object.
+        def fn(x, a, b):
+            return x + 1 if a is b else x - 1
+
+        v = (1, 2)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, v, v), fn(x, v, v))
+
+    def test_is_on_assume_constant_result_compiles(self):
+        # The constant side has a ConstantSource, which takes no guard.
         sentinel = object()
 
         @torch._dynamo.assume_constant_result
@@ -3342,6 +3399,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(x, sentinel), fn(x, sentinel))
+
+    @unittest.expectedFailure
+    def test_is_on_assume_constant_result_relation_is_unguarded(self):
+        # Known limitation, older than the relation guards: nothing guards
+        # L['opt'] against the assumed constant, so the True entry is reused.
+        sentinel = object()
+
+        @torch._dynamo.assume_constant_result
+        def get_sentinel():
+            return sentinel
+
+        def fn(x, opt):
+            return x + 1 if opt is get_sentinel() else x - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(x, sentinel)
+        self.assertEqual(opt_fn(x, object()), fn(x, object()))
 
     def test_is_floating_point(self):
         def fn(a, b):

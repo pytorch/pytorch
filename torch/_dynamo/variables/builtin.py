@@ -170,6 +170,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
+guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 
 
 IN_PLACE_DESUGARING_MAP = {
@@ -351,17 +352,25 @@ def _try_computed_lazy_constant(
     return ComputedLazyConstantVariable.create(fn, args)
 
 
-def _sources_identity_matches(
+def _fold_disagrees_with_frame(
     tx: "InstructionTranslatorBase", a: Source, b: Source, is_same: bool
 ) -> bool:
     # Some VTs (tuples, partials, slices, ...) rebuild their backed value, so
-    # a fold can disagree with the frame. A guard on such a fold would fail on
-    # the frame that created it, so only guard folds the frame agrees with.
+    # the fold can disagree with the frame, and a guard on it would fail on the
+    # frame that created it. A source that cannot be resolved here is still
+    # guarded: a failing guard only recompiles, a missing one is a wrong result.
+    resolve = tx.output.resolve_source_value
     try:
-        resolve = tx.output.resolve_source_value
-        return (resolve(a) is resolve(b)) == is_same
-    except Exception:
+        frame_is_same = resolve(a) is resolve(b)
+    except Exception as e:
+        guards_log.debug("guarding `%s is %s` unverified: %r", a.name, b.name, e)
         return False
+    if frame_is_same != is_same:
+        guards_log.debug(
+            "not guarding `%s is %s`: fold disagrees with the frame", a.name, b.name
+        )
+        return True
+    return False
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -1184,16 +1193,29 @@ class BuiltinVariable(BaseBuiltinVariable):
                         and not isinstance(b, ConstantVariable)
                         and a.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
                         and b.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
-                        and _sources_identity_matches(tx, a.source, b.source, is_same)
-                    ):
-                        relation_guard = (
-                            make_dupe_guard(a.source, b.source) if is_same else None
-                        ) or functools.partial(
-                            GuardBuilder.IDENTITY_COMPARE,
-                            source_b=b.source,
-                            is_same=is_same,
+                        and not _fold_disagrees_with_frame(
+                            tx, a.source, b.source, is_same
                         )
-                        install_guard(a.source.make_guard(relation_guard))
+                    ):
+                        if isinstance(a.source, TypeSource) or isinstance(
+                            b.source, TypeSource
+                        ):
+                            # `type(x) is C`: ID_MATCH on a TypeSource is
+                            # TYPE_MATCH on x, so pinning both sides settles
+                            # the relation in C++ without extra recompiles.
+                            install_guard(
+                                a.source.make_guard(GuardBuilder.ID_MATCH),
+                                b.source.make_guard(GuardBuilder.ID_MATCH),
+                            )
+                        else:
+                            relation_guard = (
+                                make_dupe_guard(a.source, b.source) if is_same else None
+                            ) or functools.partial(
+                                GuardBuilder.IDENTITY_COMPARE,
+                                source_b=b.source,
+                                is_same=is_same,
+                            )
+                            install_guard(a.source.make_guard(relation_guard))
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
                     )

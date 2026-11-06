@@ -75,7 +75,8 @@ def vt_identity_compare(
     """Try to determine Python identity (left is right) at trace time.
 
     Returns ConstantVariable(True/False) if determinable, else None.
-    Mirrors the logic in BuiltinVariable's handle_is handler.
+    Mirrors the logic in BuiltinVariable's handle_is handler, which also
+    guards the identity relation when it folds a comparison of two sources.
     """
     if left is right:
         return ConstantVariable.create(True)
