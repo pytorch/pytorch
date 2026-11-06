@@ -2,7 +2,8 @@
 """Tests for user-defined CuTeDSL kernels (``@cute.jit`` host functions) in PT2.
 
 Mirrors test/inductor/test_triton_kernels.py (the reference suite for user-defined
-Triton kernels): the HOPs used directly (side table, eager launch, fake mode, make_fx).
+Triton kernels): the HOPs used directly (side table, eager launch, fake mode, make_fx,
+functionalization).
 """
 
 import contextlib
@@ -1265,6 +1266,303 @@ def forward(self, x_1, y_1):
             x, y = _rand(300), _rand(300)
             self.assertEqual(gm(x, y), x + y)
 
+    def test_cutedsl_hop_functionalize(self):
+        # Mirrors test_triton_kernel_functionalize: functionalization rewrites the
+        # mutation HOP into the functional HOP cloning exactly mutates_args.
+        from torch._subclasses.functional_tensor import (
+            CppFunctionalizeAPI,
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        kidx = _add_kernel_to_table(add_kernel, ["mOut"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(x, y, out)
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with FunctionalTensorMode():
+            gm_py = make_fx(PythonFunctionalizeAPI().functionalize(f))(x, y)
+        gm_cpp = make_fx(CppFunctionalizeAPI().functionalize(f))(x, y)
+        gm_func = make_fx(torch.func.functionalize(f))(x, y)
+        for gm in (gm_py, gm_cpp, gm_func):
+            self.assertEqual(_hop_nodes(gm, cutedsl_kernel_wrapper_mutation), [])
+            (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_functional)
+            self.assertEqual(node.kwargs["tensors_to_clone"], ["mOut"])
+            self.assertNotIn("tensor_bases", node.kwargs)
+            self.assertEqual(gm(x, y), x + y)
+
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(x, y)
+        self.assertExpectedInline(
+            _normalize_indices(gm.code.strip()),
+            """\
+def forward(self, x_1, y_1):
+    zeros_like = torch.ops.aten.zeros_like.default(x_1, pin_memory = False)
+    cutedsl_kernel_wrapper_functional_proxy = torch.ops.higher_order.cutedsl_kernel_wrapper_functional(kernel_idx = K, constant_args_idx = C, kwargs = {'mX': x_1, 'mY': y_1, 'mOut': zeros_like, 'n': 1000}, tensors_to_clone = ['mOut']);  x_1 = y_1 = zeros_like = None
+    getitem = cutedsl_kernel_wrapper_functional_proxy['mOut'];  cutedsl_kernel_wrapper_functional_proxy = None
+    return getitem""",
+        )
+
+    def test_cutedsl_hop_functionalize_inplace(self):
+        # A kernel that reads and writes the same argument: only it is cloned, and
+        # the mutation of the graph input is written back.
+        kidx = _add_kernel_to_table(scale_inplace_kernel, ["mX"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def f(x):
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs={"mX": x, "n": x.numel()},
+            )
+            return x
+
+        x = _rand(1000)
+        gm = make_fx(torch.func.functionalize(f))(x.clone())
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_functional)
+        self.assertEqual(node.kwargs["tensors_to_clone"], ["mX"])
+        x_in = x.clone()
+        self.assertEqual(gm(x_in), 2 * x)
+        self.assertEqual(x_in, 2 * x)
+
+    @parametrize("view", ["offset", "gap"])
+    def test_cutedsl_hop_functionalize_view_arg(self, view):
+        # A mutated arg that is a view is cloned through its base: the functional
+        # HOP gets tensor_bases. "gap" makes the view non-dense (cf.
+        # test_triton_kernel_mutated_offset_view_not_miscompiled).
+        kidx = _add_kernel_to_table(scale_inplace_kernel, ["mX"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def take_view(base):
+            return base[4:] if view == "offset" else base[::2]
+
+        def f(base):
+            v = take_view(base)
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs={"mX": v, "n": v.numel()},
+            )
+            return base
+
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        base = torch.arange(1, 1001, device=DEVICE, dtype=torch.float32)
+        expected = base.clone()
+        take_view(expected).mul_(2)
+
+        # Python functionalization (what AOTAutograd runs): the view's base is a
+        # tracked value, so it is passed as tensor_bases.
+        with FunctionalTensorMode():
+            gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(base.clone())
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_functional)
+        self.assertEqual(node.kwargs["tensors_to_clone"], ["mX"])
+        self.assertEqual(list(node.kwargs["tensor_bases"]), ["mX"])
+        self.assertEqual(gm(base.clone()), expected)
+
+        # torch.func.functionalize: the C++ functional wrappers carry no _base, so
+        # there are no tensor_bases (as for Triton); the result and the write-back
+        # into the input must still be right.
+        gm = make_fx(torch.func.functionalize(f))(base.clone())
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_functional)
+        self.assertEqual(node.kwargs["tensors_to_clone"], ["mX"])
+        b = base.clone()
+        self.assertEqual(gm(b), expected)
+        self.assertEqual(b, expected)
+
+    def test_cutedsl_hop_unknown_mutates_args_clones_every_tensor(self):
+        kidx = _add_kernel_to_table(add_kernel, "unknown")
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(x, y, out)
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        gm = make_fx(torch.func.functionalize(f))(x, y)
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_functional)
+        self.assertEqual(sorted(node.kwargs["tensors_to_clone"]), ["mOut", "mX", "mY"])
+        x_in, y_in = x.clone(), y.clone()
+        self.assertEqual(gm(x_in, y_in), x + y)
+        self.assertEqual((x_in, y_in), (x, y))
+
+    @parametrize("api", ["python", "cpp", "cpp_view_copies"])
+    def test_cutedsl_hop_functionalize_refuses_aliased_writes(self, api):
+        # test/test_hop_infra.py checks which written arguments functionalization
+        # refuses as possibly overlapping. Here the views of one base that it accepts,
+        # interleaved ones included (the q, k and v columns of a fused buffer), are
+        # written back correctly, unless functionalization copies views
+        # (remove="mutations_and_views"); and with mutates_args naming the written
+        # parameters, a refusal does not suggest naming fewer.
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        unknown_kidx = _add_kernel_to_table(add_kernel, "unknown")
+        named_kidx = _add_kernel_to_table(add_kernel, ["mX", "mOut"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def launch(kidx, x, y, out):
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(x, y, out)
+            )
+
+        def trace(f, *args, tracing_mode="real"):
+            if api == "python":
+                with FunctionalTensorMode():
+                    f_func = PythonFunctionalizeAPI().functionalize(f)
+                    return make_fx(f_func, tracing_mode=tracing_mode)(*args)
+            remove = "mutations_and_views" if api == "cpp_view_copies" else "mutations"
+            f_func = torch.func.functionalize(f, remove=remove)
+            return make_fx(f_func, tracing_mode=tracing_mode)(*args)
+
+        def in_place(x, y):
+            launch(named_kidx, x, y, x)
+            return x
+
+        def views(base, y):
+            launch(unknown_kidx, base[0], y, base[1])
+            return base
+
+        def named_views(base, y):
+            launch(named_kidx, base[0], y, base[1])
+            return base
+
+        def columns(qkv):
+            d = qkv.shape[1] // 3
+            launch(unknown_kidx, *(qkv.narrow(1, i * d, d) for i in range(3)))
+            return qkv
+
+        def empty(x, y):
+            launch(unknown_kidx, x, y, x[500:500])  # an empty view overlaps nothing
+            return x
+
+        written = (
+            ", and both count as written (mutates_args=('mX', 'mOut')). PT2 clones "
+            "each written argument and writes it back on its own, so one write could "
+            "be lost. "
+        )
+        x, y = _rand(1000), _rand(1000)
+        base, qkv = torch.stack([x, torch.zeros_like(x)]), _rand(40, 75)
+        overlap = "are the same tensor or views that may overlap"
+        fix = "Pass tensors that do not overlap."
+        refusals = [(in_place, (x.clone(), y), f"{overlap}{written}{fix}")]
+        if api == "cpp_view_copies":
+            copied = (
+                "are views of one tensor, which functionalization with "
+                'remove="mutations_and_views" copied, so PT2 cannot tell whether they '
+                f'overlap{written}Functionalize with remove="mutations" (the default), '
+                "which keeps views, or pass tensors that are not views of one tensor."
+            )
+            refusals.append((named_views, (base, y), copied))
+        for f, args, msg in refusals:
+            msg = f"CuTeDSL kernel add_kernel: 'mX' and 'mOut' {msg}"
+            with self.assertRaisesRegex(RuntimeError, re.escape(msg) + "$"):
+                trace(f, *args)
+        if api != "cpp_view_copies":
+            q, k = qkv[:, :25], qkv[:, 25:50]
+            gm = trace(views, base.clone(), y)
+            self.assertEqual(gm(base.clone(), y), torch.stack([x, x + y]))
+            gm = trace(columns, qkv.clone())
+            self.assertEqual(gm(qkv.clone()), torch.cat([q, k, q + k], dim=1))
+            # Traced with fake tensors: CUDA refuses a launch of zero blocks (n = 0).
+            trace(empty, x.clone(), y, tracing_mode="fake")
+
+    @parametrize("api", ["python", "cpp"])
+    def test_cutedsl_hop_functionalize_accepts_empty_views_of_another_dtype(self, api):
+        # Written arguments of different element sizes are compared by their byte
+        # ranges (test/test_hop_infra.py), and an empty one overlaps nothing: empty
+        # uint8 views inside the output's bytes, passed for the parameter the kernel
+        # leaves alone, are accepted under mutates_args="unknown", and the output is
+        # written back.
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        kidx = _add_kernel_to_table(mul_cfg_kernel, "unknown")
+        cidx = cutedsl_kernel_side_table.add_constant_args({"cfg": Cfg(2.0)})
+
+        def trace(f, *args):
+            if api == "python":
+                with FunctionalTensorMode():
+                    return make_fx(PythonFunctionalizeAPI().functionalize(f))(*args)
+            return make_fx(torch.func.functionalize(f))(*args)
+
+        def launch(x, out, unused):
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs={"mX": x, "mOut": out, "n": 1000, "unused": unused},
+            )
+
+        def flat(x, out):
+            launch(x, out, out.view(torch.uint8)[4:4])
+            return out
+
+        def rows(x, out):
+            # Shape (5, 0), strides (100, 1): 400 bytes from byte 100, as a range.
+            launch(x, out, out.view(torch.uint8).view(40, 100)[1:6, :0])
+            return out
+
+        x = _rand(1000)
+        for f in (flat, rows):
+            gm = trace(f, x, torch.zeros_like(x))
+            self.assertEqual(gm(x, torch.zeros_like(x)), x * 2.0)
+
+    @parametrize("api", ["python", "cpp"])
+    def test_cutedsl_hop_functionalize_columns_symbolic(self, api):
+        # With symbolic sizes too, the q, k and v columns of a fused buffer are
+        # proven disjoint. compute_overlapping_tensors guards on the sizes it
+        # compares, and its guards hold for other sizes too.
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        kidx = _add_kernel_to_table(add_kernel, "unknown")
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def f(x, y):
+            n, d = x.shape
+            qkv = x.new_zeros(n, 3 * d)
+            q, k, v = (qkv.narrow(1, i * d, d) for i in range(3))
+            q.copy_(x)
+            k.copy_(y)
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(q, k, v)
+            )
+            return qkv
+
+        if api == "python":
+            with FunctionalTensorMode():
+                f_func = PythonFunctionalizeAPI().functionalize(f)
+                gm = make_fx(f_func, tracing_mode="symbolic")(_rand(8, 4), _rand(8, 4))
+        else:
+            f_func = torch.func.functionalize(f)
+            gm = make_fx(f_func, tracing_mode="symbolic")(_rand(8, 4), _rand(8, 4))
+        inputs = [node.meta["val"] for node in gm.graph.find_nodes(op="placeholder")]
+        for shape in ((8, 4), (5, 7)):
+            x, y = _rand(*shape), _rand(*shape)
+            self.assertTrue(gm.shape_env.evaluate_guards_for_args(inputs, [x, y]))
+            self.assertEqual(gm(x, y), torch.cat([x, y, x + y], dim=1))
+
     @parametrize("case", ["e8m0", "complex", "meta", "sparse", "fp8"])
     def test_cutedsl_hop_functional_decomposed_before_type_fallback(self, case):
         # Mirrors test_triton_kernel_functional_decomposition_before_type_fallback: the
@@ -1325,6 +1623,48 @@ def forward(self, x_1, y_1):
             sorted(get_cutedsl_mutated_tensors(kidx, cidx, kwargs)),
             ["mDiff", "mSum", "mX", "mY"],
         )
+
+    def test_cutedsl_hop_mutation_hidden_from_autograd(self):
+        # Mirrors test_triton_kernel_mutation_type.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        kidx = _add_kernel_to_table(scale_inplace_kernel, ["mX"])
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def prep():
+            x = torch.ones(4, device=DEVICE, requires_grad=True)
+            with FunctionalTensorMode():
+                x_func = FunctionalTensor.to_functional(x)
+            self.assertTrue(torch._is_functional_tensor(x_func.elem))
+            return x_func
+
+        def launch(x_func):
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs={"mX": x_func, "n": 4}
+            )
+
+        # kernel mutation only
+        with FakeTensorMode():
+            x_func = prep()
+            with FunctionalTensorMode():
+                launch(x_func)
+            self.assertTrue(
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
+            )
+
+        # normal mutation + kernel mutation
+        with FakeTensorMode():
+            x_func = prep()
+            with FunctionalTensorMode():
+                x_func.mul_(2)
+                launch(x_func)
+            self.assertFalse(
+                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
+            )
 
     def test_cutedsl_side_table_is_separate(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
