@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import json
 import os
 import re
@@ -20,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
 from tools.testing.llm_selector import select_tests, selection
 from tools.testing.llm_selector.selection import (
+    apply_selection,
     DRIVER_MAPPINGS,
     needs_run_all,
     normalize_test_name,
@@ -1597,6 +1599,331 @@ class TestSplit(unittest.TestCase):
         for sel in (Selection(run_all=True), sweep):
             include, exclude, split = self.split(sel, {}, times, config="crossref")
             self.assertEqual((include, exclude, split.hedged), (["a", "b"], [], set()))
+
+
+@mock.patch.object(selection, "ENFORCEMENT_ENABLED", True)
+class TestApplySelection(unittest.TestCase):
+    TIMES: dict[str, float] = {"a": 10, "p": 20, "s": 170, "big": 600, "rest": 200}
+    ENFORCED_LINE = "LLM selection: running 3 of 5 test files (1 covered; 1 previous failures added; 1 hedged within 200s)\n"
+
+    def sel(self, **kwargs: Any) -> Selection:
+        return Selection(candidates=set(self.TIMES), **kwargs)
+
+    def apply(
+        self,
+        sel: Selection,
+        td_enabled: bool = True,
+        pr_number: int | None = 1,
+        prev: Collection[str] | None = (),
+        times: dict[str, float] | None = None,
+        stderr: io.StringIO | None = None,
+    ) -> selection.AppliedSelection:
+        times = self.TIMES if times is None else times
+        tp = TestPrioritizations(list(self.TIMES), {TestRun("p"): 1, TestRun("s"): 0.5})
+        include, exclude = tp.get_top_per_tests(25)
+        with (
+            mock.patch.object(selection, "get_pr_number", return_value=pr_number),
+            mock.patch("sys.stderr", io.StringIO() if stderr is None else stderr),
+        ):
+            return apply_selection(
+                sel,
+                include,
+                exclude,
+                tp.get_score,
+                times,
+                test_config="default",
+                td_enabled=td_enabled,
+                previous_failures=prev,
+            )
+
+    def metric(self, enforced: bool, requested: bool) -> dict[str, object]:
+        # p previously failed, and s is hedged within the 200s budget.
+        return {
+            "list_id": "7916c4091b31",  # sha256 of the sorted test list
+            "enforced": enforced,
+            "enforce_requested": requested,
+            "enforcement_enabled": True,
+            "td_enabled": True,
+            "run_all": False,
+            "selector_error": None,
+            "num_tests": 5,
+            "num_covered": 1,
+            "num_td_include": 2,
+            "num_hedged": 1,
+            "num_previous_failures_added": 1,
+            "kept_td": False,
+            "enforce": requested,
+            "would_enforce": enforced,
+            "fallback": None,
+            "previous_failures_known": True,
+            "time_total": 1000,
+            "time_covered": 10,
+            "time_hedged": 170,
+            "time_previous_failures_added": 20,
+        }
+
+    def test_gate(self) -> None:
+        cases = itertools.product((False, True), (False, True), (None, 1), (None, "x"))
+        for td_enabled, enforce, pr_number, error in cases:
+            run_all = error is not None
+            sel = self.sel(files={"a"}, enforce=enforce, error=error, run_all=run_all)
+            applied = self.apply(sel, td_enabled, pr_number)
+            expected = td_enabled and enforce and pr_number is not None and not error
+            case = (td_enabled, enforce, pr_number, error)
+            self.assertEqual(applied.enforced, expected, case)
+            self.assertEqual(applied.selection_metric["enforced"], expected)
+            self.assertFalse(applied.kept_td)
+            # No previous failures is known, not unknown.
+            self.assertTrue(applied.previous_failures_known)
+            self.assertTrue(
+                applied.failure_metric(TestRun("a"))["previous_failures_known"]
+            )
+
+    def test_not_enforced_measures_the_selection(self) -> None:
+        applied = self.apply(self.sel(files={"a"}), prev={"p", "elsewhere"})
+        self.assertFalse(applied.enforced)
+        self.assertEqual(applied.td_include, {"p", "s"})
+        self.assertEqual(applied.selection_metric, self.metric(False, False))
+        self.assertEqual(
+            applied.failure_metric(TestRun("s")),
+            {
+                "failure": "s",
+                "covered": False,
+                "enforced": False,
+                "enforce_requested": False,
+                "enforcement_enabled": True,
+                "td_enabled": True,
+                "in_td_include": True,
+                "hedged": True,
+                "previous_failure_added": False,
+                "kept_td": False,
+                "enforce": False,
+                "would_enforce": False,
+                "fallback": None,
+                "previous_failures_known": True,
+                "selector_error": None,
+            },
+        )
+
+    def test_enforced_swaps_in_the_selection(self) -> None:
+        sel = self.sel(files={"a"}, enforce=True)
+        applied = self.apply(sel, prev={"p", "elsewhere"})
+        self.assertEqual([str(x) for x in applied.split.include], ["p", "s", "a"])
+        self.assertEqual([str(x) for x in applied.split.exclude], ["big", "rest"])
+        self.assertEqual(applied.selection_metric, self.metric(True, True))
+
+    def test_enforced_log_line(self) -> None:
+        stderr = io.StringIO()
+        self.apply(self.sel(files={"a"}, enforce=True), prev={"p"}, stderr=stderr)
+        self.assertEqual(stderr.getvalue(), self.ENFORCED_LINE)
+
+    def test_unknown_previous_failures_fall_back_to_td(self) -> None:
+        # td_results.json from a writer that does not store them.
+        stderr = io.StringIO()
+        sel = self.sel(files={"a"}, enforce=True)
+        applied = self.apply(sel, prev=None, stderr=stderr)
+        self.assertFalse(applied.enforced)
+        self.assertEqual(
+            stderr.getvalue(),
+            "LLM selection: previous failures not recorded in the TD results, using TD\n",
+        )
+        # Without them p is hedged too, as the shadow metrics record.
+        unknown = {
+            "num_previous_failures_added": 0,
+            "time_previous_failures_added": 0,
+            "num_hedged": 2,
+            "time_hedged": 190,
+            "previous_failures_known": False,
+            "kept_td": True,
+            "fallback": "previous failures not recorded in the TD results",
+        }
+        self.assertEqual(applied.selection_metric, self.metric(False, True) | unknown)
+        failure = applied.failure_metric(TestRun("p"))
+        keys = ("previous_failure_added", "kept_td", "previous_failures_known")
+        self.assertEqual([failure[k] for k in keys], [False, True, False])
+        shadow = self.apply(self.sel(files={"a"}), prev=None)
+        self.assertEqual((shadow.enforced, shadow.kept_td), (False, False))
+
+    def test_no_test_times_falls_back_to_td(self) -> None:
+        stderr = io.StringIO()
+        sel = self.sel(files={"a"}, enforce=True)
+        applied = self.apply(sel, times={}, stderr=stderr)
+        self.assertFalse(applied.enforced)
+        self.assertEqual(stderr.getvalue(), "LLM selection: no test times, using TD\n")
+        self.assertEqual(applied.selection_metric["time_total"], 0)
+        self.assertTrue(applied.kept_td)
+        # test-times.json is there but has none of the call's files.
+        applied = self.apply(sel, times={"elsewhere": 100.0})
+        self.assertEqual((applied.enforced, applied.kept_td), (False, True))
+
+    def test_nothing_chosen_is_reported_as_td(self) -> None:
+        # Neither scored file fits the 200s hedge and the selection names none.
+        stderr = io.StringIO()
+        times = {"p": 500.0, "s": 500.0}
+        applied = self.apply(self.sel(enforce=True), times=times, stderr=stderr)
+        self.assertFalse(applied.enforced)
+        self.assertEqual(stderr.getvalue(), "LLM selection: chose no files, using TD\n")
+        self.assertTrue(applied.kept_td)
+        failure = applied.failure_metric(TestRun("p"))
+        self.assertEqual((failure["enforced"], failure["kept_td"]), (False, True))
+        self.assertFalse(self.apply(self.sel(), times=times).kept_td)
+
+    def test_fallback_order(self) -> None:
+        # No test times, then unknown previous failures, then choosing nothing.
+        nothing = {"p": 500.0, "s": 500.0}
+        for sel, times, prev, reason in (
+            (self.sel(files={"a"}, enforce=True), {}, None, "no test times"),
+            (self.sel(enforce=True), {}, (), "no test times"),
+            (
+                self.sel(enforce=True),
+                nothing,
+                None,
+                "previous failures not recorded in the TD results",
+            ),
+        ):
+            stderr = io.StringIO()
+            applied = self.apply(sel, prev=prev, times=times, stderr=stderr)
+            self.assertEqual((applied.enforced, applied.kept_td), (False, True))
+            self.assertEqual(stderr.getvalue(), f"LLM selection: {reason}, using TD\n")
+
+    def test_shadow_records_what_enforcing_would_do(self) -> None:
+        nothing = {"p": 500.0, "s": 500.0}
+        enforce = self.sel(files={"a"}, enforce=True)
+        refused = self.sel(files={"a"}, enforce_requested=True)
+        for sel, times, prev, fallback in (
+            (enforce, {}, (), "no test times"),
+            (
+                enforce,
+                self.TIMES,
+                None,
+                "previous failures not recorded in the TD results",
+            ),
+            (self.sel(enforce=True), nothing, (), "chose no files"),
+            (enforce, self.TIMES, (), None),
+            (refused, self.TIMES, (), None),
+        ):
+            stderr = io.StringIO()
+            with mock.patch.object(selection, "ENFORCEMENT_ENABLED", False):
+                applied = self.apply(sel, prev=prev, times=times, stderr=stderr)
+            would = sel.enforce and fallback is None
+            self.assertEqual((applied.enforced, applied.kept_td), (False, False))
+            self.assertEqual(stderr.getvalue(), "")
+            for metric in (
+                applied.selection_metric,
+                applied.failure_metric(TestRun("a")),
+            ):
+                keys = ("enforce", "enforce_requested", "would_enforce", "fallback")
+                self.assertEqual(
+                    [metric[k] for k in keys], [sel.enforce, True, would, fallback]
+                )
+
+    def test_failure_metric(self) -> None:
+        # big failed before but TD does not run it and it does not fit the
+        # budget, so it does not run.
+        applied = self.apply(self.sel(files={"a"}, enforce=True), prev={"p", "big"})
+        self.assertEqual([str(x) for x in applied.split.exclude], ["big", "rest"])
+        expected = {
+            "a": (True, False, False, False),
+            "p": (False, True, False, True),
+            "s": (False, True, True, False),
+            "big": (False, False, False, False),
+        }
+        for f, (covered, in_td, hedged, prev) in expected.items():
+            self.assertEqual(
+                applied.failure_metric(TestRun(f)),
+                {
+                    "failure": f,
+                    "covered": covered,
+                    "enforced": True,
+                    "enforce_requested": True,
+                    "enforcement_enabled": True,
+                    "td_enabled": True,
+                    "in_td_include": in_td,
+                    "hedged": hedged,
+                    "previous_failure_added": prev,
+                    "kept_td": False,
+                    "enforce": True,
+                    "would_enforce": True,
+                    "fallback": None,
+                    "previous_failures_known": True,
+                    "selector_error": None,
+                },
+            )
+
+    def test_previous_failure_in_td_include_runs_when_enforced(self) -> None:
+        # TD ranks class A of f first and the rest of f last, and f is over
+        # the hedge budget, so only its previous failure runs it. r1 fits the
+        # budget but TD does not score it.
+        f_a = TestRun("f", included=["A"])
+        files = ["a", "f", "r1", "r2", "r3"]
+        tp = TestPrioritizations(files, {f_a: 1})
+        include, exclude = tp.get_top_per_tests(25)
+        self.assertEqual([str(x) for x in include], ["f, A", "a"])
+        sel = Selection(files={"a"}, enforce=True, candidates=set(files))
+        times: dict[str, float] = {"a": 1, "f": 300, "r1": 150, "r2": 233, "r3": 233}
+        for prev, runs in (({"f"}, ["f, A", "a", "f, not (A)"]), (set(), ["a"])):
+            with (
+                mock.patch.object(selection, "get_pr_number", return_value=1),
+                mock.patch("sys.stderr"),
+            ):
+                applied = apply_selection(
+                    sel,
+                    include,
+                    exclude,
+                    tp.get_score,
+                    times,
+                    test_config="default",
+                    td_enabled=True,
+                    previous_failures=prev,
+                )
+            self.assertTrue(applied.enforced)
+            self.assertEqual([str(x) for x in applied.split.include], runs)
+            # TD's include has only class A of f, so a failure in the rest of f is outside it.
+            in_td = [
+                applied.failure_metric(x)["in_td_include"]
+                for x in (f_a, TestRun("f", excluded=["A"]))
+            ]
+            self.assertEqual(in_td, [True, False])
+
+    def test_refused_request_log_line(self) -> None:
+        refused = "LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD\n"
+        failed = "LLM selection: the selector failed ('x'), using TD\n"
+        for sel, pr_number, expected in (
+            (self.sel(files={"a"}, enforce_requested=True), 1, refused),
+            (self.sel(files={"a"}, enforce_requested=True), None, ""),
+            (Selection(run_all=True, error="x", enforce_requested=True), 1, failed),
+            (self.sel(files={"a"}, enforce=True), 1, self.ENFORCED_LINE),
+        ):
+            stderr = io.StringIO()
+            applied = self.apply(sel, pr_number=pr_number, prev={"p"}, stderr=stderr)
+            self.assertEqual(stderr.getvalue(), expected)
+            self.assertFalse(applied.kept_td)
+
+    def test_metrics_tell_a_failed_selector_from_a_run_all(self) -> None:
+        # select_tests clears enforce when the selector failed, and a file
+        # that sets both is not enforced either.
+        failed = Selection(run_all=True, reason="selector failed: x", error="x")
+        failed_enforce = Selection(
+            run_all=True, reason="selector failed: x", enforce=True, error="x"
+        )
+        deliberate = Selection(run_all=True, reason="infra", enforce=True)
+        # select_tests keeps the request, so a failed enforced selector is counted.
+        requested = Selection(
+            run_all=True, reason="selector failed: x", error="x", enforce_requested=True
+        )
+        cases = (
+            (failed, "x", False),
+            (failed_enforce, "x", False),
+            (deliberate, None, True),
+            (requested, "x", False),
+        )
+        for sel, error, enforced in cases:
+            applied = self.apply(Selection.from_json(sel.to_json()))
+            self.assertEqual((applied.enforced, applied.kept_td), (enforced, False))
+            failure = applied.failure_metric(TestRun("a"))
+            for metric in (applied.selection_metric, failure):
+                self.assertEqual(metric["selector_error"], error)
+                self.assertEqual(metric["enforce_requested"], sel is not failed)
 
 
 class TestPrompt(unittest.TestCase):
