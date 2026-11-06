@@ -5124,8 +5124,9 @@ class TestPrecompileDynamoCapture(TestCase):
                 "def cos(x: torch.Tensor) -> torch.Tensor:\n    return x.cos()\n"
                 "cos.register_fake(torch.empty_like)\nclass Model(torch.nn.Module):\n"
                 "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
-                "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
-                "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
+                "if save:\n    with torch._dynamo.config.patch(nested_graph_breaks=False):\n"
+                "        with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
+                "            cap(Model(), x)\nelse:\n    f = load(a, c)\n"
                 "    assert f.installed and f(Model(), x).equal(x.cos().sum(dim=0))\n"
             )
         for save in ("1", ""):
@@ -5142,11 +5143,28 @@ class TestPrecompileDynamoCapture(TestCase):
                 self.assertRegex(python_code, r"\nSERVED_MODULES = \(.*'__main__'")
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_inlined_breaking_helper_is_served_standalone(self):
+        # NGB resumes the inlined helper without making it an unreachable frame.
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            y2 = cap(self.model, self.x2)
+            y3 = cap(self.model, self.x3)
+            summary = cap.summary()
+        self.assertEqual(y2, fn(self.model, self.x2))
+        self.assertEqual(y3, fn(self.model, self.x3))
+        self.assertTrue(summary.complete, str(summary))
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "standalone"', f.read())
+        calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
+        self._serve_in_fresh_process(calls + calls[:1])
+
+    @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_frame_the_entry_cannot_reach_is_served_installed(self, backend):
-        # The graph break inside breaking_helper compiles it as a frame of its
-        # own, entered by an ordinary call rather than by a continuation name.
+        # With NGB off, breaking_helper compiles as its own unreachable frame,
+        # entered by an ordinary call rather than by a continuation name.
         fn = self.mod.calls_breaking_helper
         with self._capture(fn, backend=backend) as cap:
             y2 = cap(self.model, self.x2)
@@ -5784,6 +5802,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_can_opt_into_serve_time_compiles(
         self, caching_precompile
     ):
@@ -5839,6 +5858,10 @@ class TestPrecompileDynamoCapture(TestCase):
             "        raise AssertionError('compiled under fail_on_recompile')\n"
             "print('compiled at serve time')\n"
         )
+        script = (
+            "import torch\n"
+            "with torch._dynamo.config.patch(nested_graph_breaks=False):\n"
+        ) + textwrap.indent(script, "    ")
         argv = [self.dir, self.artifact, self.cache, self.module_name, state]
         cmd = [sys.executable, "-c", script, *argv]
         env = {**os.environ, "TORCH_CACHING_PRECOMPILE": str(int(caching_precompile))}
@@ -5848,6 +5871,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("given", ["options", "mode"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_take_the_capture_options(self, given):
         from torch._inductor import list_mode_options
         from torch._precompile import _parse_artifact_metadata
@@ -5896,6 +5920,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("compiled with the capture options", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
         from torch._precompile import _parse_artifact_metadata
 
@@ -5915,6 +5940,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only to an installed artifact"):
             load(self.artifact, self.cache, allow_serve_time_compiles=True)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_without_the_flag_default_refuses_it(self):
         with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
             cap(self.model, self.x2)
@@ -5938,6 +5964,7 @@ class TestPrecompileDynamoCapture(TestCase):
             ("_ALLOW_SERVE_TIME_COMPILES = False  # edited", True, "not in the form"),
         ],
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_with_an_edited_flag_line_refuses_to_load(
         self, line, allow, msg
     ):
