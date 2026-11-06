@@ -450,13 +450,13 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     const double back = static_cast<double>(f);
     uint32_t bits = __float_as_uint(f);
     const uint32_t step = (back != x) & (x == x) & ~bits & 1u;
-    const uint32_t up = (back < 0 ? -back : back) < (x < 0 ? -x : x);
+    const uint32_t up = fabs(back) < fabs(x);
     bits += step * (2 * up - 1);
     return __uint_as_float(bits);
   }
 
-  // Mirrors detail::rounds_through_float in TypeCast.h, limited to the types
-  // the jiterator supports.
+  // Mirrors detail::rounds_through_float in TypeCast.h. The jiterator's Half
+  // and BFloat16 have no numeric_limits, so it lists its only narrower types.
   template <typename T>
   constexpr bool rounds_through_float = std::is_same<T, at::Half>::value ||
       std::is_same<T, at::BFloat16>::value ||
