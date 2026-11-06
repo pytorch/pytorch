@@ -7,13 +7,25 @@ import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.distributed_c10d import Backend, BackendConfig, ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import _to_dtype_if_needed
 from ._fsdp_param import FSDPParam, ShardedState
+
+
+def _aligned_nccl_numel(
+    numel: int, dtype: torch.dtype, device: torch.device, group: dist.ProcessGroup
+) -> int:
+    if device.type != "cuda":
+        return numel
+    backend_map = BackendConfig(dist.get_backend(group)).get_device_backend_map()
+    if backend_map.get(device.type) != Backend.NCCL:
+        return numel
+    alignment = math.lcm(16, dtype.itemsize) // dtype.itemsize
+    return (numel + alignment - 1) // alignment * alignment
 
 
 class AllGatherResult(NamedTuple):
@@ -268,9 +280,12 @@ def all_gather_copy_in_default(
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
-    foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
+    raw_numel = sum(inp_split_sizes)
+    foreach_copy_dsts = torch.split(all_gather_input[:raw_numel], inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        if raw_numel < all_gather_input_numel:
+            all_gather_input[raw_numel:].zero_()
     return all_gather_input, all_gather_output
 
 
@@ -346,6 +361,8 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
+    *,
+    all_gather_output_fn: Callable | None = None,
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
@@ -364,6 +381,14 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
+        # Custom copy-out callbacks retain their original flat-layout contract.
+        if type(all_gather_comm) is DefaultAllGather and (
+            all_gather_output_fn is None
+            or all_gather_output_fn is _default_all_gather_output_fn
+        ):
+            all_gather_input_numel = _aligned_nccl_numel(
+                all_gather_input_numel, dtype, device, group
+            )
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
@@ -453,7 +478,9 @@ def _get_param_all_gather_inputs(
 # prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
 # their dtypes. Of its arguments, fn may only write outputs, whose version
 # counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
-# an empty all-gather.
+# an empty all-gather. Only for this default fn with DefaultAllGather over NCCL
+# does FSDP pad each rank's chunk to a 16-byte multiple, leaving the padding at
+# the end of each rank's row; a custom fn or comm keeps the unpadded layout.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -479,8 +506,15 @@ def _default_all_gather_output_fn(
         if split_output.numel() != world_size * split_size:  # a smaller payload
             split_output = split_output[: world_size * split_size]
         split_outputs.append(split_output.view(world_size, split_size))
+    all_gather_output = all_gather_output.view(world_size, -1)
+    padding_numel = all_gather_output.size(1) - sum(split_sizes)
+    if padding_numel > 0:
+        # Keep the full input dense for the fused CUDA split kernel by copying
+        # each row's padding into a scratch output instead of slicing it off.
+        split_sizes = [*split_sizes, padding_numel]
+        split_outputs.append(all_gather_output.new_empty((world_size, padding_numel)))
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
+        all_gather_output, split_sizes, dim=1, out=split_outputs
     )
     for copy_output, output, outer_size in reassembled:
         chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
@@ -541,7 +575,10 @@ def foreach_all_gather_copy_out(
 # copy_in(reduce_scatter_input) then fills that flat buffer so that, viewed as
 # (world_size, -1), row r holds each gradient's padded shard r in order, cast to the
 # buffer's dtype. Both run under no_grad on the current stream, also for a single
-# rank; FSDP frees copy_in and the gradients afterward, so keep neither.
+# rank; FSDP frees copy_in and the gradients afterward, so keep neither. Only for
+# the default fn with DefaultReduceScatter over NCCL does FSDP widen each row to a
+# 16-byte multiple, which the default copy-in zero-fills; a custom fn or comm
+# keeps rows exactly as wide as the padded shards.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     *,
@@ -614,7 +651,16 @@ def foreach_reduce(
     copy_in = prepare_reduce_scatter_inputs(
         unsharded_grads, shard_dims=shard_dims, world_size=world_size
     )
-    reduce_scatter_output_numel = sum(padded_sharded_numels)
+    raw_reduce_scatter_output_numel = sum(padded_sharded_numels)
+    reduce_scatter_output_numel = raw_reduce_scatter_output_numel
+    if (
+        world_size > 1
+        and type(reduce_scatter_comm) is DefaultReduceScatter
+        and prepare_reduce_scatter_inputs is _default_reduce_scatter_input_fn
+    ):
+        reduce_scatter_output_numel = _aligned_nccl_numel(
+            reduce_scatter_output_numel, reduce_dtype, device, reduce_scatter_group
+        )
     reduce_scatter_input = reduce_scatter_comm.allocate(
         (reduce_scatter_output_numel * world_size,),
         dtype=reduce_dtype,
@@ -652,6 +698,8 @@ def foreach_reduce(
             else:
                 reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
+        # All downstream reduction/output logic retains the logical length.
+        reduce_output = reduce_output[:raw_reduce_scatter_output_numel]
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
             # Accumulations must run in the reduce-scatter stream
@@ -863,6 +911,21 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    raw_chunk_numel = sum(
+        ((grad.size(0) + world_size - 1) // world_size) * math.prod(grad.shape[1:])
+        for grad in unsharded_grads
+    )
+    padding_numel = reduce_scatter_input.size(1) - raw_chunk_numel
+    if padding_numel:
+        # Pack a tiny extra tensor at each rank's tail in the existing kernel.
+        # Keeping out contiguous avoids a strided-out fallback/repack. Matching
+        # uniform gradients' dtype keeps their same-dtype dispatch below.
+        dtypes = {grad.dtype for grad in unsharded_grads}
+        padding = reduce_scatter_input.new_zeros(
+            (world_size * padding_numel,) + (1,) * (unsharded_grads[0].ndim - 1),
+            dtype=dtypes.pop() if len(dtypes) == 1 else reduce_scatter_input.dtype,
+        )
+        unsharded_grads = [*unsharded_grads, padding]
     # With reduce_dtype set, gradients share it. Otherwise each follows its
     # parameter's grad_dtype policy (default: the parameter's dtype), so a group
     # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the
