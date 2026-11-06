@@ -3197,6 +3197,59 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(y.is_contiguous())
         self.assertEqual(out, y, atol=0., rtol=0.)
 
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.half, torch.bfloat16, torch.float, torch.double, torch.complex64)
+    def test_cumsum_cumprod_outer_dim(self, device, dtype):
+        # On ROCm, scans along a non-last dim of length >= 16 run a tiled kernel that also splits
+        # long columns into chunks. The inputs keep every result exact in `dtype` for any combine
+        # order: integers wrap around (odd factors for cumprod, so products never reach 0), and
+        # floating-point inputs are small integers for cumsum and +-1 (+-1j) for cumprod.
+        cases = [
+            ((16, 5), 0),
+            ((300, 3), 0),
+            ((1024, 4), 0),
+            ((257, 33), 0),
+            ((20, 1000), 0),
+            ((4, 300, 33), 1),
+            ((65536, 4), 0),
+            ((3, 20001, 3), 1),
+        ]
+        # Partial sums of up to this many values in {-1, 0, 1} are exact in `dtype`.
+        max_len = {torch.half: 2048, torch.bfloat16: 256}.get(dtype, 2**24)
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
+            if shape[dim] > max_len:
+                continue
+            if dtype.is_floating_point or dtype.is_complex:
+                if op is torch.cumsum:
+                    vals = [-1, 0, 1] + ([1j, -1j, 1 + 1j] if dtype.is_complex else [])
+                else:
+                    vals = [-1, 1] + ([1j, -1j] if dtype.is_complex else [])
+                vals = torch.tensor(vals, dtype=dtype)
+                x = vals[torch.randint(len(vals), shape)]
+            elif op is torch.cumsum:
+                x = make_tensor(shape, dtype=dtype, device="cpu")
+            else:
+                x = torch.randint(0, 5, shape, dtype=dtype) * 2 + 1
+            expected = op(x, dim, dtype=dtype)
+            x = x.to(device)
+            self.assertEqual(op(x, dim, dtype=dtype), expected, atol=0, rtol=0)
+            # A one-element storage offset misaligns 16-byte vector accesses.
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(op(x_off, dim, dtype=dtype), expected, atol=0, rtol=0)
+            getattr(x_off, op.__name__ + "_")(dim)
+            self.assertEqual(x_off, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_logcumsumexp_outer_dim(self, device, dtype):
+        cases = [((16, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
+        for shape, dim in cases:
+            x = torch.randn(shape, dtype=dtype, device=device)
+            expected = torch.logcumsumexp(x.cpu().double(), dim).to(dtype)
+            self.assertEqual(torch.logcumsumexp(x, dim), expected)
+
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
         self.assertEqual(val, expected_val, atol=0, rtol=0)
