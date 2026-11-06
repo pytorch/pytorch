@@ -146,6 +146,15 @@ class GeneratedFileCleaner:
 def _to_unix_path(path: str) -> str:
     return path.replace(os.sep, '/')
 
+def _rel_path_for_hipify(path: str, output_directory: str) -> tuple[str, str]:
+    """Returns (base, rel) with rel relative to base, for get_hip_file_path."""
+    try:
+        return output_directory, _to_unix_path(os.path.relpath(path, output_directory))
+    except ValueError:
+        # On Windows no relative path exists across drives, so anchor at the drive root instead.
+        drive, rest = os.path.splitdrive(os.path.abspath(path))
+        return drive + os.sep, _to_unix_path(rest).lstrip('/')
+
 def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
     return any(filename.endswith(e) for e in extensions)
@@ -817,7 +826,7 @@ def preprocessor(
         hipify_result.current_state = CurrentState.DONE
         return hipify_result
 
-    rel_filepath = _to_unix_path(os.path.relpath(filepath, output_directory))
+    rel_base, rel_filepath = _rel_path_for_hipify(fin_path, output_directory)
 
     with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -831,7 +840,7 @@ def preprocessor(
     orig_output_source = output_source
 
     # get_hip_file_path needs a relative path to work correctly
-    fout_path = os.path.abspath(os.path.join(output_directory, get_hip_file_path(rel_filepath, is_pytorch_extension)))
+    fout_path = os.path.abspath(os.path.join(rel_base, get_hip_file_path(rel_filepath, is_pytorch_extension)))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -874,7 +883,7 @@ def preprocessor(
                               "THC/")) or
                 (f.startswith("THC") and not f.startswith("THCP"))
             ):
-                return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
+                return templ.format(_to_unix_path(get_hip_file_path(m.group(1), is_pytorch_extension)))
             # if filename is one of the files being hipified for this extension
             if (is_pytorch_extension and any(s.endswith(filename) for s in all_files)):
                 header_dir = None
@@ -907,13 +916,13 @@ def preprocessor(
                     header_result = HIPIFY_FINAL_RESULT[header_filepath]
                     if header_result.current_state == CurrentState.INITIALIZED:
                         # get_hip_file_path needs a relative path to work correctly
-                        header_rel_path = os.path.relpath(header_filepath, output_directory)
-                        header_fout_path = os.path.abspath(os.path.join(output_directory,
+                        header_rel_base, header_rel_path = _rel_path_for_hipify(header_filepath, output_directory)
+                        header_fout_path = os.path.abspath(os.path.join(header_rel_base,
                                                                         get_hip_file_path(header_rel_path, is_pytorch_extension)))
                         header_result.hipified_path = header_fout_path
                         HIPIFY_FINAL_RESULT[header_filepath] = header_result
-                        return templ.format(os.path.relpath(header_fout_path if header_fout_path is not None
-                                                            else header_filepath, header_dir))
+                        return templ.format(_to_unix_path(os.path.relpath(header_fout_path if header_fout_path is not None
+                                                                          else header_filepath, header_dir)))
                 hipified_header_filepath = HIPIFY_FINAL_RESULT[header_filepath].hipified_path
                 return templ.format(_to_unix_path(os.path.relpath(hipified_header_filepath if hipified_header_filepath is not None
                                                                   else header_filepath, header_dir)))

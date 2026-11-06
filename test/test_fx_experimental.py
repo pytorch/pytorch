@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_Z3,
     TestCase,
@@ -2098,6 +2099,7 @@ class {test_classname}(torch.nn.Module):
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
+    @skipIfTorchDynamo("traces 8 full torchvision models (~6 min); this tests an FX pass")
     def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,

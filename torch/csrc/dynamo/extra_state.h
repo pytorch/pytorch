@@ -203,11 +203,11 @@ CacheLookupResult record_compile_result(
     PyObject* guarded_code,
     PyObject* backend);
 
-// Returns the list of CacheEntry corresponding to code_obj.
-// Warning: returns references whose lifetimes are controlled by C++
+// These return copies that hold their own references, so they stay valid after
+// torch._dynamo.reset() frees the cached entries.  Copies of the same entry
+// compare equal.
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 // Returns the list of CacheEntry for a given isolate_recompiles_id bucket.
-// Warning: returns references whose lifetimes are controlled by C++
 py::list _get_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
