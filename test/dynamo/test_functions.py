@@ -10078,6 +10078,92 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x + 22)
         self.assertEqual(counter.frame_count, 3)
 
+    def test_locally_instantiated_compiled_enter(self):
+        # __enter__ is a torch.compile wrapper: Dynamo traces its
+        # _torchdynamo_inline target, whose closure is not the wrapper's.
+        log = []
+
+        class CM:
+            @torch.compile(backend="eager")
+            def __enter__(self):
+                log.append("enter")
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fn(x):
+            with CM():
+                return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(log, ["enter", "enter"])
+
+    def test_locally_instantiated_compiled_dunder_methods(self):
+        # The same for __exit__, __getattr__ and a descriptor's __get__.
+        log = []
+
+        class D:
+            @torch.compile(backend="eager")
+            def __get__(self, obj, objtype=None):
+                log.append("get")
+                return 2
+
+        class Helper:
+            d = D()
+
+            def __enter__(self):
+                return self
+
+            @torch.compile(backend="eager")
+            def __exit__(self, *args):
+                log.append("exit")
+                return False
+
+            @torch.compile(backend="eager")
+            def __getattr__(self, name):
+                log.append(name)
+                return 1
+
+        def fn(x):
+            with Helper():
+                return x + Helper().missing + Helper().d
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(log, ["missing", "get", "exit"] * 2)
+
+    def test_locally_instantiated_compiled_enter_rebind(self):
+        class CM:
+            @torch.compile(backend="eager")
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, *args):
+                return False
+
+        @torch.compile(backend="eager")
+        def new_enter(self):
+            return 2
+
+        def fn(x):
+            with CM() as v:
+                return x + v
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        CM.__enter__ = new_enter
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 2)
+
 
 _FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
 

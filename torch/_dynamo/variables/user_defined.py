@@ -2299,10 +2299,19 @@ def build_mro_method(
     its class: fn_source is the function's entry in the defining class's
     __dict__, which lets bind_args track the function's closure cells. Guard the
     function's code as resolve_type_attr does, so that rebinding it on the class
-    recompiles instead of replaying the traced body.
+    recompiles instead of replaying the traced body. A torch.compile wrapper is
+    traced through its _torchdynamo_inline target, whose closure is not the
+    wrapper's, so it gets a wrapper VT (as in resolve_type_attr) instead.
     """
     from .builder import VariableBuilder
 
+    if inspect.getattr_static(fn, "_torchdynamo_inline", False):
+        wrapper_vt = VariableBuilder.create_internal_wrapper_user_function(
+            fn, "_torchdynamo_inline", source=fn_source
+        )
+        return variables.WrapperUserMethodVariable.create(
+            wrapper_vt, im_self, source=method_source
+        )
     if can_guard_class_function_code(tx, fn):
         fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
     else:
