@@ -319,6 +319,8 @@ XPU_BLOCKLIST = [
     "distributed/test_p2p_ipc",
     "distributed/test_shmem_triton",
     "distributed/test_token_switch",
+    "dynamo/test_cudagraphs",
+    "dynamo/test_cudagraphs_expandable_segments",
     "functorch/test_control_flow_cuda_initialization",
     "inductor/test_ck_backend",
     "inductor/test_cudagraph_trees",
@@ -335,6 +337,7 @@ XPU_BLOCKLIST = [
     "inductor/test_nv_universal_gemm",
     "inductor/test_origami",
     "inductor/test_pallas",
+    "nn/attention/test_fa4",
     "python_native/test_quack_vendor",
     "python_native/test_topk_cutedsl",
     "quantization/core/test_quantized_tensor",
@@ -351,7 +354,10 @@ XPU_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_cuda_primary_ctx",
     "test_cuda_sanitizer",
+    "test_functionalization_of_rng_ops",
     "test_jiterator",
+    "test_matmul_cuda",
+    "test_sparse_semi_structured",
     "test_stateless_rng",
 ]
 
