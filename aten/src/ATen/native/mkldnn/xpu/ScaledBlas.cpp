@@ -1223,7 +1223,7 @@ static void _scaled_mm_xpu_v2_impl(
   // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm
   // kernels do not support this case). The output has already been sized by
   // the structured-op meta function; we only need to zero-fill when K=0.
-  // // scaled_addmm handles empty matrices below to preserve beta * accumulator.
+  // scaled_addmm handles empty matrices below to preserve beta * accumulator.
   if (!accumulator.has_value() &&
       (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0)) {
     if (mat_a.size(1) == 0) {
