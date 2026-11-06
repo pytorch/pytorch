@@ -7749,25 +7749,36 @@ class ExternKernel(InputsKernel):
         if buf is None:
             raise AssertionError("Expected buf is not None")
         x_unwrap_view_fx_node = buf.get_origin_node()
-        padding_fx_node = x_unwrap_view_fx_node or V.get_current_node()
-        with V.set_current_node(padding_fx_node):
-            # Prefer channels last format according to how the format is set from eager.
-            if (
-                x_unwrap_view_fx_node is not None
-                and "val" in x_unwrap_view_fx_node.meta
-                and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
-                and isinstance(x_unwrap_view.layout, FlexibleLayout)
-                and (
-                    is_contiguous_for_memory_format_or_false(
-                        x_unwrap_view_fx_node.meta["val"],
-                        memory_format=torch.channels_last,
-                    )
-                    or is_contiguous_for_memory_format_or_false(
-                        x_unwrap_view_fx_node.meta["val"],
-                        memory_format=torch.channels_last_3d,
-                    )
+        # Prefer channels last format according to how the format is set from eager.
+        prefer_channels_last = (
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last,
                 )
-            ):
+                or is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last_3d,
+                )
+            )
+        )
+        # This freezes an intermediate buffer owned by its producer. If the current
+        # node only protects its own output strides, that says nothing about this
+        # input, so let the producer's marking decide whether it can be padded.
+        padding_fx_node = V.get_current_node()
+        if (
+            x_unwrap_view_fx_node is not None
+            and hasattr(padding_fx_node, "meta")
+            and padding_fx_node.meta.get("dislike_padding_only_for_output", False)
+            and not x_unwrap_view_fx_node.meta.get("backs_user_visible_output", False)
+        ):
+            padding_fx_node = x_unwrap_view_fx_node
+        with V.set_current_node(padding_fx_node):
+            if prefer_channels_last:
                 x_unwrap_view.freeze_layout_with_same_order(
                     make_channels_last_strides_for(x_unwrap_view.get_size())
                 )
