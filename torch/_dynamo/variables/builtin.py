@@ -109,6 +109,7 @@ from .dicts import (
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
+    _is_skipped_constant_property,
     _NO_DEFAULT,
     binary_iop,
     binary_op,
@@ -3688,24 +3689,40 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
         try:
-            return self._call_getattr(tx, args, kwargs)
+            fold_constant = False
+            if args[1].is_python_constant():
+                name = args[1].as_python_constant()
+                fold_constant = (
+                    isinstance(name, str)
+                    and _is_skipped_constant_property(tx, args[0], name)
+                    and check_unspec_or_constant_args(args, kwargs)
+                )
+            if not fold_constant:
+                return self._call_getattr(tx, args, kwargs)
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
-            try:
-                result = getattr(*[a.as_python_constant() for a in args])
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-            except AsPythonConstantNotImplementedError:
-                raise
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-                raise
-            return VariableTracker.build(tx, result)
+        return self._call_constant_getattr(tx, args)
+
+    def _call_constant_getattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+    ) -> VariableTracker:
+        try:
+            result = getattr(*[a.as_python_constant() for a in args])
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+        except AsPythonConstantNotImplementedError:
+            raise
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+            raise
+        return VariableTracker.build(tx, result)
 
     def _call_getattr(
         self,

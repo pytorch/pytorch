@@ -212,6 +212,7 @@ from .variables.lists import (
 from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
     generic_getiter,
@@ -3395,7 +3396,10 @@ class InstructionTranslatorBase(
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
+            if not _is_skipped_constant_property(self, obj, attr):
+                result = generic_getattr(self, obj, attr)
+                self.push(result)
+                return
         except Unsupported:
             if not obj.is_python_constant():
                 raise
@@ -3408,10 +3412,10 @@ class InstructionTranslatorBase(
                 types.FunctionType,
             ):
                 raise
-            source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+        source = AttrSource(obj.source, attr) if obj.source else None
+        result = VariableTracker.build(
+            self, getattr(obj.as_python_constant(), attr), source=source
+        )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:

@@ -3660,8 +3660,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _check_for_getattr(self) -> object:
         return get_custom_getattr(self.value)
 
-    @staticmethod
-    def _is_c_defined_property(subobj: object) -> bool:
+    def _is_c_defined_property(self, subobj: object) -> bool:
         if not isinstance(subobj, property):
             return False
 

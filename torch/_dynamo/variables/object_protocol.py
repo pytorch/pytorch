@@ -2324,6 +2324,36 @@ def mro_attr_source(
     return None
 
 
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        type(obj) is not variables.ConstantVariable
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
@@ -2352,20 +2382,6 @@ def _resolve_descriptor_get(
             else None
         )
         prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
-        if (
-            type(type_attr) is property
-            and isinstance(obj, variables.ConstantVariable)
-            and variables.UserDefinedObjectVariable._is_c_defined_property(type_attr)
-        ):
-            fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
-            if isinstance(fget_vt, variables.SkipFunctionVariable):
-                # Preserve each caller's constant fallback and result source.
-                unimplemented(
-                    gb_type="Constant C property getter",
-                    context=f"constant property getter: {fget_vt}",
-                    explanation="C-defined property getters on constants use constant attribute access.",
-                    hints=[],
-                )
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
