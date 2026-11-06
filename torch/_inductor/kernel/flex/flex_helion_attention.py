@@ -57,11 +57,9 @@ _AUTOTUNE_EFFORTS = ("none", "quick", "full")
 _DENSE_BLOCK_SIZE = 128
 
 # Pretuned B200 (sm100) configs by (direction, head dim, V head dim), tuned
-# with HELION_AUTOTUNE_EFFORT=quick on causal bf16 B=4 H=16 S=8192 (1.1-1.3x
+# with HELION_AUTOTUNE_EFFORT=quick on causal bf16 B=4 H=16 S=8192 (1.15-1.3x
 # over Helion's default config there). Each lists the knobs that differ from
-# Helion's default config; Helion fills in the rest. The forward ones leave out
-# the tuned cute_flash_s_load_rep=16, which corrupts the output when both the
-# score_mod and the mask_mod gather captured tensors.
+# Helion's default config; Helion fills in the rest.
 _PRETUNED_SM100: dict[tuple[str, int, int], dict[str, Any]] = {
     ("forward", 64, 64): {
         "block_sizes": [128, 128],
@@ -79,6 +77,7 @@ _PRETUNED_SM100: dict[tuple[str, int, int], dict[str, Any]] = {
         "cute_flash_kv_stage": 2,
         "cute_flash_other_regs": 32,
         "cute_flash_persistent": False,
+        "cute_flash_s_load_rep": 16,
         "cute_flash_softmax_region": "shared",
         "cute_flash_softmax_regs": 168,
         "cute_flash_split_p_arrive": True,
@@ -98,6 +97,7 @@ _PRETUNED_SM100: dict[tuple[str, int, int], dict[str, Any]] = {
         "cute_flash_other_regs": 32,
         "cute_flash_persistent": False,
         "cute_flash_rescale_chunk_cols": 32,
+        "cute_flash_s_load_rep": 16,
         "cute_flash_softmax_region": "shared",
         "cute_flash_softmax_regs": 168,
     },
