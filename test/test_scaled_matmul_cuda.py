@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     skipCUDAIf,
     skipMPS,
+    skipXPU,
     skipXPUIf,
     skipCUDAIfNotRocm,
 )
@@ -2856,6 +2857,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
     @onlyAccelerator
+    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -2894,6 +2896,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
