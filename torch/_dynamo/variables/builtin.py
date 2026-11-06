@@ -106,7 +106,13 @@ from .dicts import (
     DictKeysVariable,
     pydict_checkexact,
 )
-from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
+from .lists import (
+    BaseListVariable,
+    ByteArrayVariable,
+    ListVariable,
+    TupleIteratorVariable,
+    TupleVariable,
+)
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
@@ -4204,7 +4210,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, str(e))
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=list(e.args))
-        return VariableTracker.build(tx, result)
+        return ByteArrayVariable.create(result)
 
     def call_function(
         self,
@@ -4213,7 +4219,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 0 and not kwargs:
-            return VariableTracker.build(tx, bytearray())
+            return ByteArrayVariable.create(bytearray())
 
         if kwargs or len(args) >= 2:
             if not all(a.is_python_constant() for a in args) or not all(
@@ -4230,7 +4236,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
         try:
             unpacked = arg.unpack_var_sequence(tx)
             values = [v.as_python_constant() for v in unpacked]
-            return VariableTracker.build(tx, bytearray(values))
+            return ByteArrayVariable.create(bytearray(values))
         except NotImplementedError:
             pass
 
