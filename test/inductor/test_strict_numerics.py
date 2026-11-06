@@ -675,7 +675,7 @@ class StrictNumericsCompileTest(TestCase):
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})
         actual, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(actual, fn(a, b))
+        self.assertTrue(_outputs_equal(actual, fn(a, b)))
 
     @dtypes(torch.float32, torch.float64)
     def test_empty_reshape_preserves_dtype_view_strides(self, device, dtype):
