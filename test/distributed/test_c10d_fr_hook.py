@@ -983,8 +983,8 @@ class AbstractFlightRecorderHookTest:
         # once the sentinel's entry is retired the target has finished on the
         # device too, and is_completed() publishes its result -- before a
         # post-hook that has not run yet, because it is waiting on this one.
-        if self.device_type != "cuda":
-            self.skipTest("needs a device stream")
+        if self.backend_name != "nccl2":
+            self.skipTest("needs a device stream and collective timing")
         pg = self._init_pg()
         pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
