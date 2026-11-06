@@ -3579,6 +3579,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # whether that body updates welford accumulators.
         self.num_loop_loads = 0
         self.loop_has_welford = False
+        # Whether hinted loops can be switched off by the LOOP_UNROLL constexpr
+        # (not in combo kernels, which build their own signature), and the
+        # (reduction size, factor, block size name) of each hinted loop.
+        self.loop_unroll_switch = (
+            config.triton.reduction_loop_unroll_autotune and not is_combo_kernel
+        )
+        self.loop_unroll_hints: list[tuple[int, int, str]] = []
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -7804,10 +7811,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             t.block_size_str() for t in self.range_trees if t.tensor_dim is not None
         )
         # Triton 3.3 accepts only two operands per boolean operator.
-        return (
-            f", loop_unroll_factor={factor} if ({numel} % {block}"
-            f" and {numel} >= {factor} * {block}) and {tile} <= 1024 else None"
-        )
+        cond = f"({numel} % {block} and {numel} >= {factor} * {block})"
+        if self.loop_unroll_switch:
+            self.loop_unroll_hints.append((numel, factor, block))
+            return (
+                f", loop_unroll_factor={factor} if {cond}"
+                f" and (LOOP_UNROLL and {tile} <= 1024) else None"
+            )
+        return f", loop_unroll_factor={factor} if {cond} and {tile} <= 1024 else None"
 
     def _get_heuristic(self):
         if self.fixed_config:
@@ -8289,6 +8300,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self._prescan_host_tma_materializability()
         self.codegen_body()
+        if self.loop_unroll_hints:
+            add_constexpr_arg("LOOP_UNROLL")
+            triton_meta["signature"] = signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            )
+            self.inductor_meta["reduction_loop_unroll"] = sorted(
+                OrderedSet(self.loop_unroll_hints)
+            )
 
         tma_fields = (
             "tma_min_block_sizes",

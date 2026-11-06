@@ -2423,6 +2423,16 @@ class triton:
         os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_FACTOR", "8")
     )
 
+    # Also autotune each config whose unroll hint applies against an otherwise
+    # identical config without the hint (LOOP_UNROLL=0), so that loops that
+    # unrolling slows down, such as ones with heavy arithmetic, keep the rolled
+    # loop. Kernels with such configs are timed with a cold-L2 CUDA graph, so
+    # that host launch overhead does not decide the choice. Not used for
+    # reductions whose configs are filtered for deterministic numerics.
+    reduction_loop_unroll_autotune: bool = (
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_AUTOTUNE", "1") == "1"
+    )
+
     # Reduction loops that issue more distinct loads per iteration than this,
     # including masked and indirect ones, get no unroll hint.
     reduction_loop_unroll_max_loads: int = int(

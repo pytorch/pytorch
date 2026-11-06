@@ -435,6 +435,8 @@ def test_flydsl_loader_main(value, stream):
 
         # Fake name to make sure the lookup table is name agnostic
         # When codegen/triton.py is changed, func_def must be updated
+        extra_args = ""
+        extra_kwargs = {}
         if torch.version.hip:
             loop_header = (
                 "for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):"
@@ -444,17 +446,25 @@ def test_flydsl_loader_main(value, stream):
             and config.triton.reduction_loop_unroll_factor > 1
             and get_triton_version() >= (3, 3)
         ):
+            switch = config.triton.reduction_loop_unroll_autotune
             loop_header = (
                 "for r0_offset in tl.range(0, r0_numel, R0_BLOCK, loop_unroll_factor="
                 f"{config.triton.reduction_loop_unroll_factor} if (11776 % R0_BLOCK"
                 f" and 11776 >= {config.triton.reduction_loop_unroll_factor} * R0_BLOCK)"
-                " and XBLOCK * R0_BLOCK <= 1024 else None):"
+                + (
+                    " and (LOOP_UNROLL and XBLOCK * R0_BLOCK <= 1024) else None):"
+                    if switch
+                    else " and XBLOCK * R0_BLOCK <= 1024 else None):"
+                )
             )
+            if switch:
+                extra_args = ", LOOP_UNROLL : tl.constexpr"
+                extra_kwargs = {"LOOP_UNROLL": 1}
         else:
             loop_header = "for r0_offset in tl.range(0, r0_numel, R0_BLOCK):"
 
         func_def = f"""
-def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
+def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr{extra_args}):
     xnumel = 1024
     r0_numel = 11776
     rnumel = r0_numel
@@ -488,6 +498,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         block_configs = {
             "XBLOCK": 1,
             "R0_BLOCK": 128,
+            **extra_kwargs,
         }
         num_warps = 16
         num_stages = 1

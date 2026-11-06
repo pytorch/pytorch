@@ -45,6 +45,7 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    fresh_cache,
     get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
@@ -342,6 +343,7 @@ class TestCodegenTriton(InductorTestCase):
                     {
                         "split_reductions": False,
                         "triton.reduction_loop_unroll_factor": factor,
+                        "triton.reduction_loop_unroll_autotune": False,
                     }
                 ),
                 patch.object(CachingAutotuner, "precompile", capture_precompile),
@@ -365,6 +367,161 @@ class TestCodegenTriton(InductorTestCase):
                 self.assertLessEqual(kwargs["XBLOCK"] * kwargs["R0_BLOCK"], 1024)
             else:
                 self.assertNotIn("loop_unroll_factor", loop_headers[0])
+
+    def _compile_capturing_configs(self, fn, *args):
+        """Compile fn in-process and in a fresh cache (a kernel compiled in a
+        worker, reused, or found in the autotune cache no longer has its config
+        list at precompile time) and return its output, code, and for each
+        autotuner the kwargs of its configs at precompile time and the
+        autotuner."""
+        captured = []
+        precompile = CachingAutotuner.precompile
+
+        def capture_precompile(autotuner, *a, **kw):
+            captured.append(
+                ([dict(c.kwargs) for c in autotuner.configs or ()], autotuner)
+            )
+            return precompile(autotuner, *a, **kw)
+
+        with (
+            fresh_cache(),
+            inductor_config.patch(compile_threads=1),
+            patch.object(CachingAutotuner, "precompile", capture_precompile),
+        ):
+            out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        return out, code, captured
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.reduction_loop_unroll_factor": 8,
+        }
+    )
+    def test_reduction_loop_unroll_twin_configs(self):
+        def fn(x):
+            return x.sum(dim=0)
+
+        x = torch.randn(17000, 1024, device=GPU_TYPE)
+        torch._dynamo.reset()
+        actual, code, captured = self._compile_capturing_configs(fn, x)
+        self.assertEqual(actual, fn(x), atol=1e-3, rtol=1e-4)
+        self.assertIn("LOOP_UNROLL : tl.constexpr", code)
+        self.assertIn(
+            "loop_unroll_factor=8 if (17000 % R0_BLOCK and 17000 >= 8 * R0_BLOCK)"
+            " and (LOOP_UNROLL and XBLOCK * R0_BLOCK <= 1024) else None",
+            code,
+        )
+        self.assertEqual(len(captured), 1)
+        configs, autotuner = captured[0]
+        self.assertTrue(all(c["LOOP_UNROLL"] in (0, 1) for c in configs))
+        twins = [c for c in configs if c["LOOP_UNROLL"] == 0]
+        self.assertGreater(len(twins), 0)
+        for twin in twins:
+            # Each twin follows a hinted config with the same blocks whose
+            # unroll condition holds.
+            self.assertIn({**twin, "LOOP_UNROLL": 1}, configs)
+            self.assertNotEqual(17000 % twin["R0_BLOCK"], 0)
+            self.assertGreaterEqual(17000, 8 * twin["R0_BLOCK"])
+            self.assertLessEqual(twin["XBLOCK"] * twin["R0_BLOCK"], 1024)
+        self.assertTrue(autotuner.cold_graph_benchmark)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.reduction_loop_unroll_factor": 8,
+        }
+    )
+    def test_reduction_loop_unroll_twin_selected(self):
+        # Make autotuning prefer the twins, so the launched kernel runs the
+        # loop without the hint, and check that both paths compute the sum.
+        def fn(x):
+            return x.sum(dim=0)
+
+        x = torch.randn(17000, 1024, device=GPU_TYPE)
+        for preferred in (0, 1):
+            torch._dynamo.reset()
+            with patch.object(
+                CachingAutotuner,
+                "bench",
+                lambda self, launcher, *a, **kw: (
+                    0.0
+                    if launcher.config.kwargs.get("LOOP_UNROLL") == preferred
+                    else 1.0
+                ),
+            ):
+                actual, _, captured = self._compile_capturing_configs(fn, x)
+            self.assertEqual(actual, fn(x), atol=1e-3, rtol=1e-4)
+            (launcher,) = captured[0][1].launchers
+            self.assertEqual(launcher.config.kwargs["LOOP_UNROLL"], preferred)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.reduction_loop_unroll_factor": 8,
+        }
+    )
+    def test_reduction_loop_unroll_cold_graph_benchmark(self):
+        # Only kernels with twin configs are timed with the cold-L2 CUDA graph.
+        from torch._inductor.runtime import triton_heuristics
+
+        calls = []
+        original = triton_heuristics._benchmark_cold_cuda_graph
+
+        def counting(fn, *a, **kw):
+            # Count completed timings: a failed capture raises past this
+            # wrapper and falls back to eager timing.
+            result = original(fn, *a, **kw)
+            calls.append(result)
+            return result
+
+        def fn(x):
+            return x.sum(dim=0)
+
+        with patch.object(triton_heuristics, "_benchmark_cold_cuda_graph", counting):
+            for rows, expect_graph in ((17000, True), (16384, False)):
+                torch._dynamo.reset()
+                calls.clear()
+                x = torch.randn(rows, 1024, device=GPU_TYPE)
+                actual, _, captured = self._compile_capturing_configs(fn, x)
+                self.assertEqual(actual, fn(x), atol=1e-3, rtol=1e-4)
+                autotuner = captured[0][1]
+                self.assertEqual(autotuner.cold_graph_benchmark, expect_graph)
+                self.assertEqual(len(calls) > 0, expect_graph)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.reduction_loop_unroll_factor": 8,
+            "deterministic": True,
+        }
+    )
+    def test_reduction_loop_unroll_no_twins_when_deterministic(self):
+        def fn(x):
+            return x.sum(dim=0)
+
+        x = torch.randn(17000, 1024, device=GPU_TYPE)
+        torch._dynamo.reset()
+        actual, code, captured = self._compile_capturing_configs(fn, x)
+        self.assertEqual(actual, fn(x), atol=1e-3, rtol=1e-4)
+        configs, autotuner = captured[0]
+        self.assertEqual([c["LOOP_UNROLL"] for c in configs], [1] * len(configs))
+        self.assertFalse(autotuner.cold_graph_benchmark)
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
