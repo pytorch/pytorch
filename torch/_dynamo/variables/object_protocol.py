@@ -51,6 +51,7 @@ from ..source import (
 )
 from ..utils import (
     get_type_mro_no_user_code,
+    has_custom_metaclass_accessor,
     iter_mro_static_attrs,
     iter_mro_static_dicts,
     specialize_symnode,
@@ -798,13 +799,12 @@ def pylong_from_base(
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
+    if not issubclass(x.python_type(), (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
     if not x.is_python_constant():
         return None
-    xval = x.as_python_constant()
-    if not isinstance(xval, (str, bytes, bytearray)):
-        raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
-        return ConstantVariable.create(int(xval, base))
+        return ConstantVariable.create(int(x.as_python_constant(), base))
     except ValueError as e:
         raise_observed_exception(ValueError, tx, args=list(e.args))
 
@@ -1862,36 +1862,6 @@ def slot_wrapper_iadd(
 is_richcompare_not_implemented = is_nb_not_implemented
 
 
-def object_richcompare(
-    self: VariableTracker,
-    tx: "InstructionTranslatorBase",
-    other: VariableTracker,
-    op: str,
-) -> VariableTracker:
-    """object's tp_richcompare.
-
-    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
-    - __eq__: identity check, else NotImplemented
-    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering
-    """
-    if op == "__eq__":
-        identity = vt_identity_compare(self, other)
-        if identity is not None and identity.as_python_constant():
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(NotImplemented)
-    elif op == "__ne__":
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
-        # Safe to call as_python_constant(): only identity-based types use
-        # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
-        if is_richcompare_not_implemented(eq_result):
-            return eq_result
-        return ConstantVariable.create(not eq_result.as_python_constant())
-    else:
-        return ConstantVariable.create(NotImplemented)
-
-
 def python_constant_richcompare_impl(
     self: VariableTracker,
     tx: "InstructionTranslatorBase",
@@ -2071,11 +2041,11 @@ def generic_hash_impl(
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
-    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    Dispatches to the VT's tp_hash_impl.  Called by generic_hash (which wraps
     the result in a VT), container hash_impls (which propagate is_fake),
     and HashableTracker (which just needs the int).
     """
-    return obj.hash_impl(tx)
+    return obj.tp_hash_impl(tx)
 
 
 def generic_hash(
@@ -2275,18 +2245,6 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
-def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
-    r"""Whether reading class metadata can invoke a custom metaclass accessor."""
-    metacls = type(klass)
-    if metacls is type:
-        return False
-    return (
-        next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-        is not type.__dict__["__getattribute__"]
-        or next(iter_mro_static_attrs(metacls, name), None) is not type.__dict__[name]
-    )
-
-
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     r"""Source for ``klass.__mro__[idx]``.
 
@@ -2298,6 +2256,26 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     if not idx and base is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
+
+
+def guard_mro_absent(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+    stop: int,
+) -> None:
+    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    for idx in range(stop):
+        absent_key = (id(klass), idx, name)
+        if absent_key in tx.output.guarded_mro_absent_keys:
+            continue
+        tx.output.guarded_mro_absent_keys.add(absent_key)
+        install_guard(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
+                partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+            )
+        )
 
 
 def mro_attr_source(
@@ -2316,8 +2294,7 @@ def mro_attr_source(
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
     """
-    entries = tuple(iter_mro_static_dicts(klass))
-    for idx, (base, namespace) in enumerate(entries):
+    for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
         if not is_constant_source(klass_source):
             direct = not idx and base is klass
             attr = None
@@ -2334,17 +2311,11 @@ def mro_attr_source(
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
         if name not in namespace:
-            # Repeated MRO walks share absence guards for the same class and name.
-            absent_key = (id(base), name)
-            if absent_key not in tx.output.guarded_mro_absent_keys:
-                entry_source = _mro_entry_source(klass, klass_source, idx)
-                tx.output.guarded_mro_absent_keys.add(absent_key)
-                install_guard(
-                    TypeDictSource(entry_source).make_guard(
-                        partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
-                    )
-                )
             continue
+
+        # Guard the classes we walked past, so the owner stays the owner if one
+        # of them later gains *name*.
+        guard_mro_absent(tx, klass, klass_source, name, idx)
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
@@ -2362,6 +2333,9 @@ def mro_attr_source(
         tx.output.mro_source_cache[cache_key] = source
         return source
 
+    guard_mro_absent(
+        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
+    )
     return None
 
 
