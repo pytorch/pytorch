@@ -112,6 +112,8 @@ def main():
         "pins": PINS,
         "controls": {},
     }
+    # Match the original standalone reader's sibling imports.
+    sys.path.insert(0, str(TITAN / "scripts"))
     spec = importlib.util.spec_from_file_location(
         "current_loss_compare", TITAN / "scripts/loss_compare.py"
     )
