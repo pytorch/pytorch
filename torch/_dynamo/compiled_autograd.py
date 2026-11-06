@@ -319,6 +319,18 @@ _impure_targets = OrderedSet(
 COMPILE_COUNTER = itertools.count()
 
 
+def _accumulate_gradients(
+    old_grad: torch.Tensor | None, new_grad: torch.Tensor | None
+) -> torch.Tensor | None:
+    # Undefined gradient contributions are skipped, but a defined contribution
+    # is preserved and accumulated. Returning None indicates no gradient contribution.
+    if old_grad is None:
+        return new_grad
+    if new_grad is None:
+        return old_grad
+    return torch.add(old_grad, new_grad)
+
+
 def make_compile_context(compiled_autograd_id: int) -> Any:
     return compile_context(
         CompileContext(
@@ -872,11 +884,14 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies(outputs, new_proxy_outputs)
         return outputs
 
-    def accumulate(self, old_var: Any, new_var: Any) -> torch.Tensor:
+    def accumulate(self, old_var: Any, new_var: Any) -> torch.Tensor | None:
         old_var_proxy = self.to_proxy(old_var)
         new_var_proxy = self.to_proxy(new_var)
         proxy_out = self.fx_tracer.create_proxy(
-            "call_function", torch.add, args=(old_var_proxy, new_var_proxy), kwargs={}
+            "call_function",
+            _accumulate_gradients,
+            args=(old_var_proxy, new_var_proxy),
+            kwargs={},
         )
         result = self.allocate_dummy()
         self.bind_objects_to_proxies([result], [proxy_out])
