@@ -12,11 +12,10 @@ from collections.abc import Callable
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_JETSON,
     IS_MACOS,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -27,9 +26,8 @@ log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
-    @parametrize(
-        "name",
-        (
+    def test_retired_torchscript_exports(self):
+        for name in (
             "fork",
             "freeze",
             "interface",
@@ -42,11 +40,12 @@ class TestPublicBindings(TestCase):
             "trace",
             "trace_module",
             "wait",
-        ),
-    )
-    def test_retired_torchscript_exports(self, name):
-        self.assertNotIn(name, torch.jit.__all__)
-        self.assertFalse(hasattr(torch.jit, name))
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    name in torch.jit.__all__, IS_FBCODE and name != "script_method"
+                )
+                self.assertEqual(hasattr(torch.jit, name), IS_FBCODE)
 
     def test_no_new_reexport_callables(self):
         """
@@ -670,9 +669,6 @@ class TestPublicBindings(TestCase):
 
         # empty lists are considered false in python
         self.assertTrue(not failure_list, msg)
-
-
-instantiate_parametrized_tests(TestPublicBindings)
 
 
 if __name__ == "__main__":

@@ -1115,13 +1115,28 @@ class TestSerialization(TestCase, SerializationMixin):
             with open(filename, "wb") as f:
                 f.write(archive)
             for source in (filename, io.BytesIO(archive)):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    re.escape("TorchScript archives are no longer supported by torch.load")
-                ) as cm:
-                    torch.load(source, weights_only=weights_only)
-                self.assertIn("older PyTorch version", str(cm.exception))
-                self.assertIn("original model to torch.export", str(cm.exception))
+                if IS_FBCODE:
+                    if weights_only:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            re.escape(
+                                "Cannot use ``weights_only=True`` with TorchScript archives "
+                                "passed to ``torch.load``"
+                            ),
+                        ):
+                            torch.load(source, weights_only=True)
+                    else:
+                        loaded = torch.load(source, weights_only=False)
+                        x = torch.arange(3)
+                        self.assertEqual(loaded(x), cu.forward(x))
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        re.escape("TorchScript archives are no longer supported by torch.load")
+                    ) as cm:
+                        torch.load(source, weights_only=weights_only)
+                    self.assertIn("older PyTorch version", str(cm.exception))
+                    self.assertIn("original model to torch.export", str(cm.exception))
 
     # Ensure large zip64 serialization works properly
     @serialTest()

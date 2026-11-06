@@ -75,9 +75,6 @@ def run_ort(
     return session.run(None, ort_input)
 
 
-# The min onnx opset version to test for
-# The max onnx opset version to test for
-
 BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (

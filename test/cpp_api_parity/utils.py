@@ -259,15 +259,18 @@ def serialize_arg_dict_as_script_module(arg_dict):
         + arg_dict["extra_args"]
         + arg_dict["other"]
     )
-    arg_dict_module = torch.nn.Module()
-    for arg_name, arg_value in arg_dict_flat.items():
-        if not isinstance(arg_value, torch.Tensor):
-            raise AssertionError(
-                f"Expected arg_value to be Tensor, got {type(arg_value)} for arg '{arg_name}'"
-            )
-        arg_dict_module.register_buffer(arg_name, arg_value)
 
-    return torch.jit._script.script(arg_dict_module)
+    class ArgDictModule(torch.jit.ScriptModule):
+        def __init__(self):
+            super().__init__()
+            for arg_name, arg_value in arg_dict_flat.items():
+                if not isinstance(arg_value, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected arg_value to be Tensor, got {type(arg_value)} for arg '{arg_name}'"
+                    )
+                self.register_buffer(arg_name, arg_value)
+
+    return ArgDictModule()
 
 
 # NOTE: any argument symbol used in `cpp_constructor_args` / `cpp_options_args` / `cpp_function_call`

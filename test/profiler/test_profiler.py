@@ -540,20 +540,7 @@ class TestProfiler(TestCase):
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
     def test_source(self):
-        """Checks that source code attribution works for eager, TS and autograd mode"""
-        # avoid automatic inlining
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
-
-        @torch.jit._script.script
-        def ts_method_2(x, y):
-            return torch.matmul(x, y)
-
-        @torch.jit._script.script
-        def ts_method_1(x, y, z):
-            a = x + z
-            w = ts_method_2(x, y) + a
-            return w.sum()
+        """Checks source attribution for eager operators, modules, and autograd."""
 
         class DummyModule(nn.Module):
             def __init__(self) -> None:
@@ -578,9 +565,7 @@ class TestProfiler(TestCase):
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
-            w = ts_method_1(x, y, z)
-            v = 2 * w
-            v.backward()
+            z.sum().backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
             b = call_module(a)
             c = b.sum()
@@ -589,16 +574,7 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
                 self.assertTrue(any("test_profiler" in entry for entry in e.stack))
-                self.assertTrue(
-                    any(
-                        (
-                            "test_source" in entry
-                            or "ts_method_1" in entry
-                            or "ts_method_2" in entry
-                        )
-                        for entry in e.stack
-                    )
-                )
+                self.assertTrue(any("test_source" in entry for entry in e.stack))
 
         if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
@@ -619,8 +595,6 @@ class TestProfiler(TestCase):
                     module_event["args"]["Python parent id"],
                     wrapper_event["args"]["Python id"],
                 )
-
-        torch._C._set_graph_executor_optimize(prev_opt)
 
     @parametrize(
         "name,thread_spec",

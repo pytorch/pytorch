@@ -394,11 +394,6 @@ def heavy_rpc_sparse(tensor):
     return 0
 
 
-@torch.jit._script.script
-def my_script_func(tensor):
-    return torch.add(tensor, tensor)
-
-
 expected_err = "Expected error"
 
 
@@ -416,11 +411,6 @@ def raise_func():
 
 def custom_raise_func():
     raise CustomException(True, "foo")
-
-
-@torch.jit._script.script
-def raise_func_script(expected_err: str) -> torch.Tensor:
-    raise ValueError(expected_err)
 
 
 expected_err_escape = (
@@ -2318,67 +2308,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_profiler_with_remote_builtin_single_threaded(self):
         self._run_test_profiler_with_remote_builtin()
 
-    def _run_test_profiler_with_script_async_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-
-    @dist_init
-    def test_profiler_with_script_async_rpc(self):
-        self._run_test_profiler_with_script_async_rpc()
-
-    @dist_init
-    def test_profiler_with_script_async_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_async_rpc()
-
-    def _run_test_profiler_with_script_sync_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-
-    @dist_init
-    def test_profiler_with_script_sync_rpc(self):
-        self._run_test_profiler_with_script_sync_rpc()
-
-    @dist_init
-    def test_profiler_with_script_sync_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_sync_rpc()
-
-    def _run_test_profiler_with_script_remote_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
-        )
-
-    @dist_init
-    def test_profiler_with_script_remote_rpc(self):
-        self._run_test_profiler_with_script_remote_rpc()
-
-    @dist_init
-    def test_profiler_with_script_remote_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_remote_rpc()
-
     def _assert_top_level_events(
         self, process_global_events, expected_top_level_event_names
     ):
@@ -3551,27 +3480,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         # We should receive the error from fut2
         with self.assertRaisesRegex(RuntimeError, "size of tensor"):
-            torch.futures.wait_all([fut1, fut2, fut3])
-
-        # Unblock RPC thread for fut1
-        RpcTest.timed_out_rpc_event.set()
-
-    @dist_init
-    def test_wait_all_exit_early_script_function(self):
-        # Initialize the event in the subprocess.
-        RpcTest.timed_out_rpc_event = Event()
-
-        # Wait for all processes to initialize event.
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        dist.barrier()
-
-        dst = worker_name((self.rank + 1) % self.world_size)
-        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
-        fut2 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
-        fut3 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
-
-        # We should receive the error from fut2
-        with self.assertRaisesRegex(RuntimeError, expected_err):
             torch.futures.wait_all([fut1, fut2, fut3])
 
         # Unblock RPC thread for fut1

@@ -265,8 +265,6 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
-    # lacks quantization support
-    "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
@@ -313,12 +311,10 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
-    "test_mobile_optimizer",
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
     "test_overrides",
-    "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_gpu_trace",
@@ -377,9 +373,6 @@ XDIST_SERIAL_CPU_LIST = [
     "test_torch",
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
-# A subset of onnx tests that cannot run in parallel due to high memory usage.
-ONNX_SERIAL_LIST = []
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -389,7 +382,6 @@ CORE_TEST_LIST = [
     "test_ops",
     "test_ops_gradients",
     "test_ops_fwd_gradients",
-    "test_ops_jit",
     "test_torch",
 ]
 
@@ -2005,7 +1997,6 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in XDIST_SERIAL_FILES
-        or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
 

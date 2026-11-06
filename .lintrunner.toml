@@ -1441,7 +1441,6 @@ exclude_patterns = [
     'test/test_mkldnn.py',
     'test/test_mkldnn_fusion.py',
     'test/test_mkldnn_verbose.py',
-    'test/test_mobile_optimizer.py',
     'test/test_model_dump.py',
     'test/test_modules.py',
     'test/test_monitor.py',

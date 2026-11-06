@@ -630,21 +630,17 @@ class TestFFT(TestCase):
                     numpy_fn = getattr(np.fft, fname)
 
 
-                torch_fns = (torch_fn,)
-
                 # Once with dim defaulted
                 input_np = input.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, norm=norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, norm=norm)
+                self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
                 expected = numpy_fn(input_np, s, dim, norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, dim, norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, dim, norm)
+                self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes

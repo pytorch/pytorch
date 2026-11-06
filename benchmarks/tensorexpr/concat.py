@@ -1,7 +1,5 @@
 import numpy as np
 
-import torch
-
 from . import benchmark
 
 
@@ -87,8 +85,6 @@ class ConcatGraphOptBench(benchmark.Benchmark):
             [I2_D1, I2_D2], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.inputs = [self.input1, self.input2]
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_cat_wo_conditionals(True)
 
     def forward(self, input1, input2):
         x1 = self.add(input1, 0.00001)

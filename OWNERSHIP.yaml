@@ -533,7 +533,6 @@ ownership:
       - /test/cpp/jit/test_mobile_type_parser.cpp
       - /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
       - /test/mobile/
-      - /test/test_mobile_optimizer.py
       - /torch/csrc/jit/mobile/
   - name: android
     labels: ["module: android"]
@@ -541,7 +540,6 @@ ownership:
     section: mobile_android
     paths:
       - /android/
-      - /test/mobile/custom_build/
   - name: mobile_delegates
     labels: ["oncall: mobile", "module: mobile delegates"]
     owners: []
@@ -549,7 +547,6 @@ ownership:
     paths:
       - /test/test_xnnpack_integration.py
       - /torch/backends/_coreml/
-      - /torch/backends/_nnapi/
       - /torch/backends/xnnpack/
       - /torch/csrc/jit/backends/
   - name: ci
@@ -812,7 +809,6 @@ ownership:
       - /benchmarks/operator_benchmark/
       - /benchmarks/overrides_benchmark/
       - /benchmarks/profiler_benchmark/
-      - /benchmarks/record_function_benchmark/
       - /benchmarks/sparse/
       - /benchmarks/static_runtime/
       - /test/test_functional_autograd_benchmark.py
@@ -1302,7 +1298,6 @@ ownership:
       - /test/expect/__init__.py
       - /test/forward_backward_compatibility/
       - /test/lazy/
-      - /test/linear.py
       - /test/minioptest_failures_dict.json
       - /test/mkl_verbose.py
       - /test/mkldnn_verbose.py
@@ -1320,7 +1315,6 @@ ownership:
       - /test/test_binary_ufuncs.py
       - /test/test_bmm_outer_product.py
       - /test/test_bundled_images.py
-      - /test/test_bundled_inputs.py
       - /test/test_ci_sanity_check_fail.py
       - /test/test_comparison_utils.py
       - /test/test_compile_benchmark_util.py
@@ -1388,7 +1382,6 @@ ownership:
       - /test/test_segment_reductions.py
       - /test/test_set_default_mobile_cpu_allocator.py
       - /test/test_shape_ops.py
-      - /test/test_show_pickle.py
       - /test/test_sort_and_select.py
       - /test/test_stateless.py
       - /test/test_stateless_rng.py
