@@ -20,17 +20,48 @@ _limits = load_by_path(
 )
 
 _DTYPES = {
-    "float16": "at::kHalf",
     "bfloat16": "at::kBFloat16",
     "float32": "at::kFloat",
 }
-_OPS = (
+_OPS: tuple[tuple[str, str, int], ...] = (
     ("add", "_add", 2),
     ("sub", "_sub", 2),
     ("mul", "_mul", 2),
     ("div.Tensor", "_div", 2),
     ("neg", "_neg", 1),
+    ("maximum", "_maximum", 2),
+    ("minimum", "_minimum", 2),
+    ("atan2", "_atan2", 2),
+    ("floor", "_floor", 1),
+    ("ceil", "_ceil", 1),
+    ("trunc", "_trunc", 1),
+    ("sign", "_sign", 1),
+    ("exp", "_exp", 1),
+    ("exp2", "_exp2", 1),
+    ("expm1", "_expm1", 1),
+    ("log", "_log", 1),
+    ("log2", "_log2", 1),
+    ("log10", "_log10", 1),
+    ("log1p", "_log1p", 1),
+    ("sqrt", "_sqrt", 1),
+    ("rsqrt", "_rsqrt", 1),
+    ("reciprocal", "_reciprocal", 1),
+    ("sin", "_sin", 1),
+    ("cos", "_cos", 1),
+    ("tan", "_tan", 1),
+    ("asin", "_asin", 1),
+    ("acos", "_acos", 1),
+    ("atan", "_atan", 1),
+    ("tanh", "_tanh", 1),
+    ("erf", "_erf", 1),
+    ("sigmoid", "_sigmoid", 1),
+    ("addcmul", "_addcmul", 3),
     ("gt.Tensor", "_gt", 2),
+    ("lt.Tensor", "_lt", 2),
+    ("ge.Tensor", "_ge", 2),
+    ("le.Tensor", "_le", 2),
+    ("eq.Tensor", "_eq", 2),
+    ("ne.Tensor", "_ne", 2),
 )
 
 
@@ -39,7 +70,7 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
     from torch._native.ops.pointwise._layout import _layout_config, _OperandLayout
 
     # Share pure layout selection with JIT without importing the CuTeDSL compiler.
-    dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    dtypes = (torch.bfloat16, torch.float32)
     if not all(isinstance(t, torch.Tensor) for t in inputs):
         return {"eligible": False}
     ref = inputs[0]
@@ -104,8 +135,15 @@ class _Declaration:
         self.ATEN_OP = aten
         self.fn = fn
         self.nin = nin
-        self.boolean = fn == "_gt"
-        self.alpha = fn in ("_add", "_sub")
+        self.boolean = fn in ("_gt", "_lt", "_ge", "_le", "_eq", "_ne")
+        self.inputs = (
+            ("self", "tensor1", "tensor2") if nin == 3 else ("self", "other")[:nin]
+        )
+        self.scalars = {
+            "add": ("alpha",),
+            "sub": ("alpha",),
+            "addcmul": ("value",),
+        }.get(aten, ())
 
     def kernel_precompile_grid(self) -> list[dict[str, Any]]:
         return [
@@ -120,22 +158,25 @@ class _Declaration:
         ]
 
     def covered_axes(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        alpha = kwargs.get("alpha", args[self.nin] if len(args) > self.nin else 1)
-        if self.alpha and isinstance(alpha, complex):
-            return {"eligible": False}
+        for i, name in enumerate(self.scalars, self.nin):
+            value = kwargs.get(name, args[i] if i < len(args) else 1)
+            if isinstance(value, complex):
+                return {"eligible": False}
         return _axes(args[: self.nin], kwargs.get("out"), self.boolean)
 
     def _inputs(self) -> str:
-        return "{self}" if self.nin == 1 else "{self, other}"
+        return "{" + ", ".join(self.inputs) + "}"
 
     def cpp_helpers(self) -> str:
         return _CPP_HELPERS
 
     def cpp_dispatch_prelude(self) -> str:
-        alpha_gate = "if (alpha.isComplex()) return false;" if self.alpha else ""
+        scalar_gate = (
+            f"if ({self.scalars[0]}.isComplex()) return false;" if self.scalars else ""
+        )
         return f"""
 if (_naot_props->major != 10) return false;
-{alpha_gate}
+{scalar_gate}
 auto cfg = pointwise_tma_config({self._inputs()}, &out, {str(self.boolean).lower()},
                                 _naot_props->sharedMemPerBlockOptin);
 if (cfg.mask < 0) return false;
@@ -150,7 +191,7 @@ if (cfg.mask < 0) return false;
     def cpp_launch(self, spec: dict[str, Any], launch_fn: str) -> str:
         views = []
         for i, transposed in enumerate(spec["transposed"]):
-            name = "self" if i == 0 else "other"
+            name = self.inputs[i]
             shape = "{cfg.rows, cfg.cols}"
             stride = (
                 f"{{1, {name}.stride(cfg.fast)}}"
@@ -161,21 +202,23 @@ if (cfg.mask < 0) return false;
         output = (
             "auto result = out.as_strided({1, cfg.rows, cfg.cols}, {0, cfg.cols, 1});"
         )
-        alpha = "alpha.toFloat()" if self.alpha else "1.0f"
-        operands = "x0" if self.nin == 1 else "x0, x1"
+        scalar = f"{self.scalars[0]}.toFloat()" if self.scalars else "1.0f"
+        operands = ", ".join(f"x{i}" for i in range(self.nin))
         return "\n".join(
             [
                 *views,
                 output,
-                f"{launch_fn}({operands}, result, {alpha}, at::cuda::getCurrentCUDAStream());",
+                f"{launch_fn}({operands}, result, {scalar}, at::cuda::getCurrentCUDAStream());",
             ]
         )
 
     def cpp_covers(self) -> str:
-        alpha_gate = "if (alpha.isComplex()) return false;" if self.alpha else ""
+        scalar_gate = (
+            f"if ({self.scalars[0]}.isComplex()) return false;" if self.scalars else ""
+        )
         return f"""
 if (_naot_props->major != 10) return false;
-{alpha_gate}
+{scalar_gate}
 return pointwise_tma_config({self._inputs()}, out ? &*out : nullptr,
                             {str(self.boolean).lower()}, _naot_props->sharedMemPerBlockOptin).mask >= 0;
 """
@@ -213,7 +256,7 @@ PointwiseTmaConfig pointwise_tma_config(
   if (!ref.is_cuda() || ref.layout() != at::kStrided || ref.dim() != 2 ||
       ref.numel() <= 0 || ref.numel() > INT32_MAX) return cfg;
   auto dt = ref.scalar_type();
-  if (dt != at::kHalf && dt != at::kBFloat16 && dt != at::kFloat) return cfg;
+  if (dt != at::kBFloat16 && dt != at::kFloat) return cfg;
   if (std::all_of(inputs.begin(), inputs.end(), [](const auto& t) { return t.is_contiguous(); })) return cfg;
   cfg.fast = ref.stride(0) == 1 ? 0 : 1;
   if (out) {
