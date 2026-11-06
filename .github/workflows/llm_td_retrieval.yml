@@ -92,6 +92,8 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The runner's default HF_HOME is a read-only shared cache.
+          HF_HOME: ${{ runner.temp }}/hf
         run: |
           set -euxo pipefail
           python -P -m torchci.td.llm.retrieve \

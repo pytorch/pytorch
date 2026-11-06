@@ -65,6 +65,9 @@ jobs:
         id: build
         shell: bash
         working-directory: test-infra/tools/torchci
+        env:
+          # The runner's default HF_HOME is a read-only shared cache.
+          HF_HOME: ${{ runner.temp }}/hf
         run: |
           set -euxo pipefail
           python -P -m torchci.td.llm.index \
