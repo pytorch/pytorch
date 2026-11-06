@@ -6,6 +6,7 @@ from typing import Any, cast, Literal, NamedTuple
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
@@ -658,40 +659,48 @@ def _default_reduce_scatter_input_fn(
     """Reorder gradients sharded on a nonzero dim by rank, zero-padding that dim
     to the padded sharded size, and return their copy-in."""
     if world_size > 1:
+        # The copy-in gives rank r the r-th of world_size chunks along dim 0. For
+        # Shard(0) that is already its shard, so stack the other gradients' rank
+        # chunks along dim 0.
         for i, shard_dim in enumerate(shard_dims):
-            if shard_dim != 0:
-                grad = unsharded_grads[i]
-                if grad.shape[shard_dim] % world_size:
-                    unsharded_grads[i] = _pad_and_reorder_by_rank(
-                        grad, shard_dim, world_size
-                    )
-                    continue
-                chunks = torch.chunk(grad, world_size, dim=shard_dim)
-                unsharded_grads[i] = torch.cat(chunks, dim=0)
+            if shard_dim == 0:
+                continue
+            grad = unsharded_grads[i]
+            if grad.shape[shard_dim] % world_size == 0:
+                grad = torch.cat(torch.chunk(grad, world_size, dim=shard_dim), dim=0)
+            else:
+                grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
+            unsharded_grads[i] = grad
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
 
 
 def _pad_and_reorder_by_rank(
     grad: torch.Tensor, shard_dim: int, world_size: int
 ) -> torch.Tensor:
-    """Concatenate grad's torch.chunk chunks along dim 0, each zero-padded on
-    shard_dim to ceil(size / world_size) rows, in one pass over grad."""
+    """
+    Returns grad's chunks on shard_dim, each zero-padded to the first chunk's
+    size and stacked along dim 0, in one pass over grad. For example, a (2, 5)
+    gradient on Shard(1) over 4 ranks gives the ranks 2, 2, 1 and 0 columns:
+
+        grad                    shards (4, 2, 2), returned as (8, 2)
+        g00 g01 g02 g03 g04     rank 0    rank 1    rank 2    rank 3
+        g10 g11 g12 g13 g14     g00 g01   g02 g03   g04 0     0 0
+                                g10 g11   g12 g13   g14 0     0 0
+    """
     size = grad.shape[shard_dim]
-    chunk_rows = -(-size // world_size)
+    chunk_size = math.ceil(size / world_size)
     # Full chunks come first, then at most one short chunk, then empty ones
-    num_full, tail = divmod(size, chunk_rows)
-    rows = grad.new_zeros(
-        world_size, *grad.shape[:shard_dim], chunk_rows, *grad.shape[shard_dim + 1 :]
-    )
-    full = grad.narrow(shard_dim, 0, num_full * chunk_rows)
-    rows[:num_full].copy_(
-        full.unflatten(shard_dim, (num_full, chunk_rows)).movedim(shard_dim, 0)
-    )
+    num_full, tail = divmod(size, chunk_size)
+    shard_shape = (*grad.shape[:shard_dim], chunk_size, *grad.shape[shard_dim + 1 :])
+    shards = grad.new_zeros(world_size, *shard_shape)
+    # One copy moves the full chunks to a leading rank dim, and a second the tail
+    full = grad.narrow(shard_dim, 0, num_full * chunk_size)
+    full = full.unflatten(shard_dim, (num_full, chunk_size)).movedim(shard_dim, 0)
+    shards[:num_full].copy_(full)
     if tail:
-        rows[num_full].narrow(shard_dim, 0, tail).copy_(
-            grad.narrow(shard_dim, num_full * chunk_rows, tail)
-        )
-    return rows.flatten(0, 1)
+        tail_chunk = grad.narrow(shard_dim, num_full * chunk_size, tail)
+        shards[num_full].narrow(shard_dim, 0, tail).copy_(tail_chunk)
+    return shards.flatten(0, 1)
 
 
 @torch.no_grad()
@@ -980,13 +989,19 @@ def _cast_and_view_sharded_grads(
         group_offset = group_output.storage_offset()
         for fsdp_param, padded_sharded_numel in param_group:
             if fsdp_param.needs_nonzero_dim_padding:
-                # Padded like the all-gather input: copy out this rank's rows
-                start = group_offset - group_output.storage_offset()
-                padded = group_output[start : start + padded_sharded_numel].view(
+                # The shard arrives padded on its shard dim, like the all-gather
+                # input: rank 2 of a (2, 5) gradient on Shard(1) over 4 ranks gets
+                # [[g04, 0], [g14, 0]]. The padded strides view its data,
+                # [[g04], [g14]], which is copied into a compact gradient.
+                padded_stride = make_contiguous_strides_for(
                     fsdp_param.padded_sharded_param_size
                 )
-                dim = fsdp_param.fsdp_placement.dim
-                grad = padded.narrow(dim, 0, fsdp_param.sharded_size[dim]).contiguous()
+                grad = torch.as_strided(
+                    group_output,
+                    size=fsdp_param.sharded_size,
+                    stride=padded_stride,
+                    storage_offset=group_offset,
+                ).contiguous()
                 record_grad_output_stream(grad, consumer_stream)
             else:
                 grad = torch.as_strided(
