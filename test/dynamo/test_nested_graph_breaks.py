@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import itertools
 import unittest
 
@@ -1928,6 +1929,259 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         result = fn(x)
         self.assertEqual(result, x + 2)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_getattr_nested_graph_break_instance_shadow(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            bound = wrapper.method
+            return bound(x) + 2
+
+        x = torch.randn(3)
+        self.assertNotIn("method", wrapper.__dict__)
+        self.assertEqual(fn(x), torch.sin(x + 1) + 2)
+        self.assertEqual(cnts.frame_count, 2)
+        wrapper.method = torch.cos
+        self.assertEqual(fn(x), torch.cos(x + 1) + 2)
+        self.assertEqual(fn(x), torch.cos(x + 1) + 2)
+        self.assertEqual(cnts.frame_count, 3)
+
+    @parametrize("owner", ("class", "base"))
+    @parametrize("metaclass", (type, abc.ABCMeta))
+    def test_getattr_nested_graph_break_class_shadow(self, owner, metaclass):
+        class Base(metaclass=metaclass):
+            pass
+
+        class Wrapper(Base):
+            def __getattr__(self, name):
+                torch._dynamo.graph_break()
+                return torch.sin
+
+        wrapper = Wrapper()
+        target = Wrapper if owner == "class" else Base
+        self.assertNotIn("method", target.__dict__)
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            x = x + 1
+            bound = wrapper.method
+            return bound(x) + 2
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 2)
+        target.method = torch.cos
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_getattr_pybind11_metaclass(self):
+        class MyFut(torch.futures.Future):
+            def foo(self, x):
+                return x * 2
+
+        f = MyFut()
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch.compile(lambda x: f.foo(x), backend=cnts, fullgraph=True)
+        self.assertEqual(fn(torch.ones(2)), torch.tensor([2.0, 2.0]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @parametrize("native_mro", (False, True))
+    @parametrize("cache_first", (False, True))
+    def test_getattr_metaclass_metadata(self, native_mro, cache_first):
+        class Meta(type):
+            @property
+            def __mro__(cls):
+                return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+        class NativeMeta(Meta):
+            __mro__ = type.__dict__["__mro__"]
+
+        class Base(metaclass=Meta):
+            pass
+
+        calls = []
+
+        class Wrapper(Base, metaclass=NativeMeta if native_mro else Meta):
+            def __getattr__(self, name):
+                if name != "method":
+                    raise AttributeError(name)
+                if not native_mro:
+                    calls.append(name)
+                return torch.sin
+
+        class Safe(Wrapper, metaclass=NativeMeta):
+            pass
+
+        safe = Safe()
+        wrapper = Wrapper()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            if cache_first:
+                safe.method(x)
+            return wrapper.method(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        if not native_mro:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Custom metaclass metadata access",
+            ):
+                opt_fn(x)
+            self.assertEqual(cnts.frame_count, 0)
+            self.assertEqual(calls, [])
+            opt_fn = torch.compile(fn, backend=cnts)
+
+        expected = torch.sin(x)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(cnts.frame_count, 1 if native_mro else 0)
+        if native_mro:
+            Base.method = torch.cos
+            expected = torch.cos(x)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(cnts.frame_count, 2)
+        else:
+            self.assertEqual(calls, ["method"] * (4 if cache_first else 2))
+
+    @parametrize("metadata", ("__dict__", "__mro__"))
+    def test_property_metaclass_metadata(self, metadata):
+        calls = []
+
+        def accessor(cls):
+            calls.append(metadata)
+            return type.__dict__[metadata].__get__(cls, type(cls))
+
+        Meta = type("Meta", (type,), {metadata: property(accessor)})
+
+        class Base:
+            @property
+            def method(self):
+                return torch.sin
+
+        class Wrapper(Base, metaclass=Meta):
+            pass
+
+        wrapper = Wrapper()
+
+        def fn(x):
+            return wrapper.method(x + 1) + 2
+
+        x = torch.arange(3, dtype=torch.float64)
+        expected = fn(x)
+        self.assertEqual(calls, [])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Custom metaclass metadata access"
+        ):
+            opt_fn(x)
+        self.assertEqual(cnts.frame_count, 0)
+        # Opaque type classification reads __mro__ once before source construction.
+        expected_calls = [metadata] if metadata == "__mro__" else []
+        self.assertEqual(calls, expected_calls)
+        calls.clear()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(calls, expected_calls)
+
+    @parametrize("owner", ("class", "base"))
+    def test_getattr_nn_module_class_shadow(self, owner):
+        class Base(torch.nn.Module):
+            pass
+
+        class Wrapper(Base):
+            pass
+
+        wrapper = Wrapper()
+        wrapper.register_buffer("value", torch.tensor(1.0))
+        target = Wrapper if owner == "class" else Base
+
+        def fn(x):
+            return x + wrapper.value
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+        target.value = torch.tensor(2.0)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_getattr_omitted_receiver_dict(self):
+        class Carrier:
+            def __getattr__(self, name):
+                if name != "method":
+                    raise AttributeError(name)
+                return torch.sin
+
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return type.__dict__["__dict__"].__get__(cls, type(cls))
+
+        class Receiver(Carrier, metaclass=Meta):
+            pass
+
+        Meta.mro = lambda cls: [Carrier, object]
+        Receiver.__bases__ = (Carrier,)
+        self.assertEqual(Receiver.__mro__, (Carrier, object))
+        receiver = Receiver()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return receiver.method(x)
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), torch.sin(x))
+        self.assertEqual(opt_fn(x), torch.sin(x))
+        self.assertEqual(cnts.frame_count, 1)
+        Carrier.method = torch.cos
+        self.assertEqual(opt_fn(x), torch.cos(x))
+        self.assertEqual(opt_fn(x), torch.cos(x))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_getattr_constant_source(self):
+        class Wrapper:
+            def __getattr__(self, name):
+                if name != "method":
+                    raise AttributeError(name)
+                return torch.sin
+
+        wrapper = Wrapper()
+
+        @torch._dynamo.assume_constant_result
+        def factory():
+            return wrapper
+
+        def fn(x):
+            bound = factory().method
+            return bound(x + 1) + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.arange(3, dtype=torch.float64)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_map_callback_graph_break_preserves_iteration(self):
         def transform(x):
