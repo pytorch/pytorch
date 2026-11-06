@@ -3210,6 +3210,17 @@ class TestXPUMultiprocessing(TestCase):
         c2p.put(1)  # notify parent synchronization is done
 
     @staticmethod
+    def _tensor_multiply_two(queue, ready, done):
+        ready.set()
+        with torch.xpu.Stream():
+            xpu_event, tensor = queue.get()
+            xpu_event.wait()
+            tensor.mul_(2)
+            xpu_event.record()
+            done.set()
+            del xpu_event
+
+    @staticmethod
     def _send_tensor_with_untyped_storage(queue, event, expandable, peer):
         torch._C._accelerator_setAllocatorSettings(f"expandable_segments:{expandable}")
         tensors = (*torch.ones(2, device="xpu").chunk(2), torch.ones(1, device="xpu"))
@@ -3335,6 +3346,31 @@ class TestXPUMultiprocessing(TestCase):
         c2p.get()  # wait for synchronization in child
         self.assertTrue(event.query())
         p.join()
+
+    def test_tensor_multiprocess(self):
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        ready = ctx.Event()
+        done = ctx.Event()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._tensor_multiply_two,
+            args=(queue, ready, done),
+        )
+        p.start()
+
+        ready.wait()
+        with torch.xpu.Stream():
+            tensor = torch.tensor([1, 1, 1, 1], device="xpu")
+            event = torch.xpu.Event(interprocess=True)
+            torch.xpu._sleep(200_000_000)
+            tensor.add_(1)
+            event.record()
+            queue.put((event, tensor))
+            self.assertTrue(done.wait(timeout=60))
+            event.synchronize()
+            self.assertEqual(list(tensor), [4, 4, 4, 4])
+        p.join()
+        self.assertEqual(p.exitcode, 0)
 
     @parametrize("expandable", [False, True])
     @parametrize("peer", [False, True])
