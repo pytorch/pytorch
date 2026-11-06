@@ -52,6 +52,7 @@ from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
+    sgn as decomp_sgn,
     xlogy as decomp_xlogy,
 )
 from torch._refs.nn.functional import (
@@ -165,6 +166,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.logaddexp2.default,
     aten.logit_backward.default,
     aten.sigmoid_backward.default,
+    aten.sgn,
     aten.silu_backward.default,
     aten.softplus.default,
     aten.tanh_backward.default,
@@ -1294,6 +1296,23 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
     if self.is_complex():
         return NotImplemented
     return self
+
+
+@register_decomposition(aten.sgn)
+@out_wrapper(exact_dtype=True)
+def sgn(self: torch.Tensor) -> torch.Tensor:
+    if not is_strict_cuda_triton(self.device) or self.dtype not in (
+        torch.complex64,
+        torch.complex128,
+    ):
+        return decomp_sgn(self)
+    real, imag = self.real, self.imag
+    magnitude = self.abs()
+    zero = (real == 0) & (imag == 0)
+    # CUDA sgn divides by a real scalar, rather than using complex division.
+    real = torch.where(zero, 0, real / magnitude)
+    imag = torch.where(zero, 0, imag / magnitude)
+    return torch.view_as_complex(torch.stack((real, imag), dim=-1))
 
 
 @register_decomposition([aten.lift, aten.detach_])
