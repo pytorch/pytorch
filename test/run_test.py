@@ -16,6 +16,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import uuid
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -65,7 +66,6 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact, TD_SOURCE
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -80,6 +80,7 @@ from tools.testing.test_selections import (
     get_test_case_configs,
     NUM_PROCS,
     NUM_PROCS_FOR_SHARDING_CALC,
+    run_test_split,
     ShardedTest,
     THRESHOLD,
 )
@@ -2649,6 +2650,8 @@ def main():
     which_shard, num_shards = get_sharding_opts(options)
     add_global_metric("shard", which_shard)
     add_global_metric("num_shards", num_shards)
+    # Joins one call's metrics: test.sh runs some files several times per job.
+    add_global_metric("call_id", uuid.uuid4().hex)
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
@@ -2700,20 +2703,20 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    percent_to_run = 25 if options.enable_td else 100
-    print_to_stderr(
-        f"Running {percent_to_run}% of tests based on TD"
-        if options.enable_td
-        else "Running all tests"
+    # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_selector.
+    split = run_test_split(
+        test_prioritizations,
+        test_file_times_dict,
+        previous_failures=previous_failures,
+        test_config=TEST_CONFIG,
+        td_enabled=options.enable_td,
+        is_ci=IS_CI,
     )
-    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
-
-    test_batch = TestBatch("tests to run", include, False)
-    test_batch_exclude = TestBatch("excluded", exclude, True)
-    if IS_CI:
-        included = [x.to_json() for x in include]
-        excluded = [x.to_json() for x in exclude]
-        gen_ci_artifact(included, excluded, source=TD_SOURCE, td_excluded=excluded)
+    test_batch = TestBatch("tests to run", split.include, False)
+    test_batch_exclude = TestBatch("excluded", split.exclude, True)
+    # emit_metric records its caller, so this stays in main().
+    for name, payload in split.selection_metrics(IS_CI):
+        emit_metric(name, payload)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
@@ -2761,14 +2764,11 @@ def main():
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
-                emit_metric(
-                    "td_test_failure_stats_v2",
-                    {
-                        "selected_tests": selected_tests,
-                        "failure": str(test),
-                        **test_stats,
-                    },
-                )
+                # emit_metric records its caller, so this stays in main().
+                for name, payload in split.failure_metrics(
+                    test, selected_tests, test_stats
+                ):
+                    emit_metric(name, payload)
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
