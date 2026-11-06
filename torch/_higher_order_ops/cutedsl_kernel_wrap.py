@@ -1,20 +1,99 @@
-"""User-defined CuTeDSL kernels in PT2: the counterpart of triton_kernel_wrap.py."""
+"""User-defined CuTeDSL kernels in PT2: the counterpart of triton_kernel_wrap.py.
+
+A CuTeDSL kernel is launched by a ``@cute.jit`` host function. PT2 captures a call to
+one as ``cutedsl_kernel_wrapper_mutation(kernel_idx, constant_args_idx, kwargs)``: the
+host function and the user's write set are a side-table record (CuteDSLKernel), the
+tensors and dynamic scalars are ``kwargs``, and every other argument is a constant
+arg in the side table. The node's functional counterpart is
+``cutedsl_kernel_wrapper_functional``, exactly as for Triton, and the DSL-agnostic
+passes treat both DSLs the same way through the user-kernel HOP registry
+(user_kernel_hop.py).
+
+The stream parameter of the host function (the one annotated ``cuda.CUstream``) is
+never part of the node: the kernel is launched on the current stream when the node
+runs.
+"""
 
 import dataclasses
 import inspect
 import sys
 import weakref
 from collections.abc import Callable, Collection, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import sympy
 
 from torch import SymBool, SymFloat, SymInt, Tensor
-from torch._higher_order_ops.user_kernel_hop import ConstantRules
+from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
+from torch._higher_order_ops.user_kernel_hop import (
+    ConstantRules,
+    functional_hop_dense,
+    functional_hop_fake,
+    KernelSideTable,
+    register_user_kernel_hop,
+    register_user_kernel_hop_dispatch,
+    trace_user_kernel_wrapper,
+    UserKernelHOPInfo,
+    UserKernelWrapperHOP,
+)
+from torch._higher_order_ops.utils import register_fake
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+
+###############################################################################
+# Kernel Side Table
+
+
+# The parameter names the kernel writes, or "unknown": every tensor argument.
+MutatesArgs = tuple[str, ...] | Literal["unknown"]
 
 
 def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
     return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
+
+
+@dataclasses.dataclass(frozen=True)
+class CuteDSLKernel:
+    """Side-table entry for a CuTeDSL host function: plays the part a JITFunction
+    plays for Triton. The write set is part of the record, so one host function
+    wrapped with two different lists gets two entries. ``mutates_args`` may be any
+    iterable of parameter names (stored as a tuple without repeats), or "unknown"."""
+
+    fn: Callable[..., Any]
+    mutates_args: MutatesArgs
+
+    def __post_init__(self) -> None:
+        if self.mutates_args == "unknown":
+            return
+        error = TypeError(
+            f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or an '
+            f"iterable of parameter names, got {self.mutates_args!r}"
+        )
+        if isinstance(self.mutates_args, str):
+            raise error
+        try:
+            names = tuple(dict.fromkeys(self.mutates_args))
+        except TypeError:
+            raise error from None
+        if not all(isinstance(name, str) for name in names):
+            raise error
+        object.__setattr__(self, "mutates_args", names)
+        if not names:
+            return
+        info = get_host_fn_info(self.fn)
+        writable = tuple(p for p in info.params if p != info.stream_param)
+        for name in names:
+            if name not in writable:
+                raise ValueError(
+                    f"CuTeDSL kernel {self.name}: mutates_args names {name!r}, but "
+                    f"its parameters other than the stream {info.stream_param!r} "
+                    f"are {writable}"
+                )
+
+    @property
+    def name(self) -> str:
+        return cutedsl_kernel_name(self.fn)
 
 
 def _is_cutlass_type(cls: type) -> bool:
@@ -34,6 +113,20 @@ class _CuteDSLConstantRules(ConstantRules):
 
 
 CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
+
+# Unlike Triton's table, torch._dynamo.reset() leaves this one alone: graphs and
+# exported programs captured before a reset keep resolving their indices. So every
+# host function recorded here stays alive for the life of the process, and with it
+# its eager compiles (see _compiled in torch/_native/cutedsl/user_kernel.py): a
+# @cute.jit function built anew for each call adds a record and a compile per call.
+# TODO: release the records that no captured graph or exported program refers to.
+cutedsl_kernel_side_table: KernelSideTable[CuteDSLKernel] = KernelSideTable(
+    constant_rules=CUTEDSL_CONSTANT_RULES
+)
+
+
+def get_kernel(kernel_idx: int) -> CuteDSLKernel:
+    return cutedsl_kernel_side_table.get_kernel(kernel_idx)
 
 
 ###############################################################################
@@ -247,3 +340,215 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
     )
     _host_fn_infos[fn] = info
     return info
+
+
+###############################################################################
+# CuTeDSL Kernel Wrappers
+
+
+# Used for wrapping a CuTeDSL host function
+class CuteDSLKernelWrapperMutation(UserKernelWrapperHOP):
+    def __init__(self) -> None:
+        # Not cacheable: its side-table indices exist only in the process that
+        # captured them.
+        super().__init__("cutedsl_kernel_wrapper_mutation", cacheable=False)
+
+    def __call__(
+        self,
+        kernel_idx: int,
+        constant_args_idx: int,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        # pyrefly: ignore [missing-attribute]
+        return super().__call__(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            kwargs=kwargs,
+        )
+
+
+cutedsl_kernel_wrapper_mutation = CuteDSLKernelWrapperMutation()
+
+
+# Used for wrapping a CuTeDSL host function in a functional manner
+class CuteDSLKernelWrapperFunctional(UserKernelWrapperHOP):
+    def __init__(self) -> None:
+        # Not cacheable: its side-table indices exist only in the process that
+        # captured them.
+        super().__init__("cutedsl_kernel_wrapper_functional", cacheable=False)
+
+    def __call__(
+        self,
+        kernel_idx: int,
+        constant_args_idx: int,
+        kwargs: dict[str, Any],
+        tensors_to_clone: list[str],
+        tensor_bases: dict[str, Tensor] | None = None,
+    ) -> dict[str, Any]:
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "kwargs": kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if tensor_bases:
+            hop_kwargs["tensor_bases"] = tensor_bases
+
+        # pyrefly: ignore [missing-attribute]
+        return super().__call__(**hop_kwargs)
+
+
+cutedsl_kernel_wrapper_functional = CuteDSLKernelWrapperFunctional()
+
+
+@cutedsl_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
+def cutedsl_kernel_wrapper_mutation_dense(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+) -> None:
+    from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+    table = cutedsl_kernel_side_table
+    kernel = table.get_kernel(kernel_idx)
+    constant_args = table.get_constant_args(constant_args_idx)
+    launch_cutedsl_kernel(
+        kernel.fn,
+        {**kwargs, **constant_args},
+        constant_keys=table.get_constant_args_keys(constant_args_idx),
+    )
+
+
+@register_fake(cutedsl_kernel_wrapper_mutation, skip_cache=True)
+def cutedsl_kernel_wrapper_mutation_fake_tensor_mode(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+) -> None:
+    return None
+
+
+@cutedsl_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
+def _(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+) -> None:
+    return None
+
+
+@cutedsl_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
+def cutedsl_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
+    mode: ProxyTorchDispatchMode,
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+) -> None:
+    trace_user_kernel_wrapper(
+        mode,
+        cutedsl_kernel_wrapper_mutation,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "kwargs": kwargs,
+        },
+    )
+
+    return None
+
+
+def get_cutedsl_mutated_tensors(
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+) -> list[str]:
+    """Names of the tensor kwargs the kernel writes: the mirror of Triton's
+    get_mutated_tensors, read from the user's mutates_args instead of TTIR."""
+    kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
+    if kernel.mutates_args == "unknown":
+        names: tuple[str, ...] = tuple(kwargs)
+    else:
+        names = kernel.mutates_args
+    return [name for name in names if isinstance(kwargs.get(name), Tensor)]
+
+
+@cutedsl_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
+def cutedsl_kernel_wrapper_functional_dense(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None = None,
+) -> dict[str, Any]:
+    return functional_hop_dense(
+        cutedsl_kernel_wrapper_mutation,
+        hop_kwargs={"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
+
+
+@register_fake(cutedsl_kernel_wrapper_functional, skip_cache=True)
+def cutedsl_kernel_wrapper_functional_fake_tensor_mode(
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None = None,
+) -> dict[str, Any]:
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
+
+
+@cutedsl_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
+def cutedsl_kernel_wrapper_functional_proxy_torch_dispatch_mode(
+    mode: ProxyTorchDispatchMode,
+    *,
+    kernel_idx: int,
+    constant_args_idx: int,
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None = None,
+) -> dict[str, Any]:
+    node_args: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "kwargs": kwargs,
+        "tensors_to_clone": tensors_to_clone,
+    }
+    if tensor_bases:
+        node_args["tensor_bases"] = tensor_bases
+
+    ret = trace_user_kernel_wrapper(mode, cutedsl_kernel_wrapper_functional, node_args)
+    if ret is None:
+        raise AssertionError("trace_user_kernel_wrapper returned None")
+    return ret
+
+
+register_user_kernel_hop_dispatch(
+    cutedsl_kernel_wrapper_mutation, cutedsl_kernel_wrapper_functional
+)
+
+
+register_user_kernel_hop(
+    UserKernelHOPInfo(
+        dsl="cutedsl",
+        mutation=cutedsl_kernel_wrapper_mutation,
+        functional=cutedsl_kernel_wrapper_functional,
+        get_mutated_tensors=lambda hop_kwargs, kwargs: get_cutedsl_mutated_tensors(
+            hop_kwargs["kernel_idx"], hop_kwargs["constant_args_idx"], kwargs
+        ),
+        get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
+        get_layout_constraint=lambda: "needs_fixed_stride_order",
+        reinplace_trigger=ReInplaceTrigger.CUTEDSL_OPS,
+        serializable=False,
+    )
+)

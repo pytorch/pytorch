@@ -1,7 +1,7 @@
 """Compile and launch user-defined CuTeDSL kernels (``@cute.jit`` host functions).
 
-It lives outside torch._inductor so that an eager launch imports neither Inductor
-nor Dynamo.
+Used by the eager impl of ``cutedsl_kernel_wrapper_mutation``. It lives outside
+torch._inductor so that an eager launch imports neither Inductor nor Dynamo.
 
 A compiled CuTeDSL kernel is specialized to the arguments it was compiled for and
 checks none of them at launch, so compiles are cached per host function and argument
@@ -59,10 +59,10 @@ def _compile(
 ) -> Any:
     """cute.compile(fn, **args) on copies of the ``constants`` (see _snapshot): the
     host code that the compile runs can change one (cache a layout on a config
-    object, say), while the compile cache key and the caller's object must keep the
-    contents they were keyed by. Not cached by jit_cache, whose disk cache keys by
-    qualified name and pickled arguments and loads its compiles through tvm-ffi:
-    launch_cutedsl_kernel caches it."""
+    object, say), while the compile cache key, the side table's snapshot and the
+    caller's object must keep the contents they were keyed by. Not cached by
+    jit_cache, whose disk cache keys by qualified name and pickled arguments and
+    loads its compiles through tvm-ffi: launch_cutedsl_kernel caches it."""
     import cutlass.cute as cute
 
     from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
@@ -77,10 +77,13 @@ def launch_cutedsl_kernel(
     fn: Callable[..., Any],
     args: Mapping[str, Any],
     stream: int | None = None,
+    constant_keys: Mapping[str, object] | None = None,
 ) -> None:
     """Launch host function ``fn`` with ``args`` (every parameter but the stream,
     by name; missing ones take their defaults) on ``stream``, a raw CUDA stream
-    (default: the current stream of the tensors' device)."""
+    (default: the current stream of the tensors' device). ``constant_keys`` holds
+    the constant_key of constants among ``args`` that the caller has keyed already
+    (on the HOP path, the side table's keys)."""
     import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
     from cutlass.cute.runtime import from_dlpack
 
@@ -123,8 +126,12 @@ def launch_cutedsl_kernel(
                 value = python_scalar(value, annotation)
                 key.append((param, annotation or type(value)))
             compile_args[param] = value
+        keys = constant_keys or {}
         for param, value in constant_args.items():
             compile_args[param] = value
+            if param in keys:
+                key.append((param, keys[param]))
+                continue
             try:
                 key.append((param, constant_key(value, CUTEDSL_CONSTANT_RULES)))
             except (TypeError, ValueError) as e:
