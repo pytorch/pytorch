@@ -2206,8 +2206,8 @@ class TestDockerCiGates(TestCase):
 
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
-        # The window reaches the top PR's rule check and the lower PRs' (through
-        # merge_changes_locally), so a waiting job anywhere in the stack is retried.
+        # The window reaches the top PR's rule check and the lower PRs', so a waiting
+        # job anywhere in the stack is retried.
         self.assertIs(
             mock_find_matching_merge_rule.call_args.kwargs["classification_wait"],
             window,
@@ -2216,9 +2216,8 @@ class TestDockerCiGates(TestCase):
             repo,
             False,
             1,
+            skip_all_rule_checks=True,
             ghstack_prs=ghstack_prs,
-            ignore_current_checks=None,
-            classification_wait=window,
         )
 
 
@@ -2636,6 +2635,43 @@ class TestGreenlightGuardCallSite(TestCase):
         self.assertEqual(repo_full_name, "pytorch/pytorch")
         self.assertEqual([(p.pr_num, p.head_sha) for p in prs], [(1, "head-sha")])
 
+    @mock.patch("trymerge.check_stacked_pr_merge_rule")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_a_waiting_lower_ghstack_pr_retries_before_the_greenlight_check(
+        self, mock_evaluate: Any, mock_get_ghstack_prs: Any, mock_stacked: Any
+    ) -> None:
+        """Whether a lower PR's human approvals suffice can depend on its CI, so the
+        question is not asked, and its answer not cached, while that CI waits."""
+        lower_pr, top_pr = self._pr(1), self._pr(2, ghstack=True)
+        mock_get_ghstack_prs.return_value = [(lower_pr, "lower"), (top_pr, "top")]
+        mock_stacked.side_effect = MandatoryChecksMissingError("waiting on Dr.CI")
+        window = ClassificationWaitWindow()
+
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "waiting on Dr.CI"):
+            GitHubPR.merge_into(
+                top_pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                classification_wait=window,
+            )
+
+        self.assertIs(mock_stacked.call_args.args[0], lower_pr)
+        self.assertIs(mock_stacked.call_args.kwargs["classification_wait"], window)
+        mock_evaluate.assert_not_called()
+
+        # merge()'s retry, once the lower PR's CI has cleared.
+        mock_stacked.side_effect = None
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(
+                top_pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                classification_wait=window,
+            )
+        mock_evaluate.assert_called_once()
+
     @mock.patch("trymerge.get_ghstack_prs")
     @mock.patch("trymerge.evaluate_greenlight_guard")
     def test_ghstack_stack_is_checked_at_the_github_heads(
@@ -2905,9 +2941,8 @@ class TestGreenlightGuardWiring(TestCase):
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], {(1, "some-check")}
         )
-        self.assertEqual(
-            pr.merge_changes_locally.call_args.kwargs["ignore_current_checks"],
-            {(1, "some-check")},
+        self.assertTrue(
+            pr.merge_changes_locally.call_args.kwargs["skip_all_rule_checks"]
         )
 
 
@@ -4830,17 +4865,35 @@ class TestMergeChangesLocallyEndToEnd(LandingTestCase):
         self.addCleanup(patcher.stop)
         return bases
 
-    def test_retry_after_a_stacked_pr_check_lands_each_pr_once(self) -> None:
-        """#102's checks are pending on the first attempt, after #101 was
-        cherry-picked onto the clone's main. Trunk moves before merge() calls
-        merge_into again on the same clone."""
-        self.stacked_rule.side_effect = [
-            None,
-            MandatoryChecksMissingError("pending"),
-            None,
-            None,
-        ]
+    def test_a_pending_stacked_pr_stops_the_merge_before_any_cherry_pick(
+        self,
+    ) -> None:
+        self.stacked_rule.side_effect = [None, MandatoryChecksMissingError("pending")]
         with self.assertRaises(MandatoryChecksMissingError):
+            GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        self.assertEqual(
+            self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir), []
+        )
+
+    def test_retry_after_a_failed_cherry_pick_lands_each_pr_once(self) -> None:
+        """The first attempt fails after #101 was cherry-picked onto the clone's main.
+        Trunk moves before merge_into runs again on the same clone."""
+        picks = 0
+        cherry_pick = self.repo.cherry_pick
+
+        def fail_the_second_pick(ref: str) -> None:
+            nonlocal picks
+            picks += 1
+            if picks == 2:
+                raise RuntimeError("interrupted")
+            cherry_pick(ref)
+
+        with (
+            mock.patch.object(
+                self.repo, "cherry_pick", side_effect=fail_the_second_pick
+            ),
+            self.assertRaisesRegex(RuntimeError, "interrupted"),
+        ):
             GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
         left_over = self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir)
         self.assertEqual(left_over, landing_subjects(101))

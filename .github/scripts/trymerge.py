@@ -1695,16 +1695,18 @@ class GitHubPR:
             stack = get_native_stack(self.org, self.project, self.pr_num)
             native_prs = get_native_stack_prs(repo, self, stack)
             prs_to_merge = [pr for pr, _, _ in native_prs]
-            for pr in prs_to_merge:
-                if pr.pr_num != self.pr_num:
-                    check_stacked_pr_merge_rule(
-                        pr,
-                        repo,
-                        skip_mandatory_checks=skip_mandatory_checks,
-                        skip_internal_checks=skip_internal_checks,
-                        ignore_current_checks=ignore_current_checks,
-                        classification_wait=classification_wait,
-                    )
+        # Before the greenlight check: whether a lower PR's human approvals suffice can
+        # depend on its CI, so that question waits until the PR's own checks pass.
+        for pr in prs_to_merge:
+            if pr.pr_num != self.pr_num:
+                check_stacked_pr_merge_rule(
+                    pr,
+                    repo,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    skip_internal_checks=skip_internal_checks,
+                    ignore_current_checks=ignore_current_checks,
+                    classification_wait=classification_wait,
+                )
 
         check_greenlight_reviewed_head_sha(
             self,
@@ -1742,9 +1744,9 @@ class GitHubPR:
                 repo,
                 skip_mandatory_checks,
                 comment_id,
+                # Checked above, before the greenlight check.
+                skip_all_rule_checks=True,
                 ghstack_prs=ghstack_prs,
-                ignore_current_checks=ignore_current_checks,
-                classification_wait=classification_wait,
             )
 
             # Log, but do not block on, a docker land race.
@@ -2326,6 +2328,8 @@ def is_authorized_without_greenlight(
     Greenlight rule -- leaving greenlight the sole authority with the guard switched off.
     The one argument not passed is `classification_wait`: without it a job still waiting
     on its classification counts as failed here, which can only make this check stricter.
+    `merge_into` asks only after every PR it lands has passed its own rule check, so by
+    then no job is still waiting on its classification.
 
     An answer is cached per approver set and head commit. Both are re-read from GitHub on
     every retry, so an approval added mid-merge still takes effect; what the cache drops
