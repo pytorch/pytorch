@@ -912,13 +912,23 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+    # The name that stands for every type without a serialized name may map
+    # to any of them.
+    if (
+        dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE
+        or dumpable_context == NO_SERIALIZED_TYPE_NAME_FOUND
+    ):
         raise NotImplementedError(
             f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
             "because we couldn't find a serialized name."
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    if not is_namedtuple_class(typ):
+        raise NotImplementedError(
+            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+            f"because it names {typ}, which is not a namedtuple class."
+        )
     return typ
 
 
@@ -2062,13 +2072,29 @@ def enum_object_hook(obj: dict[str, Any]) -> Enum | dict[str, Any]:
     return obj
 
 
-def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
+def _refuse_enum_object_hook(obj: dict[str, Any]) -> dict[str, Any]:
+    if "__enum__" in obj:
+        raise ValueError("Loading this treespec would import the module of an enum")
+    return obj
+
+
+def _json_to_treespec(
+    json_schema: DumpableContext, *, allow_imports: bool = True
+) -> TreeSpec:
     if (
         json_schema["type"] is None
         and json_schema["context"] is None
         and len(json_schema["children_spec"]) == 0
     ):
         return _LEAF_SPEC
+
+    # treespec_dumps never writes the name that stands for every type registered
+    # without a serialized_type_name.
+    if json_schema["type"] == NO_SERIALIZED_TYPE_NAME_FOUND:
+        raise NotImplementedError(
+            f"Deserializing {NO_SERIALIZED_TYPE_NAME_FOUND} in pytree failed because "
+            "it does not name one type."
+        )
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         serialized_type_name = json_schema["type"]
@@ -2086,11 +2112,16 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]
+    if typ is defaultdict and not allow_imports:
+        raise ValueError(
+            "Loading this treespec would import the module of a defaultdict factory"
+        )
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[typ]
 
     if serialize_node_def.from_dumpable_context is None:
+        hook = enum_object_hook if allow_imports else _refuse_enum_object_hook
         try:
-            context = json.loads(json_schema["context"], object_hook=enum_object_hook)
+            context = json.loads(json_schema["context"], object_hook=hook)
         except TypeError as ex:
             raise TypeError(
                 "Unable to deserialize context. "
@@ -2101,7 +2132,8 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
     children_specs = [
-        _json_to_treespec(child_string) for child_string in json_schema["children_spec"]
+        _json_to_treespec(child_string, allow_imports=allow_imports)
+        for child_string in json_schema["children_spec"]
     ]
 
     return TreeSpec(typ, context, children_specs)
@@ -2138,6 +2170,21 @@ def treespec_loads(serialized: str) -> TreeSpec:
         f"Unknown protocol {protocol}. "
         f"Available protocols: {list(_SUPPORTED_PROTOCOLS.keys())}",
     )
+
+
+def _treespec_loads_without_imports(serialized: str) -> TreeSpec:
+    """
+    Load a treespec like ``treespec_loads``, but refuse the parts that import a
+    module that ``serialized`` names: enum classes and defaultdict factories.
+    Types registered with their own context decoder still decode their
+    contexts with it.
+    """
+    protocol, json_schema = json.loads(serialized)
+    if protocol != 1:
+        raise ValueError(
+            f"Unknown protocol {protocol}. Loading without imports supports protocol 1."
+        )
+    return _json_to_treespec(json_schema, allow_imports=False)
 
 
 class _Asterisk(str):
