@@ -17,7 +17,12 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # For testing handling NumPy objects and sending tensors to / accepting
@@ -538,10 +543,6 @@ class TestNumPyInterop(TestCase):
             # np integral type can be treated as a python int in native functions with
             # int parameters:
             self.assertEqual(torch.ones(5).diag(scalar), torch.ones(5).diag(np_val))
-            self.assertEqual(
-                torch.ones([2, 2, 2, 2]).mean(scalar),
-                torch.ones([2, 2, 2, 2]).mean(np_val),
-            )
 
             # numpy integral type parses like a python int in custom python bindings:
             self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore[attr-defined]
@@ -556,6 +557,17 @@ class TestNumPyInterop(TestCase):
             t = torch.from_numpy(np_arr)
             self.assertEqual((t + np_val).dtype, t.dtype)
             self.assertEqual((np_val + t).dtype, t.dtype)
+
+    @onlyCPU
+    @parametrize("nptype", [np.int16, np.int8, np.uint8, np.int32, np.int64])
+    @skipIfTorchDynamo("NumPy tracing treats integral scalars as 0-D arrays")
+    def test_parse_numpy_int_mean(self, device, nptype):
+        scalar = 3
+        np_val = np.array([scalar], dtype=nptype)[0]
+        self.assertEqual(
+            torch.ones([2, 2, 2, 2]).mean(scalar),
+            torch.ones([2, 2, 2, 2]).mean(np_val),
+        )
 
     def test_has_storage_numpy(self, device):
         for dtype in [np.float32, np.float64, np.int64, np.int32, np.int16, np.uint8]:
