@@ -60,9 +60,11 @@ struct C10_CUDA_API CUDAGuardImpl final
     C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    // noexcept, but MaybeSetDevice() -> SetDevice() can throw via
-    // C10_CUDA_CHECK(cudaGetDevice) on a device carrying a sticky error, and
-    // the throw escapes while evaluating the argument, before
+    // noexcept, but MaybeSetDevice() can throw: on the CUDA-12 / ROCm path via
+    // hasPrimaryContext() (bad device index or a failed primary-context
+    // query), on the pre-CUDA-12 path via SetDevice() (TORCH_CHECK on the
+    // index, or C10_CUDA_CHECK(cudaGetDevice) on a device carrying a sticky
+    // error). The throw escapes while evaluating the argument, before
     // C10_CUDA_CHECK_WARN can demote it. Catch it so a device restore warns
     // instead of std::terminate.
     try {
