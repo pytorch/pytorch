@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 # counter for tracking how many kernels have been generated
 generated_kernel_count = 0
+generated_fallback_kernel_count: int = 0
 generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
 nodes_num_elem: list[
@@ -66,6 +67,7 @@ codegen_nested_reduction: int = 0
 # reset all counters
 def reset() -> None:
     global generated_kernel_count
+    global generated_fallback_kernel_count
     global generated_cpp_vec_kernel_count
     global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
@@ -81,6 +83,7 @@ def reset() -> None:
     global num_auto_chunking
 
     generated_kernel_count = 0
+    generated_fallback_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
     num_bytes_accessed = 0
     nodes_num_elem.clear()
@@ -111,6 +114,7 @@ class CachedMetricsDeltas:
     cpp_to_dtype_count: int
     num_bytes_accessed: int
     num_matches_for_scatter_upon_const_tensor: int
+    generated_fallback_kernel_count: int = 0
 
 
 def get_metric_fields() -> list[str]:

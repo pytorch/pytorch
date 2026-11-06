@@ -2604,13 +2604,16 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    def test_generated_kernel_count(self):
+    @parametrize("fallback", (False, True))
+    def test_generated_kernel_count(self, fallback):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
         """
         torch._logging.set_logs(inductor_metrics=True)
 
         def fn(x, y):
+            if fallback:
+                return (torch.histc(x, bins=25, min=0, max=1).reshape(5, 5) + y,)
             return (x * y + y,)
 
         a = torch.rand(5, 5)
@@ -2620,17 +2623,20 @@ class TestFxGraphCache(TestCase):
 
         metrics.reset()
         self.assertEqual(metrics.generated_kernel_count, 0)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
 
         # Verify the "miss" case.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(metrics.generated_fallback_kernel_count, int(fallback))
 
         # Verify the "hit" case
         self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 2 * int(fallback))
         torch._logging.set_logs()
 
     @config.patch({"fx_graph_cache": True})
