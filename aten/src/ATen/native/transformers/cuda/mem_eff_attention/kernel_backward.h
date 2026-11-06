@@ -697,9 +697,9 @@ struct AttentionBackwardKernel {
     // Everything below is only used in `advance_to_block`
     // and shouldn't use registers
     int64_t o_strideH = -1;
-    int32_t q_strideH = -1;
-    int32_t k_strideH = -1;
-    int32_t v_strideH = -1;
+    int64_t q_strideH = -1;
+    int64_t k_strideH = -1;
+    int64_t v_strideH = -1;
     int64_t bias_strideH = 0;
     int64_t o_strideB = -1;
     int64_t q_strideB = -1;
@@ -1592,6 +1592,7 @@ struct AttentionBackwardKernel {
       mma.set_prologue_done(kPrologueQK);
       mma.set_zero_outside_bounds(!skipBoundsChecks);
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
+      Mma::drain_cp_asyncs();
       accum = cutlass::multiplies<typename Mma::FragmentC>()(scale, accum);
 
       // Epilogue: add LSE + exp and store that to our shared memory buffer
@@ -1846,7 +1847,7 @@ struct AttentionBackwardKernel {
           output_frags.gradV,
           iterator_B,
           output_frags.gradV);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGV && !kSingleIterationGradV &&
           col + MatmulGradV::ThreadblockShape::kN < p.head_dim_value) {
         prologueGradV(col + MatmulGradV::ThreadblockShape::kN);
@@ -1902,7 +1903,7 @@ struct AttentionBackwardKernel {
 
       // Compute threadblock-scoped matrix multiply-add
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGQ) {
         prologueGradQ(0);
       }
@@ -2094,7 +2095,7 @@ struct AttentionBackwardKernel {
       __syncthreads();
       mma.set_prologue_done(kPrologueGQ);
       mma(gemm_k_iterations, accum, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradQ ||
           (col + MatmulGradQ::ThreadblockShape::kN >= p.head_dim);
       if (kPrologueGQ && !isLastColumn) {
@@ -2232,7 +2233,7 @@ struct AttentionBackwardKernel {
           output_frags.gradK,
           iterator_B,
           output_frags.gradK);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradK ||
           col + MatmulGradK::ThreadblockShape::kN >= p.head_dim;
       if (kPrologueGK && !isLastColumn) {

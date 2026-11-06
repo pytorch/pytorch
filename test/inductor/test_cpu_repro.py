@@ -7,6 +7,7 @@ import itertools
 import math
 import os
 import platform
+import re
 import sys
 import unittest
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
     CppOverrides,
+    CppScheduling,
     CppVecKernel,
     CppVecOverrides,
     KernelGroup,
@@ -40,9 +42,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -52,10 +54,10 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -150,8 +152,15 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+# Not a module-level skip: other test files import this one, including on GPU
+# jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
@@ -3952,9 +3961,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (input, eps))
 
     @slowTest
-    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
-    # for the ~1h this test takes.
-    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -4523,6 +4529,23 @@ class CPUReproTests(TestCase):
                 1,
             )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_local_buffer_with_mutation_output(self):
+        # https://github.com/pytorch/pytorch/issues/196570
+        # m depends on x so that dropping the index_put changes the output.
+        def fn(x):
+            m = x.clone()
+            m[torch.arange(8).unsqueeze(0), torch.arange(8).unsqueeze(1)] = 0
+            return torch.softmax(x + m, dim=-1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (torch.randn(8, 8),))
+        counts = metrics.cpp_outer_loop_fused_inner_counts
+        self.assertEqual(len(counts), 1)
+        self.assertEqual(counts[0].inner_kernel_number, 3)
+        self.assertEqual(counts[0].local_buffer_number, 1)
+
     @requires_vectorization
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_local_buffer_with_tiled_outer_dim(self):
@@ -5013,6 +5036,39 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
+
+    def test_kernel_group_skips_exact_arg_count_below_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        with (
+            fresh_cache(),
+            patch.object(
+                KernelGroup,
+                "get_num_args",
+                autospec=True,
+                side_effect=KernelGroup.get_num_args,
+            ) as get_num_args,
+        ):
+            opt_fn = torch.compile(fn, backend="inductor")
+            self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Twenty arguments is far below the limit, so the exact count, which
+        # formats every argument, is never needed.
+        get_num_args.assert_not_called()
+
+    @patch.object(CppScheduling, "MAX_FUSED_KERNEL_ARGS_NUM", 6)
+    def test_kernel_group_flushes_when_args_exceed_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        opt_fn = torch.compile(fn, backend="inductor")
+        _, code = run_and_get_cpp_code(opt_fn, *xs)
+        self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Each add has two arguments, so a limit of six splits them across kernels.
+        kernels = set(re.findall(r"cpp_fused_\w+?_\d+\b", code))
+        self.assertGreater(len(kernels), 1)
 
     @requires_vectorization
     def test_vertical_reduction_tail_store_uses_tail_width(self):
@@ -8019,7 +8075,6 @@ class CPUReproTests(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if RUN_CPU and not IS_MACOS:
         run_tests(needs="filelock")

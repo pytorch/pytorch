@@ -874,9 +874,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.10)
+if(${Python_VERSION} VERSION_LESS 3.11)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.11 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1082,18 +1082,19 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
-    # composable_kernel has no gfx1250 support, so aten/src/ATen/CMakeLists.txt
-    # filters gfx1250 out of the ck_gemm target's HIP_ARCHITECTURES. When gfx1250
-    # is the only requested arch that list is empty and CMake fails at generate
-    # time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so turn CK GEMM
-    # off entirely here -- before -DUSE_ROCM_CK_GEMM is added below, since the
-    # non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp, GroupedBlas.cpp)
-    # would otherwise reference symbols the unbuilt ck_gemm target never provides.
-    # Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable pattern in
-    # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). aten/src/ATen/CMakeLists.txt
+    # restricts the ck_gemm target's HIP_ARCHITECTURES to that subset. When none
+    # of the requested archs are supported that list is empty and CMake fails at
+    # generate time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so
+    # turn CK GEMM off entirely here -- before -DUSE_ROCM_CK_GEMM is added below,
+    # since the non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp,
+    # GroupedBlas.cpp) would otherwise reference symbols the unbuilt ck_gemm
+    # target never provides. Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable
+    # pattern in aten/src/ATen/CMakeLists.txt.
     if(USE_ROCM_CK_GEMM)
-      set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
-      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      torch_filter_ck_gemm_arches(_ck_gemm_supported_arches)
       if(_ck_gemm_supported_arches STREQUAL "")
         message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
         caffe2_update_option(USE_ROCM_CK_GEMM OFF)
@@ -1228,10 +1229,10 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
-# Defines the __caffe2_nccl_ep interface target (libnccl_ep.so + headers). It is
+# Defines the __caffe2_nccl_ep interface target (libnccl_ep + headers). It is
 # NOT added to Caffe2_CUDA_DEPENDENCY_LIBS: the EP code lives in its own optional
 # extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
-# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl4py.
+# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl-extensions.
 if(USE_NCCL_EP)
   message(STATUS "USE_NCCL_EP is ON")
   include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
@@ -1517,6 +1518,10 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
       endif()
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
+        # Match the C++ host-compiler setting without changing public type layouts.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-interference-size ")
+      endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
@@ -1746,17 +1751,11 @@ if(USE_KINETO)
   endif()
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
-  set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+  set(KINETO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/torch/csrc/profiler/kineto/libkineto" CACHE STRING "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
 
   # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
-  # The xpu backend is excluded because its tests compile SYCL device code
-  # through an ExternalProject, which does not fit inside this build.
-  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
-    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
-  else()
-    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  endif()
+  set(KINETO_BUILD_TESTS "${BUILD_TEST}" CACHE BOOL "" FORCE)
   # Install alongside PyTorch's own test binaries, where the Windows CI
   # runner looks for C++ tests.
   set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)

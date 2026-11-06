@@ -36,6 +36,30 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     PythonKeyTracer,
 )
+
+
+# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
+# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
+
+# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
+# construction build a CppFakeTensorMode so the suite exercises it end to end.
+if torch._dynamo.config.use_cpp_fake_tensor:
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
+
+    def FakeTensorMode(
+        *,
+        shape_env=None,
+        allow_fallback_kernels=True,
+        allow_non_fake_inputs=False,
+        **kwargs,
+    ):
+        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
+            FakeTensorConverter(), shape_env
+        )
+        mode.set_allow_fallback_kernels(allow_fallback_kernels)
+        mode.allow_non_fake_inputs = allow_non_fake_inputs
+        return mode
+
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -151,6 +175,7 @@ class UnwrapTensor(torch.Tensor):
         args = tree_map(unwrap, args)
         kwargs = tree_map(unwrap, kwargs)
         return func(*args, **kwargs)
+
 
 class TestGenericProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1014,6 +1039,14 @@ class TestSymbolicTracing(TestCase):
             if assert_eq:
                 self.assertEqual(rx, ry)
         return traced_f
+
+    # The arg parser expands a scalar SymInt for an int[N] arg, but calling an OpOverload directly doesn't
+    def test_op_overload_scalar_symint_for_int_list(self):
+        def f(x, k):
+            return torch.ops.aten.max_pool2d_with_indices.default(x, k)
+
+        with self.assertRaisesRegex(RuntimeError, r"List\[int\].*SymInt"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2, 6, 6), 3)
 
 
     def test_debug_interpreter(self):
@@ -2102,8 +2135,6 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-
-    xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??

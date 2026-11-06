@@ -53,10 +53,12 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
+    MI200_ARCH,
     parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -3309,6 +3311,9 @@ class TestConvolutionNNDevice(NNTestCase):
     @largeTensorTest("12GB")
     @serialTest()
     @skipXPU
+    # MI200-specific MIOpen failure, addressed by
+    # https://github.com/ROCm/rocm-libraries/pull/11809
+    @skipIfRocmArch(MI200_ARCH)
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type != "cpu" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -3824,11 +3829,50 @@ class TestConvolutionNNDevice(NNTestCase):
             torch.ops.aten.slow_conv_dilated3d, input, weight, bias, kwargs
         )
 
+    @onlyAccelerator
+    def test_conv_inputs_device_mismatch(self, device):
+        device_mismatches = (
+            ("cpu", device, "cpu"),
+            ("cpu", "cpu", device),
+            ("cpu", device, device),
+            ("cpu", device, None),
+            (device, "cpu", device),
+            (device, device, "cpu"),
+            (device, "cpu", "cpu"),
+            (device, "cpu", None),
+        )
+        for input_device, weight_device, bias_device in device_mismatches:
+            input = torch.randn(1, 2, 5, device=input_device)
+            weight = torch.randn(3, 2, 3, device=weight_device)
+            bias = (
+                torch.randn(3, device=bias_device) if bias_device is not None else None
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "Expected all tensors to be on the same device"
+            ):
+                if bias is None:
+                    F.conv1d(input, weight)
+                else:
+                    F.conv1d(input, weight, bias)
+
 
 class TestConvolutionNNCPU(NNTestCase):
     """CPU-specific convolution tests."""
 
     hw_classification = HardwareClassification.CPU
+
+    @unittest.skipIf(
+        torch.backends.nnpack.is_available()
+        and not torch.backends.mkldnn.is_available(),
+        "NNPACK's FFT-based convolution spreads NaN across the tile",
+    )
+    @parametrize_test("batch_size", [4, 16, 32])
+    def test_conv1d_nan_does_not_spread(self, batch_size):
+        # See https://github.com/pytorch/pytorch/issues/157237
+        x = torch.randn(batch_size, 1, 24)
+        x[3, 0, 9] = float("nan")
+        y = F.conv1d(x, torch.randn(1, 1, 3))
+        self.assertEqual(y[3, 0].isnan().nonzero().flatten().tolist(), [7, 8, 9])
 
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
@@ -4105,6 +4149,37 @@ class TestConvolutionNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("rank", [0, 1, 2])
+    def test_cudnn_convolution_invalid_rank(self, device, transpose, rank):
+        x = torch.rand((4,) * rank, device=device)
+        args = (x, x, [0])
+        if transpose:
+            args += ([0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* to have at least 3 dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1], [1], 1, False, False, False)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("weight_rank", [0, 1, 2, 3, 5])
+    def test_cudnn_convolution_mismatched_rank(self, device, transpose, weight_rank):
+        x = torch.rand(1, 1, 4, 4, device=device)
+        weight = torch.rand((1,) * weight_rank, device=device)
+        args = (x, weight, [0, 0])
+        if transpose:
+            args += ([0, 0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* and weight to have the same number of dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1, 1], [1, 1], 1, False, False, False)
 
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm
@@ -4560,6 +4635,43 @@ class TestConvolutionNNCUDA(NNTestCase):
             yref = m(x)
         y = m(x)
         self.assertEqual(yref, y)
+
+    @skipCUDAIfNoMiopen
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test("transposed", [False, True])
+    @parametrize_test("benchmark", [False, True])
+    def test_conv_cuda_graph_new_shape(self, device, dtype, transposed, benchmark):
+        conv = F.conv_transpose2d if transposed else F.conv2d
+        w = torch.randn(8, 8, 3, 3, device=device, dtype=dtype, requires_grad=True)
+
+        def step(x):
+            out = conv(x, w, stride=2, padding=1)
+            return (out, *torch.autograd.grad(out.sum(), (x, w)))
+
+        def make_input(n, size):
+            x = torch.randn(n, 8, size, size, device=device, dtype=dtype)
+            return x.requires_grad_()
+
+        # The MIOpen algorithm cache is per process and not keyed on benchmark,
+        # so give each variant its own capture shape to keep it a cache miss.
+        size = 9 + 2 * benchmark + 4 * transposed
+        # deterministic keeps MIOpen off its split-K weight-gradient kernels,
+        # whose results vary from run to run.
+        with cudnn.flags(
+            enabled=True, benchmark=benchmark, deterministic=True, allow_tf32=False
+        ):
+            for _ in range(2):
+                step(make_input(2, 7))
+            x = make_input(4, size)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = step(x)
+            graph.replay()
+            # Capture uses immediate mode for the new shape; eager Find may pick
+            # a solver that rounds differently, so compare against immediate mode.
+            with torch.backends.miopen.flags(immediate=True):
+                expected = step(x)
+        self.assertEqual(captured, expected)
 
     @skipCUDAIfRocm
     @largeTensorTest("96GB", "cuda")

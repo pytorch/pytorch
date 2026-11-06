@@ -380,9 +380,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         shard_dims = [-1, 0, 1, 2]
         elementwise_affine_list = [False, True]
 
-        # Test RMSNorm as well if CUDA
+        # Test RMSNorm as well if running on an accelerator
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -448,9 +448,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
 
-        # Test both LayerNorm and RMSNorm (if CUDA)
+        # Test both LayerNorm and RMSNorm (if on an accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -564,9 +564,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         device_mesh = self.build_device_mesh()
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
 
-        # Test both LayerNorm and RMSNorm (if CUDA)
+        # Test both LayerNorm and RMSNorm (if on an accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
+        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         # build our subtest configurations and filter out invalid ones
@@ -846,20 +846,29 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
-        grad0 = torch.randn(12, 8)
-        grad1 = torch.randn(8, 8)
+        # dtype is _foreach_norm.Scalar's third argument: (self, ord, dtype).
+        for input_dtype, dtype in (
+            (torch.float32, None),
+            (torch.bfloat16, torch.float32),
+        ):
+            with self.subTest(input_dtype=input_dtype, dtype=dtype):
+                grad0 = torch.randn(12, 8, dtype=input_dtype)
+                grad1 = torch.randn(8, 8, dtype=input_dtype)
 
-        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
-        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+                sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+                sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # non-sharded op
-        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+                # non-sharded op
+                out = torch.ops.aten._foreach_norm([grad0, grad1], 2, dtype=dtype)
 
-        # sharded op
-        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+                # sharded op
+                sharded_out = torch.ops.aten._foreach_norm(
+                    [sharded_grad0, sharded_grad1], 2, dtype=dtype
+                )
 
-        for o, so in zip(out, sharded_out):
-            self.assertEqual(so.full_tensor(), o)
+                for o, so in zip(out, sharded_out):
+                    self.assertEqual(so.dtype, o.dtype)
+                    self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_max_sharded(self):
@@ -993,6 +1002,18 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
             self.assertEqual(sharded_out[0].full_tensor(), expected0)
             self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+        # dtype sits where linalg__powsum has dim: _foreach_powsum.Scalar is (self, ord, dtype).
+        low = [grad0.bfloat16(), grad1.bfloat16()]
+        sharded_low = [distribute_tensor(t, device_mesh, [Shard(0)]) for t in low]
+        out = torch.ops.aten._foreach_powsum(low, 2, dtype=torch.float32)
+        sharded_out = torch.ops.aten._foreach_powsum(
+            sharded_low, 2, dtype=torch.float32
+        )
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.placements, (Partial("sum"),))
+            self.assertEqual(so.dtype, o.dtype)
+            self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_norm_different_mesh(self):
@@ -2032,6 +2053,59 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         result_no_affine = F.group_norm(dt_inp, num_groups)
         self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
         self.assertTrue(result_no_affine.placements[0].is_shard(0))
+
+        # Batch-sharded GroupNorm backward, including bias-only affine parameters.
+        batch = self.world_size * 2
+        group_input = torch.randn(batch, C, H, W, device=self.device_type)
+        for use_weight, use_bias in [
+            (True, True),
+            (False, False),
+            (False, True),
+            (True, False),
+        ]:
+            with self.subTest(use_weight=use_weight, use_bias=use_bias):
+                ref_input = group_input.detach().clone().requires_grad_(True)
+                dt_input = distribute_tensor(
+                    group_input.detach().clone().requires_grad_(True),
+                    device_mesh,
+                    [Shard(0)],
+                )
+                ref_weight = (
+                    weight.detach().clone().requires_grad_(True) if use_weight else None
+                )
+                ref_bias = (
+                    bias.detach().clone().requires_grad_(True) if use_bias else None
+                )
+                dt_weight_bwd = (
+                    distribute_tensor(
+                        ref_weight.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        replicate,
+                    )
+                    if use_weight
+                    else None
+                )
+                dt_bias_bwd = (
+                    distribute_tensor(
+                        ref_bias.detach().clone().requires_grad_(True),
+                        device_mesh,
+                        replicate,
+                    )
+                    if use_bias
+                    else None
+                )
+                ref_output = F.group_norm(ref_input, num_groups, ref_weight, ref_bias)
+                dt_output = F.group_norm(
+                    dt_input, num_groups, dt_weight_bwd, dt_bias_bwd
+                )
+                self.assertEqual(dt_output.full_tensor(), ref_output)
+                ref_output.sum().backward()
+                dt_output.sum().backward()
+                self.assertEqual(dt_input.grad.full_tensor(), ref_input.grad)
+                if use_weight:
+                    self.assertEqual(dt_weight_bwd.grad.full_tensor(), ref_weight.grad)
+                if use_bias:
+                    self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
