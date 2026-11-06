@@ -251,11 +251,9 @@ class AbstractWindowTest:
             0,
             lambda args: pre.append((args.name, args.op_id, args.root, args.async_op)),
         )
-        pg.register_post_hook(
-            0, lambda args: post.append((args.name, args.op_id, args.work is None))
-        )
+        pg.register_post_hook(0, post.append)
         try:
-            dist._new_window()
+            window = dist._new_window()
         finally:
             pg.unregister_pre_hook(0)
             pg.unregister_post_hook(0)
@@ -264,7 +262,12 @@ class AbstractWindowTest:
         name, op_id, root, async_op = pre[0]
         self.assertEqual(name, HookOpName.NEW_WINDOW)
         self.assertEqual((root, async_op), (-1, False))
-        self.assertEqual(post, [(HookOpName.NEW_WINDOW, op_id, True)])
+        self.assertEqual(len(post), 1)
+        args = post[0]
+        self.assertEqual((args.name, args.op_id), (HookOpName.NEW_WINDOW, op_id))
+        self.assertIsNone(args.work)
+        self.assertIsNone(args.group)
+        self.assertIs(args.window, window)
 
     def test_map_remote_tensor_local(self):
         self._init_backend()

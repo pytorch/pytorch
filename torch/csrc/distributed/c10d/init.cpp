@@ -1580,7 +1580,8 @@ dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
 ``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
 ``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
-``SPLIT`` and ``NEW_WINDOW``.)")
+``SPLIT`` and ``NEW_WINDOW``, which pass the new ``group`` or ``window``
+instead.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1641,7 +1642,9 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
-      "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
+      "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.",
+      // A kept copy may hold the last reference to a group or work.
+      py::release_gil_before_calling_cpp_dtor())
       .def(py::init<>())
       .def_readwrite(
           "name",
@@ -1659,7 +1662,17 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
-          "Same ``op_id`` as the matching pre-hook call.");
+          "Same ``op_id`` as the matching pre-hook call.")
+      .def_readwrite(
+          "group",
+          &::c10d::PostHookArgs::group,
+          "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
+          "for other operations. When created by ``torch.distributed.split_group``, "
+          "the hook runs before the group is registered.")
+      .def_readwrite(
+          "window",
+          &::c10d::PostHookArgs::window,
+          "New window for ``NEW_WINDOW``; ``None`` for other operations.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
