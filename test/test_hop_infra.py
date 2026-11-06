@@ -7,10 +7,12 @@ import importlib
 import logging
 import pkgutil
 import types
+from unittest import mock
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     CUTEDSL_CONSTANT_RULES,
+    cutedsl_kernel_wrapper_mutation,
     CuteDSLHostFnInfo,
     python_scalar,
 )
@@ -110,6 +112,8 @@ class TestHOPInfra(TestCase):
             "trace_wrapped",
             "triton_kernel_wrapper_functional",
             "triton_kernel_wrapper_mutation",
+            "cutedsl_kernel_wrapper_functional",  # Imports sympy, as Triton's does
+            "cutedsl_kernel_wrapper_mutation",  # Imports sympy, as Triton's does
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
             "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }
@@ -216,16 +220,17 @@ class TestHOPInfra(TestCase):
 
 @skipIfTorchDynamo("not applicable")
 class TestCuteDSLHOPHelpers(TestCase):
-    """The parts of CuTeDSL kernel support that need neither CUDA nor
-    nvidia-cutlass-dsl: how a side table with CuTeDSL's constant rules keys and
-    stores constants, and how a call is split. The tests that compile and launch
+    """The parts of the CuTeDSL user-kernel HOPs that need neither CUDA nor
+    nvidia-cutlass-dsl: how the side table keys and stores constants, how a call is
+    split, and who owns their reinplacing trigger. The tests that compile and launch
     host functions are in test/inductor/test_cutedsl_kernels.py."""
 
     hw_classification = HardwareClassification.GENERIC
 
     def test_side_table_dedupes_constant_args(self):
-        # Interchangeable constants share one entry (see constant_key), which holds a
-        # snapshot of the constants it was added with.
+        # The CuTeDSL table is never reset and every eager launch through the HOP adds
+        # its constants, so interchangeable constants share one entry (see
+        # constant_key), which holds a snapshot of the constants it was added with.
         Tile = collections.namedtuple("Tile", ["m", "n"])
 
         @dataclasses.dataclass(frozen=True)
@@ -345,7 +350,8 @@ class TestCuteDSLHOPHelpers(TestCase):
 
     def test_side_table_reset_clears_the_dedupe_index(self):
         # Without the index, a reset table would hand out the index of an entry that
-        # no longer exists. The table also keeps each entry's keys.
+        # no longer exists. The table also keeps each entry's keys, which the eager
+        # launch reuses.
         table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
         table.add_constant_args({"a": 1})
         self.assertEqual(table.add_constant_args({"a": 2.0}), 1)
@@ -689,6 +695,27 @@ class TestCuteDSLHOPHelpers(TestCase):
             converted = python_scalar(value)
             self.assertIs(type(converted), type(expected))
             self.assertEqual(converted, expected)
+
+    def test_cutedsl_trigger_refused_to_other_dsls(self):
+        # ReInplaceTrigger.CUTEDSL_OPS belongs to the cutedsl DSL (TRIGGER_DSLS)
+        # whether or not CuTeDSL has registered yet (it registers when
+        # cutedsl_kernel_wrap is first imported), so another DSL registering first
+        # cannot take it and make CuTeDSL's own registration fail.
+        from torch._higher_order_ops.user_kernel_hop import (
+            _user_kernel_hops,
+            get_user_kernel_hop_info,
+            register_user_kernel_hop,
+        )
+
+        info = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        msg = (
+            "^ReInplaceTrigger.CUTEDSL_OPS belongs to the cutedsl DSL; register the "
+            "toy DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own$"
+        )
+        with mock.patch.dict(_user_kernel_hops, clear=True):
+            with self.assertRaisesRegex(ValueError, msg):
+                register_user_kernel_hop(dataclasses.replace(info, dsl="toy"))
+            self.assertEqual(_user_kernel_hops, {})
 
 
 if __name__ == "__main__":
