@@ -467,41 +467,65 @@ def _default_all_gather_output_fn(
     outer_sizes: list[int],
     world_size: int,
 ) -> None:
-    """Copy outputs with outer_size > 1 or dropped padding via intermediate
-    buffers, others directly."""
+    """
+    Copies all_gather_output into outputs in two steps. For example, with 4 ranks,
+    A (5, 3) on Shard(0), B (2, 8) on Shard(1) and C (2, 5) on Shard(1) give
+    split_sizes = [6, 4, 4] and outer_sizes = [1, 2, 2]. Row r of
+    all_gather_output.view(4, -1) holds rank r's padded shards, written here as
+    b17 for B[1, 7] and .. for padding:
+
+                 A                         B                 C
+        rank 0   a00 a01 a02 a10 a11 a12 | b00 b01 b10 b11 | c00 c01 c10 c11
+        rank 1   a20 a21 a22 a30 a31 a32 | b02 b03 b12 b13 | c02 c03 c12 c13
+        rank 2   a40 a41 a42 ..  ..  ..  | b04 b05 b14 b15 | c04 ..  c14 ..
+        rank 3   ..  ..  ..  ..  ..  ..  | b06 b07 b16 b17 | ..  ..  ..  ..
+
+    1. One split_with_sizes_copy writes each column block into a destination
+       viewed as (world_size, split_size). A Shard(0) chunk is whole rows, so A's
+       block goes straight into its output, where A is the prefix
+       output[:15].view(5, 3). B's and C's rows interleave the ranks' chunks
+       (outer_size > 1), so their blocks go into rank-major buffers.
+    2. Each buffer, viewed as (rank, row, chunk), is copied into its output's
+       rows: row j takes row j of every rank's chunk. C's output holds only its
+       10 elements, so its rows skip the padding and the empty rank 3:
+
+        B   b00 b01 b02 b03 b04 b05 b06 b07     C   c00 c01 c02 c03 c04
+            b10 b11 b12 b13 b14 b15 b16 b17         c10 c11 c12 c13 c14
+    """
     byte_views = all_gather_output.dtype == torch.uint8
     split_outputs: list[torch.Tensor] = []
-    # (intermediate buffer, output, outer size, whether output drops padding)
+    # (rank-major buffer, output, outer size, whether the output drops padding)
     reassembled: list[tuple[torch.Tensor, torch.Tensor, int, bool]] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        gathered = world_size * split_size  # in all_gather_output's elements
-        copy_output = output
-        if outer_size > 1:
+        # In all_gather_output's elements, which are bytes for byte views
+        gathered = world_size * split_size
+        size = output.nbytes if byte_views else output.numel()
+        dst = output
+        if outer_size > 1 or size < gathered:
             numel = gathered // output.element_size() if byte_views else gathered
-            compact = output.numel() < numel
-            copy_output = output.new_empty(numel)
-            reassembled.append((copy_output, output, outer_size, compact))
-        if byte_views and copy_output.nbytes == gathered:
+            dst = output.new_empty(numel)
+            reassembled.append((dst, output, outer_size, size < gathered))
+            size = gathered
+        if byte_views and size == gathered:
             # View as bytes last: a view of a byte view keeps the byte view alive
-            split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
+            split_outputs.append(dst.view(world_size, -1).view(torch.uint8))
             continue
-        split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        if (split_numel := split_output.numel()) > gathered:  # a smaller payload
-            split_output = split_output[:gathered]
-        elif split_numel < gathered:  # an outer-size-1 output that drops padding
-            split_output = split_output.new_empty(gathered)
-            reassembled.append((split_output.view(output.dtype), output, 1, True))
-        split_outputs.append(split_output.view(world_size, split_size))
+        if byte_views:
+            dst = dst.view(torch.uint8)
+        if size > gathered:  # a smaller payload fills a prefix
+            dst = dst[:gathered]
+        split_outputs.append(dst.view(world_size, split_size))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
-    for copy_output, output, outer_size, compact in reassembled:
-        chunks = copy_output.view(world_size, outer_size, -1)
+    for buffer, output, outer_size, drops_padding in reassembled:
+        chunks = buffer.view(world_size, outer_size, -1)
         rows = output.view(outer_size, -1)
-        if not compact:
+        if not drops_padding:
             torch.cat(chunks.unbind(0), dim=1, out=rows)
             continue
-        # Full chunks come first, then a prefix of the next rank's chunk
+        # torch.chunk gives full chunks, at most one short chunk, then empty ones,
+        # so each row is num_full whole chunks and then a tail of the short chunk
         chunk_size = chunks.size(2)
         num_full, tail = divmod(rows.size(1), chunk_size)
         full_size = num_full * chunk_size
