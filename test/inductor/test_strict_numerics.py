@@ -279,6 +279,74 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @ops(
+        [op for op in op_db if op.name == "_native_batch_norm_legit"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    def test_batch_norm_parameter_gradients(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype, requires_grad=True):
+            if len(sample.args) != 7:
+                continue
+
+            def fn(inp, *args):
+                args = tuple(
+                    x.clone() if isinstance(x, torch.Tensor) else x for x in args
+                )
+                return op.op(inp, *args)[0]
+
+            # Request parameter gradients while keeping the input gradient disabled.
+            inp = sample.input.detach()
+            parameters = sample.args[:2]
+            expected = fn(inp, *sample.args)
+            actual = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})(
+                inp, *sample.args
+            )
+            gradient = torch.ones_like(expected)
+            self.assertTrue(
+                _outputs_equal(
+                    torch.autograd.grad(actual, parameters, gradient),
+                    torch.autograd.grad(expected, parameters, gradient),
+                )
+            )
+
+    @ops(
+        [op for op in op_db if op.name == "_native_batch_norm_legit"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("view", ("slice", "expand", "convolution"))
+    @config.patch(force_layout_optimization=True, realize_reads_threshold=0)
+    def test_batch_norm_computed_view(self, device, dtype, op, view):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            if sample.input.ndim < 3 or (
+                view == "convolution" and sample.input.ndim != 4
+            ):
+                continue
+
+            def fn(inp, *args):
+                inp = inp + 1
+                if view == "slice":
+                    inp = inp[..., ::2]
+                elif view == "expand":
+                    inp = inp[:, :, :1].expand_as(inp)
+                # Isolate native updates to running statistics between calls.
+                args = tuple(
+                    x.clone() if isinstance(x, torch.Tensor) else x for x in args
+                )
+                result = op.op(inp, *args, **sample.kwargs)
+                if view == "convolution":
+                    # A convolution consumer makes Inductor prefer channels last.
+                    weight = inp.new_ones((inp.shape[1], 1, 1, 1))
+                    result = (
+                        *result,
+                        torch.nn.functional.conv2d(inp, weight, groups=inp.shape[1]),
+                    )
+                return result
+
+            actual = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})(
+                sample.input, *sample.args
+            )
+            self.assertTrue(_outputs_equal(actual, fn(sample.input, *sample.args)))
+
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
