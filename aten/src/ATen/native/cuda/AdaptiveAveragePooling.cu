@@ -450,7 +450,7 @@ namespace {
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d(): Expected 4D tensor, but got ",
                     input.sizes());
 
@@ -612,7 +612,7 @@ namespace {
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got ", input.ndimension());
 
         int sizeB = input.size(0);
