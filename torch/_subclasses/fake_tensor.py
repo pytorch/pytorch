@@ -14,7 +14,17 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Literal, Self, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    Literal,
+    overload,
+    Self,
+    TYPE_CHECKING,
+    TypeGuard,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypedDict, Unpack
 from weakref import ReferenceType
 
@@ -779,6 +789,22 @@ def _exit_fake_mode(
             torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
 
+# The ShapeEnv from_tensor converts with, shared with CppFakeTensorMode
+def _from_tensor_shape_env(
+    mode: FakeTensorMode | CppFakeTensorMode,
+    static_shapes: bool | None,
+    symbolic_context: SymbolicContext | None,
+    /,
+) -> ShapeEnv | None:
+    if static_shapes is None:
+        static_shapes = mode.static_shapes
+    if static_shapes:
+        if symbolic_context is not None:
+            raise AssertionError("cannot set both static_shapes and symbolic_context")
+        return None
+    return mode.shape_env
+
+
 @typing.final
 class CppFakeTensorMode:
     # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
@@ -797,7 +823,11 @@ class CppFakeTensorMode:
     )
 
     def __init__(
-        self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
+        self,
+        *,
+        shape_env: ShapeEnv | None = None,
+        allow_non_fake_inputs: bool = False,
+        static_shapes: bool | None = None,
     ) -> None:
         import torch._functorch.config
 
@@ -810,6 +840,8 @@ class CppFakeTensorMode:
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
         self._cpp_mode._stack_trace = traceback.extract_stack()
         self.allow_non_fake_inputs = allow_non_fake_inputs
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
 
     @classmethod
     def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
@@ -849,6 +881,41 @@ class CppFakeTensorMode:
     @allow_non_fake_inputs.setter
     def allow_non_fake_inputs(self, value: bool) -> None:
         self._cpp_mode.allow_non_fake_inputs = value
+
+    @property
+    def static_shapes(self) -> bool:
+        return self._cpp_mode.static_shapes
+
+    @static_shapes.setter
+    def static_shapes(self, value: bool) -> None:
+        self._cpp_mode.static_shapes = value
+
+    # Like FakeTensorMode.from_tensor, for C++ fakes
+    def from_tensor(
+        self,
+        tensor: Tensor,
+        *,
+        static_shapes: bool | None = None,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
+        if (
+            torch._C._maybe_get_fake_mode(tensor) is self
+            and static_shapes is None
+            and source is None
+            and symbolic_context is None
+        ):
+            return tensor
+
+        return self.fake_tensor_converter.from_real_tensor(
+            self,
+            tensor,
+            shape_env=_from_tensor_shape_env(self, static_shapes, symbolic_context),
+            source=source,
+            symbolic_context=symbolic_context,
+            trace=trace,
+        )
 
     # Same as FakeTensorMode.avoid_device_init
     @property
@@ -1041,6 +1108,7 @@ class FakeTensorConverter:
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
+    @overload
     def from_real_tensor(
         self,
         fake_mode: FakeTensorMode,
@@ -1051,7 +1119,32 @@ class FakeTensorConverter:
         source: Source | None = None,
         symbolic_context: SymbolicContext | None = None,
         trace: bool = True,
-    ) -> FakeTensor:
+    ) -> FakeTensor: ...
+
+    @overload
+    def from_real_tensor(
+        self,
+        fake_mode: CppFakeTensorMode,
+        t: Tensor,
+        make_constant: bool = False,
+        shape_env: ShapeEnv | None = None,
+        *,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor: ...
+
+    def from_real_tensor(
+        self,
+        fake_mode: FakeTensorMode | CppFakeTensorMode,
+        t: Tensor,
+        make_constant: bool = False,
+        shape_env: ShapeEnv | None = None,
+        *,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -1075,6 +1168,9 @@ class FakeTensorConverter:
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
+        # A C++ fake cannot report the mkldnn layout yet
+        if t.is_mkldnn and isinstance(fake_mode, CppFakeTensorMode):
+            raise UnsupportedFakeTensorException("mkldnn nyi in C++ fake tensors")
         if type(t) is torch.nn.Parameter:
             if make_constant:
                 raise AssertionError("make_constant must be False for nn.Parameter")
@@ -1086,7 +1182,7 @@ class FakeTensorConverter:
         # have different devices.
         def mk_fake_tensor(
             make_meta_t: Callable[[], object], device: torch.device | str
-        ) -> FakeTensor:
+        ) -> Tensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -1095,6 +1191,13 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
+                if isinstance(fake_mode, CppFakeTensorMode):
+                    return torch._C._from_meta_and_device(
+                        # pyrefly: ignore [bad-argument-type]
+                        make_meta_t(),
+                        torch.device(device),
+                        fake_mode._cpp_mode,
+                    )
                 return FakeTensor(
                     fake_mode,
                     # pyrefly: ignore [bad-argument-type]
@@ -1109,6 +1212,8 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
+            # A C++ mode's converter holds C++ fakes, not FakeTensors
+            # pyrefly: ignore [bad-argument-type]
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
@@ -1242,7 +1347,11 @@ class FakeTensorConverter:
                             ),
                         )
         if make_constant:
-            self.add_constant_storage_mapping(out)
+            if isinstance(out, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                self.add_constant_storage_mapping(out)
+            else:
+                # The C++ mode tracks the constant's storage aliases itself
+                torch._C._set_fake_constant(out, constant)
         # NB: meta_converter set the memo
         return out
 
@@ -1310,18 +1419,27 @@ def allow_non_fake_inputs_temporarily(
 
 @contextlib.contextmanager
 def in_kernel_invocation_manager(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
 ) -> Generator[None, None, None]:
     # See: note [Fake Tensor Dispatch Keys]
-    prev_in_kernel = fake_mode.in_kernel_invocation
+    # A CppFakeTensorMode has no in_kernel_invocation flag: C++ fakes read the
+    # thread-local one _InKernelInvocation sets below. That flag can be set
+    # without the Meta include (by a bare _InKernelInvocation), so for a C++
+    # mode only the Meta include implies the flag.
+    python_mode = None if isinstance(fake_mode, CppFakeTensorMode) else fake_mode
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    if meta_in_tls != prev_in_kernel:
-        raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    if python_mode is not None:
+        prev_in_kernel = python_mode.in_kernel_invocation
+        if meta_in_tls != prev_in_kernel:
+            raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    elif meta_in_tls and not torch._C._in_kernel_invocation():
+        raise AssertionError(f"{meta_in_tls}, False")
 
     # _InKernelInvocation makes C++ fakes report meta here too, see Note
     # [C++ in_kernel_invocation].
     with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
-        fake_mode.in_kernel_invocation = True
+        if python_mode is not None:
+            python_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)
         with torch._C._PreserveDispatchKeyGuard():
@@ -1329,7 +1447,8 @@ def in_kernel_invocation_manager(
             try:
                 yield
             finally:
-                fake_mode.in_kernel_invocation = prev_in_kernel
+                if python_mode is not None:
+                    python_mode.in_kernel_invocation = prev_in_kernel
                 # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
 
 
@@ -3926,19 +4045,10 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             return tensor
 
-        shape_env: ShapeEnv | None = self.shape_env
-        if static_shapes is None:
-            static_shapes = self.static_shapes
-        if static_shapes:
-            if symbolic_context is not None:
-                raise AssertionError(
-                    "cannot set both static_shapes and symbolic_context"
-                )
-            shape_env = None
         return self.fake_tensor_converter.from_real_tensor(
             self,
             tensor,
-            shape_env=shape_env,
+            shape_env=_from_tensor_shape_env(self, static_shapes, symbolic_context),
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
