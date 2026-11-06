@@ -383,8 +383,11 @@ The TMA path accepts matching-shape, matching-dtype float16, bfloat16 and
 float32 operands, plus Boolean comparison outputs. It supports aligned row
 pitches and aligned nonzero-offset views. Higher-rank permutations are supported
 when their dense dimension groups collapse to a 2-D transpose, optionally with
-an outer batch group, with complete TMA tiles. Inner strides greater than one, broadcasting, in-place
-operations, and unsupported layouts or output buffers fall back to ATen. No
-CuTeDSL vector, conversion, fill/range, or RNG kernel is included. The registry
-scalar-coercion fix is retained so calls with Python-number operands can still
-fall back to ATen correctly.
+an outer batch group, with complete TMA tiles. Inner strides greater than one,
+broadcasting, in-place operations, and unsupported layouts or output
+buffers fall back to ATen.
+Outputs retain ATen's dense physical dimension order. TMA eligibility is checked
+relative to that order, rather than requiring a contiguous output.
+No CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
+The registry scalar-coercion fix is retained so calls with Python-number
+operands can still fall back to ATen correctly.

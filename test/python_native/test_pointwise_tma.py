@@ -92,6 +92,14 @@ class TestPointwiseTma(TestCase):
             launch.assert_called()
             with torch.backends.python_native.cutedsl.disabled():
                 self.assertEqual(actual, expected)
+            if alpha == 0.5:
+                self.assertEqual(actual.stride(), expected.stride())
+        # FP8 preparation relies on clamp preserving a transpose's layout.
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.clamp(x, min=-1, max=1)
+        actual = torch.clamp(x, min=-1, max=1)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
 
     @onlyCUDA
     @skipIfNoCuteDSL

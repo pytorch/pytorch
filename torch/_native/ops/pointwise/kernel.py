@@ -57,7 +57,12 @@ def _pointer(t: torch.Tensor) -> int:
         return t.const_data_ptr()
 
 
-def _layout_key(inputs: Sequence[torch.Tensor], address: int, smem_limit: int) -> tuple:
+def _layout_key(
+    inputs: Sequence[torch.Tensor],
+    address: int,
+    smem_limit: int,
+    output_strides: Sequence[int] | None,
+) -> tuple:
     layouts = tuple(
         _OperandLayout(
             tuple(t.shape),
@@ -68,7 +73,13 @@ def _layout_key(inputs: Sequence[torch.Tensor], address: int, smem_limit: int) -
         )
         for t in inputs
     )
-    return layouts, tuple(inputs[0].shape), address % _MIN_ALIGNMENT, smem_limit
+    return (
+        layouts,
+        tuple(inputs[0].shape),
+        address % _MIN_ALIGNMENT,
+        smem_limit,
+        None if output_strides is None else tuple(output_strides),
+    )
 
 
 def _tma_smem_layout(dtype: Any, box: int, transposed: bool) -> Any:
@@ -302,7 +313,6 @@ def can_run(
         or target.dtype not in (ref.dtype, torch.bool)
         or not torch.can_cast(out_dtype, target.dtype)
         or tuple(target.shape) != tuple(shape)
-        or not target.is_contiguous()
         or target.is_neg()
         or target.is_conj()
         or torch._C._is_cow_tensor(target)  # pyrefly: ignore[missing-attribute]
@@ -310,7 +320,12 @@ def can_run(
     ):
         return False
     address = 0 if target is None else _pointer(target)
-    key = _layout_key(inputs, address, _hw.caps(ref.device).smem_per_block_optin)
+    key = _layout_key(
+        inputs,
+        address,
+        _hw.caps(ref.device).smem_per_block_optin,
+        target.stride() if target is not None else None,
+    )
     return _layout_config(*key) is not None
 
 
@@ -374,7 +389,9 @@ def run(
     comp_type: type[cutlass.Numeric],
 ) -> None:
     caps = _hw.caps(inputs[0].device)
-    layout_key = _layout_key(inputs, _pointer(out), caps.smem_per_block_optin)
+    layout_key = _layout_key(
+        inputs, _pointer(out), caps.smem_per_block_optin, out.stride()
+    )
     plan_key = (
         aten_name,
         id(fn),
