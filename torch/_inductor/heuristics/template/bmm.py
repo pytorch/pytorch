@@ -183,6 +183,6 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
         # Skip the gate (and its guard) when this template yields no configs.
         allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
-            m, n, k, kernel_inputs.device_type, dtype
+            m, n, k, kernel_inputs.device_type, dtype, batched=True
         )
         return {"ALLOW_TF32": allow_tf32}
