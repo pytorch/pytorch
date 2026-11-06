@@ -820,6 +820,15 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(tx, self.is_nested)
         return None
 
+    def method_attr_imag(self, tx: "InstructionTranslatorBase") -> None:
+        # Tracing getattr(x, "imag") would raise this TypeError inside the fake
+        # tensor call, where user code cannot catch it.
+        if self.dtype is not None and not self.dtype.is_complex:
+            raise_type_error(
+                tx, "imag is not implemented for tensors with non-complex dtypes."
+            )
+        return None
+
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
