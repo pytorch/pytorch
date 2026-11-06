@@ -1781,6 +1781,29 @@ def _clamp_slice_end_to_start(end, start):
     return Max(end, start)
 
 
+def _dynamic_view_storage_offset(x, dim, index, symbol, *, clamp):
+    # A graph binding describes captured reference metadata, even if lowering
+    # restored a producer's native layout. Bind that offset in its own geometry;
+    # the physical view address uses the lowered base's geometry separately.
+    from torch.fx.experimental.proxy_tensor import _normalize_original_aten_index
+
+    dim = int(dim)
+    reference = _original_aten_reference_value(V.graph.current_node.args[0])
+    buffer = ir.DynamicSelectStorageOffset(
+        symbol,
+        index,
+        convert_symint_to_expr(reference.storage_offset()),
+        convert_symint_to_expr(reference.stride(dim)),
+        convert_symint_to_expr(reference.size(dim)),
+        clamp=clamp,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+    size = x.get_size()[dim]
+    normalized = _normalize_original_aten_index(index, size, clamp=clamp)
+    return x.get_layout().offset + x.get_stride()[dim] * normalized
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1877,17 +1900,9 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     else:
         if stride is None:
             raise AssertionError("expected: stride is not None")
-        b_storage = ir.DynamicSelectStorageOffset(
-            sym_storage,
-            start,
-            x.get_layout().offset,
-            stride[dim],
-            x.get_size()[dim],
-            clamp=True,
+        new_storage_offset = _dynamic_view_storage_offset(
+            x, dim, start, sym_storage, clamp=True
         )
-        b_storage.name = V.graph.register_buffer(b_storage)
-        V.graph.register_operation(b_storage)
-        new_storage_offset = sym_storage
 
     new_sizes = list(x.get_size())
     new_strides = list(stride)
@@ -2807,17 +2822,9 @@ def select(x, dim, idx):
     x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
-    new_storage_offset = unbacked_offset_sym
-    buffer = ir.DynamicSelectStorageOffset(
-        unbacked_offset_sym,
-        idx,
-        x.get_layout().offset,
-        new_stride[dim],
-        x.get_size()[dim],
-        clamp=False,
+    new_storage_offset = _dynamic_view_storage_offset(
+        x, dim, idx, unbacked_offset_sym, clamp=False
     )
-    buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
 
     del new_size[dim]
     del new_stride[dim]
@@ -8203,7 +8210,7 @@ def _cuda_mul_native_mutation(node):
     )
 
 
-def _cuda_mul_native_value(node):
+def _original_aten_reference_value(node):
     mutation = node.meta.get("original_aten_mutation")
     return mutation[1] if isinstance(mutation, tuple) else node.meta.get("val")
 
@@ -8234,7 +8241,7 @@ def _cuda_mul_mutation_destination(node, native_destination=None, input_node=Non
             sources, ((input_node, V.graph.graph_inputs[input_node.target]),)
         )
     for source, destination in sources:
-        value = _cuda_mul_native_value(source)
+        value = _original_aten_reference_value(source)
         if isinstance(value, torch.Tensor) and get_storage(value) == get_storage(
             native_destination
         ):
@@ -8341,7 +8348,7 @@ def _cuda_mul_mutation_storage_nodes(graph):
                 current_mutation[0]
                 if isinstance(current_mutation, tuple)
                 and _cuda_mul_native_mutation(current)
-                else _cuda_mul_native_value(current)
+                else _original_aten_reference_value(current)
             )
             native_alias = (
                 isinstance(mutation, tuple)
@@ -8367,7 +8374,15 @@ def _cuda_mul_mutation_storage_nodes(graph):
 
 def _cuda_mul_original_mutation_operand(node):
     from torch._functorch._aot_autograd.descriptors import InputMutationAOTOutput
+    from torch.fx.experimental.proxy_tensor import (
+        _replay_original_aten_view,
+        disable_proxy_modes_tracing,
+    )
+    from torch.fx.experimental.symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+    )
     from torch.fx.passes.reinplace import _is_view_op
+    from torch.utils._python_dispatch import _disable_current_modes
 
     from .fx_utils import get_node_storage, get_storage
 
@@ -8384,10 +8399,9 @@ def _cuda_mul_original_mutation_operand(node):
         if not isinstance(output, torch.fx.Node):
             continue
         output_mutation = output.meta.get("original_aten_mutation")
-        if (
-            not isinstance(desc, InputMutationAOTOutput)
-            or not isinstance(output_mutation, tuple)
-            or get_storage(output_mutation[0]) != get_storage(mutation[0])
+        if not isinstance(desc, InputMutationAOTOutput) or (
+            isinstance(output_mutation, tuple)
+            and get_storage(output_mutation[0]) != get_storage(mutation[0])
         ):
             continue
         for primal in graph_module.graph.nodes:
@@ -8413,9 +8427,16 @@ def _cuda_mul_original_mutation_operand(node):
                         (arg.args[1:], arg.kwargs),
                     )
                     base = replay(arg.args[0])
-                    return (
-                        arg.target(base, *args, **kwargs) if base is not None else None
-                    )
+                    if base is None:
+                        return None
+                    with (
+                        disable_proxy_modes_tracing(),
+                        _disable_current_modes(),
+                        _ignore_fresh_unbacked_symbols_tls_context(),
+                    ):
+                        return _replay_original_aten_view(
+                            base, arg.target, args, kwargs, arg
+                        )
                 previous = arg.meta.get("original_aten_mutation")
                 if (
                     isinstance(previous, tuple)
@@ -8434,11 +8455,11 @@ def _cuda_mul_original_mutation_operand(node):
                 return None
 
             native = replay(node.args[0])
-            return (
-                _cuda_mul_mutation_destination(node, native, primal)
-                if native is not None
-                else None
-            )
+            if native is not None:
+                # Autograd may create the final view scatter without original
+                # mutation metadata. Its AOT output descriptor and the operand's
+                # exact replay to this primal still prove the caller geometry.
+                return _cuda_mul_mutation_destination(node, native, primal)
     return None
 
 
@@ -8458,12 +8479,26 @@ def _cuda_mul_execution(a, b):
         and is_strict_cuda_triton(a.get_device())
     ):
         return None
+    local_destination = None
     if node.meta.get("original_aten") == aten.mul_.Tensor:
         # Autograd saves a clone before functionalizing mul_; native execution
         # still uses the destination's original geometry and pointer alignment.
         destination = _cuda_mul_original_mutation_operand(node)
+        if destination is None:
+            destination = _cuda_mul_mutation_destination(node)
         if destination is not None:
             a = destination[0]
+        else:
+            mutation = node.meta.get("original_aten_mutation")
+            if not (
+                isinstance(mutation, tuple)
+                and len(mutation) == 3
+                and mutation[2] is False
+            ):
+                return None
+            # Clone elimination can expose a caller input as the loader, while
+            # native mul_ still observes the local destination's fresh storage.
+            local_destination = mutation[0]
     from torch._tensor_iterator import binary_op
     from torch.utils._python_dispatch import _disable_current_modes
 
@@ -8473,7 +8508,10 @@ def _cuda_mul_execution(a, b):
             raise AssertionError("strict CUDA mul requires tensor node operands")
         values.append(arg.meta["val"])
     geometry = []
-    for inp, value in zip((a, b), values):
+    for index, (inp, value) in enumerate(zip((a, b), values)):
+        if index == 0 and local_destination is not None:
+            geometry.append((local_destination.shape, local_destination.stride()))
+            continue
         data = inp
         while isinstance(data, (MutableBox, BaseView)):
             data = data.data
@@ -8531,7 +8569,12 @@ def _cuda_mul_execution(a, b):
         strides = tuple(iterator.output().stride())
         contiguous = sympy.true
     alignments: list[tuple[str | None, sympy.Expr]] = []
-    for inp, value in zip((a, b), values):
+    for index, (inp, value) in enumerate(zip((a, b), values)):
+        if index == 0 and local_destination is not None:
+            alignments.append(
+                (None, convert_symint_to_expr(local_destination.storage_offset()))
+            )
+            continue
         data = inp
         while isinstance(data, (MutableBox, BaseView)):
             data = data.data
@@ -8568,6 +8611,11 @@ def _cuda_mul_pointwise(a, b, execution):
         return result
 
     def inner_fn(index):
+        for name, _ in alignments:
+            if name is not None:
+                # Alignment reads the backing pointer even when values come
+                # from an autograd clone. Record its lifetime before scheduling.
+                ops.load(name, sympy.Integer(0))
         native_index = ops.index_expr(
             sum(i * s for i, s in zip(index, strides)), torch.int64
         )

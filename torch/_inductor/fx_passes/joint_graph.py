@@ -947,7 +947,10 @@ def joint_graph_passes(
                     mutation = (native, node.meta["val"])
             if (
                 isinstance(mutation, tuple)
-                and get_storage(mutation[1]) in native_storages
+                and (
+                    get_storage(mutation[1]) in native_storages
+                    or node.meta.get("original_aten") == aten.mul_.Tensor
+                )
                 and get_node_storage(node) == get_storage(mutation[1])
             ):
                 node.meta["original_aten_mutation"] = (
