@@ -159,10 +159,10 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 |---|---|---|---|
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
-| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| Pre-review | `triaged` | Assigned reviewers | Assigned reviewers accept by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, and object with a thumbs-down or "Request changes". The PR moves to `in progress` once every assigned reviewer accepts, or when the one-week pre-review deadline passes with no objection. A reviewer who rejects it closes it or moves it back to draft. |
 | In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
-| Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
+| Accepted | (approval satisfying merge rules) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
 
@@ -190,6 +190,16 @@ The PR must follow the [AI policy](AI_POLICY.md).
 It is the author's responsibility to give the reviewers all the information they'd need to make a quick (<1m) decision for faster turnaround.
 It is always ok for a reviewer to reject a PR at pre-review, including on the basis that the description is not clear enough and the assessment would be too time consuming.
 If the PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
+Pre-review has a one-week deadline, which starts when the PR enters pre-review: when it is triaged, marked ready for review after being a draft, or when its `missing actionable issue` label is removed.
+Adding reviewers does not extend it.
+Reviewers who have not responded by the deadline no longer block the PR.
+Objections (a thumbs-down on the PR description or an outstanding change request) keep blocking until withdrawn.
+The PR Status section of the pytorchbot comment shows who has responded and the exact deadline.
+
+Only an approval that satisfies [`.github/merge_rules.yaml`](.github/merge_rules.yaml) accepts a PR: the approver must be named by a rule that covers every file the PR changes.
+Such an approval also ends pre-review.
+Other approvals are welcome feedback but leave the PR in its current stage.
 
 To assess a PR:
 
