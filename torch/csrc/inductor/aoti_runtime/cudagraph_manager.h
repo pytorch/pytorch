@@ -299,30 +299,27 @@ class CudaGraphManager {
   // The dtypes _foreach_copy_'s CUDA kernel fuses; it throws on lists of
   // others, such as float8_e8m0fnu. Copying the rest one by one is always
   // correct, so a model built from this header just won't fuse dtypes the
-  // kernel learns later.
+  // kernel learns later. Read from the shim once.
   static bool fused_dtype(int32_t dtype) {
-    for (int32_t fused :
-         {aoti_torch_dtype_float32(),
-          aoti_torch_dtype_float64(),
-          aoti_torch_dtype_float16(),
-          aoti_torch_dtype_bfloat16(),
-          aoti_torch_dtype_float8_e4m3fn(),
-          aoti_torch_dtype_float8_e4m3fnuz(),
-          aoti_torch_dtype_float8_e5m2(),
-          aoti_torch_dtype_float8_e5m2fnuz(),
-          aoti_torch_dtype_complex64(),
-          aoti_torch_dtype_complex128(),
-          aoti_torch_dtype_bool(),
-          aoti_torch_dtype_uint8(),
-          aoti_torch_dtype_int8(),
-          aoti_torch_dtype_int16(),
-          aoti_torch_dtype_int32(),
-          aoti_torch_dtype_int64()}) {
-      if (dtype == fused) {
-        return true;
-      }
-    }
-    return false;
+    static const int32_t kFused[] = {
+        aoti_torch_dtype_float32(),
+        aoti_torch_dtype_float64(),
+        aoti_torch_dtype_float16(),
+        aoti_torch_dtype_bfloat16(),
+        aoti_torch_dtype_float8_e4m3fn(),
+        aoti_torch_dtype_float8_e4m3fnuz(),
+        aoti_torch_dtype_float8_e5m2(),
+        aoti_torch_dtype_float8_e5m2fnuz(),
+        aoti_torch_dtype_complex64(),
+        aoti_torch_dtype_complex128(),
+        aoti_torch_dtype_bool(),
+        aoti_torch_dtype_uint8(),
+        aoti_torch_dtype_int8(),
+        aoti_torch_dtype_int16(),
+        aoti_torch_dtype_int32(),
+        aoti_torch_dtype_int64()};
+    return std::find(std::begin(kFused), std::end(kFused), dtype) !=
+        std::end(kFused);
   }
 
   // Whether an input, or a dense output, covering `extent` elements joins a
