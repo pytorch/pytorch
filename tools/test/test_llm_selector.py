@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from unittest import mock
 
 
@@ -25,6 +25,12 @@ from tools.testing.llm_selector.selection import (
     normalize_test_name,
     Selection,
 )
+from tools.testing.target_determination.heuristics.interface import TestPrioritizations
+from tools.testing.test_run import TestRun
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Iterator
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -1470,6 +1476,129 @@ g () {
         )
 
 
+class TestSplit(unittest.TestCase):
+    def split(
+        self,
+        sel: Selection,
+        scores: dict[TestRun, float],
+        times: dict[str, float],
+        prev: Collection[str] = (),
+        td: Collection[str] = (),
+        share: float | None = None,
+        config: str = "default",
+    ) -> tuple[list[str], list[str], selection.Split]:
+        tp = TestPrioritizations(times, scores)
+        ranked = tp.get_all_tests()
+        split = sel.split(
+            ranked,
+            tp.get_score,
+            times,
+            config,
+            previous_failures=prev,
+            td_include=td,
+            share=share,
+        )
+        return [str(x) for x in split.include], [str(x) for x in split.exclude], split
+
+    def test_hedge_is_greedy_in_rank_order(self) -> None:
+        scores = {"a": 1, "b": 0.9, "c": 0.8, "d": 0.7, "untimed": 0.6, "neg": -0.5}
+        times: dict[str, float] = {"a": 10, "b": 150, "c": 52, "d": 48, "untimed": 0}
+        times |= {"zero": 1, "neg": 1, "rest": 738}
+        # The budget is 20% of 1000s = 200s. b leaves 50s, so c (52s, fits
+        # alone) is skipped and d (48s) still fits, leaving 2s that the
+        # unscored and negatively scored 1s files may not use. With 19% d does
+        # not fit, with 21% c does.
+        ranked = {TestRun(f): s for f, s in scores.items()}
+        sel = Selection(files={"a"}, candidates=set(times))
+        include, exclude, split = self.split(sel, ranked, times)
+        self.assertEqual(include, ["a", "b", "d"])
+        self.assertEqual(exclude, ["c", "untimed", "rest", "zero", "neg"])
+        self.assertEqual(split.covered, {"a"})
+        self.assertEqual((split.hedged, split.budget), ({"b", "d"}, 200))
+        for share, hedged in ((0.19, {"b"}), (0.21, {"b", "c"})):
+            split = self.split(sel, ranked, times, share=share)[2]
+            self.assertEqual(split.hedged, hedged, share)
+
+    def test_nothing_chosen_sets_chose_nothing(self) -> None:
+        # A targeted call such as `run_test.py --include test_cuda`: one file
+        # is all of the call's time, so it never fits the 20% hedge.
+        scores, times = {TestRun("test_cuda"): 1.0}, {"test_cuda": 100.0}
+        for files, include in (({"a"}, []), ({"test_cuda"}, ["test_cuda"])):
+            sel = Selection(files=files, candidates=set(times) | files)
+            got, _, split = self.split(sel, scores, times)
+            self.assertEqual((got, split.chose_nothing), (include, not include))
+
+    def test_partial_runs_of_a_file_are_charged_once(self) -> None:
+        f_a, f_rest = TestRun("f", included=["A"]), TestRun("f", excluded=["A"])
+        g_b = TestRun("g", included=["B"])
+        scores = {f_a: 1, g_b: 1, f_rest: 0.6, TestRun("h"): 0.5}
+        times: dict[str, float] = {"f": 40, "g": 30, "h": 130, "r": 800}
+        # f's two scored runs cost 40s once, and g's positive class pulls in
+        # its unscored rest, so h (130s) fits the 200s budget exactly.
+        sel = Selection(candidates=set(times))
+        include, exclude, split = self.split(sel, scores, times)
+        self.assertEqual(split.hedged, {"f", "g", "h"})
+        self.assertEqual(exclude, ["r"])
+        self.assertEqual(include, ["f, A", "g, B", "f, not (A)", "h", "g, not (B)"])
+
+    def test_previous_failures_in_td_always_run_outside_the_budget(self) -> None:
+        scores = {TestRun("s"): 1, TestRun("p"): 0.5, TestRun("q"): 0.4}
+        times: dict[str, float] = {"a": 10, "s": 150, "p": 100, "q": 60, "big": 600}
+        times |= {"untimed": 0, "rest": 80}
+        sel = Selection(files={"a"}, candidates={*times, "tiny"})
+        include, exclude, split = self.split(sel, scores, times)
+        self.assertEqual((include, split.hedged), (["s", "a"], {"s"}))
+        # p always runs and leaves the whole 200s budget to s, so q (60s)
+        # still does not fit next to s.
+        td = {"s", "p", "a"}
+        include, exclude, split = self.split(sel, scores, times, {"p", "a"}, td)
+        self.assertEqual(include, ["s", "p", "a"])
+        self.assertEqual((split.previous_failures_added, split.hedged), ({"p"}, {"s"}))
+        # big (three times the budget, unscored) and untimed also run because
+        # TD runs them, and the hedge still gets the whole budget.
+        scores[TestRun("tiny")] = 0.1
+        times |= {"tiny": 1, "rest": 79}
+        prev, td = {"p", "big", "untimed", "a", "elsewhere"}, {"p", "big", "untimed"}
+        include, exclude, split = self.split(sel, scores, times, prev, td)
+        self.assertEqual(include, ["s", "p", "tiny", "a", "big", "untimed"])
+        self.assertEqual(exclude, ["q", "rest"])
+        self.assertEqual((split.covered, split.budget), ({"a"}, 200))
+        self.assertEqual(split.previous_failures_added, {"p", "big", "untimed"})
+        self.assertEqual(split.hedged, {"s", "tiny"})
+
+    def test_only_a_previous_failure_chosen_is_a_choice(self) -> None:
+        # p is all of TD's include and over the budget, so only its previous
+        # failure runs it.
+        times = {"p": 500.0, "r": 500.0}
+        sel = Selection(candidates=set(times))
+        include, exclude, split = self.split(
+            sel, {TestRun("p"): 1}, times, prev={"p"}, td={"p"}
+        )
+        self.assertEqual((include, exclude), (["p"], ["r"]))
+        self.assertEqual((split.previous_failures_added, split.hedged), ({"p"}, set()))
+        self.assertFalse(split.chose_nothing)
+
+    def test_previous_failures_outside_td_are_hedged_like_other_files(self) -> None:
+        scores = {TestRun("s"): 1, TestRun("big"): 0.8, TestRun("p"): 0.5}
+        times: dict[str, float] = {"s": 150, "big": 600, "p": 40, "rest": 210}
+        # TD runs only s, so big (over budget) does not run and p is hedged
+        # after s like any other scored file.
+        include, exclude, split = self.split(
+            Selection(candidates=set(times)), scores, times, prev={"big", "p"}, td={"s"}
+        )
+        self.assertEqual((include, exclude), (["s", "p"], ["big", "rest"]))
+        self.assertEqual(
+            (split.previous_failures_added, split.hedged), (set(), {"s", "p"})
+        )
+
+    def test_run_all_and_sweeps_take_everything(self) -> None:
+        sweep = Selection(sweeps={"crossref"}, candidates={"a", "b"})
+        times = {"a": 1.0, "b": 1.0}
+        for sel in (Selection(run_all=True), sweep):
+            include, exclude, split = self.split(sel, {}, times, config="crossref")
+            self.assertEqual((include, exclude, split.hedged), (["a", "b"], [], set()))
+
+
 class TestPrompt(unittest.TestCase):
     def test_added_test_files(self) -> None:
         added = [
@@ -2192,7 +2321,7 @@ class TestMain(unittest.TestCase):
             self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
 
     @contextlib.contextmanager
-    def scratch_repo(self) -> Any:
+    def scratch_repo(self) -> Iterator[Path]:
         """A git repo with an empty commit, as REPO_ROOT.
 
         HOME and XDG_CONFIG_HOME move too: git reads a global ignore or

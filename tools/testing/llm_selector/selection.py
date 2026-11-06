@@ -1,11 +1,14 @@
 """The test selection an LLM makes for one change, and how CI applies it.
 
-A selection names test files (paths under test/ without .py), never test
-directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
-ordinary test files in a special mode). A test file runs in a given CI config
-when the selection names the file, names that config as a sweep, or is run_all,
-and so does every test file the model was not shown and every file that
-ALWAYS_COVERED lists for that config.
+A selection names test files (paths under test/ without .py) and wrapper sweeps
+(configs such as dynamo_wrapped that re-run ordinary test files in a special
+mode). A test file is covered in a given CI config when the selection names the
+file, names that config as a sweep, or is run_all, and so is every test file the
+model was not shown and every file that ALWAYS_COVERED lists for the first
+TEST_SH_GLOBS entry the config contains. When run_test.py enforces the
+selection, it runs the covered files, the files that already failed on the PR
+and that TD runs, and, within a hedge budget, TD's positively scored files (see
+HEDGE_SHARE).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ from tools.testing.target_determination.heuristics.edited_by_pr import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable
     from pathlib import Path
+
+    from tools.testing.test_run import TestRun
 
 
 SWEEPS = ("dynamo_wrapped", "crossref")
@@ -80,6 +85,13 @@ MAX_IMPORT_HOPS = 8
 # everything runs for an inductor entry, the cpython/ tests for a CPython entry
 # and the dynamo_wrapped sweep for the others, as for a class that is not found.
 MAX_FAILURE_LIST_CLASSES = 50
+# When enforcing, run_test.py also runs the files that already failed on the
+# PR and that TD runs, whatever their size, and, greedily in rank order, TD's
+# positively scored files that have a known time and fit in this share (20%)
+# of the test time of the call's test list (for a whole config, all its shards
+# together; for a targeted --include call, only those files): TD and the model
+# miss largely different failures.
+HEDGE_SHARE = 0.20
 # Flip only after the HUD and test-infra consumers of the TD exclusions and
 # recall stats handle llm_selection_exclusions and llm_enforced.
 ENFORCEMENT_ENABLED = False
@@ -763,6 +775,51 @@ class Selection:
         always = ALWAYS_COVERED.get(glob, ())
         return whole or test_file in self.files or test_file in always
 
+    def split(
+        self,
+        ranked: list[TestRun],
+        score: Callable[[TestRun], float],
+        file_time: dict[str, float],
+        test_config: str,
+        *,
+        previous_failures: Collection[str] = (),
+        td_include: Collection[str] = (),
+        share: float | None = None,
+    ) -> Split:
+        """Split TD's ranked TestRuns into the covered files, the
+        `previous_failures` files (those that already failed on the PR) that
+        are in `td_include` (TD's split runs them), and a hedge. Those previous
+        failures run whatever their size, as under TD, and are not charged to
+        the hedge: their pool spans the PR's SHAs, build environments and
+        configs, so one large earlier failure would otherwise use up the hedge
+        of every config. A previous failure with any TestRun in TD's include
+        runs its whole file. The hedge is `share` (by default HEDGE_SHARE,
+        20%) of the test time of `ranked`, spent greedily in rank order on the
+        other files with a positively scored TestRun, including the other
+        previous failures. One positive class-level run hedges its whole file
+        at the file's full time. Files without a time are never hedged.
+        Partial TestRuns of one file share its time, so a file is charged once
+        and lands in one batch. If that chooses nothing, chose_nothing is set
+        and include is empty: apply_selection then keeps TD's split, so a call
+        never runs zero files when TD's split runs some."""
+        files = dict.fromkeys(x.test_file for x in ranked)
+        covered = {f for f in files if self.covers(f, test_config)}
+        prev = {f for f in previous_failures if f in files and f in td_include}
+        prev -= covered
+        share = HEDGE_SHARE if share is None else share
+        left = budget = share * sum(file_time.get(f, 0) for f in files)
+        hedged: set[str] = set()
+        chosen = covered | prev
+        for x in ranked:
+            f, t = x.test_file, file_time.get(x.test_file, 0)
+            if f not in chosen and score(x) > 0 and t and t <= left:
+                left -= t
+                hedged.add(f)
+                chosen.add(f)
+        include = [x for x in ranked if x.test_file in chosen]
+        exclude = [x for x in ranked if x.test_file not in chosen]
+        return Split(include, exclude, covered, prev, hedged, budget, not chosen)
+
     def to_json(self) -> dict:
         return {
             "version": SELECTION_VERSION,
@@ -835,3 +892,20 @@ class Selection:
                 file=sys.stderr,
             )
             return None
+
+
+@dataclass
+class Split:
+    """Selection.split's result: the TestRuns to run and to skip, and which
+    files run because they are covered, already failed on the PR and are in
+    TD's split, or are hedged (disjoint sets), the hedge budget in seconds
+    (which the previous failures do not use), and whether it chose no file
+    (chose_nothing), in which case include is empty."""
+
+    include: list[TestRun]
+    exclude: list[TestRun]
+    covered: set[str]
+    previous_failures_added: set[str]
+    hedged: set[str]
+    budget: float
+    chose_nothing: bool
