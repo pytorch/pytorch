@@ -1,3 +1,7 @@
+import unittest
+from contextlib import contextmanager, ExitStack
+from unittest.mock import patch
+
 import torch
 from torch.profiler import (
     kineto_available,
@@ -5,6 +9,46 @@ from torch.profiler import (
     ProfilerActivity,
     supported_activities,
 )
+from torch.testing._internal.common_utils import IS_S390X, IS_WINDOWS
+
+
+def _profiler_test_skip_reason():
+    # Preserve test_profiler.py's runner exclusions when moving its tests.
+    if IS_S390X:
+        return "Profiler tests disabled on s390x"
+    if IS_WINDOWS:
+        from torch.testing._internal.common_cuda import SM89OrLater
+
+        if SM89OrLater:
+            return "Profiler tests disabled on Windows SM89 and later"
+    return None
+
+
+def skipIfProfilerUnsupported(test):
+    reason = _profiler_test_skip_reason()
+    return unittest.skip(reason)(test) if reason else test
+
+
+@contextmanager
+def forbid_profiler_capture():
+    with ExitStack() as stack:
+        for operation in ("_prepare_profiler", "_enable_profiler", "_disable_profiler"):
+            stack.enter_context(
+                patch(
+                    f"torch.autograd.profiler.{operation}",
+                    side_effect=AssertionError(f"Unexpected native call: {operation}"),
+                )
+            )
+        yield
+
+
+def get_profiler_activities(device_type):
+    activities = [ProfilerActivity.CPU]
+    if device_type not in ("cpu", "meta"):
+        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if device_activity and device_activity in supported_activities():
+            activities.append(device_activity)
+    return activities
 
 
 def initialize_kineto_with_cuda():
