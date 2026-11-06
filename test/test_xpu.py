@@ -622,6 +622,28 @@ print(torch.xpu.is_initialized())
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.sycl_event, event.event_id)
 
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_multi_events_elapsed_time(self):
+        s0 = torch.xpu.current_stream(0)
+        s1 = torch.xpu.current_stream(1)
+
+        with s0:
+            start_event = torch.xpu.Event(enable_timing=True)
+            start_event.record()
+            _ = torch.randn(1000, device="xpu")
+
+        with s1:
+            end_event = torch.xpu.Event(enable_timing=True)
+            s0.synchronize()
+            end_event.record()
+
+        start_event.synchronize()
+        end_event.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError, "Both events must be on the same device"
+        ):
+            start_event.elapsed_time(end_event)
+
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
         self.assertEqual(stream.device_index, torch.xpu.current_device())
