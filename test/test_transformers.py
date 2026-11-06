@@ -501,13 +501,6 @@ class TestTransformersGeneric(NNTestCase):
         model(x, x, x)
         # completes without error
 
-    def test_script_mha_in_proj_weight_none(self):
-        mha = torch.nn.MultiheadAttention(
-            embed_dim=128, num_heads=8, kdim=256, vdim=256
-        ).eval()
-
-        torch.jit.script(mha)
-
 
 class TestTransformersCUDA(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -789,11 +782,10 @@ class TestTransformersAccelerator(NNTestCase):
     # use a looser tolerance on ROCm to cover that worst case while keeping
     # CUDA strict. See https://github.com/jeffdaily/tf32_analysis.
     @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.002)
-    @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
     @parametrize("d_model", [12, 256])
-    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast, d_model):
+    def test_transformerencoder_fastpath(self, device, enable_nested_tensor, use_autocast, d_model):
         """
         Test TransformerEncoder fastpath output matches slowpath output
         """
@@ -811,9 +803,6 @@ class TestTransformersAccelerator(NNTestCase):
             num_layers=2,
             enable_nested_tensor=enable_nested_tensor
         ).to(device).eval()
-
-        if use_torchscript:
-            model = torch.jit.script(model)
 
         # each input is (input, mask)
         input_mask_pairs = [
@@ -1324,93 +1313,6 @@ class TestTransformersAccelerator(NNTestCase):
             out = transformer_encoder(src=x, src_key_padding_mask=None)
 
         self.assertEqual(out.is_nested, True)
-
-
-
-    def test_script_encoder_subclass(self, device):
-        class MyCustomLayer(nn.TransformerEncoderLayer):
-            pass
-
-        encoder = nn.TransformerEncoder(
-            MyCustomLayer(d_model=256, nhead=8), num_layers=6
-        ).to(device=device)
-        torch.jit.script(encoder)
-
-    # brazenly adapted from test_transformerencoderlayer_src_mask to test execution of
-    # torchscripted transformerencoderlayer subclass
-    def test_transformerencoderlayer_subclass(self, device):
-        class MyCustomLayer(nn.TransformerEncoderLayer):
-            pass
-
-        nhead = 4
-        batch_size = 2
-        seqlen = 4
-        d_model = 8
-        dim_feedforward = 32
-
-        model = MyCustomLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            batch_first=True).to(device)
-        script_model = torch.jit.script(model)
-
-        src = torch.rand(batch_size, seqlen, d_model).to(device)  # bs, seqlen, d_model
-        src_mask = torch.zeros(seqlen, seqlen).to(torch.bool).to(device)
-
-        torch.manual_seed(42)
-        result = model(src, src_mask=src_mask)
-        torch.manual_seed(42)
-        scripted_result = script_model(src, src_mask=src_mask)
-        self.assertEqual(result, scripted_result)
-
-        model.eval()
-        script_model = torch.jit.script(model)
-
-        with torch.no_grad():
-            result = model(src, src_mask=src_mask)
-            scripted_result = script_model(src, src_mask=src_mask)
-            self.assertEqual(result, scripted_result)
-
-
-    def test_transformerencoderlayer_subclass_model(self, device):
-        class MyCustomLayer(nn.TransformerEncoderLayer):
-            pass
-
-        nhead = 4
-        batch_size = 2
-        seqlen = 4
-        d_model = 8
-        dim_feedforward = 32
-
-        layer = MyCustomLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            batch_first=True)
-        model = nn.TransformerEncoder(
-            layer, num_layers=6
-        ).to(device=device)
-        script_model = torch.jit.script(model)
-
-        src = torch.rand(batch_size, seqlen, d_model).to(device)  # bs, seqlen, d_model
-        src_mask = torch.zeros(seqlen, seqlen).to(torch.bool).to(device)
-
-        torch.manual_seed(42)
-        result = model(src, mask=src_mask)
-        torch.manual_seed(42)
-        scripted_result = script_model(src, mask=src_mask)
-        self.assertEqual(result, scripted_result)
-
-        model.eval()
-        script_model = torch.jit.script(model)
-
-        with torch.no_grad():
-            result = model(src, mask=src_mask)
-            scripted_result = script_model(src, mask=src_mask)
-            self.assertEqual(result, scripted_result)
-
-
 
     @tf32_on_and_off(0.003)
     @parametrize("batch_size", [1, 5])

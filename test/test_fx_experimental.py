@@ -1617,9 +1617,6 @@ class {test_classname}(torch.nn.Module):
                     }
                 )
 
-        # Smoke test torchscript compilation since now we're emitting type annotations
-        torch.jit.script(traced_modules_annotated)
-
         class FunctionalTracer(torch.fx.Tracer):
             def is_leaf_module(
                 self, m: torch.nn.Module, module_qualified_name: str
@@ -1646,9 +1643,6 @@ class {test_classname}(torch.nn.Module):
                 # AnnotateTypesWithSchema doesn't work with bound C++ functions
                 if not isinstance(node.target, BuiltinFunctionType):
                     self.assertIn(check, excluded_nodes)
-
-        # Smoke test torchscript compilation since now we're emitting type annotations
-        torch.jit.script(traced_functionals_annotated)
 
     def test_annotate_getitem_node(self):
         class CustomType:

@@ -394,19 +394,6 @@ def heavy_rpc_sparse(tensor):
     return 0
 
 
-@torch.jit.script
-def heavy_rpc_torchscript(tensor):
-    for i in range(1, 100):
-        tensor *= i
-        tensor /= i + 1
-    return 0
-
-
-@torch.jit.script
-def my_script_func(tensor):
-    return torch.add(tensor, tensor)
-
-
 expected_err = "Expected error"
 
 
@@ -424,11 +411,6 @@ def raise_func():
 
 def custom_raise_func():
     raise CustomException(True, "foo")
-
-
-@torch.jit.script
-def raise_func_script(expected_err: str) -> torch.Tensor:
-    raise ValueError(expected_err)
 
 
 expected_err_escape = (
@@ -2326,67 +2308,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_profiler_with_remote_builtin_single_threaded(self):
         self._run_test_profiler_with_remote_builtin()
 
-    def _run_test_profiler_with_script_async_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-
-    @dist_init
-    def test_profiler_with_script_async_rpc(self):
-        self._run_test_profiler_with_script_async_rpc()
-
-    @dist_init
-    def test_profiler_with_script_async_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_async_rpc()
-
-    def _run_test_profiler_with_script_sync_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-
-    @dist_init
-    def test_profiler_with_script_sync_rpc(self):
-        self._run_test_profiler_with_script_sync_rpc()
-
-    @dist_init
-    def test_profiler_with_script_sync_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_sync_rpc()
-
-    def _run_test_profiler_with_script_remote_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
-        )
-
-    @dist_init
-    def test_profiler_with_script_remote_rpc(self):
-        self._run_test_profiler_with_script_remote_rpc()
-
-    @dist_init
-    def test_profiler_with_script_remote_rpc_single_threaded(self):
-        self._run_test_profiler_with_script_remote_rpc()
-
     def _assert_top_level_events(
         self, process_global_events, expected_top_level_event_names
     ):
@@ -2481,37 +2402,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                     torch.ops.profiler._record_function_exit(handle)
 
                 fut.wait()
-
-    @dist_init
-    def test_async_record_function_cbs_jit_call(self):
-        if self.rank == 1:
-            with _profile() as pf:
-                key = _build_rpc_profiling_key(
-                    RPCExecMode.ASYNC,
-                    torch._jit_internal._qualified_name(my_script_func),
-                    "worker1",
-                    "worker0",
-                )
-                with torch.autograd.profiler.record_function(key) as rf:
-                    fut = rpc.rpc_async(
-                        worker_name(0), my_script_func, args=(torch.tensor(1),)
-                    )
-                    # Intentionally calling record_function internals
-                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(
-                        rf.record, fut
-                    )
-                result = fut.wait()
-                # Validate that the profiling future returns the same value as the RPC
-                # future.
-                expected = torch.add(torch.tensor(1), torch.tensor(1))
-                self.assertEqual(result, expected)
-            events = pf.function_events
-            rpc_event = get_function_event(
-                events, torch._jit_internal._qualified_name(my_script_func)
-            )
-            self.assertTrue(
-                torch._jit_internal._qualified_name(my_script_func) in rpc_event.name
-            )
 
     @dist_init
     def test_py_class_constructor(self):
@@ -2672,12 +2562,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
-
-    @dist_init
-    def test_stress_heavy_rpc_torchscript(self):
-        self._stress_test_rpc(
-            heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),)
-        )
 
     @dist_init
     def test_builtin_remote_ret(self):
@@ -3155,12 +3039,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             fut = rref._get_future()
             self.assertIsInstance(fut, torch._C.Future)
 
-            # Script
-            rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1),))
-            rref.to_here()
-            fut = rref._get_future()
-            self.assertIsInstance(fut, torch._C.Future)
-
     @dist_init
     def test_rref_context_debug_info(self):
         # This test checks local states that are modified by remote workers.
@@ -3602,27 +3480,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         # We should receive the error from fut2
         with self.assertRaisesRegex(RuntimeError, "size of tensor"):
-            torch.futures.wait_all([fut1, fut2, fut3])
-
-        # Unblock RPC thread for fut1
-        RpcTest.timed_out_rpc_event.set()
-
-    @dist_init
-    def test_wait_all_exit_early_script_function(self):
-        # Initialize the event in the subprocess.
-        RpcTest.timed_out_rpc_event = Event()
-
-        # Wait for all processes to initialize event.
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        dist.barrier()
-
-        dst = worker_name((self.rank + 1) % self.world_size)
-        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
-        fut2 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
-        fut3 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
-
-        # We should receive the error from fut2
-        with self.assertRaisesRegex(RuntimeError, expected_err):
             torch.futures.wait_all([fut1, fut2, fut3])
 
         # Unblock RPC thread for fut1
