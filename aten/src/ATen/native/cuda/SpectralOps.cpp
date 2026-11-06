@@ -19,6 +19,8 @@
 #include <ATen/ops/_fft_c2c_native.h>
 #include <ATen/ops/_fft_c2r_native.h>
 #include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/_istft_c2r_native.h>
+#include <ATen/ops/_stft_r2c_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/view_as_complex.h>
@@ -27,6 +29,10 @@
 
 #include <cufft.h>
 #include <cufftXt.h>
+
+#if defined(USE_ROCM)
+#include <ATen/native/hip/RocFFTSpectralOps.h>
+#endif
 
 #include <cmath>
 
@@ -326,6 +332,12 @@ bool use_optimized_cufft_path(IntArrayRef dim) {
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
 
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_r2c_rocfft(self, dim, normalization, onesided);
+  }
+#endif
+
   // Bfloat16 FFT path.
   //
   // On CUDA SM_80+ (Ampere): cuFFT supports CUDA_R_16BF → CUDA_C_16BF natively.
@@ -491,6 +503,13 @@ Tensor& _fft_r2c_cufft_out(const Tensor& self, IntArrayRef dim,
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
   TORCH_CHECK(self.is_complex());
+
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_c2r_rocfft(self, dim, normalization, lastdim);
+  }
+#endif
+
   auto in_sizes = self.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
@@ -535,6 +554,13 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
     return self.clone();
   }
 
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_c2c_rocfft(self, dim, normalization, forward);
+  }
+#endif
+
+
   auto out_sizes = self.sizes();
   auto output = at::empty(out_sizes, self.options());
 
@@ -572,6 +598,32 @@ Tensor& _fft_c2c_cufft_out(const Tensor& self, IntArrayRef dim,
                            int64_t normalization, bool forward, Tensor& out) {
   auto result = _fft_c2c_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), forward);
   return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
+}
+
+Tensor _stft_r2c_cuda(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                      const std::optional<Tensor>& window_opt, bool onesided,
+                      int64_t normalization) {
+#if defined(USE_ROCM)
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  auto fused = stft_r2c_rocfft(self, n_fft, hop_length, n_frames, *window_maybe_owned, onesided,
+                               normalization);
+  if (fused.defined()) {
+    return fused;
+  }
+#endif
+  return at::native::_stft_r2c(self, n_fft, hop_length, n_frames, window_opt, onesided,
+                               normalization);
+}
+
+Tensor _istft_c2r_cuda(const Tensor& self, int64_t n_fft, const Tensor& window,
+                       int64_t normalization) {
+#if defined(USE_ROCM)
+  auto fused = istft_c2r_rocfft(self, n_fft, window, normalization);
+  if (fused.defined()) {
+    return fused;
+  }
+#endif
+  return at::native::_istft_c2r(self, n_fft, window, normalization);
 }
 
 
