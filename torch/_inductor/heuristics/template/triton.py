@@ -40,6 +40,7 @@ from ...utils import (
     _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
+    clear_on_fresh_cache,
     commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
@@ -278,6 +279,7 @@ def _origami_flex_config(
     return cfg
 
 
+@clear_on_fresh_cache
 @cache
 def _origami_flex_attention_tiles(
     batch_heads: int,
@@ -2431,10 +2433,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             or context.value_dtype != context.dtype
         ):
             return configs
-        # Any override of the stock lookup (subclass, instance or patch) owns the
-        # pool it returns.
+        # Only the stock heuristic's pool is refined. Subclasses can customize it
+        # through the lookup or the tables it reads, and instance attributes or
+        # patches can replace the lookup; all of these keep their pool.
         lookup = getattr(self.get_flex_attn_fwd_configs, "__func__", None)
-        if lookup is not _ROCM_STOCK_FLEX_ATTN_FWD_CONFIGS:
+        if (
+            type(self) is not ROCmConfigHeuristic
+            or lookup is not _ROCM_STOCK_FLEX_ATTN_FWD_CONFIGS
+        ):
             return configs
         # Origami models the two GEMMs; score_mods that stream captured buffers
         # add memory traffic outside that model and are unmeasured.
@@ -2445,15 +2451,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if not context.inputs_contiguous:
             return configs
 
-        tuning_keys = (
-            "BLOCK_M",
-            "BLOCK_N",
-            "num_stages",
-            "num_warps",
-            "matrix_instr_nonkdim",
-            "waves_per_eu",
-            "kpack",
-        )
+        # The lowering always takes kpack, matrix_instr_nonkdim and waves_per_eu
+        # from the config, so only these pins are honored.
+        tuning_keys = ("BLOCK_M", "BLOCK_N", "num_stages", "num_warps")
         if any(
             key in context.kernel_options or f"fwd_{key}" in context.kernel_options
             for key in tuning_keys
@@ -2528,11 +2528,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 device_index,
                 candidate_tiles,
             )
-        except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        except Exception as error:
+            # Origami is an external model that is on by default, so any failure
+            # in it falls back to the stock pool instead of failing compilation.
             warning_once(
                 log,
                 "Origami FlexAttention config selection failed; using the stock "
-                "configs: %s",
+                "configs. Set TORCHINDUCTOR_ORIGAMI=0 to disable Origami: %s",
                 str(error),
             )
             return configs

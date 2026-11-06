@@ -24,6 +24,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
+from torch.testing._internal.common_utils import MI350_ARCH, runOnRocmArch
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -131,6 +132,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         enabled=True,
         origami_module=object(),
         selected_tiles=((128, 128), (64, 128)),
+        default_kpack=1,
     ):
         heuristic = self.heuristic if heuristic is None else heuristic
         get_device_properties = mock.Mock(return_value=mock.Mock(gcnArchName=arch))
@@ -155,7 +157,9 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 get_device_properties,
             ),
             # The real lookup caches the queried architecture process-wide.
-            mock.patch.object(triton_heuristics, "get_default_kpack", return_value=1),
+            mock.patch.object(
+                triton_heuristics, "get_default_kpack", return_value=default_kpack
+            ),
         ):
             return heuristic.refine_flex_attn_fwd_configs(self.stock, context)
 
@@ -194,15 +198,23 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         )
 
     def test_preserves_generic_d32_default(self):
+        # A kpack unlike ROCmFlexConfig's default shows the fallback tracks it.
         selected = self._select(
             self._context(
                 qk_head_dim=32,
                 v_head_dim=32,
                 qk_head_dim_rounded=32,
                 v_head_dim_rounded=32,
-            )
+            ),
+            default_kpack=2,
         )
-        self.assertIn(ROCmFlexConfig(128, 64, 1, 4, kpack=1), selected)
+        self.assertIn(ROCmFlexConfig(128, 64, 1, 4, kpack=2), selected)
+
+    def test_rocm_options_the_lowering_overrides_do_not_disable_selection(self):
+        for options in ({"kpack": 2}, {"fwd_waves_per_eu": 2}):
+            with self.subTest(options=options):
+                selected = self._select(self._context(kernel_options=options))
+                self.assertEqual(len(selected), 9)
 
     def test_gqa_keeps_two_and_four_warp_variants(self):
         selected = self._select(self._context(num_kv_heads=4))
@@ -249,10 +261,8 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             "dynamic_sequence": self._context(seq_len_q=sympy.Symbol("s")),
             "noncontiguous_inputs": self._context(inputs_contiguous=False),
             "user_tile": self._context(kernel_options={"BLOCK_M": 64}),
-            "user_rocm_option": self._context(kernel_options={"kpack": 1}),
-            "prefixed_rocm_option": self._context(
-                kernel_options={"fwd_waves_per_eu": 2}
-            ),
+            "user_stages": self._context(kernel_options={"num_stages": 1}),
+            "prefixed_user_stages": self._context(kernel_options={"fwd_num_stages": 1}),
             "score_mod_buffers": self._context(score_mod_reads_buffers=True),
         }
         for name, context in cases.items():
@@ -274,10 +284,18 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             def get_flex_attn_fwd_configs(self, *args, **kwargs):
                 return []
 
+        class CustomTableHeuristic(ROCmConfigHeuristic):
+            pass
+
         subclass = object.__new__(CustomPoolHeuristic)
         subclass.__dict__.update(self.heuristic.__dict__)
         with self.subTest(name="subclass"):
             self.assertIs(self._select(self._context(), heuristic=subclass), self.stock)
+        table = object.__new__(CustomTableHeuristic)
+        table.__dict__.update(self.heuristic.__dict__)
+        table.flex_attn_fwd_autotune_configs = []
+        with self.subTest(name="subclass_table"):
+            self.assertIs(self._select(self._context(), heuristic=table), self.stock)
         instance = object.__new__(ROCmConfigHeuristic)
         instance.__dict__.update(self.heuristic.__dict__)
         instance.get_flex_attn_fwd_configs = lambda *args, **kwargs: []
@@ -617,11 +635,8 @@ class TestOrigami(TestCase):
             "triton.native_matmul": False,
         }
 
+    @runOnRocmArch(MI350_ARCH)
     def test_origami_refines_dense_flex_attention_configs(self):
-        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
-        if arch != "gfx950":
-            self.skipTest("the measured FlexAttention config projection is gfx950-only")
-
         from torch._inductor.choices import InductorChoices
         from torch.nn.attention.flex_attention import AuxRequest, flex_attention
 
@@ -647,7 +662,6 @@ class TestOrigami(TestCase):
 
         expected_out, expected_aux = fn(q_ref, k_ref, v_ref)
         expected_out.sum().backward()
-        triton_heuristics._origami_flex_attention_tiles.cache_clear()
         selected_tiles = []
         refined_pools = []
         appended_pools = []
