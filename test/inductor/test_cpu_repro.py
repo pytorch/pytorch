@@ -42,9 +42,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -54,10 +54,10 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -152,8 +152,15 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+# Not a module-level skip: other test files import this one, including on GPU
+# jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
@@ -3954,9 +3961,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (input, eps))
 
     @slowTest
-    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
-    # for the ~1h this test takes.
-    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -8071,7 +8075,6 @@ class CPUReproTests(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if RUN_CPU and not IS_MACOS:
         run_tests(needs="filelock")
