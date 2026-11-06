@@ -119,13 +119,18 @@ def meta_addr(self, vec1, vec2, *, beta=1, alpha=1):
             ),
             lambda: f"cannot safely convert {type(scalar)} to {dtype}",
         )
-    args = _maybe_broadcast(self, vec1.reshape(shape[0], 1), vec2)
+    vec1 = vec1.reshape(shape[0], 1)
+    empty_vec1 = shape[0] == 0
+    if isinstance(empty_vec1, torch.SymBool):
+        # Native reshape gives empty vectors contiguous strides.
+        empty = torch.sym_ite(empty_vec1, 1, 0)
+        vec1 = vec1.as_strided(
+            vec1.shape, tuple(s + empty * (1 - s) for s in vec1.stride())
+        )
+    args = (self, vec1, vec2)
     utils.check_same_device(*args, allow_cpu_scalar_tensors=False)
     # Native addr's differently ranked inputs bypass TensorIterator's fast setup.
-    perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(
-        *args, allow_fast_path=False
-    )
-    strides = (1, shape[0]) if perm == [1, 0] else make_contiguous_strides_for(shape)
+    strides = utils.compute_elementwise_output_strides(*args, allow_fast_path=False)
     return self.new_empty_strided(shape, strides, dtype=dtype)
 
 
