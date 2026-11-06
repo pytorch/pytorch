@@ -1,10 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import skipIf
+
 import torch
 import torch._inductor.config
 from torch._inductor import metrics
-from unittest import skipIf
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import (
