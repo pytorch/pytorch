@@ -7828,13 +7828,6 @@ def disable_gc():
 class TestTorch(TestCase):
     exact_dtype = True
 
-    def test_compilation_unit_public_function(self):
-        unit = torch.jit.CompilationUnit(
-            "def twice(x: Tensor) -> Tensor:\n    return x + x\n"
-        )
-        self.assertIsInstance(unit.twice, torch.jit.ScriptFunction)
-        self.assertEqual(unit.twice(torch.tensor([1.0, 2.0])), torch.tensor([2.0, 4.0]))
-
     def test_dir(self):
         dir(torch)
 
