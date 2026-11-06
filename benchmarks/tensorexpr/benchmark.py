@@ -160,7 +160,7 @@ class Benchmark:
 
             if i == 0:
                 if self.jit_mode == "trace" and use_fuser:
-                    self.bm_jit = torch.jit.trace(
+                    self.bm_jit = torch.jit._trace.trace(
                         self.forward, example_inputs=self.inputs, check_trace=False
                     )
                 if callable(getattr(self, "reference", None)):

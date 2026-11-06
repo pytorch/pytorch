@@ -307,7 +307,7 @@ def run_benchmarks(operators, shapes):
         )
 
         def bench(name):
-            nnc_op = torch.jit.trace(operator, args)
+            nnc_op = torch.jit._trace.trace(operator, args)
             result = benchmark(nnc_op, args)
             print(
                 ",".join(

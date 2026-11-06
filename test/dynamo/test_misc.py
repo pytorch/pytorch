@@ -5864,6 +5864,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(y, t.sin())
         self.assertEqual(w.__wrapped__, x)
 
+    def test_object_sentinel_identity(self):
+        sentinel = object()
+
+        def fn(x, o, s=sentinel):
+            a, b = object(), object()
+            return x + 1 if o is s else x - 1, a is a, a is b, a == b, o == s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x, sentinel), fn(x, sentinel))
+
     def test_object_setattr(self):
         @dataclasses.dataclass
         class A:

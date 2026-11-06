@@ -186,7 +186,7 @@ def _get_setup(
     if language == Language.PYTHON:
         setup_template: str = textwrap.dedent(
             f"""
-            jit_model = torch.jit.load("{model_path}")
+            jit_model = torch.jit._serialization.load("{model_path}")
 
             # Warmup `jit_model`
             for _ in range(3):
@@ -236,9 +236,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
 
             model_path: str | None = None
             if args.py_model_setup and args.torchscript:
-                model_setup = (
-                    f"{args.py_model_setup}\njit_model = torch.jit.script(model)"
-                )
+                model_setup = f"{args.py_model_setup}\njit_model = torch.jit._script.script(model)"
 
                 # This is just for debugging. We just need a unique name for the
                 # model, but embedding the label makes debugging easier.

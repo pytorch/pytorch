@@ -1888,7 +1888,7 @@ def _legacy_load(
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
+                    f"{f.name} is a zip archive, not a legacy tensor checkpoint"
                 ) from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)

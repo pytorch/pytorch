@@ -165,13 +165,14 @@ ownership:
       - /test/test_spectral_ops.py
   - name: floatx_linear_algebra
     labels: ["module: linear algebra", "module: floatx (formerly float8)"]
-    owners: [drisspg, slayton58]
+    owners: [drisspg, slayton58, vkuzo]
     section: core_aten_linalg
     paths:
       - /aten/src/ATen/native/ScaledBlas.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.h
       - /test/test_scaled_matmul_cuda.py: [drisspg, slayton58]
+      - /test/test_quantize_tensor.py: [vkuzo, slayton58]
   - name: sparse
     labels: ["module: sparse"]
     owners: [amjames, nikitaved, pearu]
@@ -325,7 +326,6 @@ ownership:
     paths:
       - /aten/src/ATen/metal/
       - /test/metal/
-      - /test/test_metal.py
   - name: xpu
     labels: ["module: xpu"]
     owners: [EikanWang, gujinghui]
@@ -457,9 +457,6 @@ ownership:
       - /test/cpp/jit/test_jit_type.cpp
       - /test/cpp/jit/test_save_load.cpp
       - /test/jit_hooks/
-      - /test/test_torchscript_compatibility.py
-      - /test/test_tensorexpr.py
-      - /test/test_tensorexpr_pybind.py
       - /torch/csrc/jit/
       - /torch/jit/
       - /torch/csrc/jit/python/init.cpp
@@ -550,7 +547,6 @@ ownership:
     owners: []
     section: mobile_delegates
     paths:
-      - /test/test_vulkan.py
       - /test/test_xnnpack_integration.py
       - /torch/backends/_coreml/
       - /torch/backends/_nnapi/
@@ -1361,7 +1357,6 @@ ownership:
       - /test/test_meta.py
       - /test/test_mkl_verbose.py
       - /test/test_mkldnn.py
-      - /test/test_mkldnn_fusion.py
       - /test/test_mkldnn_verbose.py
       - /test/test_model_exports_to_core_aten.py
       - /test/test_module_tracker.py
@@ -1378,7 +1373,6 @@ ownership:
       - /test/test_opaque_obj_v2.py
       - /test/test_openmp.py
       - /test/test_ops.py
-      - /test/test_ops_jit.py
       - /test/test_ops_unbacked.py
       - /test/test_out_dtype_op.py
       - /test/test_overrides.py
@@ -1400,7 +1394,6 @@ ownership:
       - /test/test_sort_and_select.py
       - /test/test_stateless.py
       - /test/test_stateless_rng.py
-      - /test/test_static_runtime.py
       - /test/test_subclass.py
       - /test/test_sympy_utils.py
       - /test/test_tensor_creation_ops.py
@@ -1509,7 +1502,6 @@ ownership:
       - /test/nn/
       - /test/test_modules.py
       - /test/test_nn.py
-      - /test/test_nnapi.py
       - /test/test_numpy_interop.py
       - /test/test_transformers.py
       - /test/test_type_hints.py
@@ -1615,8 +1607,6 @@ ownership:
       - /.github/pi/
       - /.github/workflows/claude-autorevert-advisor.yml
       - /.github/workflows/claude-code.yml
-      - /.github/workflows/claude-distributed-triage-cron.yml
-      - /.github/workflows/distributed-triage-pi.yml
       - /.github/workflows/issue-triage-pi.yml
       - /.github/workflows/issue-triage.yml
       - /.github/workflows/pi-agent-tests.yml

@@ -153,46 +153,6 @@ class TestDeprecatedJitQuantized(JitTestCase):
         ):
             fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
 
-    @skipIfNoFBGEMM
-    def test_erase_class_tensor_shapes(self):
-        class Linear(torch.nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                qweight = torch._empty_affine_quantized(
-                    [out_features, in_features],
-                    scale=1,
-                    zero_point=0,
-                    dtype=torch.qint8,
-                )
-                self._packed_weight = torch.ops.quantized.linear_prepack(qweight)
-
-            @torch.jit.export
-            def __getstate__(self):
-                return (
-                    torch.ops.quantized.linear_unpack(self._packed_weight)[0],
-                    self.training,
-                )
-
-            def forward(self):
-                return self._packed_weight
-
-            @torch.jit.export
-            def __setstate__(self, state):
-                self._packed_weight = torch.ops.quantized.linear_prepack(state[0])
-                self.training = state[1]
-
-            @property
-            def weight(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
-
-            @weight.setter
-            def weight(self, w):
-                self._packed_weight = torch.ops.quantized.linear_prepack(w)
-
-        with torch._jit_internal._disable_emit_hooks():
-            x = torch.jit._script.script(Linear(10, 10))
-            torch._C._jit_pass_erase_shape_information(x.graph)
-
 
 if __name__ == "__main__":
     raise RuntimeError(

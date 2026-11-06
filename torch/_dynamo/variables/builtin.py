@@ -555,7 +555,7 @@ class BaseBuiltinVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
@@ -1956,12 +1956,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
         if self.fn is object and not args and not kwargs:
-            # object() -> a fresh opaque instance, wrapped as ObjectVariable to
-            # match how SourcelessBuilder wraps bare `object` instances. Falling
-            # through to the constant handler cannot build a VT from object().
-            from .builder import SourcelessBuilder
-
-            return SourcelessBuilder.create(tx, object())
+            # object() -> a fresh opaque instance. Falling through to the
+            # constant handler cannot build a VT from object().
+            return VariableTracker.build(tx, object())
 
         key: tuple[object, ...]
         if kwargs:

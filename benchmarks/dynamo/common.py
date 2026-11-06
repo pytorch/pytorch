@@ -1348,7 +1348,7 @@ def xla(args, model_iter_fn, model, example_inputs):
 
 def try_script(model, example_inputs):
     try:
-        return torch.jit.script(model)
+        return torch.jit._script.script(model)
     except Exception:
         return None
 
@@ -1496,11 +1496,11 @@ class JitTracedCache:
         if key not in cls.cache:
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
             if example_args:
-                jit_traced_module = torch.jit.trace(
+                jit_traced_module = torch.jit._trace.trace(
                     model, example_inputs=example_args, strict=False
                 )
             else:
-                jit_traced_module = torch.jit.trace(
+                jit_traced_module = torch.jit._trace.trace(
                     model, example_kwarg_inputs=example_kwargs, strict=False
                 )
 

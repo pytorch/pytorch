@@ -241,7 +241,7 @@ for shape, operator in itertools.product(shapes, operators):
         print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
         nope.add((operator, shape))
 
-    ts_op = torch.jit.script(operator)
+    ts_op = torch.jit._script.script(operator)
     torch.testing.assert_close(operator(*args), ts_op(*args))
 
 
@@ -294,7 +294,7 @@ for shape, operator in itertools.product(shapes, operators):
             )
         )
 
-    ts_op = torch.jit.script(operator)
+    ts_op = torch.jit._script.script(operator)
     result = benchmark(ts_op, args)
     print(
         ",".join(

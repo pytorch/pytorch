@@ -88,7 +88,7 @@ if __name__ == "__main__":
             workload = parallel_workload
 
         if args.use_script:
-            traced_workload = torch.jit.trace(workload, (input_x,))
+            traced_workload = torch.jit._trace.trace(workload, (input_x,))
             workload = traced_workload
 
         if profiling_enabled:

@@ -43,7 +43,7 @@ inp = torch.randn((batch_size, features))
 
 mod = Foo(num_layers, features)
 
-jit_mod = torch.jit.script(mod)
+eager_mod = mod
 
 func_model, weights = make_functional(mod)
 lr = 1.0
@@ -58,13 +58,13 @@ def functional_step(x, weights):
 
 
 optim = torch.optim.SGD(
-    jit_mod.parameters(), lr=lr, momentum=0, dampening=0, weight_decay=0
+    eager_mod.parameters(), lr=lr, momentum=0, dampening=0, weight_decay=0
 )
 
 
-def jit_step(x, weights):
+def eager_step(x, weights):
     optim.zero_grad()
-    loss = jit_mod(x)
+    loss = eager_mod(x)
     loss.backward()
     optim.step()
     return loss, None
@@ -91,5 +91,5 @@ train(grad_pt, weights)
 print("Starting NNC training")
 train(grad_nnc, weights)
 
-print("Starting JIT training")
-train(jit_step, None)
+print("Starting eager module training")
+train(eager_step, None)

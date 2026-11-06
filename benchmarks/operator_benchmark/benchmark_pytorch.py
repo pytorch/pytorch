@@ -178,7 +178,7 @@ class PyTorchOperatorTestCase:
 
     def _generate_jit_forward_graph(self):
         """generate a graph for the forward function via scripting"""
-        scripted_op_bench = torch.jit.script(self.op_bench)
+        scripted_op_bench = torch.jit._script.script(self.op_bench)
         return scripted_op_bench.forward_consume
 
     def _generate_compile_forward_graph(self):

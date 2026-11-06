@@ -130,19 +130,8 @@ def annotate(the_type, the_value):
         import torch
         from typing import Dict
 
-        @torch.jit.script
-        def fn():
-            # Telling TorchScript that this empty dictionary is a (str -> int) dictionary
-            # instead of default dictionary type of (str -> Tensor).
-            d = torch.jit.annotate(Dict[str, int], {})
-
-            # Without `torch.jit.annotate` above, following statement would fail because of
-            # type mismatch.
-            d["name"] = 20
-
-    .. testcleanup::
-
-        del fn
+        d = torch.jit.annotate(Dict[str, int], {})
+        d["name"] = 20
 
     Args:
         the_type: Python type that should be passed to TorchScript compiler as type hint for `the_value`
@@ -161,12 +150,7 @@ def script_if_tracing(fn):
     .. deprecated:: 2.5
         TorchScript is deprecated, please use ``torch.compile`` instead.
 
-    ``torch.jit.script`` has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit.script_if_tracing`` to substitute for
-    ``torch.jit.script``.
+    Compiles ``fn`` on its first call from an internal tracing consumer.
 
     Args:
         fn: A function to compile.
@@ -216,7 +200,7 @@ def isinstance(obj, target_type):
                     for val in input.values():
                         print(val)
 
-        m = torch.jit.script(MyModule())
+        m = MyModule()
         x = [torch.rand(3,3), torch.rand(4,3)]
         m(x)
         y = {"key1":"val1","key2":"val2"}
@@ -232,16 +216,7 @@ class strict_fusion:
     .. deprecated:: 2.5
         TorchScript is deprecated, please use ``torch.compile`` instead.
 
-    Example:
-    Forcing fusion of additions.
-
-    .. code-block:: python
-
-        @torch.jit.script
-        def foo(x):
-            with torch.jit.strict_fusion():
-                return x + x + x
-
+    Forcing fusion in retained scripted source is supported.
     """
 
     def __init__(self) -> None:

@@ -36,8 +36,8 @@ def inplace_addnorm(a, b, mean, std, out):
     return out
 
 
-ts_addnorm = torch.jit.script(eager_addnorm)
-ts_ip_addnorm = torch.jit.script(inplace_addnorm)
+ts_addnorm = torch.jit._script.script(eager_addnorm)
+ts_ip_addnorm = torch.jit._script.script(inplace_addnorm)
 
 
 def maybe_synced(fn):
