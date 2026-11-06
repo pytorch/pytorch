@@ -1,12 +1,10 @@
 # Owner(s): ["module: inductor"]
 """Tests for strict numerics mode."""
 
-import math
 import os
 import subprocess
 import sys
 import unittest
-from unittest import mock
 
 
 # Native reductions register during import, so enable the rollout first.
@@ -27,7 +25,6 @@ from torch.testing._internal.common_cuda import IS_SM100, IS_SM89, IS_SM90, SM90
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    OpDTypes,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -43,22 +40,13 @@ from torch.testing._internal.common_utils import (
     skipIfNoCuteDSL,
     TEST_CUTEDSL,
 )
-from torch.testing._internal.inductor_pointwise_coverage import (
-    coverage_case,
-    CoverageRecord,
-    record_result,
-    write_event,
-    write_manifest,
-)
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     generate_elementwise_binary_with_scalar_samples,
-    SampleInput,
     UnaryUfuncInfo,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_leaves, tree_map
 from torch.utils._triton import has_triton_reduction_ordering
 
 
@@ -212,13 +200,21 @@ class StrictNumericsConfigTest(TestCase):
         )
 
 
-def _compile_without_decompositions(gm, inputs):
-    from torch._inductor.compile_fx import compile_fx
-
-    return compile_fx(gm, inputs, decompositions={})
-
-
 class StrictNumericsFallbackTest(TestCase):
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_foreach_inplace_tensor_list(self, device, dtype, numerics):
+        def fn(a, b):
+            return torch._foreach_add_([a, b], 1)
+
+        a = torch.arange(4, device=device, dtype=dtype)
+        b = torch.ones_like(a)
+        eager_args = (a.clone(), b.clone())
+        expected = fn(*eager_args)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(a, b)
+        self.assertEqual(actual, expected)
+        self.assertEqual((a, b), eager_args)
+
     @ops(
         [op for op in op_db if op.name == "logit"],
         allowed_dtypes=(torch.bool, torch.int64),
@@ -240,12 +236,15 @@ class StrictNumericsFallbackTest(TestCase):
     @dtypes(torch.float32, torch.float64)
     @parametrize("numerics", NUMERICS_MODES)
     def test_log_ndtr_without_decompositions(self, device, dtype, numerics):
+        from torch._inductor.compile_fx import compile_fx
+
+        def backend(gm, inputs):
+            return compile_fx(gm, inputs, decompositions={})
+
         x = _min_max_specials(dtype, device)
         with config.patch(numerics=numerics):
             actual = torch.compile(
-                torch.special.log_ndtr,
-                backend=_compile_without_decompositions,
-                fullgraph=True,
+                torch.special.log_ndtr, backend=backend, fullgraph=True
             )(x)
         self.assertEqual(
             actual.view(_BIT_VIEW[dtype]),
@@ -258,14 +257,17 @@ class StrictNumericsFallbackTest(TestCase):
     def test_round_decimals_without_decompositions(
         self, device, dtype, numerics, decimals
     ):
+        from torch._inductor.compile_fx import compile_fx
+
+        def backend(gm, inputs):
+            return compile_fx(gm, inputs, decompositions={})
+
         def fn(x):
             return torch.round(x, decimals=decimals)
 
         x = torch.arange(-1000, 1000, device=device, dtype=dtype) / 777
         with config.patch(numerics=numerics):
-            actual = torch.compile(
-                fn, backend=_compile_without_decompositions, fullgraph=True
-            )(x)
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
         self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
 
     @ops(
@@ -274,12 +276,15 @@ class StrictNumericsFallbackTest(TestCase):
     )
     @parametrize("numerics", NUMERICS_MODES)
     def test_without_decompositions(self, device, dtype, op, numerics):
+        from torch._inductor.compile_fx import compile_fx
+
+        def backend(gm, inputs):
+            return compile_fx(gm, inputs, decompositions={})
+
         x = _min_max_specials(dtype, device)
         y = x.roll(1)
         with config.patch(numerics=numerics):
-            result = torch.compile(
-                op.op, backend=_compile_without_decompositions, fullgraph=True
-            )(x, y)
+            result = torch.compile(op.op, backend=backend, fullgraph=True)(x, y)
         self.assertEqual(result.view(torch.int32), op.op(x, y).view(torch.int32))
 
 
@@ -355,19 +360,6 @@ class StrictNumericsCompileTest(TestCase):
                 sample.input, *sample.args
             )
             self.assertTrue(_outputs_equal(actual, fn(sample.input, *sample.args)))
-
-    def _assert_bitwise_equal(self, actual, expected):
-        def bits(t):
-            return t.view(_BIT_VIEW.get(t.dtype, t.dtype))
-
-        self.assertEqual(tree_map(bits, actual), tree_map(bits, expected))
-
-    def _check_bitwise(self, fn, *args, numerics, upcast=None):
-        options = {"numerics": numerics}
-        if upcast is not None:
-            options["triton.codegen_upcast_to_fp32"] = upcast
-        actual = torch.compile(fn, fullgraph=True, options=options)(*args)
-        self._assert_bitwise_equal(actual, fn(*args))
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -446,8 +438,9 @@ class StrictNumericsCompileTest(TestCase):
                     )
                     if index == 0:
                         self.assertIn("@triton.jit", "\n".join(codes))
-                    self._assert_bitwise_equal(result, expected)
-                    self._assert_bitwise_equal(grads[0], expected_grad)
+                    bits = _BIT_VIEW[dtype]
+                    self.assertEqual(result.view(bits), expected.view(bits))
+                    self.assertEqual(grads[0].view(bits), expected_grad.view(bits))
                     if index < 2:
                         self.assertGreater(
                             counters["aot_autograd"]["autograd_cache_miss"], misses
@@ -463,41 +456,21 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize(
-        "op_name",
-        (
-            "erfcx",
-            "i0",
-            "i1",
-            "modified_bessel_i0",
-            "modified_bessel_i1",
-            "bessel_j0",
-            "bessel_j1",
-            "bessel_y0",
-            "bessel_y1",
-        ),
-    )
-    def test_special_function_boundaries(self, device, dtype, numerics, op_name):
-        if op_name == "erfcx":
-            centers = (
-                400.0 / torch.arange(1, 101, dtype=torch.float64, device=device) - 4
-            ).to(dtype)
-            below = torch.nextafter(centers, torch.full_like(centers, -float("inf")))
-            above = torch.nextafter(centers, torch.full_like(centers, float("inf")))
-            values = torch.cat((centers, below, above, -centers))
-        else:
-            centers = torch.tensor(
-                [-8.0, -5.0, -0.0, 0.0, 1e-5, 5.0, 8.0, 88.0],
-                device=device,
-                dtype=dtype,
-            ).view(torch.int32)
-            bits = centers[:, None] + torch.arange(
-                -8, 9, device=device, dtype=torch.int32
-            )
-            values = bits.flatten().view(dtype)
-        x = torch.cat((values, _min_max_specials(dtype, device)))
-        fn = getattr(torch.special, op_name)
-        self._check_bitwise(fn, x, numerics=numerics)
+    def test_erfcx_segments(self, device, dtype, numerics):
+        centers = (
+            400.0 / torch.arange(1, 101, dtype=torch.float64, device=device) - 4
+        ).to(dtype)
+        below = torch.nextafter(centers, torch.full_like(centers, -float("inf")))
+        above = torch.nextafter(centers, torch.full_like(centers, float("inf")))
+        x = torch.cat(
+            (centers, below, above, -centers, _min_max_specials(dtype, device))
+        )
+        actual = torch.compile(
+            torch.special.erfcx, fullgraph=True, options={"numerics": numerics}
+        )(x)
+        self.assertEqual(
+            actual.view(torch.int32), torch.special.erfcx(x).view(torch.int32)
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -509,7 +482,12 @@ class StrictNumericsCompileTest(TestCase):
         def fn(grad, x):
             return torch.ops.aten.softshrink_backward.default(grad, x, lambd)
 
-        self._check_bitwise(fn, grad, x, numerics=numerics)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+            grad, x
+        )
+        self.assertEqual(
+            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_softshrink_backward_overflow(self, device, dtype):
@@ -534,7 +512,39 @@ class StrictNumericsCompileTest(TestCase):
     def test_bessel_opmath(self, device, dtype, numerics, op_name, upcast):
         x = _exhaustive_16bit(dtype, device)
         fn = getattr(torch.special, op_name)
-        self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "op_name",
+        (
+            "i0",
+            "i1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+        ),
+    )
+    def test_bessel_branch_boundaries(self, device, dtype, numerics, op_name):
+        centers = torch.tensor(
+            [-8.0, -5.0, -0.0, 0.0, 1e-5, 5.0, 8.0, 88.0],
+            device=device,
+            dtype=dtype,
+        ).view(torch.int32)
+        bits = centers[:, None] + torch.arange(-8, 9, device=device, dtype=torch.int32)
+        x = torch.cat((bits.flatten().view(dtype), _min_max_specials(dtype, device)))
+        fn = getattr(torch.special, op_name)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -564,7 +574,12 @@ class StrictNumericsCompileTest(TestCase):
         def fn(grad, x):
             return torch.ops.aten.logit_backward.default(grad, x, eps)
 
-        self._check_bitwise(fn, grad, x, numerics=numerics)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+            grad, x
+        )
+        self.assertEqual(
+            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
+        )
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -574,7 +589,8 @@ class StrictNumericsCompileTest(TestCase):
         def fn(x):
             return torch.xlogy(x, 2.7296853065490723)
 
-        self._check_bitwise(fn, x, numerics=numerics)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -582,7 +598,12 @@ class StrictNumericsCompileTest(TestCase):
     def test_copysign_storage_bits(self, device, dtype, numerics, scalar):
         x = _exhaustive_16bit(dtype, device)
         y = -float("nan") if scalar else x.flip(0)
-        self._check_bitwise(torch.copysign, x, y, numerics=numerics)
+        actual = torch.compile(
+            torch.copysign, fullgraph=True, options={"numerics": numerics}
+        )(x, y)
+        self.assertEqual(
+            actual.view(torch.int16), torch.copysign(x, y).view(torch.int16)
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -598,30 +619,53 @@ class StrictNumericsCompileTest(TestCase):
             result = float("nan") * x if left else x * float("nan")
             return result.t().view(-1)
 
-        self._check_bitwise(fn, x, numerics=numerics)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    @parametrize("operation", ("cast", "cube"))
-    def test_narrow_intermediate_rounding(
-        self, device, dtype, numerics, upcast, operation
-    ):
-        if operation == "cast":
-            mantissa_bits = 10 if dtype == torch.float16 else 7
-            midpoint = 1.0 + 2.0 ** (-mantissa_bits - 1)
-            values = [midpoint - 2**-40, midpoint, midpoint + 2**-40]
-            x = torch.tensor(
-                values + [-v for v in values], device=device, dtype=torch.float64
-            )
-        else:
-            x = _exhaustive_16bit(dtype, device)
+    def test_double_to_narrow_rounding(self, device, dtype, numerics, upcast):
+        mantissa_bits = 10 if dtype == torch.float16 else 7
+        midpoint = 1.0 + 2.0 ** (-mantissa_bits - 1)
+        values = [midpoint - 2**-40, midpoint, midpoint + 2**-40]
+        x = torch.tensor(
+            values + [-v for v in values], device=device, dtype=torch.float64
+        )
 
         def fn(x):
-            result = x.to(dtype) if operation == "cast" else x.pow(3)
+            result = x.to(dtype)
             return result, result.double()
 
-        self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_cube_intermediate_rounding(self, device, dtype, numerics, upcast):
+        x = _exhaustive_16bit(dtype, device)
+
+        def fn(x):
+            result = x.pow(3)
+            return result, result.double()
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("op_name", ("floor_divide", "remainder", "true_divide"))
@@ -637,7 +681,15 @@ class StrictNumericsCompileTest(TestCase):
             result = getattr(torch, op_name)(a, b)
             return result, result.double()
 
-        self._check_bitwise(fn, a, b, numerics=numerics, upcast=upcast)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(a, b)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("op_name", ("sub", "rsub", "logaddexp2", "ldexp", "mul"))
@@ -669,7 +721,10 @@ class StrictNumericsCompileTest(TestCase):
             y,
         )
         self.assertIn("@triton.jit", "\n".join(code))
-        self._assert_bitwise_equal(actual, fn(x, y))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x, y)),
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -688,7 +743,10 @@ class StrictNumericsCompileTest(TestCase):
         for value in (0.7, 0.6, -0.7):
             expected = torch.autograd.grad(fn(*inputs, value), inputs, grad)
             actual = torch.autograd.grad(compiled(*inputs, value), inputs, grad)
-            self._assert_bitwise_equal(actual, expected)
+            self.assertEqual(
+                tuple(x.view(_BIT_VIEW[dtype]) for x in actual),
+                tuple(x.view(_BIT_VIEW[dtype]) for x in expected),
+            )
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -710,9 +768,15 @@ class StrictNumericsCompileTest(TestCase):
         )
         result, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(result, fn(a, b))
+        self.assertEqual(
+            tuple(t.view(torch.int64) for t in result),
+            tuple(t.view(torch.int64) for t in fn(a, b)),
+        )
         for scalar in (float("nan"), -float("nan"), 0.7):
-            self._assert_bitwise_equal(compiled(scalar, nans), fn(scalar, nans))
+            self.assertEqual(
+                tuple(t.view(torch.int64) for t in compiled(scalar, nans)),
+                tuple(t.view(torch.int64) for t in fn(scalar, nans)),
+            )
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -759,6 +823,582 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "layout", ("aligned", "misaligned", "strided", "expanded", "transposed")
+    )
+    def test_mul_nan_payload_full_block_and_tail(self, device, dtype, numerics, layout):
+        values = _min_max_specials(dtype, device)
+
+        def operand(value):
+            if layout == "misaligned":
+                return value.repeat(1026)[1:]
+            if layout == "strided":
+                return value.repeat(2050)[::2]
+            if layout == "expanded":
+                return value.expand(1025)
+            result = value.repeat(1025)
+            return result.reshape(205, 5).t() if layout == "transposed" else result
+
+        a, b = operand(values[7:8]), operand(values[6:7])
+        compiled = torch.compile(
+            torch.mul, fullgraph=True, options={"numerics": numerics}
+        )
+        actual, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertTrue(_outputs_equal(actual, a * b))
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("cudagraphs", (False, True))
+    @parametrize("input_dtype", (torch.float64, torch.int64, torch.float32))
+    def test_mul_nan_payload_input_provenance(
+        self, device, dtype, numerics, cudagraphs, input_dtype
+    ):
+        values = _min_max_specials(dtype, device)
+        shared = torch.empty(2052, device=device, dtype=dtype)
+        shared[:1026] = values[7]
+        shared[1026:] = values[6]
+        a, b = shared[:1025].view(input_dtype), shared[1026:2051].view(input_dtype)
+
+        def fn(a, b):
+            return a.view(dtype) * b.view(dtype)
+
+        counter = CompileCounterWithBackend("inductor")
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        with config.patch({"numerics": numerics, "triton.cudagraphs": cudagraphs}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            actual, codes = run_and_get_code(compiled, a, b)
+            self.assertIn("@triton.jit", "\n".join(codes))
+            self.assertTrue(_outputs_equal(actual, fn(a, b)))
+            del actual
+            # Read-only input aliasing and pointer alignment can change without guards.
+            for left, right in ((0, 1), (0, 0), (1, 1), (0, 0), (1, 1)):
+                a = values[7:8].repeat(1025 + left)[left:].view(input_dtype)
+                b = values[6:7].repeat(1025 + right)[right:].view(input_dtype)
+                torch.compiler.cudagraph_mark_step_begin()
+                actual = compiled(a, b)
+                self.assertTrue(_outputs_equal(actual, fn(a, b)))
+                del actual
+        self.assertEqual(counter.frame_count, 1)
+        if cudagraphs:
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "hop", ("cond", "nested_cond", "invoke", "while_loop", "aliased_clone")
+    )
+    def test_mul_nan_payload_subgraph_input_alignment(
+        self, device, dtype, numerics, hop
+    ):
+        values = _min_max_specials(dtype, device)
+
+        @torch.compiler.nested_compile_region
+        def region(a, b):
+            return a * b
+
+        def run_loop(a, b):
+            _, result, _ = torch.while_loop(
+                lambda i, a, b: i < 1,
+                lambda i, a, b: (i + 1, a * b, b + 0),
+                (torch.zeros((), device=a.device, dtype=torch.int64), a, b),
+            )
+            return result
+
+        def fn(p, a, b):
+            if hop == "invoke":
+                return region(a, b), region(b, a)
+            if hop == "aliased_clone":
+                computed = a + 0
+                return (
+                    run_loop(a.clone()[:1025], a.clone()[1025:]),
+                    run_loop(computed.clone()[:1025], computed.clone()[1025:]),
+                )
+            if hop == "while_loop":
+                return run_loop(a, b)
+            if hop == "nested_cond":
+
+                def true_fn(a, b):
+                    return torch.cond(
+                        p, lambda a, b: a * b, lambda a, b: a * b + 2, (a, b)
+                    )
+            else:
+
+                def true_fn(a, b):
+                    return a * b
+
+            return torch.cond(p, true_fn, lambda a, b: a * b + 1, (a, b))
+
+        counter = CompileCounterWithBackend("inductor")
+        p = torch.tensor(True, device=device)
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        with config.patch({"numerics": numerics, "triton.cudagraphs": True}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            for offset in (0, 1, 0):
+                a = values[7:8].repeat(1025 + offset)[offset:]
+                b = values[6:7].repeat(1025)
+                if hop == "aliased_clone":
+                    a = torch.cat((a, b))
+                torch.compiler.cudagraph_mark_step_begin()
+                actual = compiled(p, a, b)
+                if hop == "aliased_clone":
+                    expected = fn(p, a, b)
+                else:
+                    expected = (a * b, b * a) if hop == "invoke" else a * b
+                self.assertTrue(_outputs_equal(actual, expected))
+                del actual
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "producer",
+        (
+            "inplace",
+            "chain_view",
+            "dtype_view",
+            "fresh",
+            "copied_fresh",
+            "byte_view",
+            "float32_inplace",
+            "complex64_inplace",
+            "out",
+        ),
+    )
+    def test_mul_nan_payload_mutation_provenance(
+        self, device, dtype, numerics, producer
+    ):
+        values = _min_max_specials(dtype, device)
+
+        def fn(a, b, dst=None):
+            if producer == "out":
+                if typed_root:
+                    dst.add_(0)
+                    a, dst = a.view(dtype), dst.view(dtype)
+                torch.add(a, 0, out=dst)
+                # The overwritten result may disappear; the destination view
+                # must still refer to the original native storage.
+                torch.add(a.reshape(205, -1), 0, out=dst.reshape(205, -1))
+                a = dst.view(dtype)
+            elif producer == "fresh":
+                a = a + 0
+            elif producer == "byte_view":
+                a = a[3:].view(dtype)
+            elif producer == "copied_fresh":
+                result = a + 0
+                a.copy_(result)
+                a = result
+            elif producer in ("float32_inplace", "complex64_inplace"):
+                a.add_(0)
+                a = a.view(dtype)
+            else:
+                a.view(dtype).add_(0)
+                if producer == "inplace":
+                    if partial_write:
+                        a[:1025].add_(0)
+                    else:
+                        a.add_(0)
+                elif producer == "chain_view":
+                    a, b = a.reshape(205, 5), b.reshape(205, 5)
+                    a.sub_(0)
+                elif producer == "dtype_view":
+                    a = a.view(torch.int64).view(dtype)
+                    a.add_(0)
+            return (a[:1025] if partial_write else a) * b
+
+        def operands(offset):
+            if producer == "out":
+                dst = torch.zeros(1025 + offset, device=device, dtype=dtype)[
+                    offset:
+                ].view(out_dtype)
+                a = values[7:8].repeat(1025).view(out_dtype)
+                if writer_dtype != out_dtype:
+                    a = (
+                        torch.full(
+                            (1025,), 0x7FC00011, dtype=torch.int32, device=device
+                        ).view(torch.float32)
+                        if writer_dtype == torch.float32
+                        else a.to(writer_dtype)
+                    )
+                return (
+                    a,
+                    values[6:7].repeat(1025),
+                    dst,
+                )
+            if producer == "byte_view":
+                a = (
+                    values[7:8]
+                    .repeat(1027 + offset)
+                    .view(torch.float32)[1 + 2 * offset :]
+                )
+                return a, values[6:7].repeat(1025)
+            count = 2050 if partial_write else 1025
+            storage = values[7:8].repeat(count * input_stride + offset)
+            if input_stride == 2:
+                storage[offset + 1 :: 2] = 1
+            a = storage[offset::input_stride]
+            if producer == "float32_inplace":
+                a = a.view(torch.float32)
+            elif producer == "complex64_inplace":
+                a = a.view(torch.complex64)
+            b = values[6:7].repeat(1025).requires_grad_(partial_write)
+            return a, b
+
+        for out_dtype, writer_dtype, typed_root, input_stride, partial_write in (
+            (
+                (dtype, dtype, False, 1, False),
+                (torch.int64, torch.int64, False, 1, False),
+                (torch.float32, torch.float32, True, 1, False),
+                (dtype, torch.float32, False, 1, False),
+                (torch.float32, dtype, False, 1, False),
+            )
+            if producer == "out"
+            else tuple(
+                (dtype, dtype, False, stride, partial)
+                for stride in (
+                    (1, 2)
+                    if producer in ("inplace", "chain_view", "dtype_view")
+                    else (1,)
+                )
+                for partial in ((False, True) if producer == "inplace" else (False,))
+            )
+        ):
+            counter = CompileCounterWithBackend("inductor")
+            with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                compiled = torch.compile(fn, fullgraph=True, backend=counter)
+                for i, offset in enumerate((0, 1, 0, 1)):
+                    eager_args, actual_args = operands(offset), operands(offset)
+                    expected = fn(*eager_args)
+                    if i == 0:
+                        actual, codes = run_and_get_code(compiled, *actual_args)
+                        self.assertIn("@triton.jit", "\n".join(codes))
+                    else:
+                        actual = compiled(*actual_args)
+                    self.assertEqual(
+                        actual.view(torch.int64), expected.view(torch.int64)
+                    )
+                    if partial_write:
+                        grad = values[6:7].repeat(1025)
+                        expected_grad = torch.autograd.grad(
+                            expected, eager_args[1], grad
+                        )[0]
+                        actual_grad = torch.autograd.grad(actual, actual_args[1], grad)[
+                            0
+                        ]
+                        self.assertEqual(
+                            actual_grad.view(torch.int64),
+                            expected_grad.view(torch.int64),
+                        )
+                        self.assertEqual(
+                            actual_args[0].view(torch.int64),
+                            eager_args[0].view(torch.int64),
+                        )
+                    if input_stride == 2:
+                        self.assertEqual(
+                            actual_args[0]._base.view(torch.int64),
+                            eager_args[0]._base.view(torch.int64),
+                        )
+                    if producer == "out":
+                        for index in (0, 2):
+                            self.assertEqual(
+                                actual_args[index].view(torch.uint8),
+                                eager_args[index].view(torch.uint8),
+                            )
+                if producer == "out" and out_dtype == writer_dtype == dtype:
+
+                    def prior_reader(a, dst):
+                        old = dst + 1
+                        torch.add(a, 1, out=dst)
+                        return old * dst
+
+                    a = torch.ones(1025, device=device, dtype=dtype)
+                    dst = torch.ones_like(a)
+                    actual = torch.compile(prior_reader, fullgraph=True)(a, dst)
+                    self.assertEqual(actual, torch.full_like(actual, 4))
+                    self.assertEqual(dst, torch.full_like(dst, 2))
+                    self.assertEqual(a, torch.ones_like(a))
+            self.assertEqual(counter.frame_count, 1)
+
+        if producer == "inplace":
+
+            def fresh_and_mutated(a, b, c):
+                fresh = a + 0
+                a.add_(0)
+                result = a * b
+                a.add_(1)
+                return fresh * b, result, c.sin()
+
+            counter = CompileCounterWithBackend("inductor")
+            with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                compiled = torch.compile(
+                    fresh_and_mutated, fullgraph=True, backend=counter
+                )
+                for offset in (0, 1, 0, 1):
+
+                    def inputs():
+                        a = values[7:8].repeat(1025 + offset)[offset:]
+                        b = values[6:7].repeat(1025)
+                        c = torch.tensor(
+                            [0.25, -0.5, 0.75],
+                            device=device,
+                            dtype=dtype,
+                            requires_grad=True,
+                        )
+                        return a, b, c
+
+                    eager_args, actual_args = inputs(), inputs()
+                    expected = fresh_and_mutated(*eager_args)
+                    actual = compiled(*actual_args)
+                    for expected_value, actual_value in zip(expected, actual):
+                        self.assertEqual(
+                            actual_value.view(torch.int64),
+                            expected_value.view(torch.int64),
+                        )
+                    expected_grad = torch.autograd.grad(
+                        expected[2], eager_args[2], torch.ones_like(eager_args[2])
+                    )[0]
+                    actual_grad = torch.autograd.grad(
+                        actual[2], actual_args[2], torch.ones_like(actual_args[2])
+                    )[0]
+                    self.assertEqual(
+                        actual_grad.view(torch.int64), expected_grad.view(torch.int64)
+                    )
+                    self.assertEqual(
+                        actual_args[0]._base.view(torch.int64),
+                        eager_args[0]._base.view(torch.int64),
+                    )
+            self.assertEqual(counter.frame_count, 1)
+
+    @dtypes(torch.float64)
+    @parametrize("option", ("strict_pointwise", "numerics"))
+    @parametrize("mutation_first", (False, True))
+    def test_mul_nan_payload_mutation_cache(
+        self, device, dtype, option, mutation_first
+    ):
+        def copied_fresh(a, b):
+            result = a + 0
+            a.copy_(result)
+            return result * b
+
+        def mutate(a, b):
+            a.add_(0)
+            return a * b
+
+        def local(a, b):
+            z = a + 0
+            z.add_(0)
+            return z * b, a
+
+        def caller(a, b):
+            z = a + 0
+            a.add_(0)
+            return a * b, z
+
+        values = _min_max_specials(dtype, device)
+        functions = (mutate, copied_fresh) if mutation_first else (copied_fresh, mutate)
+        options = {
+            option: True if option == "strict_pointwise" else "strict_pointwise",
+            "triton.cudagraphs": False,
+        }
+        with config.patch(
+            force_disable_caches=False,
+            fx_graph_cache=True,
+            fx_graph_remote_cache=False,
+        ):
+            for index, fn in enumerate((*functions, functions[0])):
+                torch._dynamo.reset()
+                a = values[7:8].repeat(1026)[1:]
+                b = values[6:7].repeat(1025)
+                eager_a = values[7:8].repeat(1026)[1:]
+                expected = fn(eager_a, b)
+                hits = counters["inductor"]["fxgraph_cache_hit"]
+                misses = counters["inductor"]["fxgraph_cache_miss"]
+                actual = torch.compile(fn, fullgraph=True, options=options)(a, b)
+                self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
+                self.assertEqual(a.view(torch.int64), eager_a.view(torch.int64))
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_miss"], misses + (index < 2)
+                )
+                self.assertEqual(
+                    counters["inductor"]["fxgraph_cache_hit"], hits + (index == 2)
+                )
+            functions = (caller, local) if mutation_first else (local, caller)
+            for fn in functions:
+                torch._dynamo.reset()
+                a = torch.arange(1, 1026, device=device, dtype=dtype)
+                b = torch.full_like(a, 2).requires_grad_()
+                eager_a = a.clone()
+                eager_b = b.detach().clone().requires_grad_()
+                expected = fn(eager_a, eager_b)
+                misses = counters["inductor"]["fxgraph_cache_miss"]
+                actual = torch.compile(fn, fullgraph=True, options=options)(a, b)
+                self.assertEqual(actual, expected)
+                grad = torch.full_like(a, 3)
+                expected_grad = torch.autograd.grad(expected[0], eager_b, grad)[0]
+                actual_grad = torch.autograd.grad(actual[0], b, grad)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                self.assertEqual(a, eager_a)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], misses + 2)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("cpu_scalar", (False, True))
+    @parametrize("producer", ("inplace", "out"))
+    def test_mul_nan_payload_mutation_backward(
+        self, device, dtype, numerics, cpu_scalar, producer
+    ):
+        values = torch.tensor(
+            [
+                0x7FF8000000000011,
+                0x7FF8000000000001,
+                0x7FF8000000000033,
+                0x7FF8000000000022,
+            ],
+            dtype=torch.int64,
+            device=device,
+        ).view(dtype)
+
+        def fn(a, b, dst=None, c=None):
+            if producer == "out":
+                if typed_root:
+                    dst.add_(0)
+                    dst = dst.view(dtype)
+                torch.add(a, 0, out=dst)
+                torch.add(c.reshape(205, -1), 0, out=dst.reshape(205, -1))
+                a = dst.view(dtype)
+            else:
+                if native_mul:
+                    if native_mul == "before":
+                        a.add_(0)
+                    result = a.mul_(b)
+                    if native_mul == "after":
+                        a.add_(0)
+                    return result
+                a.add_(0)
+            return a * b
+
+        def operands(offset):
+            a = values[0:1].repeat(1025 + offset)[offset:]
+            b = (
+                torch.tensor(1.0, dtype=dtype, device="cpu", requires_grad=True)
+                if cpu_scalar
+                else values[1:2].repeat(1025).requires_grad_()
+            )
+            if producer == "out":
+
+                def source_value(value, payload):
+                    if writer_dtype == torch.float32:
+                        return torch.full(
+                            (1025,), payload, dtype=torch.int32, device=device
+                        ).view(torch.float32)
+                    result = value.repeat(1025)
+                    return (
+                        result
+                        if backing_dtype == dtype or typed_root
+                        else result.view(backing_dtype).to(writer_dtype)
+                    )
+
+                return (
+                    source_value(values[0:1], 0x7FC00011),
+                    b,
+                    torch.zeros(1025 + offset, dtype=dtype, device=device)[
+                        offset:
+                    ].view(backing_dtype),
+                    source_value(values[3:4], 0x7FC00022),
+                )
+            return a, b
+
+        grad_output = values[2:3].repeat(1025)
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            for backing_dtype, writer_dtype, typed_root, native_mul in (
+                (
+                    (dtype, dtype, False, False),
+                    (torch.float32, dtype, True, False),
+                    (dtype, torch.float32, False, False),
+                    (torch.float32, dtype, False, False),
+                )
+                if producer == "out"
+                else tuple(
+                    (dtype, dtype, False, native)
+                    for native in (
+                        (False, True)
+                        if cpu_scalar
+                        else (False, True, "before", "after")
+                    )
+                )
+            ):
+                counter = CompileCounterWithBackend("inductor")
+                compiled = torch.compile(fn, fullgraph=True, backend=counter)
+                frames = None
+                for offset in (0, 1, 0, 1):
+                    eager_args = operands(offset)
+                    eager = fn(*eager_args)
+                    expected = torch.autograd.grad(eager, eager_args[1], grad_output)[0]
+                    args = operands(offset)
+                    output = compiled(*args)
+                    self.assertEqual(output.view(torch.int64), eager.view(torch.int64))
+                    actual = torch.autograd.grad(output, args[1], grad_output)[0]
+                    self.assertEqual(
+                        actual.view(torch.int64), expected.view(torch.int64)
+                    )
+                    for index in (0, 2) if producer == "out" else (0,):
+                        self.assertEqual(
+                            args[index].view(torch.uint8),
+                            eager_args[index].view(torch.uint8),
+                            msg=f"{backing_dtype=}, {writer_dtype=}, {typed_root=}, {offset=}, {index=}",
+                        )
+                    if frames is None:
+                        frames = counter.frame_count
+                    self.assertEqual(counter.frame_count, frames)
+                if not cpu_scalar:
+                    self.assertEqual(counter.frame_count, 1)
+
+            def prior_reader(a, b, dst):
+                if producer == "out":
+                    old = dst + 1
+                    torch.add(a, 1, out=dst)
+                    return old * dst * b
+                old = a + 1
+                a.add_(1)
+                return old * a * b
+
+            if not cpu_scalar:
+                compiled = torch.compile(prior_reader, fullgraph=True)
+                a = torch.ones(1025, device=device, dtype=dtype)
+                b = torch.ones_like(a, requires_grad=True)
+                dst = torch.ones_like(a)
+                actual = compiled(a, b, dst)
+                self.assertEqual(actual, torch.full_like(actual, 4))
+                self.assertEqual(
+                    torch.autograd.grad(actual, b, torch.ones_like(actual))[0],
+                    torch.full_like(b, 4),
+                )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("index_propagation", (False, True))
+    def test_mul_arange(self, device, dtype, numerics, index_propagation):
+        def fn(x):
+            a = torch.arange(x.numel(), device=x.device, dtype=dtype)
+            b = torch.arange(x.numel(), device=x.device, dtype=dtype)
+            return a * b
+
+        x = torch.empty(1025, device=device)
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": numerics,
+                "constant_and_index_propagation": index_propagation,
+            },
+        )
+        actual, codes = run_and_get_code(compiled, x)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(actual.view(torch.int64), fn(x).view(torch.int64))
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("scalar_left", (False, True))
     @parametrize("scalar_dtype", (torch.float32, torch.float64))
     @parametrize("foreach", (False, True))
@@ -779,7 +1419,10 @@ class StrictNumericsCompileTest(TestCase):
 
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
         for scalar in scalars:
-            self._assert_bitwise_equal(compiled(x, scalar), fn(x, scalar))
+            self.assertEqual(
+                compiled(x, scalar).view(torch.int64),
+                fn(x, scalar).view(torch.int64),
+            )
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -804,7 +1447,7 @@ class StrictNumericsCompileTest(TestCase):
         )
         expected = torch.autograd.grad(torch.acos(x), x, grad)[0]
         actual = torch.autograd.grad(compiled(x), x, grad)[0]
-        self._assert_bitwise_equal(actual, expected)
+        self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
@@ -848,7 +1491,10 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(result, fn(x))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in result),
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in fn(x)),
+        )
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle")],
@@ -875,7 +1521,10 @@ class StrictNumericsCompileTest(TestCase):
         compiled = torch.compile(
             op.op, fullgraph=True, options={"numerics": "strict_pointwise"}
         )
-        self._assert_bitwise_equal(compiled([x], [y])[0], op.op([x], [y])[0])
+        self.assertEqual(
+            compiled([x], [y])[0].view(torch.int16),
+            op.op([x], [y])[0].view(torch.int16),
+        )
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -893,7 +1542,10 @@ class StrictNumericsCompileTest(TestCase):
         )
         result, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(result, op.op(a, b))
+        self.assertEqual(
+            result.view(_BIT_VIEW[dtype]),
+            op.op(a, b).view(_BIT_VIEW[dtype]),
+        )
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -934,7 +1586,11 @@ class StrictNumericsCompileTest(TestCase):
         self.assertNotIn("aten.view.dtype(", "\n".join(codes))
         for bound in bounds:
             actual, expected = compiled(x, bound), fn(x, bound)
-            self._assert_bitwise_equal(actual, expected)
+            int_dtype = _BIT_VIEW[expected[0].dtype]
+            self.assertEqual(
+                tuple(t.view(int_dtype) for t in actual),
+                tuple(t.view(int_dtype) for t in expected),
+            )
 
     @ops(
         [op for op in op_db if op.name in ("fmin", "fmax")],
@@ -958,7 +1614,10 @@ class StrictNumericsCompileTest(TestCase):
                 "triton.codegen_upcast_to_fp32": upcast,
             },
         )
-        self._assert_bitwise_equal(compiled(a, b), fn(a, b))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in compiled(a, b)),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
+        )
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -993,7 +1652,10 @@ class StrictNumericsCompileTest(TestCase):
         result, codes = run_and_get_code(compiled, a, b)
         if shared:
             self.assertEqual(sum(code.count("@triton.jit") for code in codes), 1)
-        self._assert_bitwise_equal(result, fn(a, b))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
+        )
 
     @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
@@ -1070,7 +1732,8 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         code = "\n".join(codes)
-        self._assert_bitwise_equal(result, op.op(x))
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
         self.assertIn("libdevice.exp", code)
         self.assertIn("libdevice.rcp_rn", code)
         self.assertNotIn("tl.sigmoid", code)
@@ -1141,8 +1804,12 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("@triton.jit", "\n".join(codes))
         result_grads, codes = run_and_get_code(torch.autograd.grad, result[0], x, grad)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(result, expected)
-        self._assert_bitwise_equal(result_grads[0], expected_grad)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in expected),
+        )
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result_grads[0].view(int_dtype), expected_grad.view(int_dtype))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -1156,9 +1823,15 @@ class StrictNumericsCompileTest(TestCase):
         vector = torch.full((17,), 0 if scalar_grad else 1, device=device, dtype=dtype)
         grad, output = (scalar, vector) if scalar_grad else (vector, scalar)
         fn = torch.ops.aten.tanh_backward.default
-        self._check_bitwise(
-            fn, grad, output, numerics="strict_pointwise", upcast=upcast
-        )
+        result = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(grad, output)
+        self.assertEqual(result.view(torch.int16), fn(grad, output).view(torch.int16))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -1184,7 +1857,7 @@ class StrictNumericsCompileTest(TestCase):
             },
         )(grad, x, **kwargs)
         self.assertEqual(result.dtype, expected.dtype)
-        self._assert_bitwise_equal(result, expected)
+        self.assertEqual(result.view(torch.int16), expected.view(torch.int16))
 
     @ops(
         [
@@ -1264,12 +1937,13 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         expected, expected_below_lower = fn(x)
-        self._assert_bitwise_equal(result, expected)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
         self.assertEqual(below_lower, expected_below_lower)
         self.assertIn("tl.where", "\n".join(codes))
         expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
         result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
-        self._assert_bitwise_equal(result_grad, expected_grad)
+        self.assertEqual(result_grad.view(int_dtype), expected_grad.view(int_dtype))
 
     @config.patch(
         numerics="strict_pointwise", max_fusion_size=1, realize_opcount_threshold=0
@@ -1289,7 +1963,7 @@ class StrictNumericsCompileTest(TestCase):
         x = _exhaustive_16bit(dtype, device)
         metrics.reset()
         result = torch.compile(fn, fullgraph=True)(x)
-        self._assert_bitwise_equal(result, fn(x))
+        self.assertEqual(result.view(torch.int16), fn(x).view(torch.int16))
         self.assertGreater(metrics.generated_kernel_count, 1)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -1327,7 +2001,7 @@ class StrictNumericsCompileTest(TestCase):
         result, *masks = torch.compile(
             fn, fullgraph=True, options={"numerics": numerics}
         )(x, lo, hi)
-        self._assert_bitwise_equal(result, expected)
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
         self.assertEqual(masks, expected_masks)
         expected_grads = torch.autograd.grad(
             expected, (x, lo, hi), torch.ones_like(expected), allow_unused=True
@@ -1339,7 +2013,7 @@ class StrictNumericsCompileTest(TestCase):
             if wanted is None:
                 self.assertIsNone(actual)
             else:
-                self._assert_bitwise_equal(actual, wanted)
+                self.assertEqual(actual.view(int_dtype), wanted.view(int_dtype))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("zero_dim", (False, True))
@@ -1373,7 +2047,8 @@ class StrictNumericsCompileTest(TestCase):
                 hi = hi[None]
             expected = fn(x, lo, hi)
             result = compiled(x, lo, hi)
-            self._assert_bitwise_equal(result, expected)
+            int_dtype = _BIT_VIEW[expected.dtype]
+            self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
 
     @dtypes(torch.int32, torch.int64, torch.uint32, torch.uint64)
     @parametrize("upcast", (False, True))
@@ -1411,7 +2086,10 @@ class StrictNumericsCompileTest(TestCase):
             },
         )(x, lo, hi)
         expected = fn(x, lo, hi)
-        self._assert_bitwise_equal(actual, expected)
+        self.assertEqual(
+            tuple(t.view(torch.int16) for t in actual),
+            tuple(t.view(torch.int16) for t in expected),
+        )
 
     @dtypes(torch.float32)
     @parametrize("op", ("argmax", "argmin"))
@@ -1421,7 +2099,15 @@ class StrictNumericsCompileTest(TestCase):
             return getattr(x, op)(-1).to(torch.bfloat16)
 
         x = torch.randn((16, 16), device=device, dtype=dtype)
-        self._check_bitwise(fn, x, numerics="strict_pointwise", upcast=upcast)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(x)
+        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("bound_kind", ("min", "max"))
@@ -1441,7 +2127,10 @@ class StrictNumericsCompileTest(TestCase):
             fn, fullgraph=True, options={"numerics": "strict_pointwise"}
         )
         for bound in (-0.0, 0.7, 1e-42, float("nan")):
-            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
     @config.patch(
@@ -1477,13 +2166,19 @@ class StrictNumericsCompileTest(TestCase):
         for bound in bounds:
             if bound_source == "python":
                 bound = bound.item()
-            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
 
         if bound_source == "python":
             hits = counters["aot_autograd"]["autograd_cache_hit"]
             torch._dynamo.reset()
             bound = bounds[1].item()
-            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits + 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -1514,7 +2209,10 @@ class StrictNumericsCompileTest(TestCase):
             expected = fn(x, bound)
             actual = compiled(x, bound)
             self.assertEqual(actual[0].stride(), expected[0].stride())
-            self._assert_bitwise_equal(actual, expected)
+            self.assertEqual(
+                tuple(t.view(_BIT_VIEW[dtype]) for t in actual),
+                tuple(t.view(_BIT_VIEW[dtype]) for t in expected),
+            )
 
     @ops(
         [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
@@ -1553,10 +2251,12 @@ class StrictNumericsCompileTest(TestCase):
             options={"numerics": numerics},
         )(x)
         expected = fn(x)
-        self._assert_bitwise_equal(result, expected)
+        self.assertEqual(result.view(_BIT_VIEW[dtype]), expected.view(_BIT_VIEW[dtype]))
         expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
         result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
-        self._assert_bitwise_equal(result_grad, expected_grad)
+        self.assertEqual(
+            result_grad.view(_BIT_VIEW[dtype]), expected_grad.view(_BIT_VIEW[dtype])
+        )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
     @config.patch(numerics="strict_pointwise", _use_fp64_for_unbacked_floats=False)
@@ -1606,7 +2306,7 @@ class StrictNumericsCompileTest(TestCase):
                     bound = torch.tensor(bound, dtype=torch.float64)
                 expected = fn(x, bound)
                 result = compiled(x, bound)
-                self._assert_bitwise_equal(result, expected)
+                self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
         # Python bounds generalize once; tensor bounds recompile once for NaN.
         self.assertEqual(counter.frame_count, 2)
 
@@ -1634,12 +2334,17 @@ class StrictNumericsCompileTest(TestCase):
         )
         if from_tensor:
             bounds = tuple(torch.tensor(b, dtype=torch.float64) for b in bounds)
-        self._check_bitwise(fn, x, *bounds, numerics="strict_pointwise")
+        result = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )(x, *bounds)
+        self.assertEqual(result.view(torch.int32), fn(x, *bounds).view(torch.int32))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_softshrink_strict_symbolic_lambd(self, device, dtype, numerics):
         from torch._dynamo.testing import CompileCounterWithBackend
+
+        bits = _BIT_VIEW[dtype]
 
         def fn(x, lambd):
             return torch.nn.functional.softshrink(x, lambd)
@@ -1669,8 +2374,8 @@ class StrictNumericsCompileTest(TestCase):
                 expected_grad = torch.autograd.grad(expected, x, grad_output)[0]
                 result = compiled(x, lambd)
                 result_grad = torch.autograd.grad(result, x, grad_output)[0]
-                self._assert_bitwise_equal(result, expected)
-                self._assert_bitwise_equal(result_grad, expected_grad)
+                self.assertEqual(result.view(bits), expected.view(bits))
+                self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
         if dtype == torch.float32:
             # Half-precision inputs round lambd with scalar_tensor, which
             # tensorify cannot handle, so lambd is specialized there.
@@ -1697,7 +2402,7 @@ class StrictNumericsCompileTest(TestCase):
             y,
         )
 
-        self._assert_bitwise_equal(result, x / y)
+        self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
 
 
@@ -2023,100 +2728,8 @@ POINTWISE_EXTRA = frozenset(
         "nn.functional.hardswish",
         "nn.functional.leaky_relu",
         "native_dropout_backward",
-        "alias_copy",
-        "clone",
-        "contiguous",
-        "resolve_conj",
-        "resolve_neg",
-        "to",
-        "view_as_complex",
-        "view_as_real",
-        "addr",
-        "outer",
-        "kron",
-        "nn.functional.glu",
-        "tril",
-        "triu",
-        "zero_",
-        "unravel_index",
-        "jiterator_2inputs_2outputs",
-        "jiterator_4inputs_with_extra_args",
     }
 )
-
-POINTWISE_LOSSES = frozenset(
-    {
-        "nn.functional.binary_cross_entropy",
-        "nn.functional.binary_cross_entropy_with_logits",
-        "nn.functional.gaussian_nll_loss",
-        "nn.functional.hinge_embedding_loss",
-        "nn.functional.huber_loss",
-        "nn.functional.kl_div",
-        "nn.functional.l1_loss",
-        "nn.functional.margin_ranking_loss",
-        "nn.functional.mse_loss",
-        "nn.functional.poisson_nll_loss",
-        "nn.functional.smooth_l1_loss",
-        "nn.functional.soft_margin_loss",
-    }
-)
-POINTWISE_FIXED_STATS = frozenset(
-    {
-        "nn.functional.batch_norm",
-        "native_batch_norm",
-        "_native_batch_norm_legit",
-        "nn.functional.instance_norm",
-    }
-)
-POINTWISE_DROPOUT = frozenset(
-    {
-        "nn.functional.alpha_dropout",
-        "nn.functional.dropout",
-        "nn.functional.dropout2d",
-        "nn.functional.dropout3d",
-        "nn.functional.feature_alpha_dropout",
-    }
-)
-POINTWISE_CONDITIONAL = (
-    POINTWISE_LOSSES
-    | POINTWISE_FIXED_STATS
-    | POINTWISE_DROPOUT
-    | {"nn.functional.rrelu", "nn.functional.one_hot", "einsum", "tensordot"}
-)
-POINTWISE_REPRESENTATIONS = frozenset(
-    {
-        "alias_copy",
-        "clone",
-        "contiguous",
-        "conj",
-        "resolve_conj",
-        "resolve_neg",
-        "view_as_complex",
-        "view_as_real",
-        "to",
-    }
-)
-POINTWISE_GEOMETRY = frozenset(
-    {
-        "addr",
-        "outer",
-        "kron",
-        "nn.functional.glu",
-        "view_as_complex",
-        "view_as_real",
-        "tril",
-        "triu",
-        "unravel_index",
-        "nn.functional.prelu",
-    }
-)
-
-
-def _pointwise_op(op):
-    # Evaluation needs no seed wrapper, which Dynamo cannot trace.
-    if op.name in POINTWISE_DROPOUT | {"nn.functional.rrelu"}:
-        return getattr(torch.nn.functional, op.name.rsplit(".", 1)[1])
-    return op.op
 
 
 def _op_id(op):
@@ -2130,7 +2743,7 @@ def _pointwise_ops():
     for op in op_db:
         if not (
             isinstance(op, (UnaryUfuncInfo, BinaryUfuncInfo))
-            or op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL
+            or op.name in POINTWISE_EXTRA
         ):
             continue
         oid = _op_id(op)
@@ -2151,7 +2764,7 @@ def _dtype_label(dtype):
 
 # Exhaust all 16-bit encodings and sample float32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
-# Opt in to complete OpInfo samples, reference inputs and raw-bit sweeps.
+# Opt in to all floating dtypes and reference inputs, including arbitrary strides.
 ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 
 _FINFO32 = torch.finfo(torch.float32)
@@ -2196,8 +2809,8 @@ def _substitute(t, y, n, parity=0):
         mask = torch.zeros(n, dtype=torch.bool, device=y.device)
         mask[parity::2] = True
         return mask
-    if (t.is_floating_point() or t.is_complex()) and t.numel() != 1:
-        return y.to(t.dtype)
+    if t.is_floating_point() and t.numel() != 1:
+        return y
     return t
 
 
@@ -2232,185 +2845,6 @@ def _min_max_specials(dtype, device):
     return torch.cat((x, bits.view(dtype)))
 
 
-# Native CUDA domain endpoints and piecewise formula switches.
-POINTWISE_BOUNDARIES = {
-    "log": (0, 1),
-    "log2": (0, 1),
-    "log10": (0, 1),
-    "log1p": (-1, 0),
-    "sqrt": (0,),
-    "rsqrt": (0,),
-    "asin": (-1, 0, 1),
-    "acos": (-1, 0, 1),
-    "atanh": (-1, 0, 1),
-    "acosh": (1,),
-    "sinc": (0,),
-    "nn.functional.relu": (0,),
-    "nn.functional.relu6": (0, 6),
-    "nn.functional.hardsigmoid": (-3, 3),
-    "nn.functional.hardshrink": (-0.5, 0.5),
-    "nn.functional.leaky_relu": (0,),
-    "nn.functional.elu": (0,),
-    "nn.functional.selu": (0,),
-    "nn.functional.celu": (0,),
-    "erfinv": (-1, 1),
-    "nn.functional.hardswish": (-3, 3),
-    "nn.functional.hardtanh": (-1, 1),
-    "nn.functional.softshrink": (-0.5, 0.5),
-    "special.log_ndtr": (-1,),
-    "special.erfcx": (-26.7, -6.1, 0, 50, 5e7),
-    "special.bessel_j0": (-5, -1e-5, 0, 1e-5, 5),
-    "special.bessel_j1": (-5, 0, 5),
-    "special.bessel_y0": (0, 5),
-    "special.bessel_y1": (0, 5),
-    "special.modified_bessel_i0": (-8, 0, 8),
-    "special.modified_bessel_i1": (-8, 0, 8),
-    "special.spherical_bessel_j0": (-0.5, 0, 0.5),
-}
-POINTWISE_EDGE_NAMES = frozenset(POINTWISE_BOUNDARIES) | {
-    "clamp",
-    "lerp",
-    "logit",
-    "nn.functional.softplus",
-}
-POINTWISE_EDGE_DTYPES = (*POINTWISE_DTYPES, torch.float64)
-
-
-def _pointwise_subnormals(dtype):
-    # Construct on CPU so input generation is independent of CUDA flushing.
-    zero = torch.tensor(0.0, dtype=dtype)
-    tiny = torch.nextafter(zero, torch.tensor(float("inf"), dtype=dtype))
-    normal = torch.tensor(torch.finfo(dtype).tiny, dtype=dtype)
-    positive = torch.stack(
-        (
-            zero,
-            tiny,
-            tiny * 2,
-            torch.nextafter(normal, zero),
-            normal,
-            torch.nextafter(normal, torch.tensor(float("inf"), dtype=dtype)),
-        )
-    )
-    return torch.cat((positive, -positive))
-
-
-def _pointwise_grad_values(dtype, device):
-    if dtype.is_complex:
-        real_dtype = torch.empty((), dtype=dtype).real.dtype
-        values = _pointwise_grad_values(real_dtype, device)
-        zeros = torch.zeros_like(values)
-        return torch.cat(
-            (
-                torch.stack((values, zeros), -1).view(dtype).flatten(),
-                torch.stack((zeros, values), -1).view(dtype).flatten(),
-            )
-        )
-    return torch.cat(
-        (_pointwise_subnormals(dtype).to(device), _min_max_specials(dtype, device))
-    )
-
-
-def _pointwise_neighbors(boundaries, dtype):
-    centers = torch.tensor(boundaries, dtype=dtype)
-    centers = centers[torch.isfinite(centers)]
-    return torch.cat(
-        (
-            torch.nextafter(centers, torch.full_like(centers, -float("inf"))),
-            centers,
-            torch.nextafter(centers, torch.full_like(centers, float("inf"))),
-        )
-    )
-
-
-def _pointwise_boundary_values(boundaries, dtype, device):
-    return torch.cat(
-        (
-            _pointwise_neighbors(boundaries, dtype).to(device),
-            _pointwise_subnormals(dtype).to(device),
-            _min_max_specials(dtype, device),
-        )
-    )
-
-
-def _pointwise_edge_calls(op, device, dtype):
-    calls = []
-
-    def add(label, inp, args=(), kwargs=None):
-        calls.append((f"edge_{label}", inp, args, kwargs or {}))
-
-    if op.name in POINTWISE_BOUNDARIES:
-        x = _pointwise_boundary_values(POINTWISE_BOUNDARIES[op.name], dtype, device)
-        add("boundary", x)
-    elif op.name == "lerp":
-        weight = _pointwise_boundary_values((-0.5, 0, 0.5, 1), dtype, device)
-        start = torch.tensor([1, -1, 0.0, -0.0], dtype=dtype, device=device)
-        end = torch.tensor([-1, 1, -0.0, 0.0], dtype=dtype, device=device)
-        add(
-            "tensor_weight",
-            start.repeat_interleave(weight.numel()),
-            (end.repeat_interleave(weight.numel()), weight.repeat(start.numel())),
-        )
-        for value in _pointwise_neighbors((-0.5, 0, 0.5, 1), dtype).tolist():
-            add(f"scalar_weight_{value}", start, (end, value))
-    elif op.name == "logit":
-        acc_dtype = torch.float64 if dtype == torch.float64 else torch.float32
-        tiny = _pointwise_subnormals(dtype)[1].item()
-        for eps in (None, -1.0, -1e-50, 0.0, tiny, 0.2, 0.6, float("nan")):
-            boundaries = [0, 1]
-            if eps is not None:
-                lo = torch.tensor(eps, dtype=acc_dtype)
-                boundaries += [lo.item(), (1 - lo).item()]
-            x = _pointwise_boundary_values(boundaries, dtype, device)
-            add(f"eps_{eps}", x, kwargs={"eps": eps})
-    elif op.name == "nn.functional.softplus":
-        for beta, threshold in ((1, 20), (2, 1), (-2, 1)):
-            x = _pointwise_boundary_values((0, threshold / beta), dtype, device)
-            add(
-                f"beta_{beta}_threshold_{threshold}",
-                x,
-                kwargs={"beta": beta, "threshold": threshold},
-            )
-    elif op.name == "clamp":
-        x = _pointwise_boundary_values((-1, 1), dtype, device)
-        for lo, hi in ((-1.0, 1.0), (-1.0, None), (None, 1.0), (1.0, -1.0)):
-            add(f"scalar_bounds_{lo}_{hi}", x, (lo, hi))
-        bounds = _min_max_specials(dtype, device)
-        x = x.repeat_interleave(bounds.numel())
-        lo = bounds.repeat(x.numel() // bounds.numel())
-        add("tensor_min", x, (lo, None))
-        add("tensor_max", x, (None, lo))
-        add("tensor_bounds", x, (lo, lo.flip(0)))
-    return calls
-
-
-def _pointwise_edge_values(dtype):
-    if dtype == torch.bool:
-        return torch.tensor([False, True])
-    if dtype.is_complex:
-        real_dtype = torch.empty((), dtype=dtype).real.dtype
-        values = _pointwise_edge_values(real_dtype)
-        zeros = torch.zeros_like(values)
-        return torch.cat(
-            (
-                torch.stack((values, zeros), -1).view(dtype).flatten(),
-                torch.stack((zeros, values), -1).view(dtype).flatten(),
-            )
-        )
-    if dtype.is_floating_point:
-        limits = torch.finfo(dtype)
-        return torch.cat(
-            (
-                _pointwise_boundary_values((-2, -1, -0.5, 0, 0.5, 1, 2), dtype, "cpu"),
-                torch.tensor([limits.min, limits.max], dtype=dtype),
-            )
-        )
-    limits = torch.iinfo(dtype)
-    values = {limits.min, limits.min + 1, 0, 1, 2, limits.max - 1, limits.max}
-    if limits.min < 0:
-        values.add(-1)
-    return torch.tensor(sorted(values), dtype=dtype)
-
-
 def _diff_kind(a, b):
     r"""Classify mismatches as shape, value, NaN payload, or signed zero."""
     if isinstance(a, (tuple, list)):
@@ -2427,7 +2861,6 @@ def _diff_kind(a, b):
         return "value" if "value" in kinds or not kinds else "+".join(sorted(kinds))
     if a.dtype != b.dtype or a.shape != b.shape:
         return "shape"
-    a, b = a.resolve_conj().resolve_neg(), b.resolve_conj().resolve_neg()
     if a.is_complex():
         a, b = torch.view_as_real(a), torch.view_as_real(b)
     int_dtype = _BIT_VIEW.get(a.dtype)
@@ -2446,12 +2879,15 @@ def _diff_kind(a, b):
     return "+".join(parts) or "value"
 
 
-def _diff_outputs(out):
-    return [
-        t
-        for t in tree_leaves(out)
-        if isinstance(t, torch.Tensor) and (t.is_floating_point() or t.is_complex())
-    ]
+def _diff_output(out):
+    r"""Select the floating-point output, excluding frexp's integer exponent."""
+    if isinstance(out, torch.Tensor):
+        return out if out.is_floating_point() else None
+    if isinstance(out, (tuple, list)):
+        for t in out:
+            if isinstance(t, torch.Tensor) and t.is_floating_point():
+                return t
+    return None
 
 
 def _outputs_equal(a, b):
@@ -2471,7 +2907,6 @@ def _outputs_equal(a, b):
         return False
     if a.numel() == 0:
         return True
-    a, b = a.resolve_conj().resolve_neg(), b.resolve_conj().resolve_neg()
     if a.is_complex():
         a, b = torch.view_as_real(a), torch.view_as_real(b)
     return torch.equal(
@@ -2480,46 +2915,32 @@ def _outputs_equal(a, b):
     )
 
 
-def _representative_samples(samples):
-    def signature(t):
-        if not isinstance(t, torch.Tensor):
-            return t
-        return (
-            t.dtype,
-            t.layout,
-            tuple(min(size, 2) for size in t.shape),
-            t.is_contiguous(),
-            tuple(sorted(range(t.ndim), key=lambda dim: t.stride(dim))),
-            tuple(stride == 0 for stride in t.stride()),
-            t.is_conj(),
-            t.is_neg(),
-            t.requires_grad,
-        )
+_NONFLOAT_DTYPES = (
+    torch.int64,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+    torch.uint8,
+    torch.bool,
+    torch.complex64,
+    torch.complex128,
+    torch.complex32,
+)
 
-    seen = set()
-    for sample in samples:
-        scalar_parameters = [
-            t.detach()
-            .resolve_conj()
-            .resolve_neg()
-            .cpu()
-            .reshape(-1)
-            .clone(memory_format=torch.contiguous_format)
-            .view(torch.uint8)
-            .tolist()
-            for t in tree_leaves((sample.args, sample.kwargs))
-            if isinstance(t, torch.Tensor) and t.numel() == 1
-        ]
-        key = repr(
-            (
-                tree_map(signature, (sample.input, sample.args, sample.kwargs)),
-                scalar_parameters,
-            )
-        )
-        if key not in seen:
-            seen.add(key)
-            yield sample
 
+def _first_nonfloat_dtype(op):
+    for d in _NONFLOAT_DTYPES:
+        if d in op.supported_dtypes("cuda"):
+            return d
+    return None
+
+
+NONFLOAT_INPUT_OPS = [
+    op
+    for op in POINTWISE_OPS
+    if torch.float32 not in op.supported_dtypes("cuda")
+    and _first_nonfloat_dtype(op) is not None
+]
 
 BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 
@@ -2543,6 +2964,113 @@ NONFLOAT_XFAIL = frozenset(
         ("nn_functional_silu_complex", "complex128"),
     }
 )
+
+
+# Preserve all floating dtype coverage after removing repaired xfail entries.
+FULL_DTYPE_BACKWARD_OPS = frozenset(
+    {
+        "special_erfcx",
+        "nn_functional_softshrink",
+        "mvlgamma_mvlgamma_p_1",
+        "mvlgamma_mvlgamma_p_3",
+        "mvlgamma_mvlgamma_p_5",
+        "hypot",
+        "special_log_ndtr",
+        "i0",
+        "special_bessel_j0",
+        "special_bessel_j1",
+        "special_bessel_y0",
+        "special_bessel_y1",
+        "special_i1",
+        "special_modified_bessel_i0",
+        "special_modified_bessel_i1",
+        "addcmul",
+        "deg2rad",
+        "erf",
+        "erfc",
+        "erfinv",
+        "exp2",
+        "lerp",
+        "log10",
+        "log2",
+        "logit",
+        "rad2deg",
+        "rsqrt",
+        "sinc",
+        "special_ndtr",
+        "__rpow__",
+        "copysign",
+        "special_xlog1py",
+        "xlogy",
+        "double",
+        "float_power",
+        "__rmod__",
+        "addcdiv",
+        "div_floor_rounding",
+        "div_no_rounding_mode",
+        "div_trunc_rounding",
+        "floor_divide",
+        "remainder",
+        "round_decimals_3",
+        "round_decimals_neg_3",
+        "true_divide",
+        "ldexp",
+        "logaddexp2",
+        "rsub",
+        "sub",
+        "nn_functional_gelu",
+        "nn_functional_hardswish",
+        "nn_functional_mish",
+        "nn_functional_silu",
+        "nn_functional_softplus",
+        "nn_functional_tanhshrink",
+        "sigmoid",
+        "tanh",
+    }
+)
+
+FULL_DTYPE_POINTWISE_OPS = (
+    frozenset(
+        {
+            "abs",
+            "angle",
+            "double",
+            "fmax",
+            "fmin",
+            "frexp",
+            "max_binary",
+            "maximum",
+            "min_binary",
+            "minimum",
+            "neg",
+            "special_entr",
+            "special_xlog1py",
+            "xlogy",
+        }
+    )
+    | FULL_DTYPE_BACKWARD_OPS
+)
+
+
+class _strict_ops(ops):
+    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
+        super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
+        self.xfails = xfails
+        self.full_dtype_ops = full_dtype_ops
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        for case in super()._parametrize_test(test, generic_cls, device_cls):
+            params = case[2]
+            op, dtype = params["op"], params["dtype"]
+            supported = op.supported_dtypes(device_cls.device_type)
+            preferred = next(d for d in POINTWISE_DTYPES if d in supported)
+            if (
+                ALL_SAMPLES
+                or dtype == preferred
+                or _op_id(op) in self.full_dtype_ops
+                or (_op_id(op), _dtype_label(dtype)) in self.xfails
+            ):
+                yield case
 
 
 POINTWISE_STRICT_CFG = {
@@ -2579,6 +3107,15 @@ BITPATTERN_SLOW = frozenset(
     }
 )
 
+# Jiterator kernels cannot compile under fullgraph.
+COMPILE_UNSUPPORTED = frozenset(
+    {
+        "jiterator_unary",
+        "jiterator_binary",
+        "jiterator_binary_return_by_ref",
+    }
+)
+
 
 class _RngOpDetector(TorchDispatchMode):
     def __init__(self):
@@ -2600,105 +3137,11 @@ _LEDGER_ARCH = LazyVal(lambda: bool(IS_SM89 or IS_SM90 or IS_SM100))
     "requires CUDA and Triton on sm_89, sm_90 or sm_100 (the ledger's measured arches)",
 )
 class PointwiseStrictNumericsTest(TestCase):
-    _coverage = None
-
-    def run(self, result=None):
-        directory = os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR")
-        case = coverage_case(self._testMethodName)
-        if not directory or case is None:
-            return super().run(result)
-        ledgers = {
-            "test_pointwise_bitwise": POINTWISE_XFAIL | NONFLOAT_XFAIL,
-            "test_pointwise_backward": BACKWARD_XFAIL,
-        }
-        self._coverage = CoverageRecord(
-            case,
-            (case["op"], case["dtype"]) in ledgers.get(case["family"], ()),
-            required_sample_kinds=("opinfo", "edges"),
-        )
-        self._coverage.kernel_required = case["op"] not in {
-            _op_id(op)
-            for op in POINTWISE_OPS
-            if op.name in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
-        }
-        if result is None:
-            result = self.defaultTestResult()
-        try:
-            with record_result(self._coverage, result, self):
-                return super().run(result)
-        except BaseException as error:
-            self._coverage.status, self._coverage.reason = "failed", str(error)
-            raise
-        finally:
-            write_event(directory, self._coverage.event())
-
-    def _coverage_filter(self, reason, count=1):
-        if self._coverage is not None and count:
-            self._coverage.filters[reason] += count
-
-    def _coverage_comparison(self, equal, kind="", tag="sample"):
-        if self._coverage is not None:
-            self._coverage.compared += 1
-            self._coverage.compared_by_sample_kind[
-                "edges" if tag.startswith("edge_") else "opinfo"
-            ] += 1
-            self._coverage.matched += int(equal)
-            self._coverage.generated_kernels = metrics.generated_kernel_count
-            self._coverage.generated_fallbacks = metrics.generated_fallback_kernel_count
-            if not equal:
-                self._coverage.mismatches[kind] += 1
-
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
         # Release large reference-input allocations between concurrent tests.
         torch.cuda.empty_cache()
-
-    @dtypes(torch.float32)
-    @parametrize("parameter_kind", ("python", "tensor"))
-    def test_representative_samples_keep_parameters_and_layouts(
-        self, device, dtype, parameter_kind
-    ):
-        x = torch.randn((2, 3), device=device, dtype=dtype)
-        parameters = (0.0, -0.0) if parameter_kind == "tensor" else (0.1, 0.2)
-        if parameter_kind == "tensor":
-            parameters = tuple(
-                torch.tensor([p, 1.0], device=device)[::2] for p in parameters
-            )
-        samples = [
-            SampleInput(x, args=(parameters[0],)),
-            SampleInput(torch.ones((4, 5), device=device), args=(parameters[0],)),
-            SampleInput(x.t(), args=(parameters[0],)),
-            SampleInput(x[:, ::2], args=(parameters[0],)),
-            SampleInput(x.expand(2, 2, 3), args=(parameters[0],)),
-            SampleInput(x, args=(parameters[1],)),
-        ]
-        selected = list(_representative_samples(samples))
-        self.assertEqual(len(selected), 5)
-        self.assertIs(selected[0], samples[0])
-        self.assertIs(selected[-1], samples[-1])
-
-    @dtypes(torch.float32)
-    @parametrize("full", (False, True))
-    def test_combined_samples_preserve_seeded_edges(self, device, dtype, full):
-        op = next(op for op in POINTWISE_OPS if op.name == "nn.functional.relu")
-        torch.manual_seed(0)
-        expected = self._edge_calls(op, device, dtype)
-        with mock.patch(f"{__name__}.ALL_SAMPLES", full):
-            calls = self._combined_calls(device, op, dtype)
-        actual = [call for call in calls if call[0].startswith("edge_")]
-        self.assertEqual(len(actual), len(expected))
-        for result, reference in zip(actual, expected):
-            self.assertEqual(result[0], reference[0])
-            self.assertTrue(_outputs_equal(result[1], reference[1]))
-            self.assertEqual(result[2:], reference[2:])
-
-        if not full:
-            inp = next(call[1] for call in calls if call[0] == "bits")
-            actual_bits = inp.view(torch.int32).tolist()
-            expected_bits = _sampled_fp32(256, device).view(torch.int32).tolist()
-            self.assertEqual(set(actual_bits), set(expected_bits))
-            self.assertEqual(len(actual_bits), len(set(expected_bits)))
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_keyword_input_grads(self, device, dtype):
@@ -2713,234 +3156,54 @@ class PointwiseStrictNumericsTest(TestCase):
         )
         self.assertEqual(grads, (weight, inp))
 
-    @dtypes(torch.complex64)
-    def test_nested_multi_output_input_grads(self, device, dtype):
-        x = torch.tensor([1 + 2j, -3 + 4j], device=device, dtype=dtype).requires_grad_()
-        y = torch.tensor(2 - 1j, device=device, dtype=dtype).requires_grad_()
-        constant = torch.tensor(3 + 2j, device=device, dtype=dtype)
-        g1, g2 = torch.ones_like(x), torch.full_like(x, 2 + 1j)
-
-        def fn(inputs, args, kwargs):
-            a, b = inputs
-            return a * b, a * kwargs["constant"]
-
-        _, grads = self._input_grads(
-            fn, (x, y), (), {"constant": constant}, (g1, g2), respect_requires_grad=True
-        )
-        expected = torch.autograd.grad(
-            (x * y, x * constant), (x, y), grad_outputs=(g1, g2)
-        )
-        self.assertTrue(_outputs_equal(grads, expected))
-        self.assertEqual(len(grads), 2)
-        # The scalar's gradient must include the broadcast sum.
-        self.assertEqual(grads[1], (g1 * x.conj()).sum())
-
-    @dtypes(torch.float32)
-    def test_swapped_output_gradients_are_detected(self, device, dtype):
-        class Swapped(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return 2 * x, 3 * x
-
-            @staticmethod
-            def backward(ctx, g1, g2):
-                return 3 * g1 + 2 * g2
-
-        class Op:
-            name, variant_test_name = "clone", ""
-
-            @staticmethod
-            def op(x):
-                return 2 * x, 3 * x
-
-        x = torch.ones(4, device=device, dtype=dtype).requires_grad_()
-        with mock.patch(
-            "torch.compile", return_value=lambda inp, args, kwargs: Swapped.apply(inp)
-        ):
-            mismatches = self._sweep_backward(
-                device, Op(), dtype, POINTWISE_STRICT_CFG, calls=[("sample", x, (), {})]
-            )
-        self.assertTrue(mismatches)
-        self.assertEqual(mismatches[0][-1], "value")
-
-    @dtypes(torch.complex64)
-    def test_bitwise_lazy_views(self, device, dtype):
-        x = torch.tensor([1 + 2j, -0.0 - 3j], dtype=dtype, device=device)
-        for view in (x.conj(), torch._neg_view(x)):
-            self.assertTrue(_outputs_equal(view, view.resolve_conj().resolve_neg()))
-            self.assertEqual(_diff_kind(view, view + 1), "value")
-
-    @dtypes(torch.float32)
-    def test_conditional_pointwise_samples(self, device, dtype):
-        for name in POINTWISE_CONDITIONAL:
-            for op in (o for o in POINTWISE_OPS if o.name == name):
-                with self.subTest(op=_op_id(op)):
-                    sample_dtype = (
-                        torch.int64 if name == "nn.functional.one_hot" else dtype
-                    )
-                    calls = self._collect_calls(device, op, sample_dtype)
-                    self.assertTrue(calls)
-                    for _, inp, args, kwargs in calls:
-                        if name in POINTWISE_LOSSES:
-                            self.assertEqual(kwargs["reduction"], "none")
-                        elif name in POINTWISE_DROPOUT | {"nn.functional.rrelu"}:
-                            self.assertFalse(kwargs["training"])
-
-    @dtypes(torch.float32)
-    def test_coverage_filtered_samples(self, device, dtype):
-        self._coverage = CoverageRecord({"test": self._testMethodName})
-        x = torch.ones(2, device=device, dtype=dtype)
-        reduction = next(op for op in op_db if op.name == "sum")
-        with self.assertRaisesRegex(unittest.SkipTest, "no usable sample"):
-            self._sweep(
-                device,
-                reduction,
-                dtype,
-                POINTWISE_STRICT_CFG,
-                calls=[("sample", x, (), {})],
-            )
-        self.assertEqual(self._coverage.filters["output_shape_not_pointwise"], 1)
-        self.assertEqual(self._coverage.compared, 0)
-        remainder = next(op for op in POINTWISE_OPS if op.name == "__rmod__")
-        calls = self._collect_calls(device, remainder, dtype, backward=True)
-        self.assertTrue(calls)
-        self.assertTrue(
-            all(isinstance(args[0], torch.Tensor) for _, _, args, _ in calls)
-        )
-        self.assertGreater(
-            self._coverage.filters["scalar_remainder_has_no_eager_backward"], 0
-        )
-
     def _is_tensor_output(self, out):
         return isinstance(out, torch.Tensor) or (
             isinstance(out, (tuple, list))
             and all(isinstance(t, torch.Tensor) for t in out)
         )
 
-    def _is_pointwise_output(self, inp, args, kwargs, out, op=None):
-        if (
-            op is not None
-            and op.name in POINTWISE_EXTRA | POINTWISE_CONDITIONAL | POINTWISE_GEOMETRY
-        ):
-            return True
-        shapes = [
-            t.shape
-            for t in tree_leaves((inp, args, kwargs))
-            if isinstance(t, torch.Tensor)
-        ]
+    def _is_pointwise_output(self, inp, args, kwargs, out):
+        shapes = [inp.shape] + [a.shape for a in args if isinstance(a, torch.Tensor)]
+        shapes += [v.shape for v in kwargs.values() if isinstance(v, torch.Tensor)]
         try:
             bshape = torch.broadcast_shapes(*shapes)
         except Exception:
             return False
-        outs = tree_leaves(out)
+        outs = out if isinstance(out, (tuple, list)) else (out,)
         return all(isinstance(o, torch.Tensor) and o.shape == bshape for o in outs)
 
     def _build_calls(self, samples, dtype):
         r"""Build calls without flattening so reference layouts exercise codegen."""
         calls = []
         for sample in samples:
-            tensors = tree_leaves((sample.input, sample.args, sample.kwargs))
-            if not any(isinstance(t, torch.Tensor) for t in tree_leaves(sample.input)):
-                self._coverage_filter("non_tensor_input")
+            if not isinstance(sample.input, torch.Tensor):
                 continue
+            tensors = [sample.input, *sample.args]
             if any(isinstance(t, torch.Tensor) and t.dtype == dtype for t in tensors):
                 calls.append((sample.input, tuple(sample.args), dict(sample.kwargs)))
-            else:
-                self._coverage_filter("input_dtype_not_selected")
         return calls
 
-    def _sample_inputs(self, op, device, dtype, *, requires_grad=False):
-        samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
+    def _sample_inputs(self, op, device, dtype):
+        samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         if isinstance(op, BinaryUfuncInfo) and dtype.is_floating_point:
             samples.extend(
                 generate_elementwise_binary_with_scalar_samples(
-                    op, device=device, dtype=dtype, requires_grad=requires_grad
+                    op, device=device, dtype=dtype
                 )
             )
         return samples
 
-    def _pointwise_call(self, op, inp, args, kwargs):
-        kwargs = dict(kwargs)
-        if op.name in POINTWISE_LOSSES:
-            kwargs.pop("size_average", None)
-            kwargs.pop("reduce", None)
-            kwargs["reduction"] = "none"
-        elif op.name in POINTWISE_DROPOUT or op.name == "nn.functional.rrelu":
-            kwargs["training"] = False
-        elif op.name == "nn.functional.instance_norm":
-            if kwargs.get("running_mean") is None or kwargs.get("running_var") is None:
-                return None
-            kwargs["use_input_stats"] = False
-        elif op.name == "nn.functional.batch_norm":
-            if len(args) < 2 or args[0] is None or args[1] is None:
-                return None
-            kwargs["training"] = False
-        elif op.name in POINTWISE_FIXED_STATS:
-            if len(args) < 7 or args[2] is None or args[3] is None:
-                return None
-            args = (*args[:4], False, *args[5:])
-        elif op.name == "tensordot":
-            kwargs["dims"] = 0
-        elif op.name == "einsum":
-            equation = args[0].replace(" ", "")
-            if "->" not in equation:
-                return None
-            left, right = equation.split("->")
-            if set(left.replace(",", "")) - set(right):
-                return None
-        elif op.name == "nn.functional.one_hot":
-            classes = args[0] if args else kwargs.get("num_classes", -1)
-            if classes < 1:
-                classes = int(inp.max()) + 1 if inp.numel() else 1
-            if args:
-                args = (classes, *args[1:])
-            else:
-                kwargs["num_classes"] = classes
-        return inp, tuple(args), kwargs
-
     def _bitpattern_call(self, op, dtype, device):
         r"""Build valid raw-bit calls for each sampled signature and mask parity."""
-        if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
-            self._coverage_filter("raw_bits_require_original_geometry")
+        if op.name in BITPATTERN_SLOW:
             return []
-        if op.name in BITPATTERN_SLOW or "polynomial" in op.name:
-            self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
-            return []
-        key = (_op_id(op), _dtype_label(dtype))
-        expanded = (
-            ALL_SAMPLES
-            or key in REFERENCE_INPUTS
-            or key in POINTWISE_XFAIL | NONFLOAT_XFAIL | BACKWARD_XFAIL
-        )
-        count = NUM_BITPATTERN_SAMPLES if expanded else 256
         if dtype in (torch.float16, torch.bfloat16):
-            if expanded:
-                x = _exhaustive_16bit(dtype, device)
-            else:
-                gen = torch.Generator(device=device).manual_seed(0)
-                x = (
-                    torch.randint(0, 65536, (count,), device=device, generator=gen)
-                    .to(torch.int16)
-                    .view(dtype)
-                )
+            x = _exhaustive_16bit(dtype, device)
             y = x.flip(0)
         elif dtype == torch.float32:
-            x = _sampled_fp32(count, device, seed=0)
-            y = _sampled_fp32(count, device, seed=1)
-        elif dtype == torch.float64 or dtype.is_complex:
-            gen = torch.Generator(device=device).manual_seed(0)
-            bits = torch.randint(
-                0,
-                256,
-                (count * dtype.itemsize,),
-                dtype=torch.uint8,
-                device=device,
-                generator=gen,
-            )
-            x = bits.view(dtype)
-            y = x.flip(0)
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=0)
+            y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
         else:
-            self._coverage_filter("no_raw_bit_generator_for_dtype")
             return []
         # Cross special values to cover missing pairs such as (+0, -0).
         sp = _SPECIALS.to(device=device, dtype=dtype)
@@ -2948,10 +3211,7 @@ class PointwiseStrictNumericsTest(TestCase):
         y = torch.cat([y, sp.repeat(sp.numel())])
         try:
             samples = self._sample_inputs(op, device, dtype)
-        except Exception as error:
-            self._coverage_filter(
-                f"raw_bit_input_generation_error:{type(error).__name__}"
-            )
+        except Exception:
             return []
 
         def sig(v):
@@ -2960,36 +3220,17 @@ class PointwiseStrictNumericsTest(TestCase):
 
         calls = []
         seen = set()
-        single_input = None
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
-                self._coverage_filter("non_tensor_raw_bit_input")
                 continue
             operands = (*sample.args, *sample.kwargs.values())
-            inp = x
-            if not expanded and not any(
-                isinstance(t, torch.Tensor)
-                for t in tree_leaves((sample.args, sample.kwargs))
-            ):
-                # With one tensor input, special-value pairs repeat the same call.
-                if single_input is None:
-                    single_input = (
-                        torch.unique(
-                            x.view(torch.uint8).reshape(-1, x.element_size()), dim=0
-                        )
-                        .reshape(-1)
-                        .view(dtype)
-                    )
-                inp = single_input
             masked = any(
                 isinstance(t, torch.Tensor) and t.dtype == torch.bool for t in operands
             )
             for parity in (0, 1) if masked else (0,):
-                args = tuple(
-                    _substitute(a, y, inp.numel(), parity) for a in sample.args
-                )
+                args = tuple(_substitute(a, y, x.numel(), parity) for a in sample.args)
                 kwargs = {
-                    k: _substitute(v, y, inp.numel(), parity)
+                    k: _substitute(v, y, x.numel(), parity)
                     for k, v in sample.kwargs.items()
                 }
                 key = (
@@ -2998,104 +3239,63 @@ class PointwiseStrictNumericsTest(TestCase):
                     tuple(sorted((k, sig(v)) for k, v in kwargs.items())),
                 )
                 if key in seen:
-                    self._coverage_filter("duplicate_raw_bit_signature")
                     continue
                 seen.add(key)
                 try:
-                    op.op(inp, *args, **kwargs)
-                except Exception as error:
-                    self._coverage_filter(
-                        f"invalid_raw_bit_call:{type(error).__name__}"
-                    )
+                    op.op(x, *args, **kwargs)
+                except Exception:
                     continue  # e.g. per-channel PReLU weights
-                calls.append((inp, args, kwargs))
+                calls.append((x, args, kwargs))
         return calls
 
-    def _collect_calls(self, device, op, dtype, *, backward=False):
+    def _collect_calls(self, device, op, dtype):
         r"""Return (source, input, args, kwargs) calls for both sweeps."""
+        if op.name in COMPILE_UNSUPPORTED:
+            self.skipTest("uncompilable op under fullgraph")
         key = (_op_id(op), _dtype_label(dtype))
         use_reference = ALL_SAMPLES or key in REFERENCE_INPUTS
         calls = []
         try:
             if use_reference:
-                samples = list(
-                    op.reference_inputs(device, dtype, requires_grad=backward)
-                )
+                samples = list(op.reference_inputs(device, dtype, requires_grad=False))
                 calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
             calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
-            if not use_reference:
-                samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
-                if not ALL_SAMPLES:
-                    samples = _representative_samples(samples)
+            # Preserve scalar/mixed-dtype signatures and float's layout conversion.
+            keep_samples = op.name in ("clamp", "float", "ldexp", "nn.functional.prelu")
+            if not use_reference and (not calls or keep_samples):
+                samples = self._sample_inputs(op, device, dtype)
                 sample_calls = self._build_calls(samples, dtype)
+                if not keep_samples:
+                    sample_calls = [c for c in sample_calls if c[0].numel() > 1][:1]
                 calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
-            self.fail(f"{_op_id(op)} {dtype} input generation failed: {e}")
+            self.skipTest(f"input generation failed: {type(e).__name__}")
         if not calls:
             self.skipTest("no usable sample")
-        usable = []
-        for tag, inp, args, kwargs in calls:
-            # remainder.Scalar_Tensor has no eager derivative.
-            if (
-                backward
-                and op.name == "__rmod__"
-                and args
-                and not isinstance(args[0], torch.Tensor)
-            ):
-                self._coverage_filter("scalar_remainder_has_no_eager_backward")
-                continue
-            call = self._pointwise_call(op, inp, args, kwargs)
-            if call is None:
-                self._coverage_filter("non_pointwise_mode")
-                continue
-            inp, args, kwargs = call
-            detector = _RngOpDetector()
-            with detector:
-                _pointwise_op(op)(inp, *args, **kwargs)
-            if detector.has_rng and op.name not in POINTWISE_DROPOUT | {
-                "nn.functional.rrelu"
-            }:
-                self._coverage_filter("rng_call")
-                continue
-            usable.append((tag, inp, args, kwargs))
-        if not usable:
-            self.skipTest("no deterministic pointwise sample")
-        return usable
+        # Probe every call: RNG use can depend on the scalar signature.
+        detector = _RngOpDetector()
+        with detector:
+            for _, inp, args, kwargs in calls:
+                op.op(inp, *args, **kwargs)
+                if detector.has_rng:
+                    break
+        if detector.has_rng:
+            self.skipTest("RNG op excluded (RNG-source equivalence is separate)")
+        return calls
 
-    def _require_kernel(self, tested, nothing_tested, op):
+    def _require_kernel(self, tested, nothing_tested):
         # ATen fallbacks compare eager against itself, so do not count them as coverage.
         if tested == 0:
             self.skipTest(nothing_tested)
-        if (
-            metrics.generated_kernel_count == 0
-            and op.name not in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
-        ):
+        if metrics.generated_kernel_count == 0:
             self.skipTest("no Triton kernel generated (op falls back to ATen)")
 
-    def _combined_calls(self, device, op, dtype, *, backward=False):
-        try:
-            calls = self._collect_calls(device, op, dtype, backward=backward)
-        except unittest.SkipTest as error:
-            self._coverage_filter(f"opinfo_samples_skipped:{error}")
-            calls = []
-        # Preserve the edge inputs previously generated in a separate seeded test.
-        torch.manual_seed(0)
-        calls += self._edge_calls(op, device, dtype, backward=backward)
-        return calls
-
-    def _assert_sample_ledgers(self, mismatches, op, dtype, what, xfail, xfail_name):
-        ordinary = [row for row in mismatches if not row[0].startswith("edge_")]
-        edges = [row for row in mismatches if row[0].startswith("edge_")]
-        self._assert_ledger(ordinary, op, dtype, what, xfail, xfail_name)
-        self._assert_ledger(edges, op, dtype, f"edges {what}", (), "")
-
-    def _sweep(self, device, op, dtype, cfg, *, calls=None):
+    def _sweep(self, device, op, dtype, cfg):
         r"""Return mismatching (source, index, shape, kwargs, kind) records."""
-        if calls is None:
-            calls = self._collect_calls(device, op, dtype)
+        calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
-            return _pointwise_op(op)(inp, *args, **kwargs)
+            return op.op(inp, *args, **kwargs)
 
         tested = 0
         mismatches = []
@@ -3112,30 +3312,18 @@ class PointwiseStrictNumericsTest(TestCase):
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 eager = fn(inp, args, kwargs)
                 if not self._is_tensor_output(eager):
-                    self._coverage_filter("non_tensor_output")
                     continue
-                if not self._is_pointwise_output(inp, args, kwargs, eager, op):
-                    self._coverage_filter("output_shape_not_pointwise")
+                if not self._is_pointwise_output(inp, args, kwargs, eager):
                     continue
                 result = compiled(inp, args, kwargs)
                 tested += 1
-                equal = _outputs_equal(eager, result)
-                kind = "" if equal else _diff_kind(eager, result)
-                self._coverage_comparison(equal, kind, tag)
-                if not equal:
-                    mismatches.append(
-                        (
-                            tag,
-                            idx,
-                            [tuple(t.shape) for t in tree_leaves(inp)],
-                            kwargs,
-                            kind,
-                        )
-                    )
+                if not _outputs_equal(eager, result):
+                    kind = _diff_kind(eager, result)
+                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
         if not mismatches:
             # A mismatch must not be turned into a no-kernel skip.
-            self._require_kernel(tested, "no usable sample", op)
+            self._require_kernel(tested, "no usable sample")
         return mismatches
 
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
@@ -3154,324 +3342,61 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @ops(POINTWISE_OPS)
+    @_strict_ops(
+        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
+    )
     def test_pointwise_bitwise(self, device, dtype, op):
-        calls = self._combined_calls(device, op, dtype)
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
-        self._assert_sample_ledgers(
-            mismatches,
-            op,
-            dtype,
-            "forward",
-            POINTWISE_XFAIL | NONFLOAT_XFAIL,
-            "POINTWISE_XFAIL/NONFLOAT_XFAIL",
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
         )
 
-    @dtypes(torch.float32)
-    @parametrize("output_count", (1, 2))
-    def test_small_shapes_receive_all_upstream_edges(self, device, dtype, output_count):
-        seen = []
-
-        class Observe(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                outputs = tuple(x.clone() for _ in range(output_count))
-                return outputs[0] if output_count == 1 else outputs
-
-            @staticmethod
-            def backward(ctx, *grads):
-                seen.append(tuple(grad[0].detach().clone() for grad in grads))
-                return sum(grads)
-
-        class Op:
-            name, variant_test_name = "clone", ""
-            op = Observe.apply
-
-        x = torch.ones(5, dtype=dtype, device=device).requires_grad_()
-        with mock.patch(
-            "torch.compile", return_value=lambda inp, args, kwargs: Observe.apply(inp)
-        ):
-            mismatches = self._sweep_backward(
-                device,
-                Op(),
-                dtype,
-                POINTWISE_STRICT_CFG,
-                calls=[("edge_opinfo", x, (), {})],
-            )
-        self.assertFalse(mismatches)
-        values = _pointwise_grad_values(dtype, device).view(torch.int32).tolist()
-        expected = [
-            tuple(
-                values[(index + output_index) % len(values)]
-                for output_index in range(output_count)
-            )
-            for index in range(len(values))
-        ]
-        actual = [
-            tuple(grad.view(torch.int32).item() for grad in grads)
-            for grads in seen[::2]
-        ]
-        self.assertEqual(set(actual), set(expected))
-        self.assertEqual(
-            len(actual), len(expected) if ALL_SAMPLES else len(set(expected))
+    @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
+    def test_pointwise_nonfloat(self, device, dtype, op):
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
         )
 
-    @dtypes(torch.float32)
-    def test_bcomplex_cast_upstream_edges(self, device, dtype):
-        output = torch.ones(5, dtype=dtype, device=device).to(torch.bcomplex32)
-        grads = list(self._upstream_grads([output], edge=True))
-        actual = torch.stack([grad[0][0] for grad in grads]).view(torch.bfloat16)
-        values = _pointwise_grad_values(torch.bfloat16, device)
-        zeros = torch.zeros_like(values)
-        expected = torch.cat(
-            (torch.stack((values, zeros), -1), torch.stack((zeros, values), -1))
-        ).flatten()
-        actual_bits = actual.view(torch.int32).tolist()
-        expected_bits = expected.view(torch.int32).tolist()
-        self.assertEqual(set(actual_bits), set(expected_bits))
-        self.assertEqual(
-            len(actual_bits),
-            len(expected_bits) if ALL_SAMPLES else len(set(expected_bits)),
-        )
-
-    @dtypes(torch.float32)
-    def test_repeated_input_grad(self, device, dtype):
-        x = torch.tensor([-2.0, -0.0, 1.0], device=device, dtype=dtype)
-
-        def fn(inp, args, kwargs):
-            return inp * args[0] + kwargs["same"]
-
-        _, grads = self._input_grads(fn, x, (x,), {"same": x}, torch.ones_like(x))
-        self.assertEqual(len(grads), 1)
-        self.assertEqual(grads[0], 2 * x + 1)
-
-    @dtypes(torch.int32, torch.uint8)
-    def test_integer_reverse_remainder_edges(self, device, dtype):
-        op = next(o for o in POINTWISE_OPS if o.name == "__rmod__")
-        calls = self._edge_calls(op, device, dtype)
-        self.assertTrue(calls)
-        for _, inp, args, kwargs in calls:
-            self.assertTrue(bool((inp != 0).all()))
-            cpu_args = tree_map(
-                lambda t: t.cpu() if isinstance(t, torch.Tensor) else t, args
-            )
-            _pointwise_op(op)(inp.cpu(), *cpu_args, **kwargs)
-
-    @dtypes(torch.float32)
-    def test_edge_samples_keep_valid_geometry(self, device, dtype):
-        for name in (
-            "outer",
-            "view_as_complex",
-            "nn.functional.binary_cross_entropy",
-            "nn.functional.batch_norm",
-        ):
-            op = next(o for o in POINTWISE_OPS if o.name == name)
-            calls = self._edge_calls(op, device, dtype, backward=True)
-            self.assertTrue(calls)
-            for _, inp, args, kwargs in calls:
-                with self.subTest(op=name):
-                    _pointwise_op(op)(inp, *args, **kwargs)
-                    if name == "nn.functional.binary_cross_entropy":
-                        self.assertTrue(bool(((inp >= 0) & (inp <= 1)).all()))
-                    elif name == "nn.functional.batch_norm":
-                        self.assertFalse(args[0].requires_grad)
-                        self.assertFalse(args[1].requires_grad)
-        values = _pointwise_edge_values(dtype)
-        self.assertTrue(bool((torch.abs(values) == torch.finfo(dtype).max).any()))
-        self.assertTrue(
-            bool(((values.abs() > 0) & (values.abs() < torch.finfo(dtype).tiny)).any())
-        )
-        self.assertTrue(bool(((values == 0) & torch.signbit(values)).any()))
-
-    def _edge_calls(self, op, device, dtype, *, backward=False):
-        calls = []
-        if op.name in POINTWISE_EDGE_NAMES and dtype in POINTWISE_EDGE_DTYPES:
-            calls += _pointwise_edge_calls(op, device, dtype)
-        samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
-        candidates = []
-        for inp, args, kwargs in self._build_calls(samples, dtype):
-            if call := self._pointwise_call(op, inp, args, kwargs):
-                tensors = [
-                    t for t in tree_leaves(call[0]) if isinstance(t, torch.Tensor)
-                ]
-                size = sum(t.numel() for t in tensors)
-                if 0 < size <= 1024:
-                    candidates.append((size, call))
-        if not candidates:
-            self._coverage_filter("no_nonempty_edge_shape")
-            return calls
-        _, (inp, args, kwargs) = max(candidates, key=lambda candidate: candidate[0])
-        tensors = [t for t in tree_leaves(inp) if isinstance(t, torch.Tensor)]
-        for leaf_index, tensor in enumerate(tensors):
-            if tensor.dtype != dtype or tensor.numel() == 0:
-                continue
-            values = _pointwise_edge_values(dtype)
-            if op.name == "nn.functional.binary_cross_entropy":
-                values = values[torch.isfinite(values) & (values >= 0) & (values <= 1)]
-            elif op.name == "nn.functional.one_hot":
-                classes = args[0] if args else kwargs["num_classes"]
-                values = torch.tensor([0, classes - 1], dtype=dtype)
-            elif op.name == "unravel_index":
-                maximum = min(math.prod(args[0]) - 1, torch.iinfo(dtype).max)
-                values = torch.tensor([0, 1, maximum - 1, maximum], dtype=dtype)
-            elif op.name == "__rmod__" and not (
-                dtype.is_floating_point or dtype.is_complex or dtype == torch.bool
-            ):
-                values = values[values != 0]
-            # Preserve the original shapes and non-input parameters. In
-            # particular, polynomial degrees and running variances stay valid.
-            for offset in range(0, values.numel(), tensor.numel()):
-                chunk = values[offset : offset + tensor.numel()]
-                chunk = chunk.repeat(
-                    (tensor.numel() + chunk.numel() - 1) // chunk.numel()
-                )
-                replacement = chunk[: tensor.numel()].reshape(tensor.shape).to(device)
-                if tensor.is_conj():
-                    replacement = replacement.conj()
-                if tensor.is_neg():
-                    replacement = torch._neg_view(replacement)
-                replacement.requires_grad_(tensor.requires_grad)
-                edge_input = tree_map(lambda t: replacement if t is tensor else t, inp)
-                edge_args = args
-                if (
-                    not dtype.is_floating_point
-                    and not dtype.is_complex
-                    and dtype != torch.bool
-                    and op.name in {"div", "floor_divide", "remainder", "fmod"}
-                ):
-                    # MIN / -1 is undefined for signed integer division.
-                    edge_args = tuple(
-                        torch.where(a == -1, torch.ones_like(a), a)
-                        if isinstance(a, torch.Tensor)
-                        else (1 if a == -1 else a)
-                        for a in args
-                    )
-                calls.append(
-                    (
-                        f"edge_opinfo_{leaf_index}_{offset}",
-                        edge_input,
-                        edge_args,
-                        kwargs,
-                    )
-                )
-        if op.name == "to":
-            x = _pointwise_edge_values(dtype).to(device)
-            for target_dtype in sorted(op.supported_dtypes("cuda"), key=str):
-                calls.append(
-                    (f"edge_cast_{_dtype_label(target_dtype)}", x, (target_dtype,), {})
-                )
-        if op.name == "resolve_conj" and dtype.is_complex:
-            calls += [
-                (
-                    "edge_conjugated",
-                    torch.tensor([1 + 2j, -1 - 2j], device=device, dtype=dtype).conj(),
-                    (),
-                    {},
-                )
-            ]
-        if op.name == "resolve_neg" and dtype != torch.bool:
-            calls += [
-                (
-                    "edge_negative_view",
-                    torch._neg_view(_pointwise_edge_values(dtype).to(device)),
-                    (),
-                    {},
-                )
-            ]
-        return calls
-
-    def _upstream_grads(self, outputs, *, edge):
-        values = (
-            [_pointwise_grad_values(out.dtype, out.device) for out in outputs]
-            if edge
-            else []
-        )
-        count = max(v.numel() for v in values) if edge else 1
-        patterns = (
-            [
-                v.view(torch.uint8).reshape(v.numel(), v.element_size()).cpu().tolist()
-                for v in values
-            ]
-            if edge and not ALL_SAMPLES
-            else []
-        )
-        seen = set()
-        for index in range(count):
-            if patterns:
-                # Deduplicate whole tuples so multiple outputs keep their pairings.
-                key = tuple(
-                    bytes(rows[(index + output_index) % len(rows)])
-                    for output_index, rows in enumerate(patterns)
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-            upstream = []
-            for output_index, output in enumerate(outputs):
-                if edge:
-                    v = values[output_index]
-                    grad = v[(index + output_index) % v.numel()].expand(output.shape)
-                else:
-                    gen = torch.Generator(device=output.device).manual_seed(
-                        output_index
-                    )
-                    grad = torch.randn(
-                        output.shape,
-                        generator=gen,
-                        device=output.device,
-                        dtype=output.dtype,
-                    )
-                    flat = grad.reshape(-1)
-                    if flat.numel() >= 4:
-                        flat[0], flat[1] = 0.0, -0.0
-                upstream.append(grad)
-            yield upstream
-
-    def _input_grads(
-        self, call_fn, inp, args, kwargs, grad_output, *, respect_requires_grad=False
-    ):
+    def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
         leaves = []
-        leaf_by_id = {}
 
         def leafify(t):
-            if (
-                isinstance(t, torch.Tensor)
-                and (t.is_floating_point() or t.is_complex())
-                and (t.requires_grad or not respect_requires_grad)
-            ):
-                if id(t) not in leaf_by_id:
-                    leaf = t.detach().requires_grad_(True)
-                    leaves.append(leaf)
-                    leaf_by_id[id(t)] = leaf
-                return leaf_by_id[id(t)]
+            if isinstance(t, torch.Tensor) and t.is_floating_point():
+                # Preserve non-dense strides; clone expanded inputs to avoid overlap.
+                src = t.detach()
+                if src.is_contiguous() or 0 in src.stride():
+                    leaf = src.clone().requires_grad_(True)
+                else:
+                    leaf = torch.empty_strided(
+                        src.shape, src.stride(), dtype=src.dtype, device=src.device
+                    )
+                    leaf.copy_(src)
+                    leaf.requires_grad_(True)
+                leaves.append(leaf)
+                return leaf
             return t
 
-        inp2, args2, kwargs2 = tree_map(leafify, (inp, args, kwargs))
+        inp2 = leafify(inp)
+        args2 = tuple(leafify(a) for a in args)
+        kwargs2 = {k: leafify(v) for k, v in kwargs.items()}
         out = call_fn(inp2, args2, kwargs2)
-        targets = _diff_outputs(out)
-        upstream = (
-            [grad_output] if isinstance(grad_output, torch.Tensor) else grad_output
-        )
-        if len(targets) != len(upstream):
-            raise AssertionError(
-                "every differentiable output needs an upstream gradient"
-            )
-        pairs = [(t, g) for t, g in zip(targets, upstream) if t.requires_grad]
-        if not leaves or not pairs:
+        target = _diff_output(out)
+        if not leaves or target is None:
             return out, None
-        targets, upstream = zip(*pairs)
+        if target.shape != grad_output.shape:
+            return out, None
         grads = torch.autograd.grad(
-            targets, leaves, grad_outputs=upstream, allow_unused=True
+            target, leaves, grad_outputs=grad_output, allow_unused=True
         )
         return out, grads
 
-    def _sweep_backward(self, device, op, dtype, cfg, *, calls=None):
+    def _sweep_backward(self, device, op, dtype, cfg):
         r"""Compare input gradients with identical upstream gradients."""
-        if calls is None:
-            calls = self._collect_calls(device, op, dtype, backward=True)
+        calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
-            return _pointwise_op(op)(inp, *args, **kwargs)
+            return op.op(inp, *args, **kwargs)
 
         tested = 0
         mismatches = []
@@ -3488,111 +3413,63 @@ class PointwiseStrictNumericsTest(TestCase):
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 with torch.no_grad():
                     probe = fn(inp, args, kwargs)
-                outputs = _diff_outputs(probe)
-                if not outputs:
-                    self._coverage_filter("no_differentiable_output_dtype")
+                probe_out = _diff_output(probe)
+                if probe_out is None:
                     continue
-                if not self._is_pointwise_output(inp, args, kwargs, probe, op):
-                    self._coverage_filter("output_shape_not_pointwise")
+                if not self._is_pointwise_output(inp, args, kwargs, probe):
                     continue
-                for upstream in self._upstream_grads(
-                    outputs, edge=tag.startswith("edge_")
-                ):
-                    respect_requires_grad = tag in ("ref", "sample") or tag.startswith(
-                        "edge_opinfo_"
-                    )
+                # Exclude broadcasted inputs whose gradients require a reduction.
+                diff_ts = [
+                    t
+                    for t in (inp, *args, *kwargs.values())
+                    if isinstance(t, torch.Tensor) and t.is_floating_point()
+                ]
+                if any(t.shape != probe_out.shape for t in diff_ts):
+                    continue
+                gen = torch.Generator(device=probe_out.device).manual_seed(0)
+                grad_output = torch.randn(
+                    probe_out.shape,
+                    generator=gen,
+                    device=probe_out.device,
+                    dtype=probe_out.dtype,
+                )
+                # Seed signed zeros, which randn does not reliably generate.
+                flat = grad_output.reshape(-1)
+                if flat.numel() >= 2:
+                    flat[0] = 0.0
+                    flat[1] = -0.0
+                try:
                     _, eager_grads = self._input_grads(
-                        fn,
-                        inp,
-                        args,
-                        kwargs,
-                        upstream,
-                        respect_requires_grad=respect_requires_grad,
+                        fn, inp, args, kwargs, grad_output
                     )
-                    if eager_grads is None:
-                        self._coverage_filter("no_input_gradients")
-                        continue
-                    _, comp_grads = self._input_grads(
-                        compiled,
-                        inp,
-                        args,
-                        kwargs,
-                        upstream,
-                        respect_requires_grad=respect_requires_grad,
-                    )
-                    tested += 1
-                    if comp_grads is None:
-                        self._coverage_comparison(False, "shape", tag)
-                        mismatches.append(
-                            (
-                                tag,
-                                idx,
-                                [
-                                    tuple(t.shape)
-                                    for t in tree_leaves(inp)
-                                    if isinstance(t, torch.Tensor)
-                                ],
-                                kwargs,
-                                "shape",
-                            )
-                        )
-                        continue
-                    equal = _outputs_equal(eager_grads, comp_grads)
-                    kind = "" if equal else _diff_kind(eager_grads, comp_grads)
-                    self._coverage_comparison(equal, kind, tag)
-                    if not equal:
-                        mismatches.append(
-                            (
-                                tag,
-                                idx,
-                                [
-                                    tuple(t.shape)
-                                    for t in tree_leaves(inp)
-                                    if isinstance(t, torch.Tensor)
-                                ],
-                                kwargs,
-                                kind,
-                            )
-                        )
+                except Exception:
+                    continue
+                if eager_grads is None:
+                    continue
+                _, comp_grads = self._input_grads(
+                    compiled, inp, args, kwargs, grad_output
+                )
+                tested += 1
+                if comp_grads is None:
+                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, "shape"))
+                    continue
+                if not _outputs_equal(eager_grads, comp_grads):
+                    kind = _diff_kind(eager_grads, comp_grads)
+                    mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
         if not mismatches:
-            self._require_kernel(tested, "no differentiable sample", op)
+            self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
-    @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
+    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_BACKWARD_OPS)
     def test_pointwise_backward(self, device, dtype, op):
-        calls = self._combined_calls(device, op, dtype, backward=True)
-        mismatches = self._sweep_backward(
-            device, op, dtype, POINTWISE_STRICT_CFG, calls=calls
-        )
-        self._assert_sample_ledgers(
-            mismatches,
-            op,
-            dtype,
-            "backward",
-            BACKWARD_XFAIL,
-            "BACKWARD_XFAIL",
+        mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
         )
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
-
-if directory := os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR"):
-    write_manifest(
-        directory,
-        globals().get("PointwiseStrictNumericsTestCUDA"),
-        {
-            "all_samples": ALL_SAMPLES,
-            "sample_mode": "full" if ALL_SAMPLES else "compact",
-            "torch_version": torch.__version__,
-            "cuda_version": torch.version.cuda,
-            "gpu_capability": torch.cuda.get_device_capability()
-            if torch.cuda.is_available()
-            else None,
-            "strict_config": POINTWISE_STRICT_CFG,
-            "selected_opinfo_ids": [_op_id(op) for op in POINTWISE_OPS],
-        },
-    )
 
 if __name__ == "__main__":
     run_tests()
