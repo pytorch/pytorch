@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
+from .. import config
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -54,7 +55,13 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        self._triton_scheduling = TritonScheduling(scheduler)
+        self._triton_scheduling: TritonScheduling
+        if config.native_matmul_helion:
+            from .helion import HelionScheduling
+
+            self._triton_scheduling = HelionScheduling(scheduler)
+        else:
+            self._triton_scheduling = TritonScheduling(scheduler)
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)

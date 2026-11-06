@@ -467,7 +467,9 @@ def _preserve_bf16x9_matmul(arg_index, arg_name):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
             mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
-            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+            if is_bf16x9_matmul(mat.device.type, mat.dtype) or (
+                mat.device.type == "cuda" and config.native_matmul_helion
+            ):
                 return NotImplemented
             return fn(*args, **kwargs)
 

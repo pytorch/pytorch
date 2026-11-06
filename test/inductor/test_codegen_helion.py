@@ -10,7 +10,7 @@ import sympy
 
 import torch
 from torch._inductor import config, ir
-from torch._inductor.codegen.helion import HelionKernel, HelionValue
+from torch._inductor.codegen.helion import HelionKernel, HelionScheduling, HelionValue
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.graph import GraphLowering
@@ -123,6 +123,51 @@ class TestHelionCodegen(TestCase):
             self.assertNotIn(".view(-1)", source)
             self.assertNotIn(".reshape(-1)", source)
         return sources
+
+    @parametrize(
+        "source",
+        [
+            "import torch\ndef kernel():\n    return 1\n",
+            'value = """triple quoted"""\n',
+            "path = 'a\\\\b'\nvalue = '\\n'\n",
+            "",
+        ],
+    )
+    def test_wrapper_source_roundtrip(self, source):
+        cache = Mock()
+        namespace = {"PyCodeCache": cache}
+        definition = HelionScheduling.format_kernel_definition(
+            "helion_0", source, "call_kernel"
+        )
+        exec(definition, namespace)
+        cache.load.assert_called_once_with(source)
+        self.assertIs(namespace["helion_0"], cache.load.return_value.call_kernel)
+        self.assertIn('helion_0_source = """', definition)
+        self.assertIn("PyCodeCache.load(helion_0_source)", definition)
+
+    @parametrize("backend", ["triton", "cutedsl"])
+    @parametrize("effort", ["none", "quick", "full"])
+    def test_executable_settings(self, backend, effort):
+        with config.patch(
+            native_matmul_helion=True,
+            helion_backend=backend,
+            helion_autotune_effort=effort,
+        ):
+            (source,) = self.codegen(
+                lambda a, b: a @ b, [(32, 64), (64, 48)], complete=True
+            )
+        helion_backend = "cute" if backend == "cutedsl" else "triton"
+        self.assertIn(f'backend="{helion_backend}"', source)
+        self.assertIn(f'autotune_effort="{effort}"', source)
+        self.assertNotIn("force_autotune", source)
+        self.assertIn("ref_mode=helion.RefMode.OFF", source)
+        self.assertNotIn("dot_precision", source)
+
+    def test_preview_precision_default(self):
+        (source,) = self.codegen(lambda a, b: a @ b, [(32, 64), (64, 48)])
+        self.assertIn("@helion.kernel(static_shapes=True)", source)
+        self.assertNotIn("dot_precision", source)
+        self.assertNotIn("autotune_effort", source)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_mm(self, dtype):
