@@ -47,7 +47,7 @@ def fmax_nan(a, b, dtype: cutlass.Constexpr = None):
     """max(a, b), NaN-PROPAGATING: torch.maximum / amax / max.dim semantics."""
     dt = _dt(a, dtype)
     if const_expr(dt is Float32):
-        return Float32(nvvm.fmax(T.f32(), a.ir_value(), b.ir_value(), nan=True))
+        return Float32(nvvm.fmax(a.ir_value(), b.ir_value(), nan=True))
     if const_expr(getattr(dt, "is_integer", False)):
         return max(a, b)
     return b if ((b > a) or (b != b)) else a
@@ -58,7 +58,7 @@ def fmin_nan(a, b, dtype: cutlass.Constexpr = None):
     """min(a, b), NaN-PROPAGATING: torch.minimum / amin / min.dim semantics."""
     dt = _dt(a, dtype)
     if const_expr(dt is Float32):
-        return Float32(nvvm.fmin(T.f32(), a.ir_value(), b.ir_value(), nan=True))
+        return Float32(nvvm.fmin(a.ir_value(), b.ir_value(), nan=True))
     if const_expr(getattr(dt, "is_integer", False)):
         return min(a, b)
     return b if ((b < a) or (b != b)) else a

@@ -255,14 +255,13 @@ def _impl(
     ref = ins[0]
     scalars = _scalars(row, args, kwargs, ref.dtype)
     fn_name, _ = _function(row, args, kwargs)
-    shape = tuple(ref.shape)
     result_dtype = (
         torch.bool if row.promotion is PromotionKind.ALWAYS_BOOL else ref.dtype
     )
     out = (
         kwargs["out"]
         if variant.out_from == "out_kw"
-        else torch.empty(shape, device=ref.device, dtype=result_dtype)
+        else torch.empty_like(ref, dtype=result_dtype)
     )
     comp_type = dt.torch2cute[torch.float32]
     consts = tuple(comp_type(s) for s in scalars)
