@@ -1891,6 +1891,16 @@ class InstructionTranslatorBase(
 
         if (
             not self.stack
+            # Entry RESUME does no user work; defer only to an unprotected immediate successor.
+            # A protected successor cannot checkpoint, so retain this frame's entry checkpoint.
+            and not (
+                inst.opname == "RESUME"
+                and inst.arg == 0
+                and not self.block_stack
+                and inst.exn_tab_entry is None
+                and self.instruction_pointer < len(self.instructions)
+                and self.next_instruction.exn_tab_entry is None
+            )
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
