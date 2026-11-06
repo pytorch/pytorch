@@ -224,6 +224,11 @@ class FSDPParam:
     # Layouts checked against the allocated outputs, which never change, keyed by
     # each input's size, dtype and, for records, integer dim
     _extension_layouts_by_key: dict[Any, tuple[_AllGatherOutputLayout, ...]]
+    # fsdp_pre_all_gather's parameter count, cached per function since
+    # inspect.signature costs microseconds per all-gather. Bound methods are new
+    # objects on every access, so the cache keys on their underlying function.
+    _pre_all_gather_fn: Callable[..., Any] | None
+    _pre_all_gather_num_params: int
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
@@ -873,6 +878,8 @@ class FSDPParam:
         self._all_gather_metadata = None
         self._extension_all_gather_output_layouts = None
         self._extension_layouts_by_key = {}
+        self._pre_all_gather_fn = None
+        self._pre_all_gather_num_params = 0
         self._release_all_gather_outputs_after_post_all_gather = False
         if release_all_gather_outputs_fn is not None:
             # The extension owns whether its post-all-gather representation
@@ -1161,33 +1168,30 @@ class FSDPParam:
                     sharded_local_tensor = sharded_local_tensor.to(
                         self.device, non_blocking=True
                     )
-                pre_all_gather_signature = inspect.signature(
-                    # pyrefly: ignore [missing-attribute]
-                    sharded_local_tensor.fsdp_pre_all_gather
-                )
-                num_fn_params = len(pre_all_gather_signature.parameters)
+                # pyrefly: ignore [missing-attribute]
+                pre_all_gather = sharded_local_tensor.fsdp_pre_all_gather
+                pre_all_gather_fn = getattr(pre_all_gather, "__func__", pre_all_gather)
+                if pre_all_gather_fn is not self._pre_all_gather_fn:
+                    self._pre_all_gather_fn = pre_all_gather_fn
+                    self._pre_all_gather_num_params = len(
+                        inspect.signature(pre_all_gather).parameters
+                    )
+                num_fn_params = self._pre_all_gather_num_params
                 # Old signature only passes mesh; keep for BC for now
                 if num_fn_params not in (1, 5):
                     raise AssertionError(
-                        f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
+                        "Invalid fsdp_pre_all_gather: "
+                        f"{inspect.signature(pre_all_gather)}\n"
                         "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
                         "outer_size: torch.Size, outer_stride: tuple[int, ...], "
                         "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
                     )
                 if num_fn_params == 1:
-                    (
-                        all_gather_inputs,
-                        self._all_gather_metadata,
-                        # pyrefly: ignore [missing-attribute]
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(
+                    all_gather_inputs, self._all_gather_metadata = pre_all_gather(
                         self.shard_mesh_from_root
                     )
                 else:
-                    (
-                        all_gather_inputs,
-                        self._all_gather_metadata,
-                        # pyrefly: ignore [missing-attribute]
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(
+                    all_gather_inputs, self._all_gather_metadata = pre_all_gather(
                         self.shard_mesh_from_root,
                         self._orig_size,
                         self._contiguous_orig_stride,
