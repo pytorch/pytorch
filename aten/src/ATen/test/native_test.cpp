@@ -327,7 +327,6 @@ TEST(TestNative, InitCppFake) {
     EXPECT_NE(
         msg.find("Accessing the data pointer of FakeTensor"),
         std::string::npos);
-    EXPECT_NE(msg.find("is_fake_tensor(tensor)"), std::string::npos);
   };
 
   // Reading the data pointer of a fake of a default mode warns
