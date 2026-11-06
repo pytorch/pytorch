@@ -579,6 +579,22 @@ class TestNNInit(TestCase):
 class TestNNInitDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float64)
+    @parametrize_test("sparsity", [0.25, 0.75])
+    def test_sparse_generator(self, device, dtype, sparsity):
+        first = torch.empty(12, 7, dtype=dtype, device=device)
+        second = torch.empty_like(first)
+        generator = torch.Generator(device=device)
+        with torch.random.fork_rng(devices=[]):
+            global_state = torch.get_rng_state()
+            generator.manual_seed(123)
+            init.sparse_(first, sparsity, generator=generator)
+            self.assertEqual(torch.get_rng_state(), global_state)
+            torch.rand(17)
+            generator.manual_seed(123)
+            init.sparse_(second, sparsity, generator=generator)
+            self.assertEqual(first, second, atol=0, rtol=0)
+
     @torch._dynamo.disable
     def _is_trunc_normal(self, tensor, mean, std, a, b):
         z_samples = (tensor.view(-1) - mean) / std
