@@ -222,7 +222,9 @@ def register_decomposition(
 
 @register_decomposition(aten.mv.default)
 def mv(self, vec):
-    if is_strict_cuda_triton(self.device) and self.is_complex():
+    if is_strict_cuda_triton(self.device) and (
+        self.is_floating_point() or self.is_complex()
+    ):
         return NotImplemented
     return decomp_mv(self, vec)
 
