@@ -3956,6 +3956,15 @@ class TestSDPAAccelerator(NNTestCase):
         """
         if TEST_WITH_ROCM:
             return S
+        if (query_padding_mask is None and key_padding_mask is None
+                and seqlen_q <= S.size(-2) and seqlen_k <= S.size(-1)):
+            converted = S[:, :, :seqlen_q, :seqlen_k]
+            if causal:
+                window_size = (window_size[0], 0)
+            if window_size[0] >= 0 or window_size[1] >= 0:
+                local_mask = self.construct_local_mask(seqlen_q, seqlen_k, window_size, None, None, S.device)
+                converted = converted.masked_fill(local_mask, 0.0)
+            return converted
         b = S.shape[0]
 
         if causal:
@@ -3995,6 +4004,30 @@ class TestSDPAAccelerator(NNTestCase):
         S_converted = F.pad(S_converted, (0, 0, 0, seqlen_q_og - seqlen_q_rounded))
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
+
+    @onlyCUDA
+    @parametrize("lengths", [(4, 4), (143, 127), (143, 579), (256, 256), (2048, 2048)])
+    @parametrize("causal", [False, True])
+    @parametrize("window_size", [(-1, -1), (2, 1)])
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_flash_dropout_mask_dense_matches_padding(self, device, lengths, causal, window_size, dtype):
+        seq_len_q, seq_len_k = lengths
+        rounded_q = ((seq_len_q + 127) // 128) * 128
+        rounded_k = ((seq_len_k + 127) // 128) * 128
+        scores = torch.randn((2, 2, rounded_q, rounded_k), device=device, dtype=dtype, requires_grad=True)
+        original = scores.detach().clone()
+        query_mask = torch.ones((2, seq_len_q), device=device, dtype=torch.bool)
+        key_mask = torch.ones((2, seq_len_k), device=device, dtype=torch.bool)
+        expected = self.convert_flash_attn_S_to_softmax(
+            scores, seq_len_q, seq_len_k, query_mask, key_mask, causal=causal, window_size=window_size)
+        actual = self.convert_flash_attn_S_to_softmax(
+            scores, seq_len_q, seq_len_k, None, None, causal=causal, window_size=window_size)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(actual >= 0, expected >= 0)
+        grad = torch.randn_like(actual)
+        self.assertEqual(torch.autograd.grad(actual, scores, grad)[0],
+                         torch.autograd.grad(expected, scores, grad)[0], atol=0, rtol=0)
+        self.assertEqual(scores, original, atol=0, rtol=0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_different_dk_dv(self, device):
@@ -6728,13 +6761,8 @@ class TestSDPAAccelerator(NNTestCase):
             out = out[..., :v_og_size]
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
-            query_padding_mask = torch.ones(
-                batch_size, seq_len_q, device=device, dtype=torch.bool)
-            key_padding_mask = torch.ones(
-                batch_size, seq_len_k, device=device, dtype=torch.bool)
-
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
+                dbug_mask, seq_len_q, seq_len_k, None, None,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
 
             # This is the default implementation for the mask but we need to match CK if we are using it
