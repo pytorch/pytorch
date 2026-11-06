@@ -87,6 +87,9 @@ NON_HUMAN_LOGINS = frozenset(
 # can be overridden by the same REVIEW_AUTHOR environment variable.
 REVIEW_AUTHOR = "github-actions[bot]"
 MARKER = "<!-- hardened-pr-review -->"
+# A line of post_review.py's too-large notice, which reviewed nothing, so the
+# verdict before it stays the latest. Model text cannot forge it (`<` escaped).
+TOO_LARGE_TAG = "<!-- hardened-pr-review-too-large -->"
 AUTOMATED = "automated_review"
 # REST listings carry a reaction count for these kinds only; a review's does not.
 COUNTED = ("issue_comment", "review_comment")
@@ -275,10 +278,14 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
         and (r.get("body") or "").startswith(MARKER)
     ]
     ours = {r.get("id") for r in marked}
+    verdicts = [
+        r for r in marked if TOO_LARGE_TAG not in (r.get("body") or "").splitlines()
+    ]
     # By id, as post_review.py orders them: submitted_at ties within a second.
-    latest = max(marked, key=lambda r: r.get("id") or 0, default=None)
+    latest = max(verdicts, key=lambda r: r.get("id") or 0, default=None)
     # The commit the latest automated review saw, from which the review job builds the interdiff
-    # (a note when it is this head). Empty without one.
+    # (a note when it is this head). Empty without one. A too-large notice reviewed nothing, so
+    # the interdiff starts from the last verdict's commit.
     seen = (latest or {}).get("commit_id") or ""
     head["previous_review_sha"] = seen if re.fullmatch(r"[0-9a-f]{40}", seen) else ""
     roles: dict[str, str | None] = {}
