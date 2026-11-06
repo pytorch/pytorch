@@ -20,6 +20,10 @@ def delete_value_fn():
     del delete_value
 
 
+def read_delete_value_fn():
+    return delete_value
+
+
 def store_then_delete_missing_fn():
     global store_then_delete_missing_value
     store_then_delete_missing_value = 5
@@ -70,3 +74,16 @@ def store_read_delete_store_read_value_fn(x):
     store_read_delete_store_read_value = y + 5
     z = store_read_delete_store_read_value * 3
     return y + z
+
+
+flip_value = 1
+
+
+def delete_flip_value_fn():
+    global flip_value
+    del flip_value
+
+
+def delete_missing_value_fn():
+    global delete_missing_value
+    del delete_missing_value

@@ -745,7 +745,9 @@ class SideEffects:
         real globals has to be deleted at replay time, so only that case is
         recorded here; a name a STORE_GLOBAL earlier in this trace created never
         reaches the globals, so its delete drops that store instead (see
-        `discard_global_store`).
+        `discard_global_store`). A later LOAD_GLOBAL runs after the replay, so it
+        sees the name gone and resolves against builtins, raising NameError when
+        it is not there (see `_load_builtin_if_global_deleted`).
         """
         if isinstance(gvar, variables.NewGlobalVariable):
             self.store_global(gvar, name, variables.DeletedVariable())
@@ -2092,6 +2094,9 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 )
             if isinstance(value, variables.DeletedVariable):
                 # See Note [global delete replay] in SideEffects.
+                # TODO(3.16): CPython compiles `del name` to PUSH_NULL;
+                # STORE_GLOBAL, so emit that pair once 3.16 is supported. Before
+                # 3.16, STORE_GLOBAL stores the null sentinel instead.
                 ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
             else:
                 cg(value)

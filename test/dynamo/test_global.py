@@ -354,13 +354,17 @@ def crossfile_globals(**updates):
 class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _assert_delete_missing_global(self, fn, name, args=(), still_bound=False):
+    def _assert_delete_missing_global(
+        self, fn, name, args=(), still_bound=False, namespace=None
+    ):
+        if namespace is None:
+            namespace = globals()
         with self.assertRaisesRegex(
             Unsupported, f"raised exception NameError.*name '{name}' is not defined"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
         if still_bound:
-            self.assertIn(name, globals())
+            self.assertIn(name, namespace)
         torch._dynamo.reset()
         cnt = torch._dynamo.testing.CompileCounter()
         with self.assertRaisesRegex(NameError, f"name '{name}' is not defined"):
@@ -389,6 +393,16 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x + 1
 
             self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
+
+    def test_delete_missing_global_builtin(self):
+        with mock.patch.dict(globals()):
+
+            def fn(x):
+                global len
+                del len
+                return x + 1
+
+            self._assert_delete_missing_global(fn, "len", (torch.ones(2, 2),))
 
     def test_delete_missing_global_caught_by_caller(self):
         with mock.patch.dict(globals()):
@@ -524,6 +538,39 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x)
             self.assertNotIn("_dg_a", globals())
 
+    def test_delete_global_then_read(self):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                try:
+                    y = _dg_a * 2
+                except NameError:
+                    y = x * 0
+                return x + y
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x)
+            globals()["_dg_a"] = 1
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x)
+            self.assertNotIn("_dg_a", globals())
+
+    def test_delete_global_shadowing_builtin_then_read(self):
+        with mock.patch.dict(globals(), {"len": lambda _: "shadow"}):
+
+            def fn(x):
+                global len
+                del len
+                return x + len([1, 2])  # noqa: F821
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertNotIn("len", globals())
+
     def test_delete_tensor_global(self):
         with mock.patch.dict(globals()):
 
@@ -554,6 +601,36 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
             x = torch.ones(2, 2)
             self.assertEqual(fn(x), x + 1)
+            self.assertNotIn("delete_value", mod.__dict__)
+
+    def test_delete_global_crossfile_missing(self):
+        with crossfile_globals() as mod:
+
+            def fn(x):
+                mod.delete_missing_value_fn()
+                return x + 1
+
+            self._assert_delete_missing_global(
+                fn,
+                "delete_missing_value",
+                (torch.ones(2, 2),),
+                namespace=mod.__dict__,
+            )
+
+    def test_delete_global_crossfile_then_read(self):
+        with crossfile_globals(delete_value=1) as mod:
+
+            def fn(x):
+                try:
+                    mod.delete_value_fn()
+                    y = mod.read_delete_value_fn()
+                except NameError:
+                    y = x * 0
+                return x + y
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x)
             self.assertNotIn("delete_value", mod.__dict__)
 
     def test_delete_global_crossfile_created_then_deleted(self):
@@ -654,7 +731,30 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
             self.assertEqual(cnt.frame_count, 2)
 
-    def test_delete_global_store_cancelled_across_hop(self):
+    def test_delete_global_crossfile_presence_flip(self):
+        with crossfile_globals() as mod:
+            mod.__dict__.pop("flip_value")
+
+            def fn(x):
+                y = x + 1
+                try:
+                    mod.delete_flip_value_fn()
+                except NameError:
+                    y = y + 1
+                return y
+
+            x = torch.ones(2, 2)
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertEqual(cnt.frame_count, 1)
+
+            mod.flip_value = 1
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertNotIn("flip_value", mod.__dict__)
+
+    def test_delete_global_inside_hop(self):
         def true_fn(y):
             global _dg_hop
             del _dg_hop
@@ -674,6 +774,24 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2, 2))
             self.assertNotIn("_dg_hop", globals())
+
+        with mock.patch.dict(globals(), {"_dg_hop": 1}):
+
+            def delete_existing_fn(y):
+                global _dg_hop
+                del _dg_hop
+                return y + 1
+
+            def delete_existing(x):
+                return torch.cond(x.sum() > 0, delete_existing_fn, false_fn, (x,))
+
+            with self.assertRaisesRegex(
+                UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+            ):
+                torch.compile(delete_existing, backend="eager", fullgraph=True)(
+                    torch.ones(2, 2)
+                )
+            self.assertIn("_dg_hop", globals())
 
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"

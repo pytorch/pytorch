@@ -18,6 +18,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 
 SCRIPT_DIR = Path(__file__).absolute().parent
@@ -44,6 +45,19 @@ CUDA_ARCHES_CUDNN_VERSION = {
 
 ROCM_ARCHES = ["10.0", "10.1"]
 
+
+class RocmPreviewLane(NamedTuple):
+    arch: str
+    channel: str
+
+
+# Preview is a stable channel, not a version; keep its external names together.
+ROCM_PREVIEW = RocmPreviewLane(arch="preview", channel="rocm-preview")
+ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
+# Matches PYTORCH_ROCM_ARCH in .ci/docker/manywheel/build.sh. Preview's
+# device-all also pulls targets torch is not built for, e.g. gfx900.
+ROCM_PREVIEW_DEVICES = "gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
+
 XPU_ARCHES = ["xpu"]
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
@@ -67,7 +81,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
@@ -86,7 +100,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
@@ -94,6 +108,16 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
+    # don't change generated workflows.
+    ROCM_PREVIEW.arch: (
+        "rocm[libraries,"
+        + ",".join(f"device-{gfx}" for gfx in ROCM_PREVIEW_DEVICES.split(";"))
+        + "]"
+    ),
+    # The XPU runtime is on oneAPI 2026.1. The intel-openmp<2026.2.0 caps in
+    # .ci/docker/requirements-ci.txt and .ci/wheel/windows/build_install_deps.py (XPU
+    # builds only) exist because of this pin (#201218); lift them when XPU moves to 2026.2.
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
@@ -149,6 +173,12 @@ ROCM_NIGHTLY_SOURCE_MATRIX = {
     )
     for major, minor in (map(int, version.split(".")) for version in ROCM_ARCHES)
 }
+ROCM_NIGHTLY_SOURCE_MATRIX[ROCM_PREVIEW.channel] = dict(
+    name=ROCM_PREVIEW.channel,
+    index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{ROCM_PREVIEW.channel}",
+    supported_platforms=["Linux"],
+    accelerator="rocm",
+)
 XPU_NIGHTLY_SOURCE_MATRIX = {
     "xpu": dict(
         name="xpu",
@@ -289,7 +319,7 @@ def validate_runtime_release_table_consistency() -> None:
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
-    elif arch_version in ROCM_ARCHES:
+    elif arch_version in ROCM_ARCHES + ROCM_PREVIEW_ARCHES:
         return "rocm"
     elif arch_version in XPU_ARCHES:
         return "xpu"
@@ -312,6 +342,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    ROCM_PREVIEW.arch: f"manylinux2_28-builder:{ROCM_PREVIEW.channel}",
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
@@ -329,6 +360,10 @@ FULL_PYTHON_VERSIONS = [
     "3.14t",
     "3.15",
     "3.15t",
+]
+# Preview tracks a moving SDK; skip the oldest Python to keep the lane small.
+ROCM_PREVIEW_PYTHON_VERSIONS = FULL_PYTHON_VERSIONS[
+    FULL_PYTHON_VERSIONS.index("3.12") :
 ]
 
 
@@ -408,7 +443,7 @@ def generate_wheels_matrix(
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
+            arches += CUDA_ARCHES + ROCM_ARCHES + ROCM_PREVIEW_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
@@ -432,6 +467,12 @@ def generate_wheels_matrix(
                 or arch_version == "xpu"
                 else arch_version
             )
+
+            if (
+                arch_version == ROCM_PREVIEW.arch
+                and python_version not in ROCM_PREVIEW_PYTHON_VERSIONS
+            ):
+                continue
 
             # TODO: Enable python 3.14 for rest
             if os not in [
@@ -523,6 +564,9 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                if gpu_arch_version == ROCM_PREVIEW.arch:
+                    # Tests install from, and uploads land in, the same index.
+                    ret[-1]["upload_subfolder"] = ROCM_PREVIEW.channel
 
     return ret
 
@@ -533,22 +577,28 @@ def generate_libtorch_extraction_configs(
 ) -> list[dict[str, str]]:
     """Generate libtorch extraction configs from existing wheel build configs.
 
-    For each unique arch variant in wheel_configs, find the py3.11 config and
-    produce a config that the CI template uses to add an extraction job that
-    depends on that wheel's build job.
+    For each unique arch variant in wheel_configs, find the config for the
+    oldest built Python and produce a config that the CI template uses to add
+    an extraction job that depends on that wheel's build job.
 
-    NB: this must name a version that is actually in FULL_PYTHON_VERSIONS. If
-    it names one that isn't built, no wheel config matches and libtorch stops
-    being produced entirely, silently.
+    NB: the oldest built Python is per arch (py3.11 for most, later for lanes
+    such as preview that skip it), so no arch silently loses its libtorch.
     """
-    preferred_python = FULL_PYTHON_VERSIONS[0]
     arch = "arm64" if os == "windows-arm64" else "x86_64"
+
+    def python_rank(config: dict[str, str]) -> int:
+        version = config.get("python_version", "")
+        if version in FULL_PYTHON_VERSIONS:
+            return FULL_PYTHON_VERSIONS.index(version)
+        return len(FULL_PYTHON_VERSIONS)
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
     for config in wheel_configs:
         key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
-        if config.get("python_version") == preferred_python:
+        if key not in arch_to_config or python_rank(config) < python_rank(
+            arch_to_config[key]
+        ):
             arch_to_config[key] = config
 
     ret: list[dict[str, str]] = []
@@ -582,6 +632,8 @@ def generate_libtorch_extraction_configs(
             lt_config["container_image_tag_prefix"] = source_config[
                 "container_image_tag_prefix"
             ]
+        if source_config.get("upload_subfolder"):
+            lt_config["upload_subfolder"] = source_config["upload_subfolder"]
         ret.append(lt_config)
 
     return ret

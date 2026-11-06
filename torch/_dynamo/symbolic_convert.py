@@ -2545,6 +2545,17 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst: Instruction) -> None:
         self.push(self._load_const(inst))
 
+    def _load_builtin_if_global_deleted(
+        self, variable: VariableTracker, name: str, inst: Instruction
+    ) -> bool:
+        pending = self.output.side_effects.store_attr_mutations.get(variable, {}).get(
+            name
+        )
+        if not isinstance(pending, variables.DeletedVariable):
+            return False
+        self.load_builtin(inst)
+        return True
+
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
 
@@ -2561,6 +2572,8 @@ class InstructionTranslatorBase(
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
+            if self._load_builtin_if_global_deleted(variable, name, inst):
+                return
             self.push(self.output.side_effects.load_global(variable, name))
             return
 
@@ -2586,7 +2599,16 @@ class InstructionTranslatorBase(
     def STORE_GLOBAL(self, inst: Instruction) -> None:
         value = self.pop()
         name = inst.argval
-        variable = self._global_mutation_vt(name)
+        if name not in self.symbolic_globals:
+            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
+        variable = self.output.side_effects.track_global_existing(
+            GlobalSource(name), self.symbolic_globals[name]
+        )
+        if isinstance(value, NullVariable):
+            # `del name` is PUSH_NULL; STORE_GLOBAL on 3.16+; DELETE_GLOBAL
+            # shims that shape on older bytecode (see the handler below).
+            self._delete_global(inst, variable)
+            return
         if isinstance(value, RemovableHandleVariable):
             unimplemented(
                 gb_type="Storing Tensor hook handle in globals",
@@ -2597,27 +2619,25 @@ class InstructionTranslatorBase(
         self.output.side_effects.store_global(variable, name, value)
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        # CPython 3.16 compiles `del name` to PUSH_NULL; STORE_GLOBAL and drops
+        # this opcode; STORE_GLOBAL's null branch implements the delete, so this
+        # handler only shims older bytecode.
+        # TODO(3.16): remove it as dead code.
+        self.PUSH_NULL(inst)
+        self.STORE_GLOBAL(inst)
+
+    def _delete_global(self, inst: Instruction, target: VariableTracker) -> None:
+        """Record the delete against `target`, the mutation it replays or
+        cancels: the per-name sentinel holder in the root frame, or the globals
+        dict variable of an inlined frame from another module."""
         name = inst.argval
         present = name in self.f_globals
         self._install_globals_membership_guard(name, present)
-        variable = self._global_mutation_vt(name)
-        self._check_global_delete(name, variable, present)
+        self._check_global_delete(name, target, present)
         if present:
-            self.output.side_effects.record_global_delete(variable, name)
+            self.output.side_effects.record_global_delete(target, name)
         else:
-            self.output.side_effects.discard_global_store(variable, name)
-
-    def _global_mutation_vt(self, name: str) -> VariableTracker:
-        """The variable that keys this global's mutation; one per name.
-
-        STORE_GLOBAL and DELETE_GLOBAL of one name must share it, or the later
-        instruction cannot see what the earlier one recorded.
-        """
-        if name not in self.symbolic_globals:
-            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
-        return self.output.side_effects.track_global_existing(
-            GlobalSource(name), self.symbolic_globals[name]
-        )
+            self.output.side_effects.discard_global_store(target, name)
 
     def _check_global_delete(
         self,
@@ -6512,6 +6532,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
+                if self._load_builtin_if_global_deleted(fglobals_vt, name, inst):
+                    return
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
                 value = self.f_globals[name]
@@ -6524,6 +6546,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
+            if isinstance(value, NullVariable):
+                self._delete_global_other_module(inst)
+                return
             if isinstance(value, RemovableHandleVariable):
                 unimplemented(
                     gb_type="Storing Tensor hook handle in globals (inline call)",
@@ -6548,13 +6573,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
-    def DELETE_GLOBAL(self, inst: Instruction) -> None:
-        if self.output.global_scope is self.f_globals:
-            super().DELETE_GLOBAL(inst)
-            return
+    def _delete_global_other_module(self, inst: Instruction) -> None:
         name = inst.argval
-        _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
-        if isinstance(global_source, DictGetItemSource):
+        _, value, source = self.get_globals_source_and_value(name)
+        if isinstance(source, DictGetItemSource):
             unimplemented(
                 gb_type="DELETE_GLOBAL in non-module globals",
                 context=name,
@@ -6565,13 +6587,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        present = name in self.f_globals
-        self._install_globals_membership_guard(name, present)
-        self._check_global_delete(name, fglobals_vt, present)
-        if present:
-            self.output.side_effects.record_global_delete(fglobals_vt, name)
-        else:
-            self.output.side_effects.discard_global_store(fglobals_vt, name)
+        self._delete_global(inst, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
