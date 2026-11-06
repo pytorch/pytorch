@@ -10,8 +10,8 @@
 
 #include <fmt/format.h>
 #include <memory>
-#include <stdexcept>
 #include <string>
+#include <system_error>
 
 #include "ActivityLoggerFactory.h"
 #include "ActivityTraceInterface.h"
@@ -44,8 +44,9 @@ class ActivityTrace : public ActivityTraceInterface {
     // Logging only reads the buffered trace, so the caller can retry.
     if (const auto error = logger->writeError()) {
       KINETO_THROW(
-          std::runtime_error,
-          fmt::format("Failed to save trace to '{}': {}", url, *error));
+          std::system_error,
+          error,
+          fmt::format("Failed to save trace to '{}'", url));
     }
   }
 

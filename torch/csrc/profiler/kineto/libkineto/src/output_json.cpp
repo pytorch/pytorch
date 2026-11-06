@@ -500,13 +500,18 @@ static std::string defaultFileName() {
   return fmt::format(kDefaultLogFileFmt, processId());
 }
 
-void ChromeTraceLogger::recordWriteError(
-    std::string_view action,
-    std::string_view path) {
+// The error from the call that just failed. Not every failing call is
+// guaranteed to set errno, so fall back to a generic I/O error rather than
+// reporting success.
+static std::error_code lastErrorCode() {
   const int err = errno;
+  return err != 0 ? std::error_code(err, std::generic_category())
+                  : std::make_error_code(std::errc::io_error);
+}
+
+void ChromeTraceLogger::recordWriteError(std::error_code error) {
   if (!writeError_) {
-    writeError_ = fmt::format(
-        "{} '{}': {}", action, path, std::generic_category().message(err));
+    writeError_ = error;
   }
 }
 
@@ -514,7 +519,7 @@ void ChromeTraceLogger::openTraceFile() {
   tempFileName_ = fileName_ + ".tmp";
   traceOf_.open(tempFileName_, std::ofstream::out | std::ofstream::trunc);
   if (!traceOf_) {
-    recordWriteError("cannot open", tempFileName_);
+    recordWriteError(lastErrorCode());
     PLOG(ERROR) << "Failed to open '" << fileName_ << "'";
   } else {
     LOG(INFO) << "Tracing to temporary file " << fileName_;
@@ -1107,7 +1112,8 @@ void ChromeTraceLogger::addOnDemandDistMetadata() {
 
 void ChromeTraceLogger::finalizeTrace(int64_t endTime) {
   if (!traceOf_) {
-    recordWriteError("cannot write", tempFileName_);
+    // errno may no longer describe the failure that broke the stream.
+    recordWriteError(std::make_error_code(std::errc::io_error));
     LOG(ERROR) << "Failed to write to log file!";
     return;
   }
@@ -1139,16 +1145,21 @@ void ChromeTraceLogger::finalizeTrace(int64_t endTime) {
   fmt::print(traceOf_, R"JSON("traceName": "{}" }})JSON", fileName_);
 
   traceOf_.close();
-  // The stream also fails here if an earlier write or the final flush failed.
+  // The stream also fails here if an earlier write or the final flush failed,
+  // so errno may not describe it. Discard the truncated trace and leave any
+  // existing file at the destination in place.
   if (!traceOf_) {
-    recordWriteError("cannot write", tempFileName_);
+    recordWriteError(std::make_error_code(std::errc::io_error));
+    LOG(ERROR) << "Failed to write " << tempFileName_;
+    remove(tempFileName_.c_str());
+    return;
   }
 
   // On some systems, rename() fails if the destination file exists.
   // So, remove the destination file first.
   remove(fileName_.c_str());
   if (rename(tempFileName_.c_str(), fileName_.c_str()) != 0) {
-    recordWriteError("cannot rename the temporary file to", fileName_);
+    recordWriteError(lastErrorCode());
     PLOG(ERROR) << "Failed to rename " << tempFileName_ << " to " << fileName_;
   } else {
     LOG(INFO) << "Renamed the trace file to " << fileName_;

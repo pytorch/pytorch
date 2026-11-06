@@ -10,13 +10,14 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "include/Config.h"
@@ -358,8 +359,26 @@ TEST(OutputJsonTest, MissingDirectoryReportsWriteError) {
   logger.finalizeTrace(/*endTime=*/300);
 
   const auto error = logger.writeError();
-  ASSERT_TRUE(error.has_value());
-  EXPECT_NE(error->find(bogusPath), std::string::npos) << *error;
+  EXPECT_EQ(error, std::errc::no_such_file_or_directory) << error.message();
+}
+
+// A non-empty directory at the destination can be neither removed nor
+// replaced, so the trace is written but the final rename fails.
+TEST(OutputJsonTest, RenameFailureReportsWriteError) {
+  namespace fs = std::filesystem;
+  const fs::path destination = fs::temp_directory_path() /
+      ("OutputJsonTest.rename." + std::to_string(processId()));
+  fs::create_directories(destination / "blocker");
+
+  TestableChromeTraceLogger logger(destination.string());
+  logger.handleTraceStart({}, "");
+  logger.finalizeTrace(/*endTime=*/300);
+  const auto error = logger.writeError();
+
+  std::error_code ignored;
+  fs::remove_all(destination, ignored);
+  fs::remove(destination.string() + ".tmp", ignored);
+  EXPECT_TRUE(error) << "rename onto a non-empty directory was not reported";
 }
 
 // A failed save must raise and leave the trace intact for a retry.
@@ -389,7 +408,8 @@ TEST(OutputJsonTest, FailedSaveRaisesAndCanBeRetried) {
   try {
     trace.save(bogusPath);
     FAIL() << "save to a missing directory did not throw";
-  } catch (const std::runtime_error& e) {
+  } catch (const std::system_error& e) {
+    EXPECT_EQ(e.code(), std::errc::no_such_file_or_directory) << e.what();
     EXPECT_NE(std::string(e.what()).find(bogusPath), std::string::npos)
         << e.what();
   }

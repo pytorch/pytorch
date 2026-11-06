@@ -44,6 +44,7 @@
 
 #include <optional>
 #include <set>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 
@@ -414,7 +415,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
-      .def("save", &ProfilerResult::save)
+      .def(
+          "save",
+          [](ProfilerResult& r, const std::string& path) {
+            try {
+              r.save(path);
+            } catch (const std::system_error& e) {
+              // Raise OSError like Python's own file APIs. It picks the
+              // subclass from the errno, e.g. FileNotFoundError.
+              const auto& code = e.code();
+              PyErr_SetObject(
+                  PyExc_OSError,
+                  py::make_tuple(code.value(), code.message(), path).ptr());
+              throw py::error_already_set();
+            }
+          })
       .def(
           "trace_activities",
           [](py::object self) {

@@ -10,9 +10,8 @@
 
 #include <fstream>
 #include <map>
-#include <optional>
 #include <ostream>
-#include <string>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 
@@ -73,13 +72,14 @@ class ActivityLogger {
       std::unique_ptr<ActivityBuffers> buffers,
       int64_t endTime) = 0;
 
-  // Why the trace could not be written, or nullopt if it was. Checked after
-  // finalizeTrace. Loggers report write failures here instead of throwing:
-  // on-demand traces finalize on Kineto's profiler thread, where an exception
-  // would terminate the process. ActivityTrace::save turns a reported error
-  // into an exception. The default suits loggers that cannot fail to write.
-  virtual std::optional<std::string> writeError() const {
-    return std::nullopt;
+  // The error that kept the trace from being written, or an empty error_code
+  // if it was written. Checked after finalizeTrace. Loggers report write
+  // failures here instead of throwing: on-demand traces finalize on Kineto's
+  // profiler thread, where an exception would terminate the process.
+  // ActivityTrace::save turns a reported error into an exception. The default
+  // suits loggers that cannot fail to write.
+  virtual std::error_code writeError() const {
+    return {};
   }
 
  protected:
