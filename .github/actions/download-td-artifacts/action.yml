@@ -10,8 +10,9 @@ inputs:
 runs:
   using: composite
   steps:
-    # Clear any LLM test selection already in the checkout before the TD artifacts arrive.
-    # Defense in depth, not the trust boundary: test jobs run the PR's own scripts.
+    # Clear any selection already in the checkout so only the one downloaded below is used. Not
+    # the trust boundary: resolve_selection.py decides which .github/workflows/llm-selector.yml
+    # selection, if any, the test jobs get.
     - name: Remove any LLM test selection
       shell: bash
       run: rm -f .additional_ci_files/llm_selection.json
@@ -28,8 +29,17 @@ runs:
       with:
         name: td_results.json
 
+    # Resolved once per workflow run; with a pattern, no such artifact means no selection.
+    - name: Download the LLM test selection
+      continue-on-error: true
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        pattern: llm_selection.json
+        merge-multiple: true
+
     - name: Move artifacts to .additional_ci_files folder
       shell: bash
       run: |
         mkdir -p .additional_ci_files
         mv td_results.json .additional_ci_files/td_results.json || true
+        mv llm_selection.json .additional_ci_files/llm_selection.json || true
