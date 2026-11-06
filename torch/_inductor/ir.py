@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.fx.node import Node
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._sympy.functions import (
@@ -7774,7 +7775,16 @@ class ExternKernel(InputsKernel):
             x_unwrap_view_fx_node is not None
             and hasattr(padding_fx_node, "meta")
             and padding_fx_node.meta.get("dislike_padding_only_for_output", False)
-            and not x_unwrap_view_fx_node.meta.get("backs_user_visible_output", False)
+            # A no-op lowering can overwrite origin_node. Check all origins by
+            # storage so aliases of returned buffers retain the consumer context.
+            and not any(
+                isinstance(node, torch.fx.Node)
+                and isinstance(val := node.meta.get("val"), torch.Tensor)
+                and torch._C._has_storage(val)
+                and StorageWeakRef(val.untyped_storage())
+                in getattr(V.graph, "user_visible_output_storages", ())
+                for node in (x_unwrap_view_fx_node, *buf.get_origins())
+            )
         ):
             padding_fx_node = x_unwrap_view_fx_node
         with V.set_current_node(padding_fx_node):

@@ -613,29 +613,26 @@ class PaddingTest(TestCaseBase):
             code[0],
         )
 
-
     @config.patch(comprehensive_padding=True, shape_padding=False)
     @parametrize("reduction", ("mean", "sum", "amax"))
-    def test_view_of_reduction_output_not_padded(self, reduction):
+    @parametrize("view", ("unsqueeze", "transpose"))
+    def test_view_of_reduction_output_not_padded(self, reduction, view):
         """
         Reductions aren't marked dislike_padding even if user visible, so views
         returning their output rely on the view's marking to keep eager's strides.
         """
 
-        def unsqueeze(x):
-            return getattr(x, reduction)(-1).unsqueeze(1)
+        def f(x):
+            out = getattr(x, reduction)(-1)
+            return out.unsqueeze(1) if view == "unsqueeze" else out.t()
 
-        def transpose(x):
-            return getattr(x, reduction)(-1).t()
+        x = torch.randn((4, 2047, 64) if view == "unsqueeze" else (64, 2047, 4))
+        expected = f(x)
+        actual = torch.compile(f)(x)
 
-        for f, shape in ((unsqueeze, (4, 2047, 64)), (transpose, (64, 2047, 4))):
-            x = torch.randn(shape)
-            expected = f(x)
-            actual = torch.compile(f)(x)
-
-            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
-            self.assertEqual(actual.stride(), expected.stride())
-            self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
 
     @config.patch(comprehensive_padding=True, shape_padding=False)
     @parametrize("producer", ("mean", "chunk", "frexp"))
@@ -664,22 +661,81 @@ class PaddingTest(TestCaseBase):
         self.assertEqual(actual[1].stride(), expected[1].stride())
 
     @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("view", ("squeeze", "expand"))
+    @parametrize("use_mm", (False, True))
+    def test_noop_view_backing_output_not_padded(self, view, use_mm):
+        """No-op views can replace a buffer's origin without changing its storage."""
+
+        def f(x, y):
+            p = x + 1
+            q = p.squeeze(1) if view == "squeeze" else p.expand(p.shape)
+            return (q @ y if use_mm else q * 2), p.permute(0, 2, 1)
+
+        x = torch.randn(1, 16, 2047)
+        y = torch.randn(2047, 8)
+        expected = f(x, y)
+        actual, code = run_and_get_code(torch.compile(f), x, y)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            [out.stride() for out in actual], [out.stride() for out in expected]
+        )
+        self.assertNotIn("(32768, 2048, 1)", code[0])
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("num_mutations", (1, 2))
+    def test_index_put_backing_output_not_padded(self, num_mutations):
+        """Reinplaced writes must preserve the storage backing a returned view."""
+
+        def f(x, y, idx, v):
+            p = x + 1
+            out = p @ y
+            for i in range(num_mutations):
+                p[:, idx] = v + i
+            return out, p.transpose(1, 2)
+
+        x = torch.randn(2, 16, 2047)
+        y = torch.randn(2047, 8)
+        idx = torch.tensor([0, 3])
+        v = torch.randn(2, 2, 2047)
+        expected = f(x, y, idx, v)
+        actual, code = run_and_get_code(torch.compile(f), x, y, idx, v)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            [out.stride() for out in actual], [out.stride() for out in expected]
+        )
+        self.assertNotIn("(32768, 2048, 1)", code[0])
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
     def test_conv_input_through_view_not_padded(self):
         """
-        Convolution is marked dislike_padding for its inputs, so the reduction it
-        reads through a view stays dense even though the reduction isn't marked.
+        A user-visible matmul freezes a shared conv input through a view.
+        The producer's conv marking keeps it dense, while an intermediate
+        used only by another user-visible matmul can still be padded.
         """
 
-        def f(x, w):
-            return torch.nn.functional.conv2d(x.mean(1).unsqueeze(1), w)
+        def f(x, y, w):
+            p = x + 1
+            mm = p @ y
+            conv = torch.nn.functional.conv2d(p.unsqueeze(1), w)
+            return mm, conv, (p + 2) @ y
 
-        x = torch.randn(2, 8, 64, 2047)
+        x = torch.randn(2, 16, 2047)
+        y = torch.randn(2047, 8)
         w = torch.randn(4, 1, 3, 3)
 
-        _, code = run_and_get_code(torch.compile(f), x, w)
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            expected = f(x, y, w)
+            actual, code = run_and_get_code(torch.compile(f), x, y, w)
 
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
         self.assertIn(
-            f"empty_strided_{GPU_TYPE}((2, 64, 2047), (131008, 2047, 1), torch.float32)",
+            f"empty_strided_{GPU_TYPE}((2, 16, 2047), (32752, 2047, 1), torch.float32)",
+            code[0],
+        )
+        self.assertIn(
+            f"empty_strided_{GPU_TYPE}((2, 16, 2047), (32768, 2048, 1), torch.float32)",
             code[0],
         )
 
