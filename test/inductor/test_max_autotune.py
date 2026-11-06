@@ -2169,31 +2169,27 @@ class TestMaxAutotune(TestCase):
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
+            FileCheck().check("decompose_k").run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-            torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
+        torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
+            FileCheck().check("decompose_k").run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
-            )
+        torch.testing.assert_close(
+            compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
+        )
 
         # Test adding reinterpret view before subgraph
         a = a.transpose(0, 1)
@@ -2203,20 +2199,18 @@ class TestMaxAutotune(TestCase):
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
+            FileCheck().check("decompose_k").run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b),
-                (a.transpose(0, 1) @ b).relu(),
-                atol=atol,
-                rtol=rtol,
-            )
+        torch.testing.assert_close(
+            compiled_func(a, b),
+            (a.transpose(0, 1) @ b).relu(),
+            atol=atol,
+            rtol=rtol,
+        )
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             fp16_red_setting
@@ -2314,12 +2308,25 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
-    def test_decompose_k_dynamic_k_needs_a_dividing_split(self):
-        """A dynamic K that no split is known to divide gets no decompose_k and
-        no guard."""
-        frames, names = self._compile_dynamic_k_mm((16391, 20011), k_multiple=1)
+    def test_decompose_k_dynamic_k_remainder(self):
+        """A dynamic K that no split divides runs the leftover rows as one MM.
+        One compile serves K with 0 and 1 leftover rows and K between one and
+        two times the threshold."""
+        frames, names = self._compile_dynamic_k_mm(
+            (16384, 16391, 16385, 20011, 3001), only_decompose_k=True, k_multiple=1
+        )
         self.assertEqual(frames, 1)
-        self.assertFalse(any(n.startswith("decompose_k") for n in names), names)
+        self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
+
+    def test_decompose_k_remainder(self):
+        from torch._inductor.kernel.decompose_k import decomposeK
+
+        a = torch.randn(32, 4099, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(4099, 64, device=GPU_TYPE, dtype=torch.float32)
+        with tf32_off():
+            ref = a @ b
+            out = decomposeK(a, b, 16)
+        torch.testing.assert_close(out, ref, atol=1e-5 * ref.abs().max(), rtol=1e-5)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
