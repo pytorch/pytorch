@@ -2006,6 +2006,17 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_getattr_pybind11_metaclass(self):
+        class MyFut(torch.futures.Future):
+            def foo(self, x):
+                return x * 2
+
+        f = MyFut()
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch.compile(lambda x: f.foo(x), backend=cnts, fullgraph=True)
+        self.assertEqual(fn(torch.ones(2)), torch.tensor([2.0, 2.0]))
+        self.assertEqual(cnts.frame_count, 1)
+
     @parametrize("native_mro", (False, True))
     @parametrize("cache_first", (False, True))
     def test_getattr_metaclass_metadata(self, native_mro, cache_first):

@@ -1,4 +1,4 @@
-"""Label rules shared by the issue-triage and distributed-triage apply steps."""
+"""Label rules for the issue-triage apply step."""
 
 from __future__ import annotations
 
@@ -9,11 +9,32 @@ from pathlib import Path
 
 SKILLS = Path(__file__).resolve().parents[2] / ".agents/skills"
 TRIAGE_SKILL = SKILLS / "triaging-issues"
-DISTRIBUTED_SKILL = SKILLS / "distributed-triage"
 DISTRIBUTED = "oncall: distributed"
-# Distributed-bot marker; `bot-triaged` belongs to issue triage, which adds it
-# before handing off.
-PTD_TRIAGED = "ptd-bot-triaged"
+PARALLELISMS = "oncall: distributed parallelisms"
+SUB_QUEUES = {
+    "oncall: distributed checkpointing",
+    "oncall: distributed infra",
+    PARALLELISMS,
+}
+# Distributed component labels; parallelisms needs at least one to complete triage.
+DISTRIBUTED_MODULES = {
+    "module: activation checkpointing",
+    "module: c10d",
+    "module: context parallel",
+    "module: data parallel",
+    "module: ddp",
+    "module: DeviceMesh",
+    "module: distributed_tool",
+    "module: dtensor",
+    "module: elastic",
+    "module: fsdp",
+    "module: mpi",
+    "module: nccl",
+    "module: pipelining",
+    "module: rpc",
+    "module: symm_mem",
+    "module: threaded pg",
+}
 
 # Labels the triage bot must never add: CI controls, release notes, severity,
 # and decisions reserved for human reviewers.
@@ -48,20 +69,10 @@ def is_forbidden(label: str) -> bool:
     )
 
 
-def is_sub_queue(label: str) -> bool:
-    """`oncall: distributed <team>`, picked by distributed triage only."""
-    return label.startswith(DISTRIBUTED + " ")
-
-
-def load_labels(path: Path) -> set[str]:
-    return {label["name"] for label in json.loads(path.read_text())["labels"]}
-
-
 def load_valid_labels() -> set[str]:
     """Labels the issue-triage skill may request."""
-    return load_labels(TRIAGE_SKILL / "labels.json") | load_labels(
-        DISTRIBUTED_SKILL / "distributed-labels.json"
-    )
+    catalog = json.loads((TRIAGE_SKILL / "labels.json").read_text())
+    return {label["name"] for label in catalog["labels"]}
 
 
 def load_templates(skill: Path) -> dict[str, dict]:
