@@ -15,6 +15,7 @@ import sympy
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch._logging import warning_once
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
@@ -60,7 +61,7 @@ from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator, Mapping, Sequence
 
     from triton import Config as TritonConfig
 
@@ -573,7 +574,8 @@ class FlexAttentionConfigContext:
     device: torch.device
     inputs_contiguous: bool
     is_noop_block_mask: bool
-    kernel_options: dict[str, Any]
+    score_mod_reads_buffers: bool
+    kernel_options: Mapping[str, Any]
 
 
 class BaseHeuristicSingleton(type):
@@ -1523,12 +1525,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return flex_attn_fwd_configs
 
-    def filter_flex_attn_fwd_configs(
+    def refine_flex_attn_fwd_configs(
         self,
         configs: list[FlexConfig],
         context: FlexAttentionConfigContext,
     ) -> list[FlexConfig]:
-        """Optionally refine forward configs with full attention context."""
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty; a single config takes the lowering's one-config path.
+        """
         return configs
 
     def get_flex_attn_bwd_configs(
@@ -2403,7 +2409,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def filter_flex_attn_fwd_configs(
+    def refine_flex_attn_fwd_configs(
         self,
         configs: list[FlexConfig],
         context: FlexAttentionConfigContext,
@@ -2417,6 +2423,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             or not context.is_noop_block_mask
             or context.dtype not in (torch.float16, torch.bfloat16)
         ):
+            return configs
+        # A subclass that customizes the stock pool owns it.
+        if (
+            type(self).get_flex_attn_fwd_configs
+            is not ROCmConfigHeuristic.get_flex_attn_fwd_configs
+        ):
+            return configs
+        # Origami models the two GEMMs; score_mods that stream captured buffers
+        # add memory traffic outside that model and are unmeasured.
+        if context.score_mod_reads_buffers:
             return configs
 
         # Origami models dense row/column-major GEMMs, not padding or overlap.
@@ -2473,12 +2489,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             or qk_head_dim not in (32, 64, 128, 256)
         ):
             return configs
-        if configs != self.get_flex_attn_fwd_configs(
-            qk_head_dim, context.seq_len_q, context.dtype, v_head_dim
-        ):
-            # An out-of-tree choices handler supplied this pool; it owns the
-            # policy unless it explicitly overrides the refinement hook too.
-            return configs
 
         try:
             device_index = (
@@ -2513,7 +2523,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 candidate_tiles,
             )
         except (AttributeError, RuntimeError, TypeError, ValueError) as error:
-            log.debug("Origami FlexAttention selection failed: %s", error)
+            warning_once(
+                log,
+                "Origami FlexAttention config selection failed; using the stock "
+                "configs: %s",
+                str(error),
+            )
             return configs
         if not selected_tiles:
             return configs
@@ -2523,9 +2538,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         # present in the autotune list, and a heterogeneous process may have
         # initialized that list using another device's architecture.
         stock_default = self.gfx950_default_flex_config.get(
-            (context.dtype, qk_head_dim),
-            ROCmFlexConfig(128, 64, 1, 4, kpack=get_default_kpack()),
+            (context.dtype, qk_head_dim)
         )
+        if stock_default is None:
+            stock_default = ROCmFlexConfig(128, 64, 1, 4, kpack=get_default_kpack())
         # Origami has no stage/warp/MFMA/kpack model for this fused kernel.
         # gfx950 exhaustive measurements project tiles to stage 2 and
         # unconstrained occupancy; MHA uses four warps while GQA retains two and
@@ -2544,8 +2560,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         # its tile (or when its generic D=32 form uses a different stage count).
         if stock_default not in selected:
             selected.append(stock_default)
-        if not selected:
-            return configs
         log.debug(
             "Origami selected FlexAttention tiles %s (%d configs)",
             selected_tiles,
