@@ -5818,9 +5818,8 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
-        # allocate do not dispatch to the installed mode. With no Fake kernel
-        # registered yet, they would fail; once the fake fallback is, it would
-        # make meta fakes of them, which this mode's allow_meta rejects.
+        # allocate do not dispatch to the installed mode. The fake fallback
+        # does not take constructors yet, so they would fail.
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode, wrapper = self._make_mode()
         layouts = (torch.sparse_coo, torch.sparse_csr)
@@ -6266,6 +6265,72 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(fake_t.storage_offset(), t.storage_offset())
         storage = mode.from_tensor(alias).untyped_storage()
         self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        mode = CppFakeTensorMode()
+        real = torch.randn(2, 3)
+        x = mode.from_tensor(real)
+
+        def check(out, shape):
+            self.assertIs(torch._C._maybe_get_fake_mode(out), mode)
+            self.assertEqual(out.device, real.device)
+            self.assertEqual(out.shape, shape)
+
+        # An op on fakes runs their Meta kernel, under the mode or, as Python's
+        # FakeTensor dispatch enters the fakes' mode, outside it
+        with mode:
+            check(x + x, (2, 3))
+        check(x.sum(0), (3,))
+        check(x * 2, (2, 3))
+        check(x.t(), (3, 2))
+        # In-place and out= ops return their input
+        self.assertIs(x.add_(1), x)
+        out = mode.from_tensor(torch.empty(2, 3))
+        self.assertIs(torch.add(x, x, out=out), out)
+        # Converting a view replays it on the fake of its base, and converting a
+        # sparse tensor runs ops on the new fake
+        view = mode.from_tensor(real[1:])
+        check(view, (1, 3))
+        self.assertEqual(view.storage_offset(), 3)
+        self.assertEqual(view.untyped_storage()._cdata, x.untyped_storage()._cdata)
+        self.assertTrue(mode.from_tensor(torch.eye(2).to_sparse()).is_sparse)
+
+        # As in Python, the outputs of alias and detach keep the recorded
+        # dispatch keys, and those of other views do not
+        keys = torch._C._dispatch_keys(real)
+        torch._C._set_fake_dispatch_keys(x, keys)
+        self.assertEqual(maybe_get_fake_dispatch_keys(torch.ops.aten.alias(x)), keys)
+        self.assertEqual(maybe_get_fake_dispatch_keys(x.detach()), keys)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(x.t()))
+
+        # A sparse tensor's values are not made a fake by _values, which
+        # returns them as they are
+        meta = torch.eye(2).to_sparse().to("meta")
+        sparse = torch._C._from_meta_and_device(meta, real.device, mode._cpp_mode)
+        check(sparse._values(), meta._values().shape)
+        self.assertFalse(torch._C._is_fake_tensor(meta._values()))
+
+        other = CppFakeTensorMode().from_tensor(real)
+        constant = mode.fake_tensor_converter.from_real_tensor(
+            mode, torch.ones(2, 3), make_constant=True
+        )
+        with_real = mode.from_tensor(torch.randn(2, 3))
+        torch._C._set_real_tensor(with_real, real)
+        unsupported = {
+            "non-fake tensor inputs": lambda: x + real,
+            "another mode": lambda: x + other,
+            "propagate_real_tensors": lambda: with_real + with_real,
+            "constant inputs": lambda: x + constant,
+            "device arguments": lambda: torch.ops.aten._to_copy(x, device="cpu"),
+            "Python fake implementation": lambda: x.view(6),
+        }
+        for msg, fn in unsupported.items():
+            with self.subTest(msg=msg):
+                with self.assertRaisesRegex(NotImplementedError, msg), mode:
+                    fn()
 
     @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild(self):
