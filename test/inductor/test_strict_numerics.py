@@ -446,6 +446,499 @@ class StrictNumericsCompileTest(TestCase):
         actual = torch.compile(fn, fullgraph=True, options=options)(*args)
         self._assert_bitwise_equal(actual, fn(*args))
 
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("source", ("power", "product", "floor", "difference"))
+    def test_whole_input_stride_power(self, device, dtype, numerics, source):
+        import operator
+
+        from torch._inductor.fx_passes.pre_grad import _preserve_symbolic_strides
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        env = ShapeEnv()
+        u, v, k = [env.create_unbacked_symint() for _ in range(3)]
+        torch._check(u >= 3)
+        torch._check(v >= 3)
+        torch._check(u > v)
+        torch._check(k >= 0)
+        stride = {
+            "power": u**2,
+            "product": u * v,
+            "floor": u // 2,
+            "difference": u - v,
+        }[source]
+        mode = FakeTensorMode(shape_env=env)
+        with mode:
+            fake = torch.empty(
+                (2 * (stride**2 + k**2) + 3,), device=device, dtype=dtype
+            ).as_strided((3, 3), (stride, 1))
+        env.pending_fresh_unbacked_symbols.clear()
+        graph = torch.fx.Graph()
+        tensor = graph.placeholder("x")
+        scalar = graph.placeholder("k")
+        query = graph.call_method("stride", (tensor, 0))
+        square = graph.call_function(operator.mul, (query, query))
+        offset = graph.call_function(operator.mul, (scalar, scalar))
+        summed = graph.call_function(operator.add, (square, offset))
+        view = graph.call_function(
+            torch.ops.aten.as_strided.default, (tensor, (3, 3), (summed, 1))
+        )
+        query = graph.call_method("stride", (view, 0))
+        graph.output(query)
+        gm = torch.fx.GraphModule({}, graph)
+        FakeTensorProp(gm, mode=mode).propagate(fake, k)
+        with config.patch(numerics=numerics):
+            _preserve_symbolic_strides(gm)
+        graph.lint()
+        gm.recompile()
+        for stride, known in ((9, 0), (10, 3)):
+            tensor = torch.empty(
+                2 * (stride**2 + known**2) + 3, device=device, dtype=dtype
+            ).as_strided((3, 3), (stride, 1))
+            self.assertEqual(gm(tensor, known), stride**2 + known**2)
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("two_dimensions", (False, True))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_addr_unbacked_strides(self, device, dtype, numerics, two_dimensions):
+        def fn(mask1, mask2):
+            m = torch.nonzero(mask1).shape[0]
+            n = torch.nonzero(mask2).shape[0] if two_dimensions else 3
+            x = torch.empty_strided((m, n), (1, m), device=device, dtype=dtype)
+            x.fill_(0.5)
+            a = torch.ones(m, device=device, dtype=dtype)
+            b = torch.ones(n, device=device, dtype=dtype)
+            out = torch.addr(x, a, b, beta=0, alpha=2.3)
+            return out, out + 1, out.stride()
+
+        counter = CompileCounterWithBackend("inductor")
+        metrics.reset()
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+            for m in (0, 1, 2):
+                for n in (0, 1, 2) if two_dimensions else (3,):
+                    mask1 = torch.arange(4, device=device) < m
+                    mask2 = torch.arange(4, device=device) < n
+                    expected = fn(mask1, mask2)
+                    actual = compiled(mask1, mask2)
+                    self._assert_bitwise_equal(actual[:2], expected[:2])
+                    self.assertEqual(actual[0].stride(), expected[0].stride())
+                    self.assertEqual(actual[2], expected[2])
+                    self.assertEqual(actual[2], actual[0].stride())
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(metrics.generated_kernel_count, 0)
+
+        if not two_dimensions:
+            from torch._inductor.fx_passes.pre_grad import _preserve_symbolic_strides
+            from torch._subclasses.fake_tensor import FakeTensorMode
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+            from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+            # Input producers must read the incoming geometry before mutations.
+            for symbolic_shape in (False, True):
+                for mutation, args in (("transpose_", (0, 1)), ("unsqueeze_", (0,))):
+                    shape_env = ShapeEnv()
+                    u = shape_env.create_unbacked_symint()
+                    torch._check(u >= 3)
+                    mode = FakeTensorMode(shape_env=shape_env)
+                    with mode:
+                        fake = torch.empty_strided(
+                            (3, u if symbolic_shape else 3),
+                            (u, 1),
+                            device=device,
+                            dtype=dtype,
+                        )
+                    graph = torch.fx.Graph()
+                    x = graph.placeholder("x")
+                    mutated = graph.call_method(mutation, (x, *args))
+                    query = graph.call_method("stride", (mutated,))
+                    graph.output(query)
+                    gm = torch.fx.GraphModule({}, graph)
+                    FakeTensorProp(gm, mode=mode).propagate(fake)
+                    self.assertEqual(x.meta["val"].stride()[1], 1)
+                    with config.patch(numerics=numerics):
+                        _preserve_symbolic_strides(gm)
+                    graph.lint()
+                    gm.recompile()
+                    nodes = list(graph.nodes)
+                    for node in nodes:
+                        if node.target in (
+                            torch.ops.aten.sym_stride.int,
+                            torch.ops.aten.sym_size.int,
+                        ):
+                            self.assertLess(nodes.index(node), nodes.index(mutated))
+                    for count in (3, 5):
+                        tensor = torch.empty_strided(
+                            (3, count if symbolic_shape else 3),
+                            (count, 1),
+                            device=device,
+                            dtype=dtype,
+                        )
+                        expected = (
+                            (1, count)
+                            if mutation == "transpose_"
+                            else (3 * count, count, 1)
+                        )
+                        self.assertEqual(gm(tensor), expected)
+                        self.assertEqual(tensor.stride(), expected)
+
+            for mutation, args in (("transpose_", (0, 1)), ("unsqueeze_", (0,))):
+                mode = FakeTensorMode(shape_env=ShapeEnv())
+                with mode:
+                    fake = torch.empty((3, 4), device=device, dtype=dtype)
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                producer = graph.call_function(torch.ops.aten.nonzero.default, (x,))
+                mutated = graph.call_method(mutation, (producer, *args))
+                query = graph.call_method("stride", (mutated,))
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake)
+                self.assertTrue(producer.meta["unbacked_bindings"])
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                graph.lint()
+                gm.recompile()
+                nodes = list(graph.nodes)
+                for node in nodes:
+                    if node.target == torch.ops.aten.sym_size.int:
+                        self.assertLess(nodes.index(producer), nodes.index(node))
+                        self.assertLess(nodes.index(node), nodes.index(mutated))
+                for count in (3, 5, 9):
+                    tensor = torch.zeros((3, 4), device=device, dtype=dtype)
+                    tensor.view(-1)[:count] = 1
+                    expected = getattr(tensor.nonzero(), mutation)(*args).stride()
+                    self.assertEqual(gm(tensor), expected)
+
+            csr = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse_csr()
+            for tensor in (csr, csr.to("meta"), FakeTensorMode().from_tensor(csr)):
+                shape_env = ShapeEnv()
+                symbol = shape_env.create_unbacked_symint()
+                graph = torch.fx.Graph()
+                graph.placeholder("s").meta["val"] = symbol
+                graph.placeholder("csr").meta["val"] = tensor
+                result = graph.materialize_symints((symbol + 1,))
+                graph.output(result)
+                graph.lint()
+                gm = torch.fx.GraphModule({}, graph)
+                self.assertEqual(gm(7, csr), [8])
+
+            from itertools import permutations
+
+            combinations = [
+                ("shared", (0, 1)),
+                ("shared", (1, 0)),
+                ("floor", (0, 1)),
+                ("floor", (1, 0)),
+            ]
+            combinations += [
+                (kind, order)
+                for kind in ("overcomplete", "scaled", "symbolic")
+                for order in permutations(range(3))
+            ]
+            for kind, order in combinations:
+                shape_env = ShapeEnv()
+                mode = FakeTensorMode(shape_env=shape_env)
+                u, v, w, scale, weight = [
+                    shape_env.create_unbacked_symint() for _ in range(5)
+                ]
+                for symbol in (u, v, w):
+                    torch._check(symbol >= 3)
+                torch._check(u > v)
+                torch._check(scale >= 0)
+                torch._check(weight >= 0)
+                if kind in ("shared", "floor"):
+                    producers = (u + v if kind == "shared" else u // 2 + v, u + w)
+                elif kind == "symbolic":
+                    producers = (
+                        scale * u + v,
+                        u + scale * v,
+                        (scale + 2) * u + (scale + 3) * v,
+                    )
+                else:
+                    producers = (u + v, u - v, u + 2 * v)
+                    if kind == "scaled":
+                        producers = tuple(scale * producer for producer in producers)
+                producers = tuple(producers[i] for i in order)
+                values = (
+                    sum(producers),
+                    producers[0] - producers[1],
+                    scale * producers[0] + weight * sum(producers[1:]),
+                )
+                with mode:
+                    fake = torch.empty_strided(
+                        (3,) * len(producers), producers, device=device, dtype=dtype
+                    )
+                graph = torch.fx.Graph()
+                graph.placeholder("x").meta["val"] = fake
+                graph.placeholder("scale").meta["val"] = scale
+                graph.placeholder("weight").meta["val"] = weight
+                graph.output(tuple(graph.materialize_symints(values)))
+                graph.lint()
+                gm = torch.fx.GraphModule({}, graph)
+                self.assertTrue(
+                    all(
+                        node.meta.get("val") is not None
+                        for node in graph.nodes
+                        if node.op == "call_function"
+                    )
+                )
+                for concrete in ((7, 3, 4, 2, 3), (8, 4, 5, 3, 2), (9, 5, 6, 0, 1)):
+                    substitutions = {
+                        symbol.node.expr: value
+                        for symbol, value in zip((u, v, w, scale, weight), concrete)
+                    }
+                    strides = tuple(
+                        int(producer.node.expr.subs(substitutions))
+                        for producer in producers
+                    )
+                    x = torch.empty_strided(
+                        (3,) * len(producers), strides, device=device, dtype=dtype
+                    )
+                    expected = tuple(
+                        int(value.node.expr.subs(substitutions)) for value in values
+                    )
+                    self.assertEqual(gm(x, concrete[3], concrete[4]), expected)
+
+            # Independently known terms belong in the reconstructed remainder.
+            import operator
+
+            for known_term in ("identity", "square", "floor"):
+                shape_env = ShapeEnv()
+                u, k = [shape_env.create_unbacked_symint() for _ in range(2)]
+                torch._check(u >= 3)
+                torch._check(k >= 3)
+                extra = (
+                    k
+                    if known_term == "identity"
+                    else k * k
+                    if known_term == "square"
+                    else k // 2
+                )
+                mode = FakeTensorMode(shape_env=shape_env)
+                with mode:
+                    fake = torch.empty(
+                        (2 * (u + k + extra) + 3,), device=device, dtype=dtype
+                    ).as_strided((3, 3), (u + k, 1))
+                # These symbols were bound before entering this nested graph.
+                shape_env.pending_fresh_unbacked_symbols.clear()
+                graph = torch.fx.Graph()
+                tensor = graph.placeholder("x")
+                scalar = graph.placeholder("k")
+                stride = graph.call_method("stride", (tensor, 0))
+                term = scalar
+                if known_term != "identity":
+                    term = graph.call_function(
+                        operator.mul if known_term == "square" else operator.floordiv,
+                        (scalar, scalar if known_term == "square" else 2),
+                    )
+                summed = graph.call_function(operator.add, (stride, term))
+                view = graph.call_function(
+                    torch.ops.aten.as_strided.default, (tensor, (3, 3), (summed, 1))
+                )
+                query = graph.call_method("stride", (view, 0))
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake, k)
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                graph.lint()
+                gm.recompile()
+                nodes = list(graph.nodes)
+                for node in nodes:
+                    if node.target == torch.ops.aten.sym_stride.int:
+                        self.assertLess(nodes.index(tensor), nodes.index(node))
+                        self.assertLess(nodes.index(node), nodes.index(view))
+                    elif node.target in (
+                        operator.add,
+                        operator.mul,
+                        operator.floordiv,
+                        operator.pow,
+                    ):
+                        self.assertLess(nodes.index(scalar), nodes.index(node))
+                for unknown, known in ((16, 4), (7, 3), (9, 5)):
+                    tensor = torch.empty(256, device=device, dtype=dtype).as_strided(
+                        (3, 3), (unknown + known, 1)
+                    )
+                    extra = (
+                        known
+                        if known_term == "identity"
+                        else known * known
+                        if known_term == "square"
+                        else known // 2
+                    )
+                    self.assertEqual(gm(tensor, known), unknown + known + extra)
+
+            for target, dim, keyword, result_type in (
+                ("stride", None, False, tuple),
+                ("stride", 0, False, int),
+                ("stride", 0, True, int),
+                (torch.ops.aten.sym_stride.default, None, False, list),
+                (torch.ops.aten.sym_stride.default, None, True, list),
+                (torch.ops.aten.sym_stride.int, 0, False, int),
+                (torch.ops.aten.sym_stride.int, 0, True, int),
+                (torch.ops.aten.sym_stride.int, -2, False, int),
+                (torch.ops.aten.sym_stride.int, -1, False, int),
+            ):
+                shape_env = ShapeEnv()
+                mode = FakeTensorMode(shape_env=shape_env)
+                u = shape_env.create_unbacked_symint()
+                torch._check(u >= 0)
+                with mode:
+                    fake = torch.empty_strided(
+                        (3, 3), (u, 1), device=device, dtype=dtype
+                    )
+                graph = torch.fx.Graph()
+                tensor = graph.placeholder("x")
+                args = (tensor,) if dim is None or keyword else (tensor, dim)
+                kwargs = {"dim": dim} if dim is not None and keyword else {}
+                if isinstance(target, str):
+                    query = graph.call_method(target, args, kwargs)
+                else:
+                    if keyword:
+                        args = ()
+                        kwargs["self"] = tensor
+                    query = graph.call_function(target, args, kwargs)
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake)
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                gm.graph.lint()
+                gm.recompile()
+                for count in (0, 1, 5):
+                    x = torch.empty_strided(
+                        (3, 3), (count, 1), device=device, dtype=dtype
+                    )
+                    expected = (
+                        list(x.stride())
+                        if result_type is list
+                        else x.stride()
+                        if dim is None
+                        else x.stride(dim)
+                    )
+                    actual = gm(x)
+                    self.assertIs(type(actual), result_type)
+                    self.assertEqual(actual, expected)
+
+            # Branch inputs can expose whole stride expressions without
+            # exposing the individual symbols needed by their view strides.
+            def cond_fn(mask1, mask2, mask3, predicate, source, view):
+                u = torch.nonzero(mask1).shape[0]
+                torch._check(u >= 3)
+                stride1 = 1
+                if source in (
+                    "sum",
+                    "two_sources",
+                    "mixed_sign",
+                    "shared_leading",
+                    "floor_composite",
+                ):
+                    v = torch.nonzero(mask2).shape[0]
+                    torch._check(v >= 3)
+                    stride0 = u + v
+                    if source in (
+                        "two_sources",
+                        "mixed_sign",
+                        "shared_leading",
+                        "floor_composite",
+                    ):
+                        w = torch.nonzero(mask3).shape[0]
+                        torch._check(w >= 3)
+                        if source == "mixed_sign":
+                            torch._check(u > v)
+                            torch._check(v > w)
+                            stride0, stride1 = u - v, v - w
+                        elif source in ("shared_leading", "floor_composite"):
+                            stride1 = u + w
+                            if source == "floor_composite":
+                                stride0 = u // 2 + v
+                        else:
+                            stride1 = w + v
+                elif source == "negative":
+                    stride0 = u - 1
+                elif source == "scaled_positive":
+                    stride0 = 2 * u + 1
+                elif source == "scaled_negative":
+                    stride0 = 3 * u - 2
+                elif source == "nonlinear":
+                    stride0 = u * u + 1
+                else:
+                    stride0 = u + (source == "positive")
+                x = torch.empty_strided(
+                    (3, 3), (stride0, stride1), device=device, dtype=dtype
+                )
+                x.fill_(0.5)
+
+                def view_stride(t):
+                    if view == "transpose":
+                        return t.t().stride(1)
+                    if view == "slice":
+                        return t[::2].stride(0)
+                    if view == "diagonal":
+                        return t.diagonal().stride(0)
+                    if view == "select":
+                        return t.select(1, 0).stride(0)
+                    if view == "unfold":
+                        return t.unfold(0, 1, 2).stride(0)
+                    if view == "reshape":
+                        return t[::2, 0].reshape(2, 1).stride(0)
+                    return t.stride(0)
+
+                def true_branch(t):
+                    return torch.ones((view_stride(t),), device=device, dtype=dtype)
+
+                def false_branch(t):
+                    return torch.ones((view_stride(t),), device=device, dtype=dtype) + 1
+
+                return torch.cond(predicate, true_branch, false_branch, (x,))
+
+            scenarios = (
+                ("bare", "input"),
+                ("positive", "input"),
+                ("positive", "transpose"),
+                ("positive", "slice"),
+                ("positive", "diagonal"),
+                ("negative", "unfold"),
+                ("scaled_positive", "reshape"),
+                ("scaled_negative", "slice"),
+                ("sum", "slice"),
+                ("nonlinear", "unfold"),
+                ("two_sources", "diagonal"),
+                ("mixed_sign", "diagonal"),
+                ("shared_leading", "diagonal"),
+                ("floor_composite", "diagonal"),
+                ("negative", "select"),
+            )
+            for source, view in scenarios:
+                torch._dynamo.reset()
+                counter = CompileCounterWithBackend("inductor")
+                with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                    compiled = torch.compile(
+                        cond_fn, backend=counter, fullgraph=True, dynamic=True
+                    )
+                    for count in (3, 4, 5):
+                        counts = (
+                            (count + 4, count + 2, count)
+                            if source == "mixed_sign"
+                            else (count, 8 - count, count)
+                        )
+                        if source in ("shared_leading", "floor_composite"):
+                            counts = (count, 8 - count, (5, 3, 4)[count - 3])
+                        masks = tuple(
+                            torch.arange(10, device=device) < n for n in counts
+                        )
+                        for predicate in (False, True):
+                            pred = torch.tensor(predicate, device=device)
+                            expected = cond_fn(*masks, pred, source, view)
+                            actual = compiled(*masks, pred, source, view)
+                            self.assertEqual(actual.shape, expected.shape)
+                            self._assert_bitwise_equal(actual, expected)
+                self.assertEqual(counter.frame_count, 1)
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mv_computed_matrix_layout(self, device, dtype, numerics):
