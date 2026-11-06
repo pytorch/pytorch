@@ -421,7 +421,7 @@ class CuteDSLOpOverrides(OpOverrides):
         )
 
     @staticmethod
-    def mul(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+    def mul(a: CuteDSLArg, b: CuteDSLArg, *, native_cuda_execution=None) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(
             a, b, "({a} * {b})", lambda a_expr, b_expr: a_expr * b_expr
         )
