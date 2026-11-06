@@ -56,7 +56,7 @@ from torch.testing._internal.common_modules import module_inputs_torch_nn_Linear
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
+    GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -9768,6 +9768,38 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
+        self._test_upsamplingBiMode2d(
+            device, antialias, align_corners, mode, memory_format
+        )
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("num_channels", [2, 3])
+    def test_upsamplingBiMode2d_deterministic(
+        self, device, align_corners, memory_format, num_channels
+    ):
+        self._test_upsamplingBiMode2d(
+            device,
+            False,
+            align_corners,
+            "bilinear",
+            memory_format,
+            deterministic=True,
+            num_channels=num_channels,
+        )
+
+    def _test_upsamplingBiMode2d(
+        self,
+        device,
+        antialias,
+        align_corners,
+        mode,
+        memory_format,
+        deterministic=False,
+        num_channels=3,
+    ):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
@@ -9780,40 +9812,90 @@ class TestNNDeviceType(NNTestCase):
                 raise SkipTest("Lanczos mode does not support align_corners=True")
 
         kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
+        needs_compiled_autograd_workaround = (
+            TEST_WITH_TORCHDYNAMO
+            and torch.device(device).type == "cuda"
+            and mode == "bilinear"
+            and not antialias
+            and not TEST_WITH_ROCM
+        )
         # test float scale factor up & downsampling
         for scale_factor in [0.5, 1.5, 2]:
             in_t = torch.ones(
-                2, 3, 8, 8, device=device,
+                2, num_channels, 8, 8, device=device,
                 dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            expected_out = torch.ones(2, 3, out_size, out_size, device=device, dtype=torch.double)
+            expected_out = torch.ones(
+                2, num_channels, out_size, out_size, device=device, dtype=torch.double
+            )
             self.assertEqual(expected_out, out_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-            out_t.backward(torch.randn_like(out_t))
+            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+            if deterministic:
+                with DeterministicGuard(True):
+                    out_t.backward(grad_out)
+            else:
+                out_t.backward(grad_out)
             self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-            if torch.device(device).type == 'cuda':
-                # Bilinear backward is nondeterministic because of atomicAdd usage
-                nondet_tol = 1e-5
-            else:
-                nondet_tol = 0.0
+            if deterministic:
+                input_ref = in_t.detach().cpu().requires_grad_()
+                output_ref = F.interpolate(input_ref, scale_factor=scale_factor, **kwargs)
+                output_ref.backward(grad_out.cpu())
+                self.assertEqual(in_t.grad.cpu(), input_ref.grad, atol=1e-10, rtol=1e-10)
 
+            input_device = "cpu" if deterministic else device
             input = torch.randn(
-                2, 3, 8, 8, device=device,
+                2, num_channels, 8, 8, device=input_device,
                 dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
-            gradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+            # Compiled autograd cannot currently fake the SymInt lists for this CUDA backward.
+            gradcheck_context = (
+                torch._dynamo.compiled_autograd._disable()
+                if needs_compiled_autograd_workaround
+                else contextlib.nullcontext()
             )
-            gradgradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+            nondet_tol = (
+                1e-5
+                if torch.device(input_device).type == "cuda"
+                else 0.0
             )
+            with gradcheck_context:
+                gradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+                )
+                gradgradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+                )
+
+            if deterministic and not TEST_WITH_ROCM:
+                input_cuda = torch.randn(
+                    2, num_channels, 8, 8, device=device, dtype=torch.double
+                ).contiguous(memory_format=memory_format).requires_grad_()
+                compiled_autograd_context = (
+                    torch._dynamo.compiled_autograd._disable()
+                    if TEST_WITH_TORCHDYNAMO
+                    else contextlib.nullcontext()
+                )
+                with compiled_autograd_context, DeterministicGuard(True):
+                    gradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        [input_cuda],
+                        check_forward_ad=check_forward_ad,
+                        nondet_tol=0.0,
+                    )
+                    gradgradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        [input_cuda],
+                        check_fwd_over_rev=check_forward_ad,
+                        nondet_tol=0.0,
+                    )
 
             # Assert that cpu and cuda give same results
             if torch.device(device).type == 'cuda':
@@ -9834,10 +9916,23 @@ class TestNNDeviceType(NNTestCase):
                     g_cuda = torch.randn_like(out_cuda)
                     g_cpu = g_cuda.cpu()
 
-                    out_cuda.backward(g_cuda)
-                    out_cpu.backward(g_cpu)
+                    consistency_backward_context = (
+                        torch._dynamo.compiled_autograd._disable()
+                        if needs_compiled_autograd_workaround
+                        else contextlib.nullcontext()
+                    )
+                    with consistency_backward_context:
+                        if deterministic:
+                            with DeterministicGuard(True):
+                                out_cuda.backward(g_cuda)
+                        else:
+                            out_cuda.backward(g_cuda)
+                        out_cpu.backward(g_cpu)
 
-                    self.assertEqual(a_cuda.grad, a_cpu.grad)
+                    if deterministic:
+                        self.assertEqual(a_cuda.grad, a_cpu.grad, atol=1e-10, rtol=1e-10)
+                    else:
+                        self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("num_channels", [3, 5])
@@ -16714,12 +16809,13 @@ class TestNNCPU(NNTestCase):
             outf.sum().backward()
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+    def test_LSTM_differentiable_backward_using_oneDNN(self, device):
         batch = 10
         seq_len = 12
         input = 3
-        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        # Two layers exercise the inter-layer gradient path; under Dynamo the
+        # double-backward graph grows superlinearly with depth.
+        Net = nn.LSTM(input, 3, 2, batch_first=True)
         import copy
         Net_clone = copy.deepcopy(Net)
         x = torch.rand(batch, seq_len, input)
@@ -16743,10 +16839,10 @@ class TestNNCPU(NNTestCase):
                                        create_graph=True)[0]
         loss2 = der_out2.sum()
         loss2.backward(retain_graph=True)
-        if not torch.allclose(der_out1, der_out2):
-            raise AssertionError("der_out1 and der_out2 should be close")
-        if not torch.allclose(x1.grad, x2.grad):
-            raise AssertionError("x1.grad and x2.grad should be close")
+        # oneDNN and the native kernels differ by ~1e-7 relative in float32;
+        # some elements are near zero, so allclose's atol=1e-8 is too tight.
+        self.assertEqual(der_out1, der_out2, atol=1e-6, rtol=1e-5)
+        self.assertEqual(x1.grad, x2.grad, atol=1e-6, rtol=1e-5)
 
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):
