@@ -2645,7 +2645,21 @@ def batch_norm_backward(
     eps: float,
     output_mask: list[bool],
     reserve: Tensor,
-) -> tuple[Tensor, Tensor | None, Tensor | None]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    if input.is_cuda and not all(output_mask):
+        # The CUDA wrapper selects cuDNN/MIOpen with a defined dummy bias;
+        # those backends return every gradient regardless of output_mask.
+        backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
+            input,
+            weight,
+            torch.empty(1, device="cpu"),
+            running_mean,
+            running_var,
+            True,
+            eps,
+        )
+        if backend != torch._C._BatchNormBackend.Native:  # type: ignore[attr-defined]
+            output_mask = [True, True, True]
     return native_batch_norm_backward(
         grad_out,
         input,
@@ -2672,7 +2686,7 @@ def native_batch_norm_backward(
     train: bool,
     eps: float,
     output_mask: list[bool],
-) -> tuple[Tensor, Tensor | None, Tensor | None]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     input_dtype = input.dtype
     if weight is not None:
         weight_dtype = weight.dtype
@@ -2763,7 +2777,7 @@ def native_batch_norm_backward(
         grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
 
     return (
-        grad_input.to(input_dtype),
+        _maybe_cast(grad_input if output_mask[0] else None, input_dtype),
         _maybe_cast(grad_weight, weight_dtype),
         _maybe_cast(grad_bias, weight_dtype),
     )
