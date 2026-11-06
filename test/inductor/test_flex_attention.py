@@ -9435,15 +9435,16 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
     @supported_platform
-    @skip_on_xpu
-    @skip_on_mps  # uses torch.cuda.CUDAGraph; CUDA-only
-    def test_create_is_cuda_graphable(self, device):
+    @skip_on_mps  # device graph capture not supported on MPS
+    def test_create_is_gpu_graphable(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        g = torch.cuda.CUDAGraph()
+        device_module = torch.get_device_module(device)
+        graph_cls = getattr(device_module, f"{torch.device(device).type.upper()}Graph")
+        g = graph_cls()
 
-        with torch.cuda.graph(g):
+        with device_module.graph(g):
             create_block_mask(mask_mod, None, None, 256, 256)
 
         g.replay()
