@@ -2325,6 +2325,39 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("self_kind", ["transpose", "scalar"])
+    def test_addr_metadata(self, self_kind):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shapes = ((2, 3), (1, 3), (2, 1), (0, 3), (2, 0))
+        for m, n in shapes:
+            scalar = self_kind == "scalar"
+            inp = (
+                torch.tensor(0.5, dtype=torch.float64)
+                if scalar
+                else torch.empty(n, m, dtype=torch.complex128).t()
+            )
+            dtype = torch.complex64 if scalar else torch.complex128
+            vec1, vec2 = torch.ones(m, dtype=dtype), torch.ones(n, dtype=dtype)
+            for beta in (0, 0.7):
+                expected = torch.addr(inp, vec1, vec2, beta=beta, alpha=2.3)
+                with FakeTensorMode() as mode:
+                    fake = torch.addr(
+                        mode.from_tensor(inp),
+                        mode.from_tensor(vec1),
+                        mode.from_tensor(vec2),
+                        beta=beta,
+                        alpha=2.3,
+                    )
+                meta = torch.addr(
+                    inp.to("meta"), vec1.to("meta"), vec2.to("meta"),
+                    beta=beta, alpha=2.3,
+                )
+                for actual in (fake, meta):
+                    self.assertEqual(actual.shape, expected.shape)
+                    self.assertEqual(actual.stride(), expected.stride())
+                    self.assertEqual(actual.dtype, expected.dtype)
+
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])
     @parametrize("fake", [False, True])

@@ -469,7 +469,7 @@ def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False, ambiguity_check=False
+    *tensors, _skip_checks=False, ambiguity_check=False, allow_fast_path=True
 ) -> tuple[list[int], bool]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -515,10 +515,10 @@ def compute_elementwise_output_logical_to_physical_perm(
             )
         )
 
-    if is_contiguous and not is_channels_last:
+    if allow_fast_path and is_contiguous and not is_channels_last:
         return list(range(ndim)), False
 
-    if is_channels_last and not is_contiguous:
+    if allow_fast_path and is_channels_last and not is_contiguous:
         return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape

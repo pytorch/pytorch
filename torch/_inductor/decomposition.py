@@ -54,6 +54,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
+    addr as decomp_addr,
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
     sgn as decomp_sgn,
@@ -182,6 +183,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.native_layer_norm,  # we fall back on mtia
     aten.mvlgamma,  # preserve eager rounding and reduction order
     aten.mv.default,
+    aten.addr.default,
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -225,6 +227,15 @@ def mv(self, vec):
     ):
         return NotImplemented
     return decomp_mv(self, vec)
+
+
+@register_decomposition(aten.addr.default)
+def addr(self, vec1, vec2, *, beta=1, alpha=1):
+    if is_strict_cuda_triton(self.device) and (
+        self.is_complex() or vec1.is_complex() or vec2.is_complex()
+    ):
+        return NotImplemented
+    return decomp_addr(self, vec1, vec2, beta=beta, alpha=alpha)
 
 
 @register_decomposition(aten.adaptive_max_pool3d.default)
