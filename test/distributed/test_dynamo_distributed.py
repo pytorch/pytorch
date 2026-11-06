@@ -101,6 +101,14 @@ def enable_guard_collectives():
         set_enable_guard_collectives(old)
 
 
+def compile_count():
+    # get_compilation_metrics() also returns is_runtime rows, appended when a
+    # compiled graph's first call spends time in Triton autotuning.  Whether a
+    # rank autotunes at all depends on its own graph and on cache state, so
+    # those rows must not be counted where ranks compare compilation counts.
+    return sum(not m.is_runtime for m in torch._dynamo.utils.get_compilation_metrics())
+
+
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
         super().__init__()
@@ -1567,9 +1575,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                 )
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1680,9 +1687,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 x = torch.randn(12, device=self.rank)  # recompile on one rank
             f(x)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
