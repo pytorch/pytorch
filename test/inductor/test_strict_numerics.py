@@ -310,6 +310,27 @@ class StrictNumericsCompileTest(TestCase):
 
         self.assertEqual(tree_map(bits, actual), tree_map(bits, expected))
 
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_scalar_conjugate_gradient(self, device, dtype, numerics):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        components = torch.tensor(
+            [[0.0, 0.0], [-0.0, 0.0], [0.0, -0.0], [-0.0, -0.0], [1.0, -1.0]],
+            dtype=real_dtype,
+            device=device,
+        )
+        upstream = torch.view_as_complex(components)
+
+        def fn(grad):
+            return grad * complex(0.0, 0.4).conjugate()
+
+        actual, _ = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}), upstream
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(upstream))
+        )
+
     @dtypes(torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("conjugated", (False, True))
