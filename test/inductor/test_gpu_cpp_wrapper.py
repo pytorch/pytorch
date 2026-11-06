@@ -854,7 +854,10 @@ class TestGpuWrapper(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
         if GPU_TYPE == "xpu":
-            self.skipTest("ocloc backend compiler crashes with too many kernel args")
+            self.skipTest(
+                "ocloc backend compiler crashes with too many kernel args, "
+                "https://github.com/intel/torch-xpu-ops/issues/6062"
+            )
 
         num_params = 130
         params = [torch.randn(64, device=self.device) for _ in range(num_params)]
