@@ -148,11 +148,10 @@ with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], wi
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
+    # Avoid automatic inlining so scripted calls remain in the recorded stack.
+    @torch.jit.optimized_execution(False)
     def test_source(self):
         """Checks that source code attribution works for eager, TS and autograd mode"""
-        # avoid automatic inlining
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
 
         @torch.jit.script
         def ts_method_2(x, y):
@@ -229,8 +228,6 @@ with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], wi
                     module_event["args"]["Python parent id"],
                     wrapper_event["args"]["Python id"],
                 )
-
-        torch._C._set_graph_executor_optimize(prev_opt)
 
     @skipIfProfilerUnsupported
     @parametrize(
