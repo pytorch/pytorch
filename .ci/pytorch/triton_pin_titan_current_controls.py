@@ -140,7 +140,8 @@ def main():
             raise RuntimeError(f"Complete official {label} package differs")
         extract_wheel(inputs[0], package)
         phase_report = REPORT / label
-        workers = phase_report / "workers"
+        # The original test requires its output directory to start empty.
+        workers = REPORT / f"{label}-workers"
         phase_report.mkdir(parents=True, exist_ok=True)
         workers.mkdir(parents=True, exist_ok=True)
         environment = dict(os.environ)
