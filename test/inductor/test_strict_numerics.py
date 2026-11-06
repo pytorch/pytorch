@@ -331,6 +331,80 @@ class StrictNumericsCompileTest(TestCase):
             torch.view_as_real(actual), torch.view_as_real(fn(upstream))
         )
 
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "weight",
+        (
+            -0.5 - 2**-10,
+            -0.5,
+            -0.5 + 2**-10,
+            0.5 - 2**-10,
+            0.5,
+            0.5 + 2**-10,
+            0.4j,
+            1 + 2j,
+        ),
+    )
+    def test_complex_lerp_scalar(self, device, dtype, numerics, weight):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        components = torch.stack((values, values.flip(0)), dim=-1)
+        values = torch.view_as_complex(components)
+        start, end = values[:, None], values[None, :]
+
+        def fn(start, end):
+            return torch.lerp(start, end, weight)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}),
+            start,
+            end,
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(start, end))
+        )
+        self.assertIn("torch.ops.aten.lerp.Scalar", "\n".join(code))
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_lerp_tensor_broadcast(self, device, dtype, numerics):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        components = torch.stack((values, values.flip(0)), dim=-1)
+        values = torch.view_as_complex(components)
+        start, end = values[:, None], values[None, :]
+        weights = torch.tensor(
+            [
+                -0.5 - 2**-10,
+                -0.5,
+                -0.5 + 2**-10,
+                0.5 - 2**-10,
+                0.5,
+                0.5 + 2**-10,
+                0.4j,
+                1 + 2j,
+                complex(-0.0, 0.0),
+                0.5j,
+            ],
+            dtype=dtype,
+            device=device,
+        )[None, :]
+
+        def fn(start, end, weights):
+            return torch.lerp(start, end, weights)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}),
+            start,
+            end,
+            weights,
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(start, end, weights))
+        )
+        self.assertIn("torch.ops.aten.lerp.Tensor", "\n".join(code))
+
     @dtypes(torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("conjugated", (False, True))
