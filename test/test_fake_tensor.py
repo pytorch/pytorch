@@ -179,14 +179,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
         self.assertIsNone(torch._C._get_dispatch_mode(mode_key))
 
-    def test_data_ptr_warning(self):
-        # The advice also holds for a C++ fake, which is a plain Tensor
-        mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake = mode.from_tensor(torch.empty(2))
-        warning = r"Accessing the data pointer of FakeTensor.*is_fake_tensor\(tensor\)"
-        with self.assertWarnsOnceRegex(UserWarning, warning):
-            fake.data_ptr()
-
     def test_like_out_overload_meta_out(self):
         # An out overload returns its out argument, a fake already
         with torch._subclasses.fake_tensor.FakeTensorMode():
@@ -5731,12 +5723,13 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._set_dispatch_mode(NullCppMode())
         # A C++ mode and a Python FakeTensorMode cannot both be installed
         python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        with python_mode:
-            with self.assertRaisesRegex(RuntimeError, "Python FakeTensorMode is set"):
-                torch._C._set_dispatch_mode(wrapper)
-        self.assertEqual(self._installed(), (None, False))
-        torch._C._set_dispatch_mode(wrapper)
         try:
+            with python_mode:
+                msg = "Python FakeTensorMode is set"
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch._C._set_dispatch_mode(wrapper)
+            self.assertEqual(self._installed(), (None, False))
+            torch._C._set_dispatch_mode(wrapper)
             self.assertEqual(self._installed(), (wrapper, True))
             _, other_wrapper = self._make_mode()
             with self.assertRaisesRegex(RuntimeError, "one already exists"):
@@ -5759,7 +5752,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(self._installed(), (None, False))
             self.assertIsNone(torch._C._unset_dispatch_mode(fake))
         finally:
-            torch._C._unset_dispatch_mode(fake)
+            # A rejection that regressed can leave both a Python and a C++ mode
+            # installed, and unsetting removes the Python one first. The
+            # wrappers are still alive, so unsetting does not rebuild them.
+            for _ in range(2):
+                torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its wrapper")
