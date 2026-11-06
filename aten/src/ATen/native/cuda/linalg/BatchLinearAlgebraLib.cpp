@@ -1603,43 +1603,36 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
-  // get the optimal work size and allocate workspace tensor
-  size_t worksize_device;
-  size_t worksize_host;
+  // cuSOLVER XsyevBatched requires n * lda * batchSize <= INT32_MAX.
+  // Some cuSOLVER versions also fail for batches larger than 65535
+  // (CUDA Toolkit release notes, issue 6657796).
+  // Chunk the calls without copying the already contiguous output buffers.
+  const int64_t matrix_stride = static_cast<int64_t>(lda) * n;
+  const int64_t max_batch_size = std::min<int64_t>(
+      65535, std::numeric_limits<int32_t>::max() / std::max<int64_t>(1, matrix_stride));
+  TORCH_CHECK(max_batch_size > 0, "linalg.eigh: matrix is too large for cuSOLVER XsyevBatched");
 
-  at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
-      handle,
-      syev_params,
-      jobz,
-      uplo,
-      n,
-      vectors_data,
-      lda,
-      values_data,
-      &worksize_device,
-      &worksize_host,
-      batch_size);
-
-  // allocate workspace storage on device and host
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
-  auto work_device_data = device_allocator.allocate(worksize_device);
   auto& host_allocator = *at::getCPUAllocator();
-  auto work_host_data = host_allocator.allocate(worksize_host);
-  at::cuda::solver::xsyevBatched<scalar_t>(
-      handle,
-      syev_params,
-      jobz,
-      uplo,
-      n,
-      vectors_data,
-      lda,
-      values_data,
-      work_device_data.get(),
-      worksize_device,
-      work_host_data.get(),
-      worksize_host,
-      infos_data,
-      batch_size);
+  for (int64_t start = 0; start < batch_size; start += max_batch_size) {
+    const int64_t chunk_size = std::min<int64_t>(max_batch_size, batch_size - start);
+    auto* chunk_vectors = vectors_data + start * matrix_stride;
+    auto* chunk_values = values_data + start * n;
+    auto* chunk_infos = infos_data + start;
+
+    size_t worksize_device;
+    size_t worksize_host;
+    at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
+        handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
+        chunk_values, &worksize_device, &worksize_host, chunk_size);
+
+    auto work_device_data = device_allocator.allocate(worksize_device);
+    auto work_host_data = host_allocator.allocate(worksize_host);
+    at::cuda::solver::xsyevBatched<scalar_t>(
+        handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
+        chunk_values, work_device_data.get(), worksize_device,
+        work_host_data.get(), worksize_host, chunk_infos, chunk_size);
+  }
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(syev_params));
 
 #endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
