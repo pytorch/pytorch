@@ -44,7 +44,7 @@ from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
-from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.fake_tensor import extract_tensor_metadata, is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -1374,11 +1374,11 @@ def _extract_fwd_bwd_modules(
     # Stamp is_static_input on primal placeholders for the backward
     # compiler; see Note: [static_input_idxs semantics] in
     # torch/_inductor/compile_fx.py. This must happen here, while primals
-    # are still 1:1 with flat forward inputs, because staticness is tracked
-    # positionally (static_lifetime_input_nodes derives from
-    # fw_metadata.static_input_indices) and the backward graph's input
-    # ordering destroys that correspondence. The meta dict is shared by
-    # reference with the extracted fwd/bwd placeholder nodes
+    # are still in joint-graph input order, because staticness is tracked
+    # positionally: static_lifetime_input_indices are positions among the
+    # joint graph's primal placeholders, effect tokens included, and the
+    # backward graph's input ordering destroys that correspondence. The meta
+    # dict is shared by reference with the extracted fwd/bwd placeholder nodes
     # (_extract_graph_with_inputs_outputs), so the stamp is visible on
     # bw_module's placeholders regardless of how saving reorders them.
     #
@@ -1700,9 +1700,7 @@ def default_partition(
     distributed_enabled = torch.distributed.is_available()
 
     def is_tensor(node: fx.Node) -> bool:
-        return "tensor_meta" in node.meta or isinstance(
-            node.meta.get("val"), torch._subclasses.FakeTensor
-        )
+        return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
 
     def is_multi_output(node: fx.Node) -> bool:
         return (
