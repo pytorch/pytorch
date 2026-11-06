@@ -9580,6 +9580,56 @@ class TestNNDeviceType(NNTestCase):
         expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
         self.assertEqual(out.cpu(), expected.to(dtype))
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @toleranceOverride({
+        torch.float: tol(atol=1e-5, rtol=1e-5),
+        torch.double: tol(atol=1e-7, rtol=1e-7),
+        torch.half: tol(atol=1e-2, rtol=1e-2),
+        torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
+    })
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    # (ih, iw), (oh, ow), (scales_h, scales_w); scales None => size-based scale.
+    @parametrize_test("input_hw, output_hw, scales", [
+        subtest(((6, 8), (24, 32), (None, None)), name="upsample"),          # atomics/addr=16
+        subtest(((7, 5), (13, 11), (None, None)), name="mild_upsample"),
+        subtest(((24, 32), (12, 16), (None, None)), name="downsample"),      # atomics/addr=1
+        subtest(((13, 11), (7, 5), (None, None)), name="mild_downsample"),
+        subtest(((9, 10), (9, 31), (None, None)), name="anisotropic"),
+        # scales are forward scale_factors; 2.0 matches the 8->16 size-based scale.
+        subtest(((8, 8), (16, 16), (2.0, 2.0)), name="explicit_scales"),
+    ])
+    def test_upsamplingBilinear2d_backward_many_channels(
+        self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales
+    ):
+        # C=16 so channels_last takes the NHWC backward kernels (threshold is
+        # channels >= 4). Spatial sizes straddle the ROCm gather/scatter
+        # heuristic (K=6 atomics/addr). NaN-prefilled grad_input checks every
+        # element is written (gather) or correctly zeroed then scattered.
+        n, c = 2, 16
+        input_size = [n, c, *input_hw]
+        output_size = list(output_hw)
+        scales_h, scales_w = scales
+        go = make_tensor((n, c, *output_hw), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=memory_format)
+        # NaN prefill exposes any unwritten grad_input element.
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=memory_format)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners,
+            scales_h, scales_w, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=memory_format))
+        self.assertFalse(gi.isnan().any())
+
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, scales_h, scales_w,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
