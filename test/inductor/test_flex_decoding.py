@@ -349,8 +349,8 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-class TestFlexDecodingBase(InductorTestCase):
-    """Shared helper methods for the flex decoding test classes."""
+class TestFlexDecoding(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
     def setUpClass(cls):
@@ -811,10 +811,6 @@ class TestFlexDecodingBase(InductorTestCase):
             ref_out,
             compiled_out,
         )
-
-
-class TestFlexDecoding(TestFlexDecodingBase):
-    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.attention.flex_attention)
     @expectedFailure  # tl.dot does not support embedding size less than 16
@@ -1827,6 +1823,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_mixed.backward()
 
     @requires_capabilities(Capability.attention.flex_attention)
+    @skipCUDAIf(True, "Not supported on CUDA")
+    @skipXPUIf(True, "Not supported on XPU")
+    @parametrize_device_dtype("dtypes")
+    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
+    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test_with_paged_attention(
+            score_mod,
+            dtype,
+            KV_S=64,
+            device=device,
+            kernel_options={"PARTITION_SIZE": partition_size},
+        )
+
+    @requires_capabilities(Capability.attention.flex_attention)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
         def score_mod(score, b, h, m, n):
@@ -2548,28 +2561,8 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-class TestFlexDecodingCpuPartition(TestFlexDecodingBase):
-    hw_classification = HardwareClassification.CPU
-
-    @requires_capabilities(Capability.attention.flex_attention)
-    @parametrize_device_dtype("dtypes")
-    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
-    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
-        def score_mod(score, b, h, m, n):
-            return score * 2
-
-        self.run_test_with_paged_attention(
-            score_mod,
-            dtype,
-            KV_S=64,
-            device=device,
-            kernel_options={"PARTITION_SIZE": partition_size},
-        )
-
-
 instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestFlexDecodingCpuPartition, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
