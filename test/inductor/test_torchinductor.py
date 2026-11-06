@@ -20803,6 +20803,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # reduces u0 rows into one element, so it launches whatever u0 is
             return torch.nonzero(m).float().sum(0)
 
+        def native_matmul_row_sum(a, b):
+            # the row reduction runs in the matmul kernel
+            return (a @ b).sum(1) + 1
+
         m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
         v = torch.randn(64, device=GPU_TYPE)
         u = torch.randn(8, device=GPU_TYPE)
@@ -20810,13 +20814,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._dynamo.mark_dynamic(u, 0)
         v2d = torch.randn(64, 32, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(v2d, 0)
-        for middle, args, kernel in [
-            (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp"),
-            (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice"),
-            (guarded_floordiv_sum, (v2d,), "def triton_red_fused_sum_view"),
-            (nonzero_sum, (m,), "def triton_red_fused__to_copy_sum"),
+        # small integers keep the TF32 dot exact; the row epilogue needs
+        # static sizes
+        a = torch.randint(-3, 4, (64, 32), device=GPU_TYPE).float()
+        b = torch.randint(-3, 4, (32, 16), device=GPU_TYPE).float()
+        torch._dynamo.mark_static(a)
+        torch._dynamo.mark_static(b)
+        native = {"triton.native_matmul": True}
+        for middle, args, kernel, patches in [
+            (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp", {}),
+            (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
+            (guarded_floordiv_sum, (v2d,), "def triton_red_fused_sum_view", {}),
+            (nonzero_sum, (m,), "def triton_red_fused__to_copy_sum", {}),
+            (native_matmul_row_sum, (a, b), "def triton_per_fused_add_mm_sum", native),
         ]:
-            with self.subTest(middle.__name__):
+            with self.subTest(middle.__name__), config.patch(patches):
                 code = _pdl_last_kernel_code(self, middle, *args)
                 FileCheck().check(kernel).check("def triton_").check("tl.load").check(
                     "gdc_wait"
