@@ -14,7 +14,7 @@ from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
+from ..ir import ChoiceCaller, FlexibleLayout, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -760,9 +760,26 @@ def _flydsl_grouped_shape(
     return m_hint, n_static, k_static, g_static
 
 
+# FlyDSL packs operand shapes as int32 and the MXFP8 kernels pass 1-D views;
+# mirrors _INT32_MAX in the vendored kernels, which import FlyDSL.
+_FLYDSL_INT32_MAX = (1 << 31) - 1
+
+
+def _flydsl_device_cu_count(device: torch.device) -> int:
+    # An index-less device resolves to 0, as in use_flydsl_gemm_template.
+    return torch.cuda.get_device_properties(
+        device.index if device.index is not None else 0
+    ).multi_processor_count
+
+
 flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
     name="mxfp8_grouped_gemm_flydsl",
     source=load_kernel_template("flydsl_mxfp8_grouped_mm"),
+)
+
+flydsl_mxfp8_wgrad_template = FlyDSLTemplate(
+    name="mxfp8_wgrad_flydsl",
+    source=load_kernel_template("flydsl_mxfp8_wgrad"),
 )
 
 
@@ -899,10 +916,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # fit, but the weight and its scales are not split and must fit outright.
     # The tile is sized against the grid cap of the device the kernel launches
     # on; resolve an index-less device the way use_flydsl_gemm_template does.
-    device = layout.device
-    num_cus = torch.cuda.get_device_properties(
-        device.index if device.index is not None else 0
-    ).multi_processor_count
+    num_cus = _flydsl_device_cu_count(layout.device)
 
     weight_spans = (
         (g_static, n_static * k_static, n_static * k_static),
@@ -928,6 +942,107 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
             n_static, k_static, g_static, gemm_config
         )
     ]
+
+
+def get_flydsl_mxfp8_wgrad_template_kwargs(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    scale_a: TensorBox,
+    scale_b: TensorBox,
+    offs: TensorBox | None,
+    layout: Layout,
+    is_nonzero: bool,
+) -> list[dict[str, object]]:
+    """FlyDSL config for the 2D x 2D (wgrad) form: groups split the contraction M.
+
+    Group offsets must be multiples of 32 (the MX scale block); they are on the
+    device, so the kernel checks them and traps on a violation, as MSLK asserts.
+    """
+    if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
+        return []
+    if len(mat_a.get_size()) != 2 or len(mat_b.get_size()) != 2:
+        return []
+    if mat_a.get_dtype() != torch.float8_e4m3fn:
+        return []
+    if mat_b.get_dtype() != torch.float8_e4m3fn:
+        return []
+    if layout.dtype != torch.bfloat16:
+        return []
+    if scale_a.get_dtype() != torch.float8_e8m0fnu:
+        return []
+    if scale_b.get_dtype() != torch.float8_e8m0fnu:
+        return []
+    if offs.get_dtype() != torch.int32 or len(offs.get_size()) != 1:
+        return []
+    sizevars = V.graph.sizevars
+    # The kernel reads offs[i] at byte 4 * i, so the offsets must be dense.
+    if not sizevars.statically_known_equals(offs.get_stride()[0], 1):
+        return []
+
+    statically_known = PythonWrapperCodegen.statically_known_int_or_none
+    n = statically_known(mat_a.get_size()[0])
+    k = statically_known(mat_b.get_size()[1])
+    g = statically_known(offs.get_size()[0])
+    if n is None or k is None or g is None:
+        return []
+    # M (the routed token count) is dynamic and may be a separate symbol per
+    # operand. The kernel reads it at launch and the template checks that the
+    # operands agree, so only the hints have to match here.
+    m_a, m_b = mat_a.get_size()[1], mat_b.get_size()[0]
+    m = sizevars.optimization_hint(m_a)
+    if sizevars.optimization_hint(m_b) != m:
+        return []
+    if m <= 0 or m % 128 != 0 or n % 16 != 0 or k % 16 != 0:
+        return []
+    scale_m = m // 32
+
+    def is_row_major(node: TensorBox) -> bool:
+        size, stride = node.get_size(), node.get_stride()
+        return sizevars.statically_known_equals(
+            stride[0], size[1]
+        ) and sizevars.statically_known_equals(stride[1], 1)
+
+    # A is row-major [N, M]; B is [M, K] with M contiguous; scales row-major.
+    if not is_row_major(mat_a):
+        return []
+    if not (
+        sizevars.statically_known_equals(mat_b.get_stride()[0], 1)
+        and sizevars.statically_known_equals(mat_b.get_stride()[1], m_b)
+    ):
+        return []
+    for scale, rows in ((scale_a, n), (scale_b, k)):
+        if len(scale.get_size()) != 2 or not is_row_major(scale):
+            return []
+        if statically_known(scale.get_size()[0]) != rows:
+            return []
+        if sizevars.optimization_hint(scale.get_size()[1]) != scale_m:
+            return []
+    if not sizevars.statically_known_list_equals(layout.stride, [n * k, k, 1]):
+        return []
+
+    operands = (mat_a, mat_b, scale_a, scale_b)
+    if any(is_unaligned(node) for node in operands):
+        return []
+    if any(
+        not sizevars.statically_known_multiple_of(
+            node.get_layout().offset, GPU_ALIGN_BYTES
+        )
+        for node in operands
+    ):
+        return []
+    # The launcher re-checks the M-dependent operands against the real M.
+    if max(n * m, k * m, g * n * k) > _FLYDSL_INT32_MAX:
+        return []
+
+    # FlyDSLTemplate does not freeze its inputs; pin the strides checked above
+    # exactly (a plain freeze could pad them).
+    for node in operands:
+        if isinstance(node.get_layout(), FlexibleLayout):
+            node.freeze_layout_with_exact_strides(node.get_stride())
+
+    # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs.
+    num_xcd = max(1, _flydsl_device_cu_count(layout.device) // 32)
+    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
 
 
 # The op takes recipes and swizzles as plain ints, and the pybind enums compare
@@ -967,7 +1082,7 @@ def tuned_scaled_grouped_mm_v2(
 
     Only one combination has a lowering here: MXFP8 x MXFP8 (BlockWise1x32
     e8m0 scales, NO_SWIZZLE) on gfx950, served by the vendored FlyDSL ragged
-    grouped GEMM. That combination has no ATen kernel on ROCm at all -- the
+    grouped GEMM and wgrad. That combination has no ATen kernel on ROCm at all -- the
     MSLK grouped path is CUDA-only and `_mx8_mx8_bf16_grouped_mm_mslk` raises
     NOT_IMPLEMENTED there -- so the FlyDSL template is not competing with an
     extern choice, it is the only one, and no ATen choice is offered for it.
@@ -998,12 +1113,13 @@ def tuned_scaled_grouped_mm_v2(
         )
         _, is_nonzero = _is_static_problem(mm_layout)
         scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
+        offs_real = realize_inputs(offs)
         input_nodes: list[Any] = [
             mat_a,
             mat_b,
             scale_a_real,
             scale_b_real,
-            realize_inputs(offs),
+            offs_real,
         ]
 
         choices: list[ChoiceCaller] = []
@@ -1012,11 +1128,26 @@ def tuned_scaled_grouped_mm_v2(
             mat_b,
             scale_a_real,
             scale_b_real,
-            offs,
+            offs_real,
             mm_layout,
             is_nonzero,
         ):
             flydsl_mxfp8_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=mm_layout,
+                **flydsl_kwargs,
+            )
+        for flydsl_kwargs in get_flydsl_mxfp8_wgrad_template_kwargs(
+            mat_a,
+            mat_b,
+            scale_a_real,
+            scale_b_real,
+            offs_real,
+            mm_layout,
+            is_nonzero,
+        ):
+            flydsl_mxfp8_wgrad_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
                 layout=mm_layout,
@@ -1036,9 +1167,10 @@ def tuned_scaled_grouped_mm_v2(
             )
             m, k = m1_size
             n = m2_size[-1]
+            alignment = 32 if len(m2_size) == 2 else 16 // mat_a.dtype.itemsize
             input_gen_fns = {
                 4: lambda x: create_offsets(
-                    x, True, False, m, n, k, 16 // mat_a.dtype.itemsize
+                    x, True, len(m2_size) == 2, m, n, k, alignment
                 )
             }
             node, _ = autotune_select_algorithm(

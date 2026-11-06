@@ -195,6 +195,7 @@ inline constexpr MetadataField<uint64_t> kMemoryOperationId{
     "memory opration id"}; // codespell:ignore
 inline constexpr MetadataField<uint64_t> kNumberWaitEvents{
     "Number_wait_events"};
+inline constexpr MetadataField<uint64_t> kOverheadApiId{"overhead api id"};
 inline constexpr MetadataField<uint64_t> kOverheadCost{"overhead cost"};
 inline constexpr MetadataField<uint64_t> kOverheadCount{"overhead count"};
 inline constexpr MetadataField<int64_t> kReturnCode{"Return_code"};

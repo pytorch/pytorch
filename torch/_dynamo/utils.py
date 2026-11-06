@@ -5662,6 +5662,18 @@ def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
             yield namespace[name]
 
 
+def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
+    """Whether class metadata has a non-wrapper getter or a replaced descriptor."""
+    metacls = type(klass)
+    if metacls is type:
+        return False
+    getattribute = next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+    return (
+        type(getattribute) is not types.WrapperDescriptorType
+        or next(iter_mro_static_attrs(metacls, name), None) is not type.__dict__[name]
+    )
+
+
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
     if not isinstance(value, types.BuiltinMethodType):
         return None
