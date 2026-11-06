@@ -4009,6 +4009,8 @@ make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
 
 # Need templated kernel
+# Strict CUDA Triton addr can return NotImplemented to retain native execution.
+make_fallback(aten.addr.default, override_decomp=True)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 

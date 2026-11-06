@@ -469,7 +469,7 @@ def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False, ambiguity_check=False, allow_fast_path=True
+    *tensors, _skip_checks=False, ambiguity_check=False
 ) -> tuple[list[int], bool]:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -515,10 +515,10 @@ def compute_elementwise_output_logical_to_physical_perm(
             )
         )
 
-    if allow_fast_path and is_contiguous and not is_channels_last:
+    if is_contiguous and not is_channels_last:
         return list(range(ndim)), False
 
-    if allow_fast_path and is_channels_last and not is_contiguous:
+    if is_channels_last and not is_contiguous:
         return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
@@ -586,13 +586,37 @@ def compute_elementwise_output_logical_to_physical_perm(
     return list(reversed(perm)), raise_ambiguous
 
 
-def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
+def compute_elementwise_output_strides(
+    *tensors, allow_fast_path=True
+) -> tuple[int, ...]:
     """
-    Computes the output strides for elementwise operations.
+    Computes the output strides for elementwise operations. Disabling fast paths
+    preserves symbolic rank-two TensorIterator ordering; differently ranked inputs
+    broadcast to the first tensor's shape.
     """
     if len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
+
+    if not allow_fast_path and tensors[0].ndim == 2:
+        shape = tensors[0].shape
+        transpose = False
+        for tensor in reversed(tensors):
+            strides = [0] * (2 - tensor.ndim) + list(tensor.stride())
+            broadcast = False
+            for dim, size in enumerate(tensor.shape, start=2 - tensor.ndim):
+                broadcast = broadcast | ((size == 1) & (shape[dim] != 1))
+            s0, s1 = strides
+            nonzero = (s0 != 0) & (s1 != 0) & torch.sym_not(broadcast)
+            swap = (s0 < s1) | ((s0 == s1) & (shape[1] > shape[0]))
+            ambiguous = torch.sym_not(nonzero) | ((s0 == s1) & (shape[1] <= shape[0]))
+            transpose = (nonzero & swap) | (ambiguous & transpose)
+        contiguous = make_contiguous_strides_for(shape)
+        # Integer selection flags let concrete and symbolic strides promote together.
+        transposed = torch.sym_ite(transpose, 1, 0)
+        return tuple(
+            c + transposed * (s - c) for s, c in zip((1, shape[0]), contiguous)
+        )
 
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
