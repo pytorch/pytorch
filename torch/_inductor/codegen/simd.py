@@ -4709,6 +4709,13 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
+        if config.triton.replicate_atomic_scatters:
+            kernels = self.replicate_atomic_scatters(
+                kernel_features,
+                kernels,
+                [tiling],
+                {"features": kernel_features, "tiling_scores": tiling_score},
+            )
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
@@ -4799,6 +4806,17 @@ class SIMDScheduling(BaseScheduling):
                 **kernel_kwargs,
             )
         ]
+
+    def replicate_atomic_scatters(
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernels: list[SIMDKernel],
+        kernel_args,
+        kernel_kwargs,
+    ) -> list[SIMDKernel]:
+        """Implements config.triton.replicate_atomic_scatters for backends that
+        support it. Returns the kernels to define and launch."""
+        return kernels
 
     def codegen_node_schedule_with_kernel(
         self,
