@@ -868,7 +868,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
-        self.assertEqual(marks, {"daily" if hours == 24 else "periodic"})
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUp", "test"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -903,7 +903,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
-        self.assertEqual(marks, {"daily" if hours == 24 else "periodic"})
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -1033,7 +1033,7 @@ if __name__ == "__main__":
 
         marked = TestP.test_p_x_1
         plain = TestP.test_p_x_2
-        marker = "daily" if hours == 24 else "periodic"
+        marker = "periodic_daily" if hours == 24 else "periodic"
         self.assertEqual({mark.name for mark in marked.pytestmark}, {marker})
         plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
         self.assertNotIn(marker, plain_marks)
@@ -1053,8 +1053,10 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(TypeError, "test function or class, got int; pass hours by keyword"):
             periodic(24)
 
-    @periodic(hours=24)
-    def test_periodic_daily_smoke(self):
+    @parametrize("hours", [4, 24])
+    @decorateIf(periodic, lambda params: params["hours"] == 4)
+    @decorateIf(periodic(hours=24), lambda params: params["hours"] == 24)
+    def test_periodic_smoke(self, hours):
         self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 

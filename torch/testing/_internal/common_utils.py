@@ -3051,14 +3051,14 @@ def periodic(fn=None, *, hours=4):
     """Marks a test that CI runs only in periodic test mode.
 
     In periodic-strict, plain @periodic runs every four hours and
-    @periodic(hours=24) runs daily. They select the periodic and daily
+    @periodic(hours=24) runs daily. They select the periodic and periodic_daily
     pytest markers, respectively. Whenever effective markers combine,
     including through class/method decoration, stacking or inheritance,
-    daily takes precedence over periodic. Both reuse
+    periodic_daily takes precedence over periodic. Both reuse
     PYTORCH_TEST_WITH_PERIODIC to enable tests in periodic mode.
 
-    The periodic test config selects "periodic and not daily";
-    periodic_daily selects "daily". Both set PYTORCH_TEST_WITH_PERIODIC.
+    The periodic test config selects "periodic and not periodic_daily";
+    periodic_daily selects "periodic_daily". Both set PYTORCH_TEST_WITH_PERIODIC.
     Other periodic jobs setting that flag without a marker filter run both
     groups on their own cadence; hours does not enforce timing in those jobs.
     Non-scheduled periodic-strict runs cover both groups by default; manual
@@ -3084,7 +3084,7 @@ def periodic(fn=None, *, hours=4):
     if fn is None:
         return partial(periodic, hours=hours)
 
-    marker = "daily" if hours == 24 else "periodic"
+    marker = "periodic_daily" if hours == 24 else "periodic"
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 

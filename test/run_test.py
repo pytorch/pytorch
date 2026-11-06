@@ -2333,8 +2333,8 @@ def run_tests(
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
     periodic_marker = {
-        "periodic": "periodic and not daily",
-        "periodic_daily": "daily",
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
     }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
