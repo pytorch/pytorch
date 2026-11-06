@@ -43,7 +43,7 @@
 #    DLL and macOS OpenMP bundling).
 # 9. Summary (cmake/Summary.cmake): print the resolved configuration.
 
-cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 
 cmake_policy(SET CMP0126 OLD)
 # Don't remove the FindCUDA module
