@@ -4355,7 +4355,7 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
                     args = (sample_input.input,) + tuple(sample_input.args)
                     kwargs = sample_input.kwargs
                     for batched_args, in_dims, _ in generate_vmap_inputs(args, {}):
-                        with self.assertRaises(Exception):
+                        with self.assertRaises(Exception):  # noqa: B017 - vmap batching rules may raise a different type than eager
                             vmap(op, in_dims)(*batched_args, **kwargs)
 
             # Sample inputs check

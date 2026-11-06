@@ -83,7 +83,9 @@ class C10dErrorLoggerTest(DistributedTestBase):
 
     @with_comms
     def test_exception_logger(self) -> None:
-        with self.assertRaises(Exception):
+        # The invalid root rank fails in the backend (DistBackendError on NCCL,
+        # TORCH_CHECK on Gloo); both are RuntimeError.
+        with self.assertRaises(RuntimeError):
             self._failed_broadcast_raise_exception()
 
         with self.assertLogs(_c10d_logger, level="DEBUG") as captured:

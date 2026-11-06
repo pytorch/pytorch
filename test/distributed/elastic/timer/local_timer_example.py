@@ -13,7 +13,9 @@ import time
 
 import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
+from torch.multiprocessing.spawn import ProcessExitedException
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
@@ -57,6 +59,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         unittest. As of now this will SIGSEGV.
         """
 
+        hw_classification = HardwareClassification.GENERIC
+
         @skip_but_pass_in_sandcastle_if(
             TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible"
         )
@@ -75,7 +79,7 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
                 fn=_happy_function, args=(mp_queue,), nprocs=world_size, join=True
             )
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(ProcessExitedException):
                 # torch.multiprocessing.spawn kills all sub-procs
                 # if one of them gets killed
                 torch_mp.spawn(

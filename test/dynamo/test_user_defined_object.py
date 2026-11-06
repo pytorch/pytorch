@@ -126,7 +126,8 @@ class TestSlotsAttrAssignment(TestCase):
 
     def test_invalid_slot_assignment_raises(self):
         # Case 2: assign to an undeclared attr on a slotted object (no __dict__)
-        # should raise AttributeError in eager; compiled raises an exception too
+        # should raise AttributeError in eager; with fullgraph=True, Dynamo
+        # surfaces the uncaught exception as Unsupported
         def fn(t):
             obj = SlotsOnly(1, 2)
             obj.z = 99
@@ -135,7 +136,9 @@ class TestSlotsAttrAssignment(TestCase):
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         t = torch.ones(1)
         self.assertRaises(AttributeError, fn, t)
-        self.assertRaises(Exception, compiled_fn, t)
+        self.assertRaisesRegex(
+            Unsupported, "raised exception AttributeError", compiled_fn, t
+        )
 
     def test_slots_with_dict_allows_arbitrary_attrs(self):
         # Case 3: __slots__ includes __dict__ — arbitrary attr assignment should work
@@ -234,7 +237,8 @@ class TestSlotsAttrAssignment(TestCase):
         dynamo_testing.standard_test(self, fn, nargs=1)
 
     def test_slot_read_after_delete_raises(self):
-        # Reading a slot after deletion raises AttributeError in both eager and compiled
+        # Reading a slot after deletion raises AttributeError in eager; with
+        # fullgraph=True, Dynamo surfaces the uncaught exception as Unsupported
         def fn(t):
             obj = Slots()
             obj.x = 1
@@ -244,7 +248,9 @@ class TestSlotsAttrAssignment(TestCase):
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         t = torch.ones(1)
         self.assertRaises(AttributeError, fn, t)
-        self.assertRaises(Exception, compiled_fn, t)
+        self.assertRaisesRegex(
+            Unsupported, "raised exception AttributeError", compiled_fn, t
+        )
 
     def test_slot_shadowed_by_class_attribute(self):
         # Class attribute in subclass shadows parent slot descriptor:

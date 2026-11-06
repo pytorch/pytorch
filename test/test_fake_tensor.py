@@ -1816,7 +1816,9 @@ def forward(self, x_1):
         self.checkType(run_meta(), "meta", [4])
 
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
-            self.assertRaises(Exception, run_meta)
+            self.assertRaisesRegex(
+                AssertionError, "must not be 'meta' when allow_meta is False", run_meta
+            )
 
     def test_embedding_bag_meta(self):
         def f():
@@ -2485,7 +2487,11 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             x_conv = mode.from_tensor(x)
             y = torch.rand([4, 4], device=device)
             z = torch.rand([4, 4], device="cpu")
-            self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
+            self.assertRaisesRegex(
+                (FakeTensorDeviceMismatchError, RuntimeError),
+                "Expected all tensors to be on the same device",
+                lambda: torch.lerp(x_conv, y, z),
+            )
 
     @onlyAccelerator
     def test_type_as(self, device):
@@ -3303,7 +3309,7 @@ class TestFakeTensorConverter(TestCase):
             x = torch.empty(2, 2, device="cpu")
         with FakeTensorMode():
             y = torch.empty(2, 2, device="cpu")
-        self.assertRaises(Exception, lambda: x, y)
+        self.assertRaisesRegex(AssertionError, "Mixing fake modes", lambda: x + y)
 
     @skipIfCppFakeTensor("no Python FakeTensor reference-cycle support")
     @xfailIfTorchDynamo

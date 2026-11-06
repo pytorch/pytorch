@@ -2819,8 +2819,8 @@ class NumpyTestsDevice(TestCase):
 
         # Index out of bounds produces IndexError
         self.assertRaises(IndexError, a.__getitem__, 1 << 30)
-        # Index overflow produces Exception  NB: different exception type
-        self.assertRaises(Exception, a.__getitem__, 1 << 64)
+        # Index overflow produces ValueError (TORCH_CHECK_VALUE in THPUtils_unpackLong)
+        self.assertRaises(ValueError, a.__getitem__, 1 << 64)
 
     def test_single_bool_index(self, device):
         # Single boolean index

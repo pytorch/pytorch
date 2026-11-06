@@ -79,9 +79,8 @@ class TestScript(JitTestCase):
                 self.checkScript(test_rjust_fc, (input, i, '*'))
                 self.checkScript(test_zfill, (input, i))
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(TypeError):
             test_str_center_error("error")
-            test_ljust("error")
 
         def test_count() -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
             return (

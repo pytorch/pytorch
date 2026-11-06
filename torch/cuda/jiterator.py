@@ -40,7 +40,7 @@ class _CodeParser:
         )  # DOTALL for matching multiline
 
         if result is None:
-            raise Exception(  # noqa: TRY002
+            raise ValueError(
                 f"Couldn't parse code, please check correctness:\n {code_string}"
             )
 
