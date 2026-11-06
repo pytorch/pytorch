@@ -80,6 +80,10 @@ MAX_IMPORT_HOPS = 8
 # everything runs for an inductor entry, the cpython/ tests for a CPython entry
 # and the dynamo_wrapped sweep for the others, as for a class that is not found.
 MAX_FAILURE_LIST_CLASSES = 50
+# Flip only after the HUD and test-infra consumers of the TD exclusions and
+# recall stats handle llm_selection_exclusions and llm_enforced.
+ENFORCEMENT_ENABLED = False
+
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
@@ -623,6 +627,19 @@ class Selection:
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
     error: str | None = None
+    # Whether enforcement was asked for, even if a failed selector cleared enforce.
+    enforce_requested: bool = False
+
+    def __post_init__(self) -> None:
+        if self.candidates is None and not self.run_all:
+            raise ValueError("a selection without candidates must be run_all")
+        if unknown := self.sweeps - set(SWEEPS):
+            raise ValueError(f"unknown sweeps {sorted(unknown)}")
+        if self.candidates is not None and not self.files <= self.candidates:
+            raise ValueError("files must be candidates")
+        if self.error is not None and not self.run_all:
+            raise ValueError("a selection with an error must be run_all")
+        self.enforce_requested = self.enforce_requested or self.enforce
 
     @classmethod
     def from_model_output(
@@ -756,11 +773,8 @@ class Selection:
             "enforce": self.enforce,
             "candidates": None if self.candidates is None else sorted(self.candidates),
             "error": self.error,
+            "enforce_requested": self.enforce_requested,
         }
-
-    def __post_init__(self) -> None:
-        if self.candidates is None and not self.run_all:
-            raise ValueError("a selection without candidates must be run_all")
 
     @classmethod
     def from_json(cls, d: dict) -> Selection:
@@ -784,29 +798,26 @@ class Selection:
             d["reason"],
             d["error"],
         )
+        # Older selectors, which CI runs from the default branch, omit it.
+        enforce_requested = d.get("enforce_requested", enforce)
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
         ):
             raise TypeError("files, sweeps and candidates must be lists of strings")
-        if not isinstance(run_all, bool) or not isinstance(enforce, bool):
-            raise TypeError("run_all and enforce must be booleans")
+        if not all(isinstance(v, bool) for v in (run_all, enforce, enforce_requested)):
+            raise TypeError("run_all, enforce and enforce_requested must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
-        if unknown := set(sweeps) - set(SWEEPS):
-            raise ValueError(f"unknown sweeps {sorted(unknown)}")
-        if candidates is not None and not set(files) <= set(candidates):
-            raise ValueError("files must be candidates")
-        if error is not None and not run_all:
-            raise ValueError("a selection with an error must be run_all")
         return cls(
-            set(files),
-            set(sweeps),
-            run_all,
-            reason,
-            enforce,
-            None if candidates is None else set(candidates),
-            error,
+            files=set(files),
+            sweeps=set(sweeps),
+            run_all=run_all,
+            reason=reason,
+            enforce=enforce,
+            candidates=None if candidates is None else set(candidates),
+            error=error,
+            enforce_requested=enforce_requested,
         )
 
     @classmethod
