@@ -6605,9 +6605,6 @@ class TestNNDeviceType(NNTestCase):
             test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
         for mode in ('bilinear', 'nearest', 'bicubic'):
-            # XPU has no 5-D bicubic sampler: https://github.com/intel/torch-xpu-ops/issues/5542
-            if mode == 'bicubic' and torch.device(device).type == 'xpu':
-                continue
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
                     N = random.randint(2, 5)
@@ -10211,7 +10208,6 @@ class TestNNDeviceType(NNTestCase):
 
     @skipMPS
     @onlyAccelerator
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2006")
     @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
@@ -10883,9 +10879,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_half_precision(self, device):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                # XPU has no 5-D bicubic sampler: https://github.com/intel/torch-xpu-ops/issues/5542
-                if mode == 'bicubic' and len(shape_in) == 5 and torch.device(device).type == 'xpu':
-                    continue
                 data = torch.randn(shape_in, device=device, dtype=torch.half)
                 grid = torch.rand(shape_out, device=device, dtype=torch.half) * 2.0 - 1.0
 
@@ -10905,9 +10898,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_bfloat16_precision(self, device):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                # XPU has no 5-D bicubic sampler: https://github.com/intel/torch-xpu-ops/issues/5542
-                if mode == 'bicubic' and len(shape_in) == 5 and torch.device(device).type == 'xpu':
-                    continue
                 data = torch.randn(shape_in, device=device, dtype=torch.bfloat16)
                 grid = torch.rand(shape_out, device=device, dtype=torch.bfloat16) * 2.0 - 1.0
 
@@ -11613,7 +11603,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     @dtypes(torch.double, torch.float)
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_matches_2d(self, device, dtype, padding_mode, align_corners):
         # A volume constant along z samples as the image: the four z weights sum to one.
         image = torch.randn(2, 3, 7, 8, device=device, dtype=dtype)
@@ -11723,7 +11712,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_far_coordinates(self, device, dtype, padding_mode):
         # Odd fold counts past INT_MAX, off the image centre, where the two parities read
         # different taps. Double: float32 cannot resolve a voxel this far out.
@@ -11751,7 +11739,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_double_backward_low_precision(self, device, dtype):
         # On a 512-wide axis a half grid unnormalized in its own dtype lands on a
         # neighbouring voxel. The reference is the same quantized data in double.
@@ -11774,7 +11761,6 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
     @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_last_voxel_of_a_wide_axis(self, device, size):
         # Neither extent is exact in float32, and the second is not exact in double.
         # The view stores a single element.
@@ -11790,7 +11776,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_one_sided_grad(self, device, dtype, wrt, padding_mode):
         # One output at a time: the double backward builds each output's terms only when
         # asked, and the OpInfo samples ask for both.
@@ -11812,7 +11797,6 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5542")
     def test_grid_sample_3d_bicubic_non_finite(self, device, dtype, padding_mode):
         # A non-finite coordinate or voxel gives the same answer at both ranks: a dropped
         # tap contributes a zero value and keeps its coefficient.
@@ -11835,9 +11819,6 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
     def test_grid_sample_double_backward_drops_masked_taps(self, device, dtype, mode):
-        if mode == "bicubic" and torch.device(device).type == "xpu":
-            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5542")
-
         # A dropped tap is gathered from, and its cotangent scattered to, the voxel it clamps
         # onto. Plane 0, where dropped taps clamp, holds a non-finite value, and the
         # gradients must match those computed with a finite one.
