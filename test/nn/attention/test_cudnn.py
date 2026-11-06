@@ -1,11 +1,7 @@
 # Owner(s): ["module: sdpa"]
 
 import itertools
-import os
-import subprocess
 import sys
-import tempfile
-import textwrap
 import types
 import unittest
 from unittest import mock
@@ -210,61 +206,6 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         _cudnn.disable()
         self.assertEqual(self.live, [])
 
-    def test_env_var(self):
-        _use_provider(self, _fake_install(self.live, "cudnn"))
-        for value, expected in (("", []), ("0", []), ("true", []), ("1", ["cudnn"])):
-            with mock.patch.dict(os.environ, {_cudnn.ENV_VAR: value}):
-                _cudnn._enable_from_env()
-            self.assertEqual(self.live, expected, msg=f"value={value!r}")
-            _cudnn.disable()
-
-    def test_env_var_failure_warns_instead_of_raising(self):
-        def broken():
-            raise RuntimeError("provider is broken")
-
-        _use_provider(self, broken)
-        with (
-            mock.patch.dict(os.environ, {_cudnn.ENV_VAR: "1"}),
-            self.assertLogs(_cudnn.logger, level="WARNING"),
-        ):
-            _cudnn._enable_from_env()
-        self.assertFalse(_cudnn.is_enabled())
-
-    def test_env_var_enables_at_import(self):
-        # Runs the hook at the end of torch/__init__.py in a fresh interpreter,
-        # with a stand-in package on the path in place of nvidia-cudnn-frontend.
-        # The hook needs a fully initialised `torch`: placed earlier in
-        # `import torch` (e.g. in torch/nn/attention/__init__.py), it fails.
-        provider = textwrap.dedent(
-            f"""
-            import torch, torch.fx, torch.jit  # what the real provider imports
-
-            class _Handle:
-                def remove(self):
-                    pass
-
-            def {_cudnn._INSTALL_FN}():
-                return _Handle()
-            """
-        )
-        probe = "import torch; print(torch.backends.cuda.cudnn_sdp_python_enabled())"
-        with tempfile.TemporaryDirectory() as root:
-            os.makedirs(os.path.join(root, "cudnn", "torch"))
-            with open(os.path.join(root, "cudnn", "__init__.py"), "w") as f:
-                f.write(f"__version__ = {_cudnn._MIN_FRONTEND_VERSION!r}\n")
-            with open(os.path.join(root, "cudnn", "torch", "__init__.py"), "w") as f:
-                f.write(provider)
-            path = os.pathsep.join(filter(None, (root, os.environ.get("PYTHONPATH"))))
-            for value, expected in (("1", "True"), ("", "False")):
-                env = dict(os.environ, PYTHONPATH=path, **{_cudnn.ENV_VAR: value})
-                cmd = [sys.executable, "-c", probe]
-                proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
-                self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-                self.assertEqual(
-                    proc.stdout.split()[-1], expected, msg=f"value={value!r}"
-                )
-                self.assertNotIn("could not be enabled", proc.stderr)
-
 
 class TestCuDNNPythonSDPA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -468,16 +409,6 @@ class TestCuDNNPythonSDPA(TestCase):
                             (w.shape, w.stride(), w.dtype),
                             msg=f"output {i}",
                         )
-
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
-    def test_env_var_enables_the_real_provider_at_import(self, device):
-        probe = "import torch; print(torch.backends.cuda.cudnn_sdp_python_enabled())"
-        env = dict(os.environ, **{_cudnn.ENV_VAR: "1"})
-        cmd = [sys.executable, "-c", probe]
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
-        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-        self.assertEqual(proc.stdout.split()[-1], "True")
-        self.assertNotIn("could not be enabled", proc.stderr)
 
 
 instantiate_device_type_tests(TestCuDNNPythonSDPA, globals(), only_for="cuda")

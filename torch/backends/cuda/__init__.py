@@ -719,9 +719,6 @@ def enable_cudnn_sdp_python(enabled: bool):
     The provider module ``cudnn.torch`` is imported on the first enable, not
     before; :func:`is_cudnn_sdp_python_available` imports only its parent
     package ``cudnn``.
-
-    Setting ``TORCH_CUDNN_SDPA_USE_PYTHON=1`` enables this at import, so an
-    existing script can be switched over without a source change.
     """
     from torch.nn.attention import _cudnn
 
