@@ -294,17 +294,16 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
-# composable_kernel supports CK GEMM only on these gfx archs. Keep this list in
-# sync with at::Context::ckGemmSupported() (aten/src/ATen/Context.cpp) and the
-# runtime dispatch in aten/src/ATen/native/hip/ck_gemm_{half,bfloat16}.hip.
-# Returns the subset of PYTORCH_ROCM_ARCH that CK GEMM supports, matching on the
-# base arch so feature-suffixed targets (e.g. gfx942:xnack+) are kept, mirroring
-# the substring match in at::cuda::detail::CUDAHooks::isGPUArch.
+# Returns the subset of PYTORCH_ROCM_ARCH that CK GEMM supports, i.e. the archs
+# in TORCH_CK_GEMM_ARCH_LIST (the single source of truth, declared in the
+# top-level CMakeLists.txt and also surfaced to C++ via ATen/ROCmCKGEMMConfig.h).
+# Matches on the base arch so feature-suffixed targets (e.g. gfx942:xnack+) are
+# kept, mirroring the substring match in at::cuda::detail::CUDAHooks::isGPUArch.
 # Usage:
 #   torch_filter_ck_gemm_arches(variable_to_store_arches)
 #
 function(torch_filter_ck_gemm_arches out_var)
-  set(_supported "gfx90a;gfx942;gfx950")
+  set(_supported "${TORCH_CK_GEMM_ARCH_LIST}")
   set(_filtered "")
   foreach(_arch IN LISTS PYTORCH_ROCM_ARCH)
     string(REGEX REPLACE ":.*$" "" _base "${_arch}")
