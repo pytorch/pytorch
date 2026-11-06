@@ -1561,8 +1561,10 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
-// A Python FakeTensorMode and a C++ one each read as the FAKE mode, so at most
-// one of them may be installed
+// A Python FakeTensorMode and a C++ one each read as the FAKE mode, so the
+// Python APIs that install a mode refuse to install one while the other is set.
+// C++ guards that restore a stashed mode (StashTorchDispatchModeGuard,
+// StashTorchDispatchStackGuard) bypass these checks.
 static void check_no_cpp_fake_mode(c10::impl::TorchDispatchModeKey mode_key) {
   TORCH_CHECK(
       mode_key != c10::impl::TorchDispatchModeKey::FAKE ||
@@ -1725,17 +1727,20 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
+  if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
+    auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
+    if (cpp_mode != nullptr) {
+      TORCH_CHECK(
+          !c10::impl::TorchDispatchModeTLS::get_mode(mode_key).has_value(),
+          "both a Python FakeTensorMode and a C++ FakeTensorMode are set");
+      // Get the wrapper first, so a failed rebuild leaves the mode installed
+      auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
+      c10::impl::FakeTensorModeTLS::reset_state();
+      return py_mode.release().ptr();
+    }
+  }
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
   if (!maybe_mode.has_value()) {
-    if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
-      auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
-      if (cpp_mode != nullptr) {
-        // Get the wrapper first, so a failed rebuild leaves the mode installed
-        auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
-        c10::impl::FakeTensorModeTLS::reset_state();
-        return py_mode.release().ptr();
-      }
-    }
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
