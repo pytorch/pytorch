@@ -3209,6 +3209,56 @@ class TestXPUMultiprocessing(TestCase):
         event.synchronize()
         c2p.put(1)  # notify parent synchronization is done
 
+    @staticmethod
+    def _tensor_multiply_two(queue, ready, done):
+        ready.set()
+        with torch.xpu.Stream():
+            xpu_event, tensor = queue.get()
+            xpu_event.wait()
+            tensor.mul_(2)
+            xpu_event.record()
+            done.set()
+            del xpu_event
+
+    @staticmethod
+    def _send_tensor_with_untyped_storage(queue, event, expandable, peer):
+        torch._C._accelerator_setAllocatorSettings(f"expandable_segments:{expandable}")
+        tensors = (*torch.ones(2, device="xpu").chunk(2), torch.ones(1, device="xpu"))
+        specs = []
+        for tensor in tensors * (2 if peer else 1):
+            storage = tensor.untyped_storage()
+            (
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required,
+            ) = storage._share_device_()
+            specs.append(
+                {
+                    "tensor_cls": type(tensor),
+                    "tensor_size": tensor.shape,
+                    "tensor_stride": tensor.stride(),
+                    "tensor_offset": tensor.storage_offset(),
+                    "dtype": tensor.dtype,
+                    "requires_grad": tensor.requires_grad,
+                    "storage_cls": type(storage),
+                    "storage_device": storage_device,
+                    "storage_handle": storage_handle,
+                    "storage_size_bytes": storage_size_bytes,
+                    "storage_offset_bytes": storage_offset_bytes,
+                    "ref_counter_handle": ref_counter_handle,
+                    "ref_counter_offset": ref_counter_offset,
+                    "event_handle": event_handle,
+                    "event_sync_required": event_sync_required,
+                }
+            )
+        queue.put((specs, tensors[2].data_ptr() - tensors[0].data_ptr()))
+        event.wait()
+
     @parametrize(
         "event_cls",
         [
@@ -3296,6 +3346,88 @@ class TestXPUMultiprocessing(TestCase):
         c2p.get()  # wait for synchronization in child
         self.assertTrue(event.query())
         p.join()
+
+    def test_tensor_multiprocess(self):
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        ready = ctx.Event()
+        done = ctx.Event()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._tensor_multiply_two,
+            args=(queue, ready, done),
+        )
+        p.start()
+
+        ready.wait()
+        with torch.xpu.Stream():
+            tensor = torch.tensor([1, 1, 1, 1], device="xpu")
+            event = torch.xpu.Event(interprocess=True)
+            torch.xpu._sleep(200_000_000)
+            tensor.add_(1)
+            event.record()
+            queue.put((event, tensor))
+            self.assertTrue(done.wait(timeout=60))
+            event.synchronize()
+            self.assertEqual(list(tensor), [4, 4, 4, 4])
+        p.join()
+        self.assertEqual(p.exitcode, 0)
+
+    @parametrize("expandable", [False, True])
+    @parametrize("peer", [False, True])
+    def test_rebuild_tensor(self, expandable, peer):
+        if peer and (not TEST_MULTIXPU or not torch.xpu.can_device_access_peer(1, 0)):
+            self.skipTest("requires peer access from xpu:1 to xpu:0")
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        event = ctx.Event()
+
+        proc = ctx.Process(
+            target=TestXPUMultiprocessing._send_tensor_with_untyped_storage,
+            args=(queue, event, expandable, peer),
+        )
+        proc.start()
+
+        tensors = []
+        try:
+            specs, ptr_delta = queue.get(timeout=30)
+            handles = [s["storage_handle"] for s in specs]
+            handle = handles[0]
+            self.assertEqual(handles, [handle] * len(specs))
+            self.assertEqual(handle[1:2], b"e" if expandable else b"c")
+            wrong_handle = bytearray(handle)
+            wrong_handle[1] = ord("x")
+            with self.assertRaisesRegex(RuntimeError, "illformed shareable handle"):
+                mp.reductions._rebuild_device_tensor(
+                    **dict(specs[0], storage_handle=bytes(wrong_handle))
+                )
+            for dev in range(2 if peer else 1):
+                start = 3 * dev
+                tensors.extend(
+                    mp.reductions._rebuild_device_tensor(**dict(s, storage_device=dev))
+                    for s in specs[start : start + 3]
+                )
+                self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
+                self.assertEqual(tensors[start:], [1, 1, 1])
+                self.assertEqual(
+                    tensors[start + 2].data_ptr() - tensors[start].data_ptr(), ptr_delta
+                )
+                self.assertEqual(
+                    tensors[start].untyped_storage()._cdata,
+                    tensors[start + 1].untyped_storage()._cdata,
+                )
+            with self.assertRaisesRegex(RuntimeError, "received from another process"):
+                mp.reductions.reduce_tensor(tensors[0])
+            if peer:
+                del tensors[:3]
+                self.assertEqual(tensors, [1, 1, 1])
+        finally:
+            tensors.clear()
+            event.set()
+            proc.join(30)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+        self.assertEqual(proc.exitcode, 0)
 
 
 @contextlib.contextmanager
