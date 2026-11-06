@@ -4,11 +4,6 @@
 #include <c10/util/Logging.h>
 #include <torch/csrc/Export.h>
 #include <cstddef>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <string>
-#include <vector>
 
 namespace torch {
 
@@ -52,6 +47,8 @@ struct IPCSentData final {
 TORCH_PYTHON_API at::DataPtr GetNewRefCountedSentData(
     void* data,
     at::Device device);
+
+namespace {
 
 inline constexpr int64_t IPC_REF_COUNTER_FILE_SIZE = 10000;
 inline constexpr int64_t IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
@@ -122,4 +119,6 @@ struct IPCRefCountersFile final {
   std::string handle_;
   at::DataPtr refcounted_shared_mem_;
 };
+
+} // namespace
 } // namespace torch
