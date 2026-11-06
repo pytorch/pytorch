@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -81,12 +82,13 @@ This workflow is being rolled out and not all of it is live yet, see [Current st
 Issues are a way to report feedback or make suggestions. PyTorch uses issues to track ongoing efforts and considerations for improving the codebase. Before opening an issue, please check to see if there's already an existing issue for your topic, as it may be more effective to contribute there!
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart LR
     new[New issue] --> ai(AI triage)
-    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged<br/>“triaged” + “module: *” / “oncall: *” labels"]
+    ai -- "fails, or “no automated triage”" --> manual(Manual triage) --> triaged
     triaged --> mtriage("Module-level triage<br/>any module maintainer")
-    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
+    mtriage --> full["Fully triaged<br/>“needs reproduction” / “needs research” /<br/>“needs design” / “actionable” / “won't fix”"]
     full -- "remove the label to request<br/>re-evaluation" --> triaged
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
@@ -123,22 +125,23 @@ Two other labels are orthogonal to the states above:
 ### PR lifecycle
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart TD
     draft[Draft PR] -- author marks ready --> ready[Ready PR]
-    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ready --> ai("AI triage<br/>CODEOWNERS, “module: *”, linked issue")
     ai -- fails pre-conditions --> closed[Closed]
-    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
+    ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
     triaged --> pre(Pre-review)
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
-    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
+    pre -- every assigned reviewer accepts --> dev["In development by author<br/>“in progress”"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
     auto -- changes needed --> dev
-    dev -- "#quot;no automated review#quot;" --> rfr
+    dev -- "“no automated review”" --> rfr
     rfr --> review(Human review)
     review -- "needs significant changes,<br/>automated review enabled" --> dev
-    review -- "needs significant changes,<br/>#quot;no automated review#quot;" --> rfr
+    review -- "needs significant changes,<br/>“no automated review”" --> rfr
     review -- any reviewer accepts --> accepted[Accepted]
     ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
     accepted -- "@pytorchbot merge" --> merged[Merged]
@@ -162,6 +165,8 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
 
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
@@ -655,6 +660,17 @@ preserve it, so you do not need to repeat the prefix on each update.
 `ghstack -u` replaces the PR title from the commit subject, so keep the prefix
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
+
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
 
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.

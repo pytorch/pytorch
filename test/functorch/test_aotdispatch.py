@@ -267,6 +267,15 @@ def _alloc_unbacked_symint(t):
     return t
 
 
+_packed_shapes: list[tuple[int, ...]] = []
+
+
+@torch.fx.wrap
+def _record_packed_shape(t):
+    _packed_shapes.append(tuple(t.shape))
+    return t
+
+
 # `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
 # list / dict, so isinstance cannot tell them apart.
 @torch.fx.wrap
@@ -4828,6 +4837,74 @@ def forward(self, tangents_1):
         self.assertEqual(remainder, 0)
         self.assertEqual(pack_body_runs, 3)
 
+    @parametrize("subclass_weight", [False, True])
+    @parametrize("unlift_effect_tokens", [False, True])
+    @parametrize("with_effect", [False, True])
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    def test_saved_tensors_hooks_no_static_param(
+        self, with_effect, unlift_effect_tokens, subclass_weight
+    ):
+        # The weight's primals, of shape (3,), are static and must not be packed,
+        # also when an effect token comes first among the forward graph's inputs;
+        # x and the activation, of shape (4, 3), must be.
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_saved_hooks", mutates_args=())
+        def log(x: torch.Tensor) -> None:
+            pass
+
+        @log.register_fake
+        def _(x):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                weight = torch.randn(3)
+                if subclass_weight:
+                    weight = TwoTensor(weight, torch.randn(3))
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                if with_effect:
+                    log(x)
+                return (x * self.weight).sin()
+
+        def pack(x):
+            return _record_packed_shape(x)
+
+        def unpack(x):
+            return x
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        handle = _register_effectful_op(log, EffectType.ORDERED)
+        torch._dynamo.reset()
+        _packed_shapes.clear()
+        try:
+            with (
+                torch._functorch.config.patch(
+                    unlift_effect_tokens=unlift_effect_tokens,
+                    # The hooks are traced, filling _packed_shapes, only on a
+                    # cache miss.
+                    enable_autograd_cache=False,
+                ),
+                torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm),
+            ):
+                compiled = torch.compile(
+                    Model(), backend="aot_eager", fullgraph=True, dynamic=False
+                )
+                out = compiled(torch.randn(4, 3, requires_grad=True))
+                out.sum().backward()
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+        self.assertNotIn((3,), _packed_shapes)
+        self.assertIn((4, 3), _packed_shapes)
+
     @skipIfCppFakeTensor("no nested tensor support")
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
@@ -7307,20 +7384,6 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
-        mod.train()
-
-        x = torch.randn(16, 3, 32, 32, device="cuda")
-        aot_mod = memory_efficient_fusion(mod)
-
-        # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
-            res = aot_mod(x)
-        res.sum().backward()
-
     def test_quantize_activation_duplicate_nodes(self):
         """Test both quantize_activation_fw and quantize_activation_bw handle duplicate nodes correctly"""
         import torch.fx as fx
@@ -7867,185 +7930,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(compiled_out, eager_out)
         self.assertEqual(compiled_grad, eager_grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops(self):
-        """Test that effectful op outputs are saved, not recomputed.
-
-        This test traces a function with a with_effects node and verifies
-        that the getitem outputs are marked MUST_SAVE.
-        """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
-        )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
-
-        @torch.library.custom_op("test::effectful_op", mutates_args=())
-        def effectful_op(x: torch.Tensor) -> torch.Tensor:
-            return x * 2
-
-        @effectful_op.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            return torch.empty_like(x)
-
-        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
-
-        try:
-            gm = None
-
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x, weight):
-                a = torch.ops.test.effectful_op(x)
-                return a.sum() * weight
-
-            x = torch.randn(4, 4)
-            weight = torch.randn(4, 4)
-            fn(x, weight)
-
-            force_save_effectful_ops(gm)
-
-            with_effects_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function" and n.target == with_effects
-            ]
-            self.assertEqual(
-                len(with_effects_nodes), 1, "should have one with_effects node"
-            )
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_nodes[0]
-            ]
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
-            self.assertEqual(
-                must_save_count,
-                2,
-                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
-            )
-            self.assertEqual(
-                len(getitem_nodes),
-                must_save_count,
-                "all getitem nodes should be MUST_SAVE",
-            )
-        finally:
-            handle.destroy()
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops_nested_tuple(self):
-        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
-
-        This test creates a custom op that returns a tuple, registers it as effectful,
-        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
-        """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
-        )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
-
-        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
-        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return x * 2, x + 1
-
-        @effectful_tuple_op.register_fake
-        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return torch.empty_like(x), torch.empty_like(x)
-
-        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
-
-        try:
-            gm = None
-
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x):
-                a, b = torch.ops.test.effectful_tuple_op(x)
-                return a.sum() + b.sum()
-
-            x = torch.randn(4, 4)
-            fn(x)
-
-            with_effects_node = None
-            for node in gm.graph.nodes:
-                if node.op == "call_function" and node.target == with_effects:
-                    with_effects_node = node
-                    break
-            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_node
-            ]
-
-            force_save_effectful_ops(gm)
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            tensor_getitem_count = 0
-            must_save_count = 0
-            for node in getitem_nodes:
-                val = node.meta.get("val")
-                if isinstance(val, torch.Tensor):
-                    tensor_getitem_count += 1
-                    if is_must_save(node):
-                        must_save_count += 1
-
-            self.assertEqual(
-                tensor_getitem_count,
-                3,
-                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
-            )
-            self.assertEqual(
-                must_save_count,
-                tensor_getitem_count,
-                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
-            )
-        finally:
-            handle.destroy()
-
     def test_static_input_indices_with_effect_tokens(self):
         """Test that static_input_indices are correctly offset when effect tokens are prepended."""
         from torch._functorch._aot_autograd.descriptors import PlainAOTInput
@@ -8091,6 +7975,7 @@ def forward(self, primals_1, tangents_1):
                 args_descs,
                 meta=meta,
                 trace_joint=False,
+                inner_meta=meta,
             )
 
             num_tokens = len(meta.tokens)
@@ -8104,9 +7989,83 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    @parametrize("subclass_weight", [False, True])
+    @parametrize("unlift_effect_tokens", [False, True])
+    @parametrize("with_effect", [False, True])
+    def test_static_input_stamps_with_effect_tokens_in_training(
+        self, with_effect, unlift_effect_tokens, subclass_weight
+    ):
+        """The joint graph's primals start with the effect tokens, so the
+        static input indices passed to the partitioner must be offset by the
+        token count. Otherwise the is_static_input stamps shift: the parameter
+        loses its stamp and a dynamic input can gain one. A tensor-subclass
+        parameter is unwrapped into several primals, all of them static."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op(
+            "test::effectful_training_static_stamp", mutates_args=()
+        )
+        def log(x: torch.Tensor) -> None:
+            pass
+
+        @log.register_fake
+        def _(x):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                weight = torch.randn(3)
+                if subclass_weight:
+                    weight = TwoTensor(weight, torch.randn(3))
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                if with_effect:
+                    log(x)
+                return (x * self.weight).sin().sum()
+
+        stamps = []
+
+        def partition_fn(joint_module, joint_inputs, **kwargs):
+            out = min_cut_rematerialization_partition(
+                joint_module, joint_inputs, **kwargs
+            )
+            for node in joint_module.graph.find_nodes(op="placeholder"):
+                shape = tuple(node.meta["val"].shape)
+                if "is_static_input" in node.meta and shape in [(3,), (4, 3)]:
+                    stamps.append((shape, node.meta["is_static_input"]))
+            return out
+
+        handle = _register_effectful_op(log, EffectType.ORDERED)
+        torch._dynamo.reset()
+        try:
+            with torch._functorch.config.patch(
+                unlift_effect_tokens=unlift_effect_tokens,
+                enable_autograd_cache=False,
+            ):
+                backend = aot_autograd(
+                    fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+                )
+                compiled = torch.compile(Model(), backend=backend, fullgraph=True)
+                compiled(torch.randn(4, 3, requires_grad=True)).backward()
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+        num_weights = 2 if subclass_weight else 1
+        self.assertEqual(
+            sorted(stamps), [((3,), True)] * num_weights + [((4, 3), False)]
+        )
+
+    @parametrize("subclass_weight", [False, True])
+    @parametrize("training", [False, True])
     @parametrize("unlift_effect_tokens", [False, True])
     def test_static_input_indices_after_effect_token_removal(
-        self, unlift_effect_tokens
+        self, unlift_effect_tokens, training, subclass_weight
     ):
         from torch._dynamo.backends.common import aot_autograd
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -8125,7 +8084,10 @@ def forward(self, primals_1, tangents_1):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Parameter(torch.randn(3))
+                weight = torch.randn(3)
+                if subclass_weight:
+                    weight = TwoTensor(weight, torch.randn(3))
+                self.weight = torch.nn.Parameter(weight)
                 self.register_buffer("bias", torch.randn(5))
 
             def forward(self, x):
@@ -8142,7 +8104,6 @@ def forward(self, primals_1, tangents_1):
                 (
                     list(metadata.static_input_indices),
                     [tuple(x.shape) for x in example_inputs],
-                    len(metadata.tokens),
                 )
             )
             return make_boxed_func(gm.forward)
@@ -8151,7 +8112,7 @@ def forward(self, primals_1, tangents_1):
         torch._dynamo.reset()
         try:
             with (
-                torch.no_grad(),
+                torch.set_grad_enabled(training),
                 torch._functorch.config.patch(
                     unlift_effect_tokens=unlift_effect_tokens,
                     enable_autograd_cache=False,
@@ -8159,20 +8120,25 @@ def forward(self, primals_1, tangents_1):
             ):
                 compiled = torch.compile(
                     Model(),
-                    backend=aot_autograd(fw_compiler=compiler),
+                    backend=aot_autograd(fw_compiler=compiler, bw_compiler=nop),
                     fullgraph=True,
                     dynamic=False,
                 )
-                compiled(torch.randn(7))
+                out = compiled(torch.randn(7, requires_grad=training))
+                if training:
+                    out.backward()
         finally:
             handle.destroy()
             torch._dynamo.reset()
 
         self.assertEqual(len(captured), 1)
-        indices, shapes, num_tokens = captured[0]
-        self.assertEqual(num_tokens, int(not unlift_effect_tokens))
+        indices, shapes = captured[0]
+        weight_shapes = [(3,), (3,)] if subclass_weight else [(3,)]
+        # The inputs are the token (if kept), x, the weight and the bias.
+        num_tokens = int(not unlift_effect_tokens)
+        self.assertEqual(len(shapes), num_tokens + 1 + len(weight_shapes) + 1)
         self.assertTrue(all(0 <= i < len(shapes) for i in indices))
-        self.assertEqual(sorted(shapes[i] for i in indices), [(3,), (5,)])
+        self.assertEqual(sorted(shapes[i] for i in indices), [*weight_shapes, (5,)])
 
     def _make_effectful_op(self, name):
         @torch.library.custom_op(f"test::{name}", mutates_args=())
@@ -8377,27 +8343,6 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_emitted(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("functionalized_rng_wrapper") as captured:
-
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x) + x
-
-                x = torch.randn(4, device="cuda")
-                f(x)
-
-        self.assertEqual(
-            len(captured),
-            1,
-            "Expected functionalized_rng_wrapper codegen artifact",
-        )
-        source = captured[0]
-        self.assertIn("_get_rng_state_", source)
-        self.assertIn("_set_offset_", source)
-
     def test_functionalized_rng_no_codegen(self):
         with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -8427,70 +8372,6 @@ def forward(self, primals_1, tangents_1):
             sentinel, SimpleNamespace(), runtime_metadata=mock_meta
         )
         self.assertIs(result, sentinel)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_correctness(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                return torch.rand_like(x)
-
-            x = torch.randn(8, device="cuda")
-            out = f(x)
-
-        self.assertEqual(out.shape, x.shape)
-        self.assertEqual(out.device, x.device)
-        self.assertTrue((out >= 0).all() and (out <= 1).all())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_multi_output(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                noise = torch.rand_like(x)
-                return x + noise, x * 2
-
-            x = torch.randn(4, device="cuda")
-            out1, out2 = f(x)
-
-        self.assertEqual(out2, x * 2)
-        self.assertEqual(out1.shape, x.shape)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_advances_state(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                return torch.rand_like(x)
-
-            x = torch.randn(100, device="cuda")
-            out1 = f(x)
-            out2 = f(x)
-
-        self.assertFalse(
-            torch.allclose(out1, out2),
-            "Successive calls should produce different random outputs",
-        )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_source_structure(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("functionalized_rng_wrapper") as captured:
-
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x)
-
-                f(torch.randn(4, device="cuda"))
-
-        self.assertEqual(len(captured), 1)
-        source = captured[0]
-        self.assertIn("def _functionalized_rng_wrapper", source)
-        self.assertIn("extend", source)
-        self.assertIn("outs[", source)
 
     def test_functionalized_rng_codegen_unit_return_new_outs(self):
         set_offset_log = []
@@ -10891,6 +10772,290 @@ def forward(self, primals_1, tangents_1):
         out.sum().backward()
 
 
+class TestPartitioningCudaOnly(AOTTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self):
+        mod = torchvision.models.resnet18().cuda()
+        mod.train()
+
+        x = torch.randn(16, 3, 32, 32, device="cuda")
+        aot_mod = memory_efficient_fusion(mod)
+
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_force_save_effectful_ops(self):
+        """Test that effectful op outputs are saved, not recomputed.
+
+        This test traces a function with a with_effects node and verifies
+        that the getitem outputs are marked MUST_SAVE.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_op", mutates_args=())
+        def effectful_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x, weight):
+                a = torch.ops.test.effectful_op(x)
+                return a.sum() * weight
+
+            x = torch.randn(4, 4)
+            weight = torch.randn(4, 4)
+            fn(x, weight)
+
+            force_save_effectful_ops(gm)
+
+            with_effects_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function" and n.target == with_effects
+            ]
+            self.assertEqual(
+                len(with_effects_nodes), 1, "should have one with_effects node"
+            )
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_nodes[0]
+            ]
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
+            self.assertEqual(
+                must_save_count,
+                2,
+                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
+            )
+            self.assertEqual(
+                len(getitem_nodes),
+                must_save_count,
+                "all getitem nodes should be MUST_SAVE",
+            )
+        finally:
+            handle.destroy()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_force_save_effectful_ops_nested_tuple(self):
+        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
+
+        This test creates a custom op that returns a tuple, registers it as effectful,
+        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
+        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return x * 2, x + 1
+
+        @effectful_tuple_op.register_fake
+        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x):
+                a, b = torch.ops.test.effectful_tuple_op(x)
+                return a.sum() + b.sum()
+
+            x = torch.randn(4, 4)
+            fn(x)
+
+            with_effects_node = None
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target == with_effects:
+                    with_effects_node = node
+                    break
+            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_node
+            ]
+
+            force_save_effectful_ops(gm)
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            tensor_getitem_count = 0
+            must_save_count = 0
+            for node in getitem_nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.Tensor):
+                    tensor_getitem_count += 1
+                    if is_must_save(node):
+                        must_save_count += 1
+
+            self.assertEqual(
+                tensor_getitem_count,
+                3,
+                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
+            )
+            self.assertEqual(
+                must_save_count,
+                tensor_getitem_count,
+                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
+        finally:
+            handle.destroy()
+
+    # --- FunctionalizedRngRuntimeWrapper codegen tests ---
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_emitted(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda")
+                f(x)
+
+        self.assertEqual(
+            len(captured),
+            1,
+            "Expected functionalized_rng_wrapper codegen artifact",
+        )
+        source = captured[0]
+        self.assertIn("_get_rng_state_", source)
+        self.assertIn("_set_offset_", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(8, device="cuda")
+            out = f(x)
+
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.device, x.device)
+        self.assertTrue((out >= 0).all() and (out <= 1).all())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_multi_output(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                noise = torch.rand_like(x)
+                return x + noise, x * 2
+
+            x = torch.randn(4, device="cuda")
+            out1, out2 = f(x)
+
+        self.assertEqual(out2, x * 2)
+        self.assertEqual(out1.shape, x.shape)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_advances_state(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(100, device="cuda")
+            out1 = f(x)
+            out2 = f(x)
+
+        self.assertFalse(
+            torch.allclose(out1, out2),
+            "Successive calls should produce different random outputs",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_source_structure(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x)
+
+                f(torch.randn(4, device="cuda"))
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _functionalized_rng_wrapper", source)
+        self.assertIn("extend", source)
+        self.assertIn("outs[", source)
+
+
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
     # - subclass / mode introduced in the middle of the compiled fn
@@ -12745,6 +12910,55 @@ Expected a .* tangent but got a plain Tensor.""",
             expected_compile_count=3,
         )
 
+    @parametrize("freed_hook", ["pack", "unpack"])
+    def test_saved_tensors_hooks_freed_invalidates_cache_entry(self, freed_hook):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import CompileCounter
+
+        def pack(x):
+            return x * 2
+
+        def unpack(x):
+            return x / 2
+
+        def make_hooks():
+            return list(
+                saved_tensors_hooks_to_gm(pack, unpack, "pack_hash", "unpack_hash")
+            )
+
+        def fn(x):
+            return x.sin()
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3, requires_grad=True)
+        hooks = make_hooks()
+        for _ in range(2):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        annotations = [e.trace_annotation for e in _debug_get_cache_entry_list(fn)]
+        self.assertEqual(len(annotations), 1)
+        self.assertNotEqual(annotations[0], "Invalidated")
+
+        # New hooks can be allocated at a freed hook's address, so freeing
+        # either hook must invalidate the entry instead of leaving it reachable.
+        i = ("pack", "unpack").index(freed_hook)
+        hooks[i] = None
+        gc.collect()
+        self.assertEqual(
+            [e.trace_annotation for e in _debug_get_cache_entry_list(fn)],
+            ["Invalidated"],
+        )
+
+        # Replace only the freed hook: if the new one reused the freed address,
+        # the stale entry's guard would still pass.
+        hooks[i] = make_hooks()[i]
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+
     @torch._functorch.config.patch(donated_buffer=True)
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     def test_saved_tensors_hooks_donated_buffers(self):
@@ -13530,7 +13744,6 @@ class TestAOTAutogradDeviceWithCache(
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
-instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
@@ -13546,6 +13759,10 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
+
+instantiate_parametrized_tests(TestPartitioning)
+instantiate_device_type_tests(TestPartitioningCudaOnly, globals(), only_for=("cuda",))
+
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")

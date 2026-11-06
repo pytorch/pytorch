@@ -34,13 +34,16 @@ from extract_verdict import (
     _is_repo_path,  # noqa: E402
     _XREF,
     analysis_view,
+    apply_stack_policy,
     build,
     check_charset,
     check_no_encoded_blob,
     downgrade,
     failure,
+    ghstack_position,
     is_neutral_prose,
     MAX_DROPPED_TRACKED,
+    MAX_FINDINGS,
     MAX_MESSAGE,
     MAX_PATH,
     MAX_SUMMARY,
@@ -108,12 +111,102 @@ class TestDiffParsing(unittest.TestCase):
         self.assertEqual(touched["src/app.py"], {10, 11, 12, 13, 14})
         self.assertEqual(touched["README.md"], {1, 2})
 
-    def test_ignores_deleted_files(self):
+    def test_records_a_deleted_files_removed_lines(self):
+        # A PR that only deletes files would otherwise have no anchor at all.
         deletion = (
             "diff --git a/gone.py b/gone.py\n"
             "--- a/gone.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n"
         )
-        self.assertEqual(parse_diff(deletion), {})
+        self.assertEqual(parse_diff(deletion), {"gone.py": {1, 2}})
+
+    def test_a_blocking_finding_on_a_deleted_file_is_published(self):
+        deletion = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-x\n-y\n-z\n"
+        )
+        payload = ok_payload(
+            findings=[
+                {
+                    "path": "gone.py",
+                    "line": 2,
+                    "severity": "major",
+                    "message": "Still used.",
+                }
+            ]
+        )
+        result = build(payload, parse_diff(deletion))
+        self.assertEqual(result["verdict"], "changes_requested")
+        self.assertEqual([f["line"] for f in result["findings"]], [2])
+
+    def test_a_deletion_does_not_leak_into_the_next_file(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n"
+            "diff --git a/k.py b/k.py\n--- a/k.py\n+++ b/k.py\n"
+            "@@ -5,3 +5,2 @@\n-old\n kept\n kept2\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": {1, 2}, "k.py": {5, 6}})
+
+    def test_a_malformed_hunk_in_a_deletion_anchors_nothing(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ bogus @@\n-x\n-y\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": set()})
+
+    def test_lines_removed_from_a_kept_file_are_not_anchors(self):
+        # Only a deleted file is anchored on its old side; a modified file keeps
+        # new-side numbers, which is what the publish step posts on the right.
+        diff = (
+            "diff --git a/k.py b/k.py\n--- a/k.py\n+++ b/k.py\n"
+            "@@ -5,2 +5,1 @@\n-gone\n kept\n"
+        )
+        self.assertEqual(parse_diff(diff), {"k.py": {5}})
+
+    def test_a_type_change_keeps_only_the_new_side(self):
+        diff = (
+            "diff --git a/t b/t\ndeleted file mode 120000\n"
+            "--- a/t\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-a\n-b\n-c\n"
+            "diff --git a/t b/t\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/t\n@@ -0,0 +1 @@\n+x\n"
+        )
+        self.assertEqual(parse_diff(diff), {"t": {1}})
+
+    def test_a_type_change_to_an_empty_or_binary_file_has_no_anchor(self):
+        # git emits no `---`/`+++` for an empty or binary new file.
+        for created in (
+            "index 0000000..e69de29\n",
+            "index 0000000..bdc955b\nBinary files /dev/null and b/t differ\n",
+        ):
+            diff = (
+                "diff --git a/t b/t\ndeleted file mode 120000\n"
+                "--- a/t\n+++ /dev/null\n@@ -1 +0,0 @@\n-target\n"
+                "\\ No newline at end of file\n"
+                "diff --git a/t b/t\nnew file mode 100644\n" + created
+            )
+            self.assertEqual(parse_diff(diff), {}, created)
+
+    def test_a_rename_with_a_colliding_header_keeps_the_deletion(self):
+        # Deleting `x b/y` and renaming `x` to `y b/x b/y` give both stanzas the
+        # header `diff --git a/x b/y b/x b/y`; only a creation drops anchors.
+        header = "diff --git a/x b/y b/x b/y\n"
+        diff = (
+            header + "deleted file mode 100644\n"
+            "--- a/x b/y\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-p\n-q\n"
+            + header
+            + "similarity index 100%\n"
+            "rename from x\nrename to y b/x b/y\n"
+        )
+        self.assertEqual(parse_diff(diff), {"x b/y": {1, 2}})
+
+    def test_a_forged_deletion_header_inside_a_hunk_anchors_nothing(self):
+        # Modifying lines that read `-- victim.py` / `++ /dev/null` puts an
+        # adjacent `--- `/`+++ /dev/null` pair inside a real hunk body.
+        forged = (
+            "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+            "@@ -1,4 +1,2 @@\n--- victim.py\n-+++ /dev/null\n+x\n+y\n-z\n-w\n"
+        )
+        self.assertEqual(parse_diff(forged), {"a.py": {1, 2}})
 
 
 class TestCharset(unittest.TestCase):
@@ -775,7 +868,7 @@ class TestRoundThreeRegressions(unittest.TestCase):
             "diff --git a/g.py b/g.py\ndeleted file mode 100644\n"
             "--- a/g.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n"
         )
-        self.assertEqual(parse_diff(removed), {})
+        self.assertEqual(parse_diff(removed), {"g.py": {1, 2}})
 
     def test_no_newline_marker_spends_no_budget(self):
         diff = (
@@ -1462,6 +1555,191 @@ class TestBuildHoldsItsOutputToThePublishCheck(unittest.TestCase):
         result = build(ok_payload(), self.TOUCHED)
         self.assertEqual(published_findings(result), result["findings"])
         self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+
+def stack_body(position: int, size: int, newline: str = "\n") -> str:
+    """A ghstack PR body for the PR `position` from the bottom of a `size` stack."""
+    lines = [
+        "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):"
+    ]
+    for pos in range(size, 0, -1):
+        marker = "__->__ " if pos == position else ""
+        lines.append(f"* {marker}#{1000 + pos}")
+    lines += ["", "Fix the thing."]
+    return newline.join(lines)
+
+
+class TestGhstackPosition(unittest.TestCase):
+    def test_a_plain_body_is_not_in_a_stack(self):
+        self.assertEqual(ghstack_position("Fix the thing.\n\n* #123 is related"), 0)
+        self.assertEqual(ghstack_position(""), 0)
+
+    def test_the_bottom_pr_is_position_one(self):
+        self.assertEqual(ghstack_position(stack_body(1, 12)), 1)
+
+    def test_position_counts_from_the_bottom(self):
+        self.assertEqual(ghstack_position(stack_body(10, 12)), 10)
+        self.assertEqual(ghstack_position(stack_body(12, 12)), 12)
+
+    def test_crlf_line_endings_are_read(self):
+        self.assertEqual(ghstack_position(stack_body(10, 12, "\r\n")), 10)
+
+    def test_bullets_outside_the_stack_list_do_not_count(self):
+        follow_ups = "".join(f"\n* #{2000 + i}" for i in range(10))
+        body = stack_body(2, 3) + "\n\nFollow-ups:" + follow_ups
+        self.assertEqual(ghstack_position(body), 2)
+        self.assertEqual(ghstack_position("Related:" + follow_ups + "\n\n" + body), 2)
+
+
+def minor(i: int = 0) -> dict:
+    return {
+        "path": "src/app.py",
+        "line": 12,
+        "severity": "minor",
+        "message": f"Nit {i}.",
+    }
+
+
+class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
+    TOUCHED = {"src/app.py": {11, 12, 13, 14}, "README.md": {1, 2}}
+
+    def clean_result(self, **over):
+        payload = ok_payload(verdict="ready_for_human_review", findings=[])
+        payload.update(over)
+        return build(payload, self.TOUCHED)
+
+    def test_below_the_limit_nothing_changes(self):
+        result = self.clean_result()
+        self.assertEqual(
+            apply_stack_policy(result, stack_body(9, 12), self.TOUCHED), result
+        )
+
+    def test_outside_a_stack_nothing_changes(self):
+        result = self.clean_result()
+        self.assertEqual(apply_stack_policy(result, "Fix.", self.TOUCHED), result)
+
+    def test_a_failed_review_is_left_alone(self):
+        result = failure("model_error", "boom")
+        self.assertEqual(
+            apply_stack_policy(result, stack_body(10, 12), self.TOUCHED), result
+        )
+
+    def test_at_the_limit_a_clean_verdict_becomes_changes_requested(self):
+        result = apply_stack_policy(
+            self.clean_result(), stack_body(10, 12), self.TOUCHED
+        )
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["verdict"], "changes_requested")
+
+    def test_the_summary_says_why_and_passes_the_publish_check(self):
+        result = apply_stack_policy(
+            self.clean_result(), stack_body(11, 12), self.TOUCHED
+        )
+        self.assertIn("number 11 from the bottom", result["summary"])
+        self.assertIn("CONTRIBUTING.md", result["summary"])
+        self.assertIn(ok_payload()["summary"], result["summary"])
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+    def test_a_full_length_model_summary_still_fits(self):
+        result = apply_stack_policy(
+            self.clean_result(summary="word " * 400), stack_body(10, 12), self.TOUCHED
+        )
+        self.assertIn("CONTRIBUTING.md", result["summary"])
+        self.assertLessEqual(len(result["summary"]), MAX_SUMMARY)
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
+
+    def test_a_major_finding_anchors_to_the_first_touched_line(self):
+        # A major finding keeps the model's minor ones non-blocking: with no
+        # major, post_review makes every finding of an objection blocking.
+        result = apply_stack_policy(
+            self.clean_result(findings=[minor()]), stack_body(10, 12), self.TOUCHED
+        )
+        policy = result["findings"][0]
+        self.assertEqual((policy["path"], policy["line"]), ("README.md", 1))
+        self.assertEqual(policy["severity"], "major")
+        self.assertIn("CONTRIBUTING.md", policy["message"])
+        self.assertEqual(result["findings"][1:], [minor()])
+        self.assertEqual(published_findings(result), result["findings"])
+
+    def test_a_model_objection_without_a_major_stays_blocking(self):
+        model = build(ok_payload(findings=[minor()]), self.TOUCHED)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
+        self.assertEqual(result["findings"][1:], [{**minor(), "severity": "major"}])
+
+    def test_a_model_objection_with_its_own_major_is_kept_as_is(self):
+        findings = [ok_payload()["findings"][0], minor()]
+        model = build(ok_payload(findings=findings), self.TOUCHED)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
+        self.assertEqual(result["findings"][1:], findings)
+
+    def test_the_findings_cap_still_holds(self):
+        findings = [minor(i) for i in range(MAX_FINDINGS)]
+        model = self.clean_result(findings=findings)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
+        self.assertEqual(len(result["findings"]), MAX_FINDINGS)
+        self.assertEqual(result["findings"][0]["severity"], "major")
+
+    def test_with_no_line_to_anchor_on_nothing_changes(self):
+        # build() never publishes an objection without a finding to point at.
+        result = self.clean_result(findings=[minor()])
+        self.assertEqual(apply_stack_policy(result, stack_body(10, 12), {}), result)
+
+
+class TestTheStackPolicyEndToEnd(unittest.TestCase):
+    def run_script(self, comments: str | None) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            so = tmp_path / "structured.json"
+            so.write_text(
+                json.dumps(ok_payload(verdict="ready_for_human_review", findings=[]))
+            )
+            diff = tmp_path / "diff.txt"
+            diff.write_text(DIFF)
+            out = tmp_path / "verdict.json"
+            pr_comments = tmp_path / "pr-comments.json"
+            if comments is not None:
+                pr_comments.write_text(comments)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--structured-output-file",
+                    str(so),
+                    "--diff-file",
+                    str(diff),
+                    "--pr-comments-file",
+                    str(pr_comments),
+                    "--out",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(out.read_text())
+
+    def test_a_pr_high_in_a_stack_gets_changes_requested(self):
+        result = self.run_script(json.dumps({"body": stack_body(10, 12)}))
+        self.assertEqual(result["verdict"], "changes_requested")
+        (policy,) = result["findings"]
+        self.assertEqual(
+            (policy["path"], policy["line"], policy["severity"]),
+            ("README.md", 1, "major"),
+        )
+        self.assertIn("number 10 from the bottom", policy["message"])
+        self.assertTrue(result["summary"].startswith(policy["message"]))
+
+    def test_a_pr_low_in_a_stack_keeps_the_model_verdict(self):
+        result = self.run_script(json.dumps({"body": stack_body(3, 12)}))
+        self.assertEqual(result["verdict"], "ready_for_human_review")
+        self.assertEqual(result["findings"], [])
+
+    def test_an_unreadable_comments_file_does_not_break_the_review(self):
+        for comments in (None, "{not json", "[]", json.dumps({"body": 7})):
+            with self.subTest(comments=comments):
+                result = self.run_script(comments)
+                self.assertEqual(result["status"], "succeeded")
+                self.assertEqual(result["verdict"], "ready_for_human_review")
 
 
 if __name__ == "__main__":

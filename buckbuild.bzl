@@ -418,6 +418,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
