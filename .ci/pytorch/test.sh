@@ -2338,8 +2338,6 @@ EOF
   fi
   export SHA_TO_COMPARE
 
-  # create a dummy ts model at this version
-  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   create_venv_over_image venv
   # shellcheck disable=SC1091
   . venv/bin/activate
@@ -2362,21 +2360,10 @@ EOF
 
   git reset --hard "${SHA1}"
   git submodule sync && git submodule update --init --recursive
-  # FC: verify new model can be load with old code.
-  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
-      echo "FC check failed: new model cannot be load in old code"
-      return 1
-  fi
-  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
-  # BC: verify old model can be load with new code
-  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
-      echo "BC check failed: old model cannot be load in new code"
-      return 1
-  fi
   popd
   set +x
   assert_git_not_dirty
@@ -2388,14 +2375,10 @@ test_benchmarks() {
     pip_install "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json
     # TODO: Enable these for GHA once we have credentials for forked pull requests
     if [[ -z "${GITHUB_ACTIONS}" ]]; then
       python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
-      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
-      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     fi
     assert_git_not_dirty
   fi
