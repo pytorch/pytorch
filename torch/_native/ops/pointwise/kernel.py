@@ -65,6 +65,7 @@ def _layout_key(
     smem_limit: int,
     cc: tuple[int, int],
     out_bytes: int,
+    output_strides: Sequence[int] | None,
 ) -> tuple:
     # Canonicalize one-element views: the data pointer already includes storage_offset.
     shape = next(tuple(t.shape) for t in inputs if t.numel() != 1)
@@ -83,7 +84,7 @@ def _layout_key(
         tuple(shape),
         address % _MAX_VECTOR_BYTES,
         smem_limit,
-        None,
+        None if output_strides is None else tuple(output_strides[-len(shape) :]),
         cc,
         out_bytes,
     )
@@ -125,6 +126,7 @@ class _ElementwiseTma2D:
         out_type: Any,
         in_type: Any,
         config: _TmaConfig,
+        scalar_type: Any,
     ) -> None:
         self.fn = fn
         self.ninputs = ninputs
@@ -132,6 +134,7 @@ class _ElementwiseTma2D:
         self.comp_type = comp_type
         self.out_type = out_type
         self.in_type = in_type
+        self.scalar_type = scalar_type
         self.transposed = config.transposed
         self.ntma = sum(1 for value in config.transposed if value is not None)
         self.box = config.box
@@ -275,7 +278,8 @@ class _ElementwiseTma2D:
         scalars = []
         for k in cutlass.range_constexpr(self.ninputs):
             if const_expr(self.transposed[k] is None):
-                scalars.append(self.comp_type(tma_inputs[k][0]))
+                # CUDA operands round to TensorIterator's common dtype before opmath.
+                scalars.append(self.comp_type(self.scalar_type(tma_inputs[k][0])))
             else:
                 scalars.append(None)
         for stage in cutlass.range_constexpr(_TILES_PER_BLOCK):
@@ -330,7 +334,7 @@ class _ElementwiseScalarVector(_ElementwiseTma2D):
         scalars = []
         for k in cutlass.range_constexpr(self.ninputs):
             if const_expr(self.transposed[k] is None):
-                scalars.append(self.comp_type(mIns[k][0]))
+                scalars.append(self.comp_type(self.scalar_type(mIns[k][0])))
             else:
                 scalars.append(None)
         # ATen's full-block path loads striped vector groups before computing
@@ -429,7 +433,6 @@ def can_run(
         or target.dtype not in (ref.dtype, out_dtype, torch.bool)
         or not torch.can_cast(out_dtype, target.dtype)
         or tuple(target.shape) != tuple(shape)
-        or not target.is_contiguous()
         or target.is_neg()
         or target.is_conj()
         or torch._C._is_cow_tensor(target)  # pyrefly: ignore[missing-attribute]
@@ -444,6 +447,7 @@ def can_run(
         caps.smem_per_block_optin,
         caps.cc,
         target.element_size() if target is not None else out_dtype.itemsize,
+        target.stride() if target is not None else None,
     )
     return _layout_config(*key) is not None
 
@@ -459,7 +463,11 @@ def _compile_plan(
 ) -> _Plan:
     if config is None:
         raise AssertionError("pointwise override selected an unsupported TMA layout")
-    in_type = torch2cute[next(t for t in inputs if t.numel() != 1).dtype]
+    common_dtype = next(t for t in inputs if t.numel() != 1).dtype
+    in_type = torch2cute[common_dtype]
+    for t in inputs:
+        if t.ndim != 0:
+            common_dtype = torch.promote_types(common_dtype, t.dtype)
     out_type = cutlass.Int8 if out.dtype == torch.bool else torch2cute[out.dtype]
     # Vector rows and square TMA boxes share the same launch descriptor.
     vector = config.box != _TMA_BOX_SIDE
@@ -472,6 +480,7 @@ def _compile_plan(
         out_type=out_type,
         in_type=in_type,
         config=config,
+        scalar_type=torch2cute[common_dtype],
     )
     fakes = [
         _fake_tensor(
@@ -494,11 +503,12 @@ def _compile_plan(
     )
     compile_args = (fakes, fake_out, *([comp_type(1)] * _CONST_SLOTS), _L.stream())
     caps = _hw.caps(inputs[0].device)
+    # Scalar rank affects promotion even when canonical input views are identical.
     kernel_key = (
         id(fn),
         len(consts),
         comp_type,
-        tuple(t.dtype for t in inputs),
+        tuple((t.dtype, t.ndim != 0) for t in inputs),
         out_type,
         config,
         inputs[0].device.index,
@@ -524,14 +534,19 @@ def run(
 ) -> None:
     caps = _hw.caps(inputs[0].device)
     layout_key = _layout_key(
-        inputs, _pointer(out), caps.smem_per_block_optin, caps.cc, out.element_size()
+        inputs,
+        _pointer(out),
+        caps.smem_per_block_optin,
+        caps.cc,
+        out.element_size(),
+        out.stride(),
     )
     plan_key = (
         aten_name,
         id(fn),
         comp_type,
         layout_key,
-        tuple(t.dtype for t in inputs),
+        tuple((t.dtype, t.ndim != 0) for t in inputs),
         out.dtype,
         out.stride(),
         len(consts),

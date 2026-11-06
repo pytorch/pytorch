@@ -20,6 +20,7 @@ class _AotTma:
         out_type: Any,
         vector_bytes: int,
         vector_ept: int,
+        scalar_type: Any,
     ) -> None:
         self.comp_type = cutlass.Float32
         box, block = _TMA_BOX_SIDE, _THREADS_PER_BLOCK
@@ -34,11 +35,12 @@ class _AotTma:
         self.op = executor(
             fn=ops.get_fn(fn),
             ninputs=len(mask),
-            nconsts=1 if fn in ("_add", "_sub") else 0,
+            nconsts=1 if fn in ("_add", "_sub", "_addcmul") else 0,
             comp_type=self.comp_type,
             out_type=out_type,
             in_type=dtype,
             config=config,
+            scalar_type=scalar_type,
         )
 
     @cute.jit
@@ -76,10 +78,21 @@ class _AotTma:
             stream,
         )
 
+    @cute.jit
+    def ternary(
+        self,
+        x: cute.Tensor,
+        y: cute.Tensor,
+        z: cute.Tensor,
+        out: cute.Tensor,
+        value: cutlass.Float32,
+        stream: cuda.CUstream,
+    ) -> None:
+        self.op([x, y, z], out, value, self.comp_type(1), self.comp_type(1), stream)
+
 
 def build(spec: dict[str, Any]) -> dict[str, Any]:
     types = {
-        "float16": "Float16",
         "bfloat16": "BFloat16",
         "float32": "Float32",
     }
@@ -92,7 +105,16 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     output_type = (
         cutlass.Int8 if spec["boolean"] else getattr(cutlass, types[spec["out_dtype"]])
     )
-    op = _AotTma(spec["fn"], dtype, mask, output_type, vector_bytes, spec["vector_ept"])
+    common_type = getattr(cutlass, types[spec["common_dtype"]])
+    op = _AotTma(
+        spec["fn"],
+        dtype,
+        mask,
+        out_type=output_type,
+        vector_bytes=vector_bytes,
+        vector_ept=spec["vector_ept"],
+        scalar_type=common_type,
+    )
     box = op.op.box
     shapes = (
         (cute.sym_int(),)
@@ -101,7 +123,7 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     )
     fakes = []
     tensor_args: list[dict[str, Any]] = []
-    names = ("x",) if len(mask) == 1 else ("x", "y")
+    names = ("x", "y", "z")[: len(mask)]
     for name, transposed in zip(names, mask):
         if transposed is None:
             fakes.append(
@@ -164,13 +186,15 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     tag = "".join("s" if value is None else "t" if value else "n" for value in mask)
     if not spec["boolean"] and spec["out_dtype"] != spec["dtype"]:
         tag += f"_out_{spec['out_dtype']}"
+    if spec["boolean"] and spec["common_dtype"] != spec["dtype"]:
+        tag += "_promoted"
     if spec["scalar_dtype"]:
         tag += f"_{spec['scalar_dtype']}"
     if vector_bytes != 0:
         tag += f"_vec{vector_bytes}_ept{spec['vector_ept']}"
     return {
         "kind": "cutedsl",
-        "fn": op.unary if len(mask) == 1 else op.binary,
+        "fn": (op.unary, op.binary, op.ternary)[len(mask) - 1],
         "prefix": f"pointwise_{spec['fn'].lstrip('_')}_{spec['dtype']}_{tag}",
         "fake_args": [*fakes, cutlass.Float32(1), cute.runtime.make_fake_stream()],
         "tensor_args": tensor_args,

@@ -20,17 +20,48 @@ _limits = load_by_path(
 )
 
 _DTYPES = {
-    "float16": "at::kHalf",
     "bfloat16": "at::kBFloat16",
     "float32": "at::kFloat",
 }
-_OPS = (
+_OPS: tuple[tuple[str, str, int], ...] = (
     ("add", "_add", 2),
     ("sub", "_sub", 2),
     ("mul", "_mul", 2),
     ("div.Tensor", "_div", 2),
     ("neg", "_neg", 1),
+    ("maximum", "_maximum", 2),
+    ("minimum", "_minimum", 2),
+    ("atan2", "_atan2", 2),
+    ("floor", "_floor", 1),
+    ("ceil", "_ceil", 1),
+    ("trunc", "_trunc", 1),
+    ("sign", "_sign", 1),
+    ("exp", "_exp", 1),
+    ("exp2", "_exp2", 1),
+    ("expm1", "_expm1", 1),
+    ("log", "_log", 1),
+    ("log2", "_log2", 1),
+    ("log10", "_log10", 1),
+    ("log1p", "_log1p", 1),
+    ("sqrt", "_sqrt", 1),
+    ("rsqrt", "_rsqrt", 1),
+    ("reciprocal", "_reciprocal", 1),
+    ("sin", "_sin", 1),
+    ("cos", "_cos", 1),
+    ("tan", "_tan", 1),
+    ("asin", "_asin", 1),
+    ("acos", "_acos", 1),
+    ("atan", "_atan", 1),
+    ("tanh", "_tanh", 1),
+    ("erf", "_erf", 1),
+    ("sigmoid", "_sigmoid", 1),
+    ("addcmul", "_addcmul", 3),
     ("gt.Tensor", "_gt", 2),
+    ("lt.Tensor", "_lt", 2),
+    ("ge.Tensor", "_ge", 2),
+    ("le.Tensor", "_le", 2),
+    ("eq.Tensor", "_eq", 2),
+    ("ne.Tensor", "_ne", 2),
 )
 
 
@@ -40,7 +71,7 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
 
     # Tensor/device/dtype checks stay in this adapter. Pure layout selection is
     # shared with JIT, without importing the CuTeDSL compiler on an AOT-only install.
-    dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    dtypes = (torch.bfloat16, torch.float32)
     if not all(isinstance(t, torch.Tensor) for t in inputs):
         return {"eligible": False}
     ref = next((t for t in inputs if t.numel() != 1), None)
@@ -67,6 +98,8 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
     for t in inputs:
         if t.ndim != 0 and t.dtype != result_dtype:
             result_dtype = torch.promote_types(result_dtype, t.dtype)
+    # Boolean outputs still need the promoted input dtype for scalar conversion.
+    common_dtype = result_dtype
     if boolean:
         result_dtype = torch.bool
     shape = (1,) * (max(t.ndim for t in inputs) - ref.ndim) + tuple(ref.shape)
@@ -113,6 +146,7 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
         "eligible": True,
         "dtype": ref.dtype,
         "out_dtype": "bool" if boolean else result_dtype,
+        "common_dtype": common_dtype,
         "scalar_dtype": next((t.dtype for t in inputs if t.numel() == 1), None),
         "transposed": config.transposed,
         "vector_ept": config.ept if vector else 0,
@@ -131,27 +165,36 @@ class _Declaration:
         self.ATEN_OP = aten
         self.fn = fn
         self.nin = nin
-        self.boolean = fn == "_gt"
-        self.alpha = fn in ("_add", "_sub")
+        self.boolean = fn in ("_gt", "_lt", "_ge", "_le", "_eq", "_ne")
+        self.cuda_scalars = aten in ("add", "sub", "mul", "div.Tensor", "gt.Tensor")
+        self.inputs = (
+            ("self", "tensor1", "tensor2") if nin == 3 else ("self", "other")[:nin]
+        )
+        self.scalars = {
+            "add": ("alpha",),
+            "sub": ("alpha",),
+            "addcmul": ("value",),
+        }.get(aten, ())
 
     def kernel_precompile_grid(self) -> list[dict[str, Any]]:
-        sizes = {"float16": 2, "bfloat16": 2, "float32": 4, "bool": 1}
+        sizes = {"bfloat16": 2, "float32": 4, "bool": 1}
         points = []
-        for mask in itertools.product((False, True, None), repeat=self.nin):
+        # Keep CUDA-scalar variants limited to the five existing binary exports.
+        layouts = (False, True, None) if self.cuda_scalars else (False, True)
+        for mask in itertools.product(layouts, repeat=self.nin):
             if all(value is None for value in mask):
                 continue
             for dtype in _DTYPES:
                 for scalar_dtype in _DTYPES if None in mask else (None,):
-                    outputs = (
-                        ("bool",)
-                        if self.boolean
-                        else (dtype, "float32")
+                    common_dtypes = (
+                        (dtype, "float32")
                         if scalar_dtype is not None
                         and scalar_dtype != dtype
                         and dtype != "float32"
                         else (dtype,)
                     )
-                    for out_dtype in outputs:
+                    for common_dtype in common_dtypes:
+                        out_dtype = "bool" if self.boolean else common_dtype
                         configs = [(0, 0)]
                         if None in mask and True not in mask:
                             # Emit every alignment fallback used by ATen, plus
@@ -183,6 +226,7 @@ class _Declaration:
                                     "dtype": dtype,
                                     "scalar_dtype": scalar_dtype,
                                     "out_dtype": out_dtype,
+                                    "common_dtype": common_dtype,
                                     "transposed": mask,
                                     "fn": self.fn,
                                     "boolean": self.boolean,
@@ -194,22 +238,36 @@ class _Declaration:
         return points
 
     def covered_axes(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        alpha = kwargs.get("alpha", args[self.nin] if len(args) > self.nin else 1)
-        if self.alpha and isinstance(alpha, complex):
+        for i, name in enumerate(self.scalars, self.nin):
+            value = kwargs.get(name, args[i] if i < len(args) else 1)
+            if isinstance(value, complex):
+                return {"eligible": False}
+        inputs = args[: self.nin]
+        if (
+            self.nin > 1
+            and not self.cuda_scalars
+            and any(t is None or t.numel() == 1 for t in inputs)
+        ):
             return {"eligible": False}
-        return _axes(args[: self.nin], kwargs.get("out"), self.boolean)
+        return _axes(inputs, kwargs.get("out"), self.boolean)
 
     def _inputs(self) -> str:
-        return "{self}" if self.nin == 1 else "{self, other}"
+        return "{" + ", ".join(self.inputs) + "}"
+
+    def _argument_gate(self) -> str:
+        gates = [f"if ({name}.isComplex()) return false;" for name in self.scalars]
+        if self.nin > 1 and not self.cuda_scalars:
+            scalars = " || ".join(f"{name}.numel() == 1" for name in self.inputs)
+            gates.append(f"if ({scalars}) return false;")
+        return "\n".join(gates)
 
     def cpp_helpers(self) -> str:
         return _CPP_HELPERS
 
     def cpp_dispatch_prelude(self) -> str:
-        alpha_gate = "if (alpha.isComplex()) return false;" if self.alpha else ""
         return f"""
 if (_naot_props->major != 10) return false;
-{alpha_gate}
+{self._argument_gate()}
 auto cfg = pointwise_tma_config({self._inputs()}, &out, {str(self.boolean).lower()},
                                 _naot_props->sharedMemPerBlockOptin, _naot_props->minor);
 if (cfg.mask < 0) return false;
@@ -231,13 +289,13 @@ if (cfg.mask < 0) return false;
         out_type = "at::kBool" if self.boolean else _DTYPES[spec["out_dtype"]]
         return (
             result
-            + f" && out.scalar_type() == {out_type} && cfg.vector_bytes == {spec['vector_bytes']} && cfg.vector_ept == {spec['vector_ept']}"
+            + f" && out.scalar_type() == {out_type} && cfg.common_dtype == {_DTYPES[spec['common_dtype']]} && cfg.vector_bytes == {spec['vector_bytes']} && cfg.vector_ept == {spec['vector_ept']}"
         )
 
     def cpp_launch(self, spec: dict[str, Any], launch_fn: str) -> str:
         views = []
         for i, transposed in enumerate(spec["transposed"]):
-            name = "self" if i == 0 else "other"
+            name = self.inputs[i]
             if transposed is None:
                 views.append(f"auto x{i} = {name}.as_strided({{1}}, {{1}});")
                 continue
@@ -256,21 +314,20 @@ if (cfg.mask < 0) return false;
         )
         if spec["vector_bytes"] != 0:
             output = "auto result = out.as_strided({cfg.cols}, {1});"
-        alpha = "alpha.toFloat()" if self.alpha else "1.0f"
-        operands = "x0" if self.nin == 1 else "x0, x1"
+        scalar = f"{self.scalars[0]}.toFloat()" if self.scalars else "1.0f"
+        operands = ", ".join(f"x{i}" for i in range(self.nin))
         return "\n".join(
             [
                 *views,
                 output,
-                f"{launch_fn}({operands}, result, {alpha}, at::cuda::getCurrentCUDAStream());",
+                f"{launch_fn}({operands}, result, {scalar}, at::cuda::getCurrentCUDAStream());",
             ]
         )
 
     def cpp_covers(self) -> str:
-        alpha_gate = "if (alpha.isComplex()) return false;" if self.alpha else ""
         return f"""
 if (_naot_props->major != 10) return false;
-{alpha_gate}
+{self._argument_gate()}
 return pointwise_tma_config({self._inputs()}, out ? &*out : nullptr,
                             {str(self.boolean).lower()}, _naot_props->sharedMemPerBlockOptin, _naot_props->minor).mask >= 0;
 """
@@ -304,6 +361,7 @@ constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
 // AOT currently handles 2-D TMA views and dense output in either orientation.
 struct PointwiseTmaConfig {
   int mask = -1;
+  at::ScalarType common_dtype = at::kFloat;
   int vector_bytes = 0;
   int vector_ept = 0;
   int fast = 1;
@@ -322,16 +380,17 @@ PointwiseTmaConfig pointwise_tma_config(
   if (!ref.is_cuda() || ref.layout() != at::kStrided || (ref.dim() != 2 && !vector) ||
       ref.numel() <= 0 || ref.numel() > INT32_MAX) return cfg;
   auto dt = ref.scalar_type();
-  if (dt != at::kHalf && dt != at::kBFloat16 && dt != at::kFloat) return cfg;
+  if (dt != at::kBFloat16 && dt != at::kFloat) return cfg;
   if (contiguous && !vector) return cfg;
-  auto result_dt = boolean ? at::kBool : dt;
+  cfg.common_dtype = dt;
   int64_t rank = ref.dim();
   size_t ntma = 0;
   for (const auto& t : inputs) {
     rank = std::max(rank, t.dim());
     if (t.numel() != 1) ++ntma;
-    else if (!boolean && t.dim() != 0 && t.scalar_type() != dt) result_dt = at::kFloat;
+    else if (t.dim() != 0 && t.scalar_type() != dt) cfg.common_dtype = at::kFloat;
   }
+  auto result_dt = boolean ? at::kBool : cfg.common_dtype;
   cfg.fast = ref.stride(0) == 1 ? 0 : 1;
   if (out) {
     auto prefix = rank - ref.dim();
@@ -358,7 +417,7 @@ PointwiseTmaConfig pointwise_tma_config(
         t.is_neg() || t.is_conj()) return cfg;
     if (t.numel() == 1) {
       auto st = t.scalar_type();
-      if (st != at::kHalf && st != at::kBFloat16 && st != at::kFloat) return cfg;
+      if (st != at::kBFloat16 && st != at::kFloat) return cfg;
       mask |= 2 << (2 * i++);
       continue;
     }

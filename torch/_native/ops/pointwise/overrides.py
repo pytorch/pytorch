@@ -267,11 +267,15 @@ def _impl(
     scalars = _scalars(row, args, kwargs, ref.dtype)
     fn_name, _ = _function(row, args, kwargs)
     shape, result_dtype = _result_spec(row, ins, ref)
-    out = (
-        kwargs["out"]
-        if variant.out_from == "out_kw"
-        else torch.empty(shape, device=ref.device, dtype=result_dtype)
-    )
+    if variant.out_from == "out_kw":
+        out = kwargs["out"]
+    else:
+        out = torch.empty_like(ref, dtype=result_dtype)
+        if len(shape) > ref.ndim:
+            # TensorIterator gives leading singleton dimensions the full tensor span.
+            out = out.as_strided(
+                shape, (ref.numel(),) * (len(shape) - ref.ndim) + out.stride()
+            )
     comp_type = dt.torch2cute[torch.float32]
     consts = tuple(comp_type(s) for s in scalars)
     K.run(ops.get_fn(cast(str, fn_name)), row.aten, ins, out, consts, comp_type)

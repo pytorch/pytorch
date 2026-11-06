@@ -73,7 +73,7 @@ def _dense_run(
 
 
 def _contiguous_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
-    # Output order is logical row-major, independent of the input permutations.
+    # Dense logical row-major strides for the contiguous vector path.
     strides = [0] * len(shape)
     stride = 1
     for dim in range(len(shape) - 1, -1, -1):
@@ -191,11 +191,22 @@ def _tma2d_config(
     smem_bytes = len(inputs) * (_TILES_PER_BLOCK * tile_bytes + _SMEM_ALIGNMENT)
     if smem_bytes + _TILES_PER_BLOCK * _BARRIER_BYTES > smem_limit:
         return None
-    # 2. Output strides are (6144, 2048, 64, 1), giving physical order
-    # (3, 2, 1, 0), fastest first. AOT may instead supply a dense transpose.
+    # 2. The example's contiguous output has strides (6144, 2048, 64, 1)
+    # and physical order (3, 2, 1, 0), fastest first. Without an explicit
+    # output, follow ATen/empty_like: densify the first tensor's physical order.
+    # Admitted non-scalar inputs have distinct positive strides, so the first
+    # input determines TensorIterator's order without ambiguous comparisons.
     explicit_output = output_strides is not None
     if output_strides is None:
-        output_strides = _contiguous_strides(shape)
+        order = _physical_dim_order(inputs[0].strides)
+        if order is None:
+            return None
+        strides = [0] * len(shape)
+        stride = 1
+        for dim in order:
+            strides[dim] = stride
+            stride *= shape[dim]
+        output_strides = tuple(strides)
     output_order = _physical_dim_order(output_strides)
     if output_order is None or (
         explicit_output and not _dense_run(shape, output_strides, output_order)
@@ -299,6 +310,8 @@ def _layout_config(
     ):
         return None
     if all(t.contiguous for t in tensors):
+        if output_strides is not None and output_strides != _contiguous_strides(shape):
+            return None
         return _scalar_vector_config(
             inputs,
             shape,

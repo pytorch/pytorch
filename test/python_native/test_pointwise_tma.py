@@ -6,6 +6,7 @@ from contextlib import contextmanager, nullcontext
 from unittest.mock import patch
 
 import torch
+from torch._native.ops.pointwise.aot import declarations
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import IS_SM10X
 from torch.testing._internal.common_device_type import (
@@ -48,6 +49,46 @@ class TestPointwiseTma(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @dtypes(torch.bfloat16, torch.float32)
+    @parametrize(
+        "op_name",
+        [
+            subtest(name, decorators=[skipIfNoNativeAot(name)])
+            for name in (d.ATEN_OP for d in declarations())
+        ],
+    )
+    def test_aot_operators(self, device: str, dtype: torch.dtype, op_name: str) -> None:
+        from torch._native.ops.pointwise import kernel
+
+        declaration = next(d for d in declarations() if d.ATEN_OP == op_name)
+        x = (
+            torch.linspace(0.125, 0.875, 64 * 128, device=device, dtype=dtype)
+            .view(64, 128)
+            .t()
+        )
+        y, z = torch.full_like(x, 0.25), torch.full_like(x, 0.75)
+        args = (x, y, z)[: declaration.nin]
+        kwargs = dict.fromkeys(declaration.scalars, 0.5)
+        op = getattr(torch, op_name.split(".")[0])
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = op(*args, **kwargs)
+        out = torch.empty_like(expected)
+        with (
+            profile(activities=[ProfilerActivity.CUDA]) as profiler,
+            patch.object(kernel, "run", wraps=kernel.run) as launch,
+        ):
+            actual = op(*args, **kwargs)
+            with _execution_route("aot"):
+                op(*args, **kwargs, out=out)
+        launch.assert_not_called()
+        self.assertTrue(any("ElementwiseTma2D" in e.name for e in profiler.events()))
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(actual, expected)
+            self.assertEqual(out, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @dtypes(torch.float32)
     def test_pow_float32(self, device: str, dtype: torch.dtype) -> None:
         from torch._native.ops.pointwise import kernel
@@ -81,6 +122,8 @@ class TestPointwiseTma(TestCase):
     ) -> None:
         from torch._native.ops.pointwise import kernel
 
+        if route == "aot" and dtype == torch.float16:
+            self.skipTest("FP16 pointwise kernels are JIT-only")
         if layout == "rank3":
             x = torch.randn(32, 32, 64, device=device, dtype=dtype).permute(2, 0, 1)
             y = torch.randn(x.shape, device=device, dtype=dtype)
@@ -132,6 +175,15 @@ class TestPointwiseTma(TestCase):
                 )
             with torch.backends.python_native.cutedsl.disabled():
                 self.assertEqual(actual, expected)
+            if alpha == 0.5:
+                self.assertEqual(actual.stride(), expected.stride())
+        if route == "jit":
+            # FP8 preparation relies on clamp preserving a transpose's layout.
+            with torch.backends.python_native.cutedsl.disabled():
+                expected = torch.clamp(x, min=-1, max=1)
+            actual = torch.clamp(x, min=-1, max=1)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -139,9 +191,9 @@ class TestPointwiseTma(TestCase):
     @parametrize(
         "route", ("jit", subtest("aot", decorators=[skipIfNoNativeAot("gt.Tensor")]))
     )
-    @parametrize("scalar_contiguous", (False, True))
+    @parametrize("layout", ("mixed", "scalar", "singleton"))
     def test_tma_bool_output_and_capture(
-        self, device: str, dtype: torch.dtype, route: str, scalar_contiguous: bool
+        self, device: str, dtype: torch.dtype, route: str, layout: str
     ) -> None:
         from torch._native.ops.pointwise import kernel
 
@@ -150,12 +202,19 @@ class TestPointwiseTma(TestCase):
         x[0, :3] = torch.tensor(
             (float("nan"), float("inf"), -float("inf")), device=device, dtype=dtype
         )
+        scalar_contiguous = layout != "mixed"
         if scalar_contiguous:
             x = x.contiguous()
-            y = torch.tensor(1.503, device=device, dtype=torch.float32)
+            x[1, :3] = 1.5
+            y = torch.full(
+                (1,) if layout == "singleton" else (),
+                1.499,
+                device=device,
+                dtype=torch.float32,
+            )
         out = torch.empty(x.shape, device=device, dtype=torch.bool)
         with torch.backends.python_native.cutedsl.disabled():
-            expected = torch.gt(x.float() if scalar_contiguous else x, y)
+            expected = torch.gt(x, y)
         profiler = profile(activities=[ProfilerActivity.CUDA])
         with (
             _execution_route(route),
@@ -203,9 +262,11 @@ class TestPointwiseTma(TestCase):
             offset:
         ]
         scalar = torch.tensor(1.003, device=device)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.mul(x, scalar)
         with _execution_route(route), patch.object(kernel, "_ENABLED", True):
             actual = torch.mul(x, scalar)
-        self.assertEqual(actual, torch.full_like(x, 1.5078125), atol=0, rtol=0)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -227,6 +288,8 @@ class TestPointwiseTma(TestCase):
     ) -> None:
         from torch._native.ops.pointwise import kernel
 
+        if route == "aot" and torch.float16 in (dtype, scalar_dtype):
+            self.skipTest("FP16 pointwise kernels are JIT-only")
         x = torch.full((160, 160), 1.5, device=device, dtype=dtype)[32:, :128].t()
         if contiguous:
             x = x.contiguous()
@@ -234,12 +297,11 @@ class TestPointwiseTma(TestCase):
         if scalar_first:
             # Retain zero-dim coverage when scalar_first=False, and exercise singleton
             # strides, ranks and a nonzero storage offset here.
-            shape = (1, 1, 1) if contiguous else (1,)
+            shape = (1, 1, 1)
             scalar = scalar.as_strided(
                 shape, tuple(2 + 3 * i for i in range(len(shape)))
             )
         args = (scalar, x) if scalar_first else (x, scalar)
-        compute_dtype = torch.float32
         result_dtype = torch.result_type(*args)
         shape = torch.broadcast_shapes(x.shape, scalar.shape)
         out = torch.empty(shape, device=device, dtype=result_dtype)
@@ -253,14 +315,10 @@ class TestPointwiseTma(TestCase):
             actual = torch.sub(*args)
             actual_mul = torch.mul(*args)
             with torch.backends.python_native.cutedsl.disabled():
-                # Match host-scalar opmath, without ATen's early CUDA-scalar cast.
-                operands = tuple(t.to(compute_dtype) for t in args)
-                self.assertEqual(
-                    actual, torch.sub(*operands).to(result_dtype), atol=0, rtol=0
-                )
-                self.assertEqual(
-                    actual_mul, torch.mul(*operands).to(result_dtype), atol=0, rtol=0
-                )
+                expected = torch.sub(*args)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(actual.stride(), expected.stride())
+                self.assertEqual(actual_mul, torch.mul(*args), atol=0, rtol=0)
             torch.sub(*args, out=out)
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -269,10 +327,7 @@ class TestPointwiseTma(TestCase):
                 scalar.fill_(value)
                 graph.replay()
                 with torch.backends.python_native.cutedsl.disabled():
-                    operands = tuple(t.to(compute_dtype) for t in args)
-                    self.assertEqual(
-                        out, torch.sub(*operands).to(result_dtype), atol=0, rtol=0
-                    )
+                    self.assertEqual(out, torch.sub(*args), atol=0, rtol=0)
         if route == "jit":
             launch.assert_called()
         else:
