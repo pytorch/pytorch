@@ -18,7 +18,7 @@ __host__ __device__ static inline scalar_t angle_wrapper(scalar_t v) {
   if (at::_isnan(v)){
     return v;
   }
-  return c10::signbit(v) ? M_PI : 0;
+  return c10::_signbit(v) ? M_PI : 0;
 }
 
 template<typename T>

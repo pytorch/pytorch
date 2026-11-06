@@ -30,23 +30,6 @@ inline constexpr bool is_negative(const T& x) {
   }
 }
 
-/// Returns true if the sign bit of x is set
-/// NOTE: Unlike is_negative, returns true for -0.0 and -NaN
-template <typename T>
-C10_HOST_DEVICE inline bool signbit(T x) {
-  if constexpr (std::is_integral_v<T>) {
-    return is_negative(x);
-  } else if constexpr (std::is_floating_point_v<T>) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    return ::signbit(x);
-#else
-    return std::signbit(x);
-#endif
-  } else {
-    return signbit(static_cast<float>(x));
-  }
-}
-
 /// Returns the sign of x as -1, 0, 1
 /// NOTE: Will fail on an unsigned custom type
 ///       For the most part it's possible to fix this if
@@ -113,7 +96,27 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::greater_than_max;
 using c10::is_negative;
 using c10::less_than_lowest;
-using c10::signbit;
 using c10::signs_differ;
 using c10::signum;
+
+/// Returns true if the sign bit of x is set (true for -0.0 and -NaN
+/// Non-builtin types are evaluated on their value converted to float
+template <typename T>
+C10_HOST_DEVICE inline bool _signbit(T x) {
+  if constexpr (std::is_integral_v<T>) {
+    return c10::is_negative(x);
+  } else if constexpr (std::is_floating_point_v<T>) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    return ::signbit(x);
+#else
+    return std::signbit(x);
+#endif
+  } else {
+    return _signbit(static_cast<float>(x));
+  }
+}
 HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::_signbit;
+} // namespace c10

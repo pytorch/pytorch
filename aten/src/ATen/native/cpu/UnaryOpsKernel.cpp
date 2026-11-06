@@ -333,7 +333,7 @@ static void sign_kernel(TensorIteratorBase& iter){
 
 static void signbit_kernel(TensorIteratorBase& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.input_dtype(), "signbit_cpu", [&] {
-    cpu_kernel(iter, [](scalar_t a) -> bool { return c10::signbit(a); });
+    cpu_kernel(iter, [](scalar_t a) -> bool { return c10::_signbit(a); });
   });
 }
 
