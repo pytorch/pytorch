@@ -1161,10 +1161,6 @@ class VariableBuilder:
                     and (
                         is_from_attr_proxy_source(result.source)
                         or isinstance(result.source, MappingProxyMappingSource)
-                        or not (
-                            is_constant_source(self.source)
-                            or is_constant_source(result.source)
-                        )
                     )
                 )
             ):
@@ -1172,12 +1168,24 @@ class VariableBuilder:
                     raise AssertionError("Tracked alias must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # object (a base module, the mapping behind a mappingproxy, or a
-                # local aliasing a global), so pin each source to its
-                # compile-time object.
+                # object (a base module, or the mapping behind a mappingproxy), so
+                # pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
+                )
+            elif result.source is not None and not (
+                is_constant_source(self.source) or is_constant_source(result.source)
+            ):
+                # A local aliasing a global, which make_dupe_guard leaves out.
+                # Guard the relation, not each object: an alias rebound on every
+                # call must not recompile every call.
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.DUPLICATE_INPUT, source_b=result.source
+                        )
+                    )
                 )
 
         if (

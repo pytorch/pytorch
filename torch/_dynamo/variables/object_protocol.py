@@ -76,7 +76,8 @@ def vt_identity_compare(
 
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler, which also
-    guards the identity relation when it folds a comparison of two sources.
+    guards the identity relation when it folds a comparison of two sources
+    (_guard_identity_fold).
     """
     if left is right:
         return ConstantVariable.create(True)

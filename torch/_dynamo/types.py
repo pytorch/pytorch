@@ -45,9 +45,9 @@ class GuardFilterEntry:
     value: object
     guard_type: str
     derived_guard_types: tuple[str, ...]
-    # True when the guard reads a global: its originating source, or for a
-    # two-source guard (DUPLICATE_INPUT, IDENTITY_COMPARE) either source, is
-    # rooted in the frame's globals.
+    # True when the guard's originating source, or for a two-source guard
+    # (DUPLICATE_INPUT, IDENTITY_COMPARE) either source, is rooted in a
+    # GlobalSource.
     is_global: bool
     orig_guard: Guard
     # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's

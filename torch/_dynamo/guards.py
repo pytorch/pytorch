@@ -1603,7 +1603,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
-        self._cached_identity_compare_guards: set[tuple[bool, frozenset[str]]] = set()
+        self._cached_identity_compare_guards: set[frozenset[str]] = set()
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
@@ -3711,20 +3711,19 @@ class GuardBuilder(GuardBuilderBase):
                 guard.user_stack,
             )
 
-    # Multi-source guard from a constant-folded `is`: `source_b is source_a`
-    # (is_same) or `is not`. DUPLICATE_INPUT covers `is` within one scope; this
-    # covers `is not` and a local against a global. There is no C++ leaf for
-    # `is not`, so it is always an epilogue lambda.
+    # Multi-source guard `source_b is not source_a`, from a constant-folded `is`
+    # that was False. A True fold gets DUPLICATE_INPUT. There is no C++ leaf for
+    # `is not`, so this is always an epilogue lambda.
     @skip_guard_check_spec
-    def IDENTITY_COMPARE(self, guard: Guard, source_b: Source, is_same: bool) -> None:
+    def IDENTITY_COMPARE(self, guard: Guard, source_b: Source) -> None:
         if (refs := self._relation_guard_refs(guard, source_b)) is None:
             return
         ref_a, ref_b = refs
-        key = (is_same, frozenset(refs))
+        key = frozenset(refs)
         if key in self._cached_identity_compare_guards:
             return
         self._cached_identity_compare_guards.add(key)
-        code_part = f"{ref_b} {'is' if is_same else 'is not'} {ref_a}"
+        code_part = f"{ref_b} is not {ref_a}"
         self._set_guard_export_info(guard, [code_part])
         verbose_code_part = get_verbose_code_parts(code_part, guard)[0]
         self.object_aliasing_guard_codes.append((code_part, verbose_code_part))
@@ -7256,9 +7255,10 @@ def make_dupe_guard(
         # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
-        # Until then, a folded `is` across scopes gets IDENTITY_COMPARE
-        # (BuiltinVariable's handle_is), and a tracker reused across scopes
-        # gets ID_MATCH on both sources (VariableBuilder._reuse_tracked_variable).
+        # Until then, a folded `is` (BuiltinVariable's handle_is) and a tracker
+        # reused across scopes (VariableBuilder._reuse_tracked_variable) install
+        # DUPLICATE_INPUT across scopes themselves; its C++ aliasing leaf relates
+        # a local to a global.
         if ser_source_is_local == source_is_local:
             # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.

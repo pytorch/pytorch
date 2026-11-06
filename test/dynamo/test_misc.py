@@ -255,6 +255,7 @@ class _IsTestMissing:
 
 
 _IS_TEST_TRACKED_SENTINEL = _IsTestMissing()
+_IS_TEST_STATE = None
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
@@ -3238,8 +3239,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @parametrize("kind", ["tuple_iterator", "list_reverseiterator"])
     def test_is_guards_items_of_iterator_inputs(self, kind):
-        # These sources' names call guard helpers such as
-        # ___tuple_iterator_getitem, so resolving them needs those helpers.
+        # The items' sources go through iterator guard helpers. Whether or not
+        # they resolve on the frame, the relation is guarded.
         p, q = object(), object()
         make = {
             "tuple_iterator": lambda: iter((p, q)),
@@ -3256,10 +3257,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(opt_fn(x, make(), target), fn(x, make(), target))
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_id_of_tuple_iterator_item(self):
-        # Resolving the item's source ran into a NameError on
-        # ___tuple_iterator_getitem, an internal error during tracing.
+    @parametrize("kind", ["tuple_iterator", "list_reverseiterator"])
+    def test_id_of_iterator_item(self, kind):
+        # Resolving the item's source raised a NameError on the iterator guard
+        # helper (___tuple_iterator_getitem, ...), an internal error in tracing.
         p, q = object(), object()
+        make = {
+            "tuple_iterator": lambda items: iter(items),
+            "list_reverseiterator": lambda items: reversed(list(items)),
+        }[kind]
 
         def fn(x, it):
             return x + id(next(it)) % 7
@@ -3267,7 +3273,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         for items in [(p, q), (q, p), (p, q)]:
-            self.assertEqual(opt_fn(x, iter(items)), fn(x, iter(items)))
+            self.assertEqual(opt_fn(x, make(items)), fn(x, make(items)))
 
     def test_is_guards_local_against_global_sentinel(self):
         def fn(x, opt=_IS_TEST_SENTINEL):
@@ -3298,6 +3304,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_alias_of_global_rebound_every_call_compiles_once(self):
+        # The local and the global share one tracker. Guarding the relation,
+        # rather than each object, keeps a fresh pair per call on one entry.
+        global _IS_TEST_STATE
+
+        def fn(x, s):
+            return x + s.v + _IS_TEST_STATE.v
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        try:
+            for _ in range(5):
+                _IS_TEST_STATE = _IsTestMissing()
+                _IS_TEST_STATE.v = 1.0
+                self.assertEqual(opt_fn(x, _IS_TEST_STATE), fn(x, _IS_TEST_STATE))
+            self.assertEqual(cnt.frame_count, 1)
+            other = _IsTestMissing()
+            other.v = 5.0
+            self.assertEqual(opt_fn(x, other), fn(x, other))
+        finally:
+            _IS_TEST_STATE = None
+
+    def test_is_on_pinned_objects_adds_no_relation_guard(self):
+        # torch.add is already pinned on both sides, which settles `f is
+        # torch.add` without a relation guard.
+        def fn(x, f):
+            return x + 1 if f is torch.add else x - 1
+
+        guards = []
+        opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+        x = torch.ones(2)
+        for f in [torch.add, torch.sub, torch.add]:
+            self.assertEqual(opt_fn(x, f), fn(x, f))
+        relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
+        self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
+
     def test_type_is_global_class_adds_no_lambda_guard(self):
         # type(L['o']) reuses the tracker of the global class, which needs a
         # guard of its own, but a C++ one: no epilogue lambda.
@@ -3314,20 +3357,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         relation = [g for g in guards if g.create_fn_name() == "IDENTITY_COMPARE"]
         self.assertFalse(relation)
 
-    def test_in_adds_no_relation_guard(self):
-        # `in` and dict lookups also compare by identity, but only an explicit
+    def test_containment_adds_no_relation_guard(self):
+        # `in`, dict lookups, list.index, list.count and dict == also compare by
+        # identity (the last three in traced polyfills), but only an explicit
         # `is` adds a relation guard. Known limitation, not changed here: those
-        # identity checks fold unguarded, for list and dict membership alike.
+        # identity checks fold unguarded.
         class Key:
             pass
 
-        def fn(x, items, table, key):
-            return x + (key in items) + (key in table)
+        def fn(x, items, table, d1, d2, key):
+            found = (key in items) + (key in table) + items.count(key)
+            return x + found + items.index(items[1]) + (d1 == d2)
 
         guards = []
         opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
         x = torch.ones(2)
-        args = (x, [Key(), Key()], {Key(): 0, Key(): 1}, Key())
+        args = (x, [Key(), Key()], {Key(): 0}, {0: Key()}, {0: Key()}, Key())
         self.assertEqual(opt_fn(*args), fn(*args))
         relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
         self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
