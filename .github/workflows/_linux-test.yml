@@ -173,11 +173,40 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
+        if: matrix.config != 'torchtitan_current_pin_controls'
         uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
+
+      - name: Download complete current original native build
+        if: matrix.config == 'torchtitan_current_pin_controls'
+        shell: bash
+        run: |
+          curl --fail --retry 2 --output current-native-artifacts.zip https://gha-artifacts.s3.amazonaws.com/pytorch/pytorch/42148713138/linux-jammy-cuda13.2-py3.12-gcc11-torchtitan/artifacts.zip
+          mkdir -p build
+          sha256sum current-native-artifacts.zip > build/pin-titan-current-native-artifact.sha256
+          unzip -o current-native-artifacts.zip
+          rm current-native-artifacts.zip
+
+      - name: Download complete original old Triton Python 3.12 package
+        if: matrix.config == 'torchtitan_current_pin_controls'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: triton-wheel-3.12-cuda-manylinux_2_28_x86_64
+          run-id: '40454125718'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pin-titan-current-packages/old
+
+      - name: Download complete current candidate Triton Python 3.12 package
+        if: matrix.config == 'torchtitan_current_pin_controls'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: triton-wheel-3.12-cuda-manylinux_2_28_x86_64
+          run-id: '42148622972'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/pin-titan-current-packages/candidate
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -226,7 +255,7 @@ jobs:
           for dll in win-torch-wheel/cudart64_*.dll; do
             if [ -f "$dll" ]; then
               mv "$dll" win-torch-wheel-extracted/bin/x64/
-              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+              echo "Moved $(basename "$dll") to win-torch-wheel-extracted/bin/x64/"
             fi
           done
 

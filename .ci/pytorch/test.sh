@@ -2502,7 +2502,9 @@ test_torchtitan() {
     export OUTPUT_DIR="${RUNNER_TEMP}/artifacts-to-be-uploaded"
   fi
 
-  if [[ "${TEST_CONFIG}" == *features* ]]; then
+  if [[ "${TEST_CONFIG}" == torchtitan_current_pin_controls ]]; then
+    python3 ../.ci/pytorch/triton_pin_titan_current_controls.py
+  elif [[ "${TEST_CONFIG}" == *features* ]]; then
     scripts/ci/pytorch_ci_test_runner.sh feature_tests
   elif [[ "${TEST_CONFIG}" == *models* ]]; then
     scripts/ci/pytorch_ci_test_runner.sh model_tests
