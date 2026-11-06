@@ -152,13 +152,6 @@ CudaIPCSentData::CudaIPCSentData(
       offset_(offset),
       counter_ptr_(counter_ptr),
       device_(device) {
-  const auto acc_type = at::accelerator::getAccelerator(true).value();
-  TORCH_CHECK(
-      device_.type() == acc_type,
-      "Expected a ",
-      acc_type,
-      " device for IPC sharing, but got ",
-      device_);
   auto stream = at::accelerator::getCurrentStream(device_.index());
   // Backends may limit the number of live interprocess events, so fall back to
   // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
