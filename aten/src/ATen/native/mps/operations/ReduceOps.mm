@@ -595,8 +595,11 @@ static void reduction_dispatch_mps(Tensor input,
                                    const std::string& profile_name = {}) {
   TORCH_INTERNAL_ASSERT(input.numel() > 0 && output.numel() > 0);
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
-  // Strided output views needing 64-bit offsets (e.g. out= a slice of a huge tensor) go through contiguous temporaries
-  auto needs_temp = [](const Tensor& t) { return !t.is_contiguous() && !canUse32BitIndexMath(t); };
+  // Output views with few elements but strides needing 64-bit offsets (e.g. out= big[::2**20]) go through
+  // contiguous temporaries; outputs with as many elements are narrowed by the input split instead
+  auto needs_temp = [](const Tensor& t) {
+    return t.numel() < std::numeric_limits<int32_t>::max() && !canUse32BitIndexMath(t);
+  };
   if (needs_temp(output) || (op.mean && needs_temp(*op.mean))) {
     auto temp_op = op;
     if (op.mean) {
