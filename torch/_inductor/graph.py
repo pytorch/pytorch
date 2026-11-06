@@ -150,6 +150,12 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 aten = torch.ops.aten
 
+
+def _is_user_kernel_mutation(target: object) -> bool:
+    from torch._higher_order_ops.user_kernel_registry import is_user_kernel_mutation
+
+    return is_user_kernel_mutation(target)
+
 _post_grad_graph_counter = itertools.count()
 
 if config.is_fbcode():
@@ -1903,18 +1909,20 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        from torch._higher_order_ops.user_kernel_registry import (
+            get_user_kernel_hops_by_mutation,
+        )
+
+        if (user_kernel := get_user_kernel_hops_by_mutation(fx_node.target)) is not None:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
-                old_kwargs["kernel_idx"],
-                old_kwargs["constant_args_idx"],
+            mutated = user_kernel.mutated_arg_names(
+                old_kwargs,
                 {
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
-                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2101,13 +2109,21 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and _is_user_kernel_mutation(n.target)
+                and (
+                    config.triton_kernel_default_layout_constraint != "flexible_layout"
+                    # Only Triton kernels may opt into flexible layouts; other DSLs
+                    # compile against the exact eager strides.
+                    or n.target
+                    is not torch.ops.higher_order.triton_kernel_wrapper_mutation
+                )
             ):
                 debug("user_defined_triton_kernel_layout_constraints")
                 if (
                     config.triton_kernel_default_layout_constraint
                     == "needs_fixed_stride_order"
+                    or n.target
+                    is not torch.ops.higher_order.triton_kernel_wrapper_mutation
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]

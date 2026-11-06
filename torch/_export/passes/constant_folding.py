@@ -8,6 +8,12 @@ import torch
 import torch.utils._pytree as pytree
 
 
+def _is_user_kernel_hop(target: object) -> bool:
+    from torch._higher_order_ops.user_kernel_registry import is_user_kernel_hop
+
+    return is_user_kernel_hop(target)
+
+
 aten = torch.ops.aten
 
 # We would like to split modules into two subgraphs for runtime weight updates to work correctly.
@@ -142,7 +148,10 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - constant folding triton kernel returns the inputs -- fix this
         if (
             node.op == "call_function"
-            and node.name == "triton_kernel_wrapper_functional_proxy"
+            and (
+                node.name == "triton_kernel_wrapper_functional_proxy"
+                or _is_user_kernel_hop(node.target)
+            )
         ):
             return self.unknown_value
 

@@ -14,9 +14,10 @@ from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops.triton_kernel_wrap import (
-    kernel_side_table,
-    triton_kernel_wrapper_functional,
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
+from torch._higher_order_ops.user_kernel_registry import (
+    get_user_kernel_hops_by_functional,
+    is_user_kernel_functional,
 )
 from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import (
@@ -462,6 +463,9 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
 
+# Kept for backward compatibility. The pass itself treats every registered
+# user-kernel functional HOP (Triton, CuTeDSL, ...) the same way; see
+# torch/_higher_order_ops/user_kernel_registry.py.
 inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
@@ -560,7 +564,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # then skip over it
             if src.target is operator.getitem and (
                 (
-                    src.args[0].target == triton_kernel_wrapper_functional
+                    is_user_kernel_functional(src.args[0].target)
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
@@ -1029,27 +1033,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                             continue
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
-        elif node.target in inplaceable_triton_ops:
-            kernel_idx = node.kwargs["kernel_idx"]
-            kernel = kernel_side_table.get_kernel(kernel_idx)
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
+        elif (user_kernel := get_user_kernel_hops_by_functional(node.target)) is not None:
+            kernel_name = user_kernel.kernel_name(node)
 
-            if isinstance(kernel, JITFunction):
-                kernel_name = kernel.fn.__name__
-            elif isinstance(kernel, Autotuner):
-                if config.is_fbcode():
-                    # Autotuner has different implementations for AMD and NV
-                    if torch.version.hip is None:
-                        kernel_name = kernel.base_fn.__name__
-                    else:
-                        kernel_name = kernel.fn.__name__
-                else:
-                    kernel_name = kernel.base_fn.__name__
-            else:
-                raise AssertionError("Unknown triton kernel type")
-
-            # inplaceable_triton_ops take an additional argument called
+            # User-kernel functional HOPs take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
