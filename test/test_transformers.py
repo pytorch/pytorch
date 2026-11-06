@@ -36,6 +36,8 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    isRocmArchAnyOf,
+    NAVI4_ARCH,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -1177,6 +1179,28 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        # The fused kernel always returns a contiguous tensor, so its meta rule
+        # must not hand back the strides of a non-contiguous src: inductor asserts
+        # the fallback's runtime metadata against them.
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            batch_first=True,
+        ).to(device).eval()
+
+        x = torch.rand(4, 64, 16, device=device).transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+        self.assertEqual(eager_out, compiled_out)
+
 
 
     @onlyAccelerator
@@ -1743,7 +1767,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not (isSM8XDevice or isSM120Device),
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM or not (isSM8XDevice or isSM120Device),
         "Does not support fused SDPA or not SM86+ hardware",
     )
     @parametrize("head_dim", [193, 256])
@@ -2596,6 +2620,23 @@ class TestSDPAFailureModes(NNTestCase):
             )
         # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    @unittest.skipIf(TEST_WITH_ROCM, "The stride check is in the CUDA CUTLASS backward")
+    @parametrize("name", ["query", "key", "value"])
+    def test_mem_eff_attention_backward_rejects_int32_overflowing_stride(self, name):
+        # The backward kernel takes 32-bit row strides; larger ones used to
+        # wrap and read out of bounds. A length-1 sequence keeps the stride
+        # without the storage.
+        make_tensor = partial(torch.randn, 1, 1, 1, 64, device="cuda")
+        inputs = {"query": make_tensor(), "key": make_tensor(), "value": make_tensor()}
+        out, lse, seed, offset, _, _ = torch.ops.aten._efficient_attention_forward(*inputs.values(), None, None, None, 1, 1, 0.0, 0, True)
+        inputs[name] = inputs[name].as_strided((1, 1, 1, 64), (0, 2**31, 64, 1))
+        with self.assertRaisesRegex(RuntimeError, f"{name}.stride\\(1\\) overflows int32"):
+            torch.ops.aten._efficient_attention_backward(
+                torch.randn_like(out), *inputs.values(), None, out, None, None, 1, 1, lse, 0.0, seed, offset, 0, False
+            )
 
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
@@ -3613,6 +3654,23 @@ class TestSDPAAccelerator(NNTestCase):
         finally:
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_sm107_runtime_version(self, device):
+        unsupported = (
+            torch.cuda.get_device_capability(device) == (10, 7)
+            and torch.backends.cudnn.version() < 92500
+        )
+        query = torch.empty(2, 4, 128, 64, device=device, dtype=torch.float16)
+        key = torch.empty_like(query)
+        value = torch.empty_like(query)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            self.assertEqual(torch.backends.cuda.can_use_cudnn_attention(params), not unsupported)
+            expected = SDPBackend.MATH if unsupported else SDPBackend.CUDNN_ATTENTION
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), expected.value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
@@ -5871,6 +5929,8 @@ class TestSDPAAccelerator(NNTestCase):
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             self.skipTest("Reference implementation OOM")
+        if dropout_p > 0.0 and seq_len_q > 1024:
+            self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5903,8 +5963,6 @@ class TestSDPAAccelerator(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(query, key, value,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
         else:
-            if seq_len_q > 1024:
-                self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
             # Create the dropout_mask
             torch.manual_seed(seed)
             dropout_mask = _get_mem_eff_drop_mask(batch_size, n_heads, seq_len_q, seq_len_k, dropout_p, seed, 0, device=device)
@@ -5992,6 +6050,8 @@ class TestSDPAAccelerator(NNTestCase):
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             self.skipTest("Reference implementation OOM")
+        if dropout_p > 0.0 and seq_len_q > 1024:
+            self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -6028,8 +6088,6 @@ class TestSDPAAccelerator(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(query, key, value, attn_mask,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
         else:
-            if seq_len_q > 1024:
-                self.skipTest("Will call _fill_mem_eff_dropout_mask with too many threads!")
             # Create the dropout_mask
             torch.manual_seed(seed)
             dropout_mask = _get_mem_eff_drop_mask(batch_size, n_heads, seq_len_q,
@@ -6143,6 +6201,44 @@ class TestSDPAAccelerator(NNTestCase):
             lambda _m: f"{_m}\nCK GQA seqlen_q==1 produced Inf ({msg})",
         )
         self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [64, 96, 128])
+    @parametrize("n_heads", [[8, 8], [8, 2]])
+    @parametrize("seqlen_k", [64, 1000])
+    def test_flash_attention_ck_backward_seqlen_q_1(self, device, dtype: torch.dtype, head_dim: int,
+                                                    n_heads: list[int], seqlen_k: int):
+        # On gfx950 the aiter asm backward kernel for head dims 65..128 returned
+        # wrong dq/dk/dv (or NaN, or faulted) when seqlen_q == 1.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if torch.backends.cuda.preferred_rocm_fa_library() != torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK SDPA backend not available")
+        num_heads_q, num_heads_kv = n_heads
+        q = torch.randn(2, num_heads_q, 1, head_dim, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(2, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(2, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype, requires_grad=True)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out)
+
+        q_ref, k_ref, v_ref = (t.detach().float().requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            out_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, enable_gqa=True)
+        grads_ref = torch.autograd.grad(out_ref, (q_ref, k_ref, v_ref), grad_out.float())
+
+        tol = 2e-2 if dtype == torch.float16 else 6e-2
+        for name, actual, expected in zip(("out", "dq", "dk", "dv"), (out, *grads), (out_ref, *grads_ref)):
+            self.assertEqual(actual.float(), expected, atol=tol * expected.abs().max().item(), rtol=0, msg=name)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
@@ -6400,8 +6496,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False])
-    @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("enable_gqa,n_heads", [(True, [16, 8]), (True, [10, 2]), (False, [4, 4])])
     @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     @skipIfXpu(msg="Flash backend variants (aotriton/ck) and head_dim>=192 paths not supported on XPU; tracked in torch-xpu-ops")
@@ -6409,7 +6504,11 @@ class TestSDPAAccelerator(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float,
                                                dtype: torch.dtype, scale: str, enable_gqa: bool,
                                                n_heads: list[int], sdpa_backend: str):
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256 + 1):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256 + 1)
+        ):
             self.skipTest("Flash attention on SM86-SM89 and SM120-SM121 for head_dim > 192 is currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
@@ -6429,10 +6528,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
-        num_heads_q = num_heads_kv = 4
-        if enable_gqa:
-            num_heads_q = n_heads[0]
-            num_heads_kv = n_heads[1]
+        num_heads_q, num_heads_kv = n_heads
 
         query = torch.rand(batch_size, num_heads_q, seq_len_q, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
@@ -6505,7 +6601,11 @@ class TestSDPAAccelerator(NNTestCase):
 
         # Backward for Flash Attention on SM86-SM89 and SM120-SM121 with
         # head_dim >= 193 is currently disabled.
-        if (isSM8XDevice or isSM120Device) and head_dim in range(193, 256):
+        if (
+            not TEST_WITH_ROCM
+            and (isSM8XDevice or isSM120Device)
+            and head_dim in range(193, 256)
+        ):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
 
@@ -6549,6 +6649,9 @@ class TestSDPAAccelerator(NNTestCase):
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
                     fudge_factors['grad_key'] = 90.0
+                # AOTriton bf16 grad_query error on gfx120x is ~6x gfx110x/gfx1151: ROCm/aotriton#259
+                if dtype == torch.bfloat16 and isRocmArchAnyOf(NAVI4_ARCH):
+                    fudge_factors['grad_query'] = max(fudge_factors['grad_query'], 520.0)
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
@@ -6568,7 +6671,6 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16])
-    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
@@ -6577,7 +6679,6 @@ class TestSDPAAccelerator(NNTestCase):
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
-                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)

@@ -17,7 +17,18 @@
     :nosignatures:
 
     sdpa_kernel
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/enum.rst
+
     SDPBackend
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     register_flash_attention_impl
     activate_flash_attention_impl
     list_flash_attention_impls

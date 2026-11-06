@@ -135,7 +135,6 @@ from torch.testing._internal.opinfo.definitions.linalg import (
     sample_inputs_linalg_qr_geqrf,
     sample_inputs_linalg_invertible,
     sample_inputs_lu_solve,
-    sample_inputs_legacy_solve,
     sample_inputs_svd,
     sample_inputs_linalg_det_logdet_slogdet,
     sample_inputs_linalg_lu,
@@ -3545,7 +3544,7 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S), (S, 2 * L))
 
     for shape, sorted, return_inverse, return_counts, dim in \
             product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
@@ -3597,12 +3596,17 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2,)), output_size=(1,)),
+                     error_type=ValueError, error_regex="Expected 2D or 3D tensor")
+
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
-                     error_regex="'output_size' should contain one int")
+                     error_type=ValueError, error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3634,10 +3638,11 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 2")
+                     error_type=ValueError, error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3660,6 +3665,8 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
+    yield SampleInput(make_arg((2, 3, 8, 8, 6), memory_format=torch.channels_last_3d), args=((5, 7, 4),))
+
 
 def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -3670,10 +3677,11 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 3")
+                     error_type=ValueError, error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3793,6 +3801,7 @@ class _TestParamsMaxPoolBase:
     def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
+            # Overlapping stride first: inductor_one_sample (test_torchinductor_opinfo.py) runs only the first sample
             'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
@@ -3801,9 +3810,9 @@ class _TestParamsMaxPoolBase:
         }
 
         self.shapes = [
-            [1, 2, None],  # batch
+            [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first 1d sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -3826,32 +3835,35 @@ class _TestParamsMaxPoolBase:
         yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+    pass
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2)]
-        self.kwargs['stride'] += [(2, 1)]
-        self.kwargs['padding'] += [(1, 1)]
-        self.kwargs['dilation'] += [(1, 2)]
+        self.kwargs['kernel_size'] = [(3, 2)]
+        # Per-dim stride values differ: H overlaps and W tiles (both overlap with dilation)
+        self.kwargs['stride'] = [(1, 2), None]
+        self.kwargs['padding'] = [0, (1, 1)]
+        self.kwargs['dilation'] = [1, (1, 2)]
 
-        self.shapes.append([6])
+        self.shapes.append([5])  # odd, so the first sample has a partial ceil_mode window in W
+
+class _TestParamsMaxPool2dBackward(_TestParamsMaxPool2d):
+
+    def __init__(self) -> None:
+        super().__init__()
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        self.kwargs['return_indices'] = [True]
 
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2, 3)]
-        self.kwargs['stride'] += [(2, 1, 2)]
-        self.kwargs['dilation'] += [(1, 2, 1)]
+        self.kwargs['kernel_size'] = [(3, 2, 3)]
+        # Per-dim stride values all differ: D overlaps and H, W tile (H overlaps too with dilation)
+        self.kwargs['stride'] = [(1, 2, 3), None]
+        self.kwargs['dilation'] = [1, (1, 2, 1)]
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -3863,7 +3875,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
-        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2dBackward,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -5172,6 +5184,17 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                     mode=mode,
                     align_corners=align_corners,
                 )
+            if mode in ('linear', 'bilinear', 'trilinear') and align_corners is not None and dtype.is_floating_point:
+                # These sizes hit source coordinates just below a power of two (gh-201764)
+                out_size = 83 if align_corners else 29
+                for dim in range(rank):
+                    yield SampleInput(
+                        make_arg((1, 1) + (9,) * rank),
+                        tuple(out_size if d == dim else D for d in range(rank)),
+                        scale_factor=None,
+                        mode=mode,
+                        align_corners=align_corners,
+                    )
             for recompute_scale_factor in [False, True]:
                 for scale_factor in [1.7, 0.6]:
                     yield SampleInput(
@@ -6105,6 +6128,10 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
             continue
         yield SampleInput(make_arg(shape), rep_dim)
 
+    # Transposed, sliced, and a size-1 dim whose stride exceeds int32.
+    for arg in (make_arg((3, 4)).t(), make_arg((7, 9))[1::2, 2::2], make_arg((1, 4)).as_strided((1, 4), (2**32, 1))):
+        yield SampleInput(arg.detach().requires_grad_(requires_grad), (2, 3))
+
 
 def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
@@ -6527,14 +6554,13 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
         yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_arg(10, low=.5, high=2.0)
+    make_window = partial(make_arg, low=.5, high=2.0)
     yield SampleInput(mt((10, 10, 6)), kwargs=dict(
-        n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
+        n_fft=10, window=make_window(10), center=True, return_complex=dtype.is_complex))
     yield SampleInput(mt((10, 10, 10)), kwargs=dict(
-        n_fft=10, window=window[:8], win_length=8, center=center, return_complex=True))
-
-    real_window = window if not dtype.is_complex else window.real
-    yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
+        n_fft=10, window=make_window(8), win_length=8, center=True, return_complex=True))
+    yield SampleInput(mt((10, 5, 6)), kwargs=dict(
+        n_fft=8, window=make_window(8, dtype=dtype.to_real()), center=True))
 
 def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
@@ -6563,6 +6589,36 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
         sample.input = make_tensor(psd_matrix.shape, dtype=dtype, device=device, requires_grad=requires_grad, low=None, high=None)
         sample.args = (psd_matrix.requires_grad_(requires_grad),)
         yield sample
+
+    # A right-hand side with the shape of L.shape[:-1] is a matrix broadcast over the batch. See #196694
+    A = make_fullrank_matrices_with_distinct_singular_values(S, S, S, dtype=dtype, device=device)
+    for upper in (False, True):
+        L = torch.linalg.cholesky(A @ A.mH, upper=upper)
+        # cholesky_solve does not read the other strict triangle of L. Filling it with
+        # nonzero values checks that the derivatives do not depend on it either. See #199069
+        unread = A.tril(-1) if upper else A.triu(1)
+        yield SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
+                          args=((L + unread).requires_grad_(requires_grad),), kwargs=dict(upper=upper))
+
+
+def sample_inputs_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_b = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    def make_a(*shape):
+        # The large diagonal keeps both triangles well conditioned
+        a = make_tensor(shape, dtype=dtype, device=device, low=-1, high=1)
+        a.diagonal(0, -2, -1).add_(shape[-1] + 1)
+        return a.requires_grad_(requires_grad)
+
+    for n, batch, k in product((5, 0), ((), (0,), (2,), (2, 2)), (1, 3)):
+        yield SampleInput(make_b(*batch, n, k), args=(make_a(*batch, n, n),))
+    for upper, transpose, unitriangular in product((True, False), repeat=3):
+        yield SampleInput(make_b(2, 3, 2), args=(make_a(2, 3, 3),),
+                          kwargs=dict(upper=upper, transpose=transpose, unitriangular=unitriangular))
+    # A right-hand side with the shape of A.shape[:-1] is a matrix broadcast over the batch. See #196694
+    yield SampleInput(make_b(3, 3), args=(make_a(3, 3, 3),))
+    # A broadcast against a batched right-hand side
+    yield SampleInput(make_b(2, 3, 2), args=(make_a(3, 3),))
 
 
 def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -7561,15 +7617,15 @@ _lce_chunked_op_skips = (
                  "TestCompositeCompliance", "test_cow_input",
                  device_type="cuda",
                  active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_grad"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvmap"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapjvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp_has_batch_rule"),
     DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
     DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
 )
@@ -9887,7 +9943,9 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
-        if dmajor >= 10:
+        # SWIZZLE_32_4_4 and NVFP4 are NVIDIA-only; on ROCm dmajor is the gfx
+        # major (e.g. 12 on gfx120x), not an SM version.
+        if dmajor >= 10 and not torch.version.hip:
             # MXFP8
             scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
             scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
@@ -10447,8 +10505,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
-        indices = sample.args[0]
+    samples = list(sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs))
+    smallest_size = min((math.prod(s.kwargs['output_size'][2:]) for s in samples), default=None)
+    for sample in samples:
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
@@ -10464,8 +10523,11 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
         # indices.
-        # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Here we go with the solution 2, the easiest of all: non-overlapping
+        # windows (stride=None, i.e. stride == kernel_size) always give unique indices.
+        # gradcheck is expensive, so only the smallest max_pool input is kept;
+        # output_size is that input's shape (sample.input is the pooled output).
+        if sample.kwargs['stride'] is None and math.prod(sample.kwargs['output_size'][2:]) == smallest_size:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -12106,20 +12168,12 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
+                           dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
+                           dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
@@ -12306,15 +12360,6 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
-               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
-                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
@@ -12754,7 +12799,6 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            error_inputs_func=error_inputs_dot_vdot,
@@ -12772,7 +12816,6 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_dot_vdot,
            error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -12836,23 +12879,6 @@ op_db: list[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
-               # FIXME: AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               # FIXME: RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   device_type='mps',
-                   dtypes=(torch.complex64,)),
-               # RuntimeError: MPS device does not support addr for non-float input
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   device_type='mps',
-                   dtypes=(torch.int64,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -13278,7 +13304,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCPUIfNoLapack],
            skips=(
                # https://github.com/pytorch/pytorch/issues/165294
@@ -14048,9 +14073,6 @@ op_db: list[OpInfo] = [
            ),
            skips=(
                skipCPUIfNoFFT,
-               # gradcheck fails on ROCm (gh-68429)
-               # grad is computed improperly (probably for weights tensor)
-               # Pre-existing condition (calls .item); needs to be fixed
             ),
            ),
     UnaryUfuncInfo('floor',
@@ -14692,9 +14714,6 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
                # Exception: RuntimeError not raised : inplace variant either incorrectly allowed resizing
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               # Exception: "masked_scatter_ only supports boolean masks" does not match
-               # "masked_scatter: expected BoolTensor or ByteTensor for mask"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -15230,13 +15249,6 @@ op_db: list[OpInfo] = [
            assert_autodiffed=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
-           ),
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -15402,7 +15414,7 @@ op_db: list[OpInfo] = [
             # Only on this variant: the scalar backward supports neither jvp
             # nor the normalize pass, while its no_reduction sibling and the
             # override variants differ in what else they cannot do.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -15452,10 +15464,10 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_grad_match",
                          dtypes=(torch.float16, torch.bfloat16, torch.float32),
                          device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
             # Only on this variant: the recompute backward breaks
             # vmap-over-grad, a batched cotangent into in-place buffers.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmap_autograd_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmap_autograd_grad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -15721,15 +15733,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
-           skips=(
-               # RuntimeError: Adaptive pool MPS: input sizes must be divisible
-               # by output sizes. Non-divisible input sizes are not implemented
-               # on MPS device yet
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-           ),
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -15744,15 +15747,6 @@ op_db: list[OpInfo] = [
                #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           skips=(
-               # RuntimeError: Adaptive pool MPS: input sizes must be divisible
-               # by output sizes. Non-divisible input sizes are not implemented
-               # on MPS device yet
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False,
            supports_forward_ad=True,
@@ -15776,14 +15770,6 @@ op_db: list[OpInfo] = [
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           skips=(
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16098,7 +16084,7 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap', device_type='cuda'
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cuda', 'xpu')
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
@@ -16264,27 +16250,31 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap',
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_jvpvjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cpu', 'cuda')
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="xpu"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestOperatorsDevice', 'test_vjp', device_type="cuda"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_vjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_vjp', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_grad', device_type="xpu"
+                   'TestOperatorsDevice', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16299,7 +16289,7 @@ op_db: list[OpInfo] = [
                # sigma; rtol=2e-5 covers small-|dW|.
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
-                   'TestOperators', 'test_grad', device_type="cuda",
+                   'TestOperatorsDevice', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
                ),
                DecorateInfo(
@@ -16309,10 +16299,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=5e-6)}),
-                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
                ),
            ),
            skips=(
@@ -16583,8 +16569,8 @@ op_db: list[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: aten::_upsample_nearest_exact*d hit the vmap fallback which is currently disabled
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapjvpall_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoDevice', 'test_op_has_batch_rule'),
            ),
            supports_out=False),
@@ -16677,11 +16663,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: Adaptive pool MPS: input sizes must be divisible by output sizes
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
@@ -17539,9 +17520,6 @@ op_db: list[OpInfo] = [
         aten_backward_name='silu_backward',
         ref=lambda x, inplace=False: x / (1 + np.exp(-x)),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfMPS=floating_types_and(
-            torch.bfloat16, torch.float16, torch.int16, torch.int32, torch.uint8, torch.bool, torch.int8
-        ),
         supports_forward_ad=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
@@ -17731,7 +17709,6 @@ op_db: list[OpInfo] = [
         'nn.functional.threshold',
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.half, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         inplace_variant=lambda x, threshold, value:
             torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
@@ -18984,11 +18961,10 @@ op_db: list[OpInfo] = [
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_legacy_solve,
+           sample_inputs_func=sample_inputs_triangular_solve,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[
                skipCPUIfNoLapack,
                DecorateInfo(
@@ -18997,7 +18973,7 @@ op_db: list[OpInfo] = [
                ),
                 DecorateInfo(
                     toleranceOverride({torch.float32: tol(atol=5e-5, rtol=3e-6)}),
-                    'TestOperators',
+                    'TestOperatorsDevice',
                     'test_jvp',
                     device_type='cpu',
                 ),
@@ -19007,7 +18983,7 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # Gradcheck fails
+               # test_out passes on MPS, which the expectedFailure above would report as an unexpected success
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -19168,7 +19144,7 @@ op_db: list[OpInfo] = [
     OpInfo('lerp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
-           dtypesIfMPS=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+           dtypesIfMPS=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19194,12 +19170,7 @@ op_db: list[OpInfo] = [
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
-                   supports_complex_to_float=True,
-                   skips=(
-                       # Ref: https://github.com/pytorch/pytorch/issues/78413
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
-                   )),
+                   supports_complex_to_float=True),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -19347,7 +19318,7 @@ op_db: list[OpInfo] = [
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
-                                    'TestOperators', 'test_grad'),
+                                    'TestOperatorsDevice', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -20534,7 +20505,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestEagerFusionOpInfo'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOperators'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice'),
                # AssertionError
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
                # AssertionError
@@ -21292,10 +21263,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # Allowed exception: sparse tensors don't have strides
-               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
-                            'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
@@ -21458,6 +21425,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    decorators=(precisionOverride({torch.float16: 7e-1}),
                                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=4e-6)}),
                                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                                            'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
                                ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -21513,13 +21482,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    promotes_int_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
-                   skips=(
-                       # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
-                       # of dtype torch.float32 into an out= with dtype torch.long
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                       # NotImplementedError: The operator 'aten::logit_' is not currently implemented for the MPS device
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-                   ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit),
     OpInfo('where',
@@ -22140,37 +22102,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # mps refuses 5-D bicubic in eager. Not listed: test_dtypes, where a
             # raising sample only marks a dtype partially supported, and test_out_warning,
             # which returns on the first sample, a 4-D bilinear one.
-            # TODO: drop these when mps / xpu implement 5-D bicubic.
+            # TODO: drop these when mps implements 5-D bicubic.
             # MPS TestConsistency has its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
-                         "test_noncontiguous_samples", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon",
-                         "test_variant_consistency_eager", device_type="xpu"),
-            # not instantiated on mps
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_operator", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_backward", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
-                         "test_view_replay", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestMathBits",
-                         "test_neg_view", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
-                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
-                         "test_fake_crossref_backward_amp", device_type="xpu"),
-            # the gradient suites run on xpu, which claims float64
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
-                         "test_fn_grad", device_type="xpu"),
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
-                         "test_fn_gradgrad", device_type="xpu"),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -22191,6 +22131,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip, "TestBwdGradients", "test_fn_grad", device_type="cuda", dtypes=(torch.float64,), active_if=TEST_WITH_ROCM or TEST_WITH_TORCHINDUCTOR),
             # https://github.com/pytorch/pytorch/issues/179743
             DecorateInfo(unittest.skip, "TestJit", "test_variant_consistency_jit", device_type="cuda", dtypes=(torch.float32,), active_if=IS_LINUX),
+            DecorateInfo(unittest.skip, "TestBwdGradients", "test_fn_gradgrad", device_type="xpu"),
         ),),
     # TODO: Remove grid_sampler_3d tests once `nn.functional.grid_sample` has
     # MPS support for all cases.
@@ -22237,7 +22178,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.all),
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
     ),
     ReductionOpInfo(
@@ -22249,7 +22190,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.any),
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
     ),
     ReductionOpInfo(
@@ -22262,13 +22203,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22284,16 +22220,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64],
-            ),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22307,18 +22235,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -22327,18 +22243,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
@@ -22351,15 +22255,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.count_nonzero),
         skips=(
             # FIXME: count_nonzero does not accept keepdim kwarg
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_unsorted_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_offbounds_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_single_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_unsorted_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_offbounds_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
         ),
     ),
     ReductionOpInfo(
@@ -22382,27 +22286,19 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type=('cuda', 'xpu'), dtypes=[torch.float32]),
             # FIXME: mean does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
             # Skipped on XPU because complex mean with extremal values (Inf/NaN) exhibits backend-dependent
             # IEEE-754 behavior that differs from the CPU reference.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='xpu', dtypes=[torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128],
-            ),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a
             # result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
@@ -22425,22 +22321,17 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Failure in testing nodes' autodifferentiation.
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: prod reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          device_type='cuda', dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22460,20 +22351,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         generate_args_kwargs=generate_std_var_kwargs,
         skips=(
             # FIXME: cannot specify keepdim without dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=(torch.float16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22495,8 +22381,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
@@ -22516,15 +22402,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         generate_args_kwargs=generate_std_var_kwargs,
         skips=(
             # FIXME: cannot specify keepdim without dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_large_input'),
             # NotImplementedError: The operator 'aten::var.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22546,8 +22432,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
@@ -22568,25 +22454,20 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=prod_numpy,
         skips=(
             # FIXME: prod does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: prod reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: prod does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16, torch.complex64]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=[torch.uint8, torch.float16, torch.complex64]),
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float16]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128, torch.int8, torch.int16, torch.int32, torch.int64]),
         ),
     ),
     ReductionOpInfo(
@@ -22608,22 +22489,17 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22643,19 +22519,14 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: nansum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: flaky test so skipped instead of xfailed
             # possibly bad low precision reference in numpy
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
@@ -22670,8 +22541,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_hash_tensor,
         skips=(
             # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # aten::hash_tensor hit the vmap fallback which is currently disabled
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
@@ -22682,7 +22553,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Error: The operator 'aten::hash_tensor.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
             # NotImplementedError: aten::hash_tensor.out
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_default', device_type='mps'),
         )
     ),
     OpInfo(
@@ -22784,9 +22655,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         "nn.functional.huber_loss",
         aten_backward_name='huber_loss_backward',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.float16, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-        ),
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
@@ -23287,7 +23155,7 @@ if "cutedsl" in dsl_ops_by_dsl:
                     "TestDecomp", "test_comprehensive"),
                 # Recompute-in-backward is not vmap-over-grad compatible, as on
                 # the "chunked_none" variant.
-                DecorateInfo(unittest.expectedFailure, "TestOperators",
+                DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice",
                              "test_vmap_autograd_grad"),
             ),
             **_cutedsl_lce_kwargs,
@@ -23601,7 +23469,9 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
@@ -23616,8 +23486,6 @@ python_ref_db = [
         decorators=(
             # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
 
@@ -23761,11 +23629,6 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
-            # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='xpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
-                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -24360,7 +24223,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
-        decorators=(precisionOverride({torch.float16: 7e-1}),),
+        decorators=(
+            precisionOverride({torch.float16: 7e-1}),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
+        ),
         skips=(
             # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -25095,24 +24962,6 @@ python_ref_db = [
         # The corresponding PyTorch op doesn't support out.  But the ref is
         # registered as a decomp and ATen has an out variant.
         supports_out=True,
-        skips=(
-            # torch.bool - Subtraction, the `-` operator, with two bool tensors is not supported.
-            # Use the `^` or `logical_xor()` operator instead.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # AssertionError: Tensor-likes are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
@@ -26365,7 +26214,7 @@ python_ref_db = [
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype',
                 dtypes=[torch.uint8]),
         ),
     ),
@@ -26376,14 +26225,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26395,14 +26239,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26413,7 +26252,7 @@ python_ref_db = [
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype',
                 dtypes=[torch.uint8]),
         ),
     ),
@@ -26423,21 +26262,21 @@ python_ref_db = [
         skips=(
             # FIXME: count_nonzero does not accept keepdim kwarg
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_dim_default_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_single_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_dim_multi_unsorted_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26448,14 +26287,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26465,22 +26299,17 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=(torch.float16,)),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_ref_duplicate_values',
                 dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
@@ -26496,25 +26325,20 @@ python_ref_db = [
             # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
             # FIXME: mean reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=[torch.float16]),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_ref_duplicate_values',
                 dtypes=[torch.float16]),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+                unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                 dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
 
         ),
     ),
@@ -26551,18 +26375,13 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=[torch.float16, torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64, torch.int8, torch.int16, torch.int32, torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26572,14 +26391,14 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values'),
         ),
     ),
     PythonRefInfo(
@@ -26595,14 +26414,6 @@ python_ref_db = [
         torch_opinfo_name="addr",
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # RuntimeError: MPS device does not support addr for non-float input
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.complex64, torch.bool,
-                )
-            ),
         ),
     ),
     PythonRefInfo(

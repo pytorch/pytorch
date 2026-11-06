@@ -5,7 +5,6 @@ import re
 import sys
 from pathlib import Path
 
-import tabulate
 import yaml
 
 
@@ -60,8 +59,33 @@ _HEADERS = (
 )
 TableRow = list[str | int | float | None]
 
-_REPORT_GUIDANCE = """\
-"""
+
+def print_table(rows: list[TableRow], headers: tuple[str, ...]) -> None:
+    # This formatter can be easily replaced with tabulate if it becomes available.
+    table = []
+    for row in rows:
+        cells = []
+        for value in row:
+            if value is None:
+                cells.append("")
+            elif isinstance(value, float):
+                cells.append(f"{value:.1%}")
+            elif isinstance(value, int):
+                cells.append(f"{value:,}")
+            else:
+                cells.append(value)
+        table.append(cells + [""] * (len(headers) - len(cells)))
+    widths = [
+        max([len(header), *(len(row[i]) for row in table)])
+        for i, header in enumerate(headers)
+    ]
+    for row in [list(headers), ["-" * width for width in widths], *table]:
+        print(
+            "  ".join(
+                cell.ljust(width) if i == 0 else cell.rjust(width)
+                for i, (cell, width) in enumerate(zip(row, widths))
+            ).rstrip()
+        )
 
 
 def _counts(
@@ -256,7 +280,6 @@ def main() -> None:
         "--profile",
         nargs=2,
         action="append",
-        required=True,
         type=Path,
         metavar=("YAML", "LOG"),
         help="Profile and corresponding optimization log; repeat for additional profiles",
@@ -273,8 +296,7 @@ def main() -> None:
         rows.extend(report_rows)
         rows.append([])  # empty row
 
-    tabulate.PRESERVE_WHITESPACE = True
-    print(tabulate.tabulate(rows, headers=_HEADERS, intfmt=",", floatfmt=".1%"))
+    print_table(rows, headers=_HEADERS)
     print(f"Use `{Path(__file__).resolve()} --help` for guidance on using this report.")
 
 

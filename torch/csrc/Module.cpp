@@ -30,12 +30,14 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
+#include <pybind11/options.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/utils/pybind.h>
@@ -101,6 +103,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -173,7 +176,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (Py_ssize_t i = 0; i < num_classes; i++) {
+  for (const auto i : c10::irange(num_classes)) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
@@ -1692,32 +1695,10 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 #undef DEFINE_SCALAR_TYPE
 
-  auto is_subbyte_dummy = [](at::ScalarType t) {
-    switch (t) {
-      case at::ScalarType::UInt1:
-      case at::ScalarType::UInt2:
-      case at::ScalarType::UInt3:
-      case at::ScalarType::UInt4:
-      case at::ScalarType::UInt5:
-      case at::ScalarType::UInt6:
-      case at::ScalarType::UInt7:
-      case at::ScalarType::Int1:
-      case at::ScalarType::Int2:
-      case at::ScalarType::Int3:
-      case at::ScalarType::Int4:
-      case at::ScalarType::Int5:
-      case at::ScalarType::Int6:
-      case at::ScalarType::Int7:
-        return true;
-      default:
-        return false;
-    }
-  };
-
   THPObjectPtr result(PyList_New(0));
   TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
-    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
+    if (c10::isQIntType(scalar_type) || c10::isSubByteIntType(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
@@ -2651,6 +2632,7 @@ PyObject* initModule() {
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));
+  ASSERT_TRUE(FastXpuLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
@@ -2898,6 +2880,29 @@ Call this whenever a new thread is created in order to propagate values from
     fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
   });
 
+  py_module.def(
+      "_set_fake_sym_memo",
+      [](const at::Tensor& fake,
+         const std::string& name,
+         c10::SymInt memo,
+         uint64_t epoch) {
+        fake.unsafeGetTensorImpl()->set_fake_sym_memo(
+            name, std::move(memo), epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("memo"),
+      py::arg("epoch"));
+
+  py_module.def(
+      "_get_fake_sym_memo",
+      [](const at::Tensor& fake, const std::string& name, uint64_t epoch) {
+        return fake.unsafeGetTensorImpl()->fake_sym_memo(name, epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("epoch"));
+
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
@@ -2934,6 +2939,51 @@ Call this whenever a new thread is created in order to propagate values from
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
   });
+
+  // A C++ FakeTensorMode, owned by its Python CppFakeTensorMode wrapper; see
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  py::class_<c10::FakeTensorMode, std::shared_ptr<c10::FakeTensorMode>>(
+      py_module, "_CppFakeTensorMode")
+      .def(
+          py::init([](const py::object& converter,
+                      const py::object& shape_env,
+                      const py::object& wrapper) {
+            TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
+            TORCH_CHECK(
+                !wrapper.is_none(),
+                "Expected the CppFakeTensorMode that owns this mode as wrapper");
+            std::shared_ptr<c10::SafePyObject> shape_env_obj;
+            if (!shape_env.is_none()) {
+              shape_env_obj = std::make_shared<c10::SafePyObject>(
+                  shape_env.inc_ref().ptr(), getPyInterpreter());
+            }
+            auto functorch_config =
+                py::module::import("torch._functorch.config");
+            auto mode = std::make_shared<c10::FakeTensorMode>(
+                std::move(shape_env_obj),
+                std::make_shared<c10::SafePyObject>(
+                    converter.inc_ref().ptr(), getPyInterpreter()),
+                functorch_config.attr("fake_tensor_allow_meta").cast<bool>());
+            PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
+            if (weakref == nullptr) {
+              throw py::error_already_set();
+            }
+            mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
+                weakref, getPyInterpreter());
+            return mode;
+          }),
+          py::arg("converter"),
+          py::arg("shape_env"),
+          py::arg("wrapper"))
+      .def_property(
+          "allow_meta",
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_meta_.load();
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_meta_.store(value);
+          });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3197,18 +3247,37 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readonly("is_causal", &sdp::sdp_params::is_causal)
       .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
-  py::enum_<sdp::SDPBackend>(
-      py_module,
-      "_SDPBackend",
-      "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
-      "This backend class is designed to be used with the sdpa_kernel context manager."
-      "See :func: torch.nn.attention.sdpa_kernel for more details.")
-      .value("ERROR", sdp::SDPBackend::error)
-      .value("MATH", sdp::SDPBackend::math)
-      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
-      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  {
+    py::options options;
+    options.disable_enum_members_docstring();
+
+    py::enum_<sdp::SDPBackend>(
+        py_module,
+        "_SDPBackend",
+        "An enum-like class that contains the different backends for scaled dot product attention.\n\n"
+        ".. warning:: This class is in beta and subject to change.\n\n"
+        "This backend class is designed to be used with the sdpa_kernel context manager. "
+        "See :func:`torch.nn.attention.sdpa_kernel` for more details.\n\n"
+        "The following members are available:\n\n"
+        "- ``ERROR``: Represents an error while determining the backend.\n"
+        "- ``MATH``: Selects the PyTorch implementation defined in C++ that "
+        "matches the formulation in "
+        ":func:`torch.nn.functional.scaled_dot_product_attention`.\n"
+        "- ``FLASH_ATTENTION``: Selects the FlashAttention backend. The default "
+        "CUDA implementation uses `FlashAttention-2`_: Faster Attention with "
+        "Better Parallelism and Work Partitioning.\n"
+        "- ``EFFICIENT_ATTENTION``: Selects `Memory-Efficient Attention`_.\n"
+        "- ``CUDNN_ATTENTION``: Selects the cuDNN scaled dot product attention implementation.\n"
+        "- ``OVERRIDEABLE``: Selects an overrideable backend provided by an extension.\n\n"
+        ".. _FlashAttention-2: https://arxiv.org/abs/2307.08691\n"
+        ".. _Memory-Efficient Attention: https://github.com/facebookresearch/xformers")
+        .value("ERROR", sdp::SDPBackend::error)
+        .value("MATH", sdp::SDPBackend::math)
+        .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+        .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
+        .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+        .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  }
 
   py_module.def("_is_flash_attention_available", []() {
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -3521,6 +3590,14 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
+  // See Note [C++ in_kernel_invocation].
+  torch::impl::py_context_manager<c10::impl::InKernelInvocationGuard>(
+      py_module, "_InKernelInvocation");
+
+  py_module.def("_in_kernel_invocation", []() {
+    return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
+  });
+
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
@@ -3580,9 +3657,55 @@ Call this whenever a new thread is created in order to propagate values from
             !tensor.is_fake() &&
                 !tensor.key_set().has(c10::DispatchKey::Python),
             "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
-        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
+        auto* storage = tensor.storage().unsafeGetStorageImpl();
+        return c10::impl::cow::is_cow_data_ptr(
+            storage->_mutable_data_ptr_no_checks());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_cow_record_done",
+      [](const at::Tensor& tensor) {
+        TORCH_CHECK(
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_cow_record_done is not defined for Python tensor subclasses or FakeTensors");
+        c10::impl::cow::record_done(*tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("tensor"),
+      R"doc(
+Record completion of earlier CUDA COW uses on the current stream without blocking the CPU.
+
+First join all earlier uses through this tensor, storage aliases (including views),
+and saved pointers onto the current stream. Include uses before the first lazy clone
+and materializing copies. Serialize this call with all host accesses to that storage;
+GPU waits do not serialize host threads. Missing a use can cause data corruption.
+
+Completion releases the old reference retained after materialization, allowing siblings
+to steal it. The materialized tensor remains usable on its new allocation.
+
+Completion is final for each reference; repeated calls are no-ops. If the current
+reference is COW, later data access (including ``const_data_ptr()``) or lazy cloning
+raises, including through storage aliases. Do not submit further work through saved
+pointers to that reference. Independent lazy clones have separate completion state.
+
+Completion must stay within the context's capture, or outside capture for an eager
+context. It has no effect on CPU storage or storage without COW references.
+
+Args:
+    tensor (Tensor): Tensor whose storage's earlier COW uses are complete on
+      the current stream.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> import torch
+    >>> x = torch.ones(1024, device="cuda")
+    >>> y = x._lazy_clone()
+    >>> x.add_(1)  # Materializes x; its storage retains the old allocation.
+    >>> torch._C._cow_record_done(x)
+    >>> y.add_(2)  # Can now steal the original allocation without copying.
+)doc");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",

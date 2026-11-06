@@ -67,7 +67,6 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -81,8 +80,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfNoLapack,
     skipIfWindows,
-    skipIfXpu,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -1042,6 +1041,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    @skipIfNoLapack
     def test_linalg_inv_singular_aot_eager_raises(self):
         def fn(x):
             return torch.linalg.inv(x)
@@ -1056,6 +1056,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._C._LinAlgError, msg):
             opt_fn(x)
 
+    @skipIfNoLapack
     def test_linalg_inv_check_errors_preserved_in_aot_graph(self):
         def fn(x):
             return torch.linalg.inv(x)
@@ -3812,6 +3813,58 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    @parametrize("alias", ["contiguous", "to_dtype", "to_device", "type", "mul_"])
+    @parametrize("call", ["method", "function"])
+    def test_inplace_view_on_noop_alias_of_input(self, alias, call):
+        # Each alias is x itself, so the in-place view must graph break like x.unsqueeze_(0).
+        make_alias = {
+            "contiguous": lambda x: x.contiguous(),
+            "to_dtype": lambda x: x.to(x.dtype),
+            "to_device": lambda x: x.to(x.device),
+            "type": lambda x: x.type(x.dtype),
+            "mul_": lambda x: x.mul_(1),
+        }[alias]
+
+        def fn(x):
+            v = make_alias(x)
+            if call == "method":
+                v.unsqueeze_(0)
+            else:
+                torch.Tensor.unsqueeze_(v, 0)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
+
+    def test_inplace_view_on_copy_of_input(self):
+        def fn(x):
+            v = x.clone()
+            v.unsqueeze_(0)
+            return v
+
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_inplace_view_on_subclass_alias_of_input(self):
+        class Subclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            v = x.contiguous().as_subclass(Subclass)
+            v.unsqueeze_(0)
+            return x, v
+
+        ref_x, ref_v = fn(torch.ones(2, 3))
+        x, v = torch.compile(fn, backend="eager")(torch.ones(2, 3))
+        self.assertEqual(x.shape, ref_x.shape)
+        self.assertEqual(v.shape, ref_v.shape)
+        self.assertIsInstance(v, Subclass)
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
@@ -6542,10 +6595,6 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -9573,7 +9622,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -9934,7 +9982,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)

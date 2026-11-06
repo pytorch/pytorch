@@ -34,7 +34,7 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
-from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.distributed.distributed_c10d import _torchcomms_handles_backend
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -58,27 +58,6 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 )
 
 
-TORCHCOMM_HAS_GLOO = False
-TORCHCOMM_HAS_XCCL = False
-TORCHCOMM_HAS_NCCL = False
-TORCHCOMM_HAS_RCCL = False
-TORCHCOMM_HAS_NCCLX = False
-TORCHCOMM_HAS_RCCLX = False
-if _TORCHCOMM_AVAILABLE:
-    import torchcomms
-
-    for _backend, _flag in [
-        ("gloo", "TORCHCOMM_HAS_GLOO"),
-        ("xccl", "TORCHCOMM_HAS_XCCL"),
-        ("nccl", "TORCHCOMM_HAS_NCCL"),
-        ("rccl", "TORCHCOMM_HAS_RCCL"),
-        ("rcclx", "TORCHCOMM_HAS_RCCLX"),
-        ("ncclx", "TORCHCOMM_HAS_NCCLX"),
-    ]:
-        if torchcomms.is_backend_built(_backend):
-            globals()[_flag] = True
-
-
 def setup_torchcomms_pg(
     backend: str,
     rank: int,
@@ -99,6 +78,8 @@ def setup_torchcomms_pg(
     ``store_path``) that is unique within the process — duplicates trip
     ``_register_pg_in_world`` and the underlying FileStore.
     """
+    import torchcomms
+
     from torch.distributed.distributed_c10d import (
         _BackendWrapper,
         _register_pg_in_world,
@@ -589,7 +570,7 @@ def requires_multicast_support():
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
-            arch_list = ["gfx942", "gfx950"]
+            arch_list = ["gfx942", "gfx950", "gfx1250"]
             for arch in arch_list:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -1298,7 +1279,6 @@ class MultiProcessTestCase(TestCase):
 # This abstracts the PG creation and deletion, the backends are selected based
 # on device type. The tests functions can be instantiated per device type using
 # common_device_type.instantiate_device_type_tests
-# other backends can add entry in backend() function
 class DistributedTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -1316,14 +1296,7 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        return c10d.get_default_backend_for_device(device)
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
@@ -1331,18 +1304,11 @@ class DistributedTestBase(MultiProcessTestCase):
         backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        if "nccl" in backend or "xccl" in backend:
+        if torch.accelerator.is_available() and backend != c10d.Backend.GLOO:
             accelerator = torch.accelerator.current_accelerator()
-            if accelerator:
-                device_type = accelerator.type
-                device = torch.device(f"{device_type}:{self.rank}")
-                torch.set_default_device(device)
-                torch.accelerator.set_device_index(device)
-            else:
-                raise RuntimeError(
-                    "Expected to find an accelerator when initializing process group"
-                    f" with {backend} backend, but got None"
-                )
+            device = torch.device(f"{accelerator.type}:{self.rank}")
+            torch.set_default_device(device)
+            torch.accelerator.set_device_index(device)
         torch.distributed.init_process_group(
             backend=backend,
             world_size=world_size,
@@ -1766,7 +1732,9 @@ def _dynamo_dist_per_rank_init(
 
     if init_pg:
         if fake_pg:
-            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            store = FakeStore()
             c10d.init_process_group(
                 backend="fake",
                 world_size=world_size,
@@ -2300,18 +2268,10 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
         return cls.backend(device_type)
 
     def _skip_if_backend_unavailable(self, device: str) -> None:
-        backend_flags = {
-            "gloo": TORCHCOMM_HAS_GLOO,
-            "xccl": TORCHCOMM_HAS_XCCL,
-            "nccl": TORCHCOMM_HAS_NCCL,
-            "rccl": TORCHCOMM_HAS_RCCL,
-            "ncclx": TORCHCOMM_HAS_NCCLX,
-            "rcclx": TORCHCOMM_HAS_RCCLX,
-        }
         backend_name = self.backend(device)
         if TEST_WITH_ROCM and backend_name == "nccl":
             backend_name = "rccl"
-        if backend_name in backend_flags and not backend_flags[backend_name]:
+        if not _torchcomms_handles_backend(backend_name):
             self.skipTest(f"torchcomms {backend_name} backend is not available")
 
     @classmethod

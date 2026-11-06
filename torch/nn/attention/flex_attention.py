@@ -13,8 +13,19 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
-from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Never,
+    NotRequired,
+    overload,
+    Self,
+    TypeAlias,
+    TypeVar,
+)
+from typing_extensions import deprecated, TypedDict
 
 import torch
 from torch import Tensor
@@ -2251,10 +2262,19 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    # Read the PrivateUse1 name per call: backends rename it after torch import.
+    supported_devices = {
+        "cuda",
+        "cpu",
+        "xpu",
+        "hpu",
+        "mps",
+        torch._C._get_privateuse1_backend_name(),
+    }
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, or MPS devices. "
+            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, MPS, or "
+            "PrivateUse1 devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
@@ -2304,7 +2324,8 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
 
     should_enforce_mem_layout = (
-        gemm_precision in fp8_dtypes
+        query.device.type == "cuda"
+        and gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (8, 9)
         and torch.cuda.get_device_capability("cuda") < (10, 0)

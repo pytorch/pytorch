@@ -11,6 +11,7 @@ from sympy import Expr
 
 from torch import SymInt
 from torch.fx.experimental._size_hinting import (
+    _current_consistent_hints,
     _guarding_hint_or_throw_base,
     _maybe_realize_expr,
     _optimization_hint_base,
@@ -1159,12 +1160,22 @@ class SizeVarAllocator:
         hints. If not provided, fallback will be used along with some heuristics
         that try to maximize consistency with the shape environment.
 
+        Inside torch.fx.experimental._size_hinting.consistent_hints(), hints
+        are computed from one shared per-symbol assignment; see
+        ConsistentHintState.
+
         Special cases:
         - Complex numbers (containing sympy.I): raises an error since tensor
           dimensions cannot be complex.
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+        state = _current_consistent_hints()
+        if state is not None and state.shape_env is self.shape_env:
+            # Hints differ inside this ShapeEnv's context, so skip the cache.
+            return _optimization_hint_base(
+                self.shape_env, expr, self.inv_precomputed_replacements, fallback
+            )
         return self._optimization_hint_cache(expr, fallback)
 
     def _optimization_hint_uncached(
