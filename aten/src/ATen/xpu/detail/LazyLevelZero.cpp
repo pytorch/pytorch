@@ -77,6 +77,12 @@ ZE_STUB(
     const void*,
     ze_memory_allocation_properties_t*,
     ze_device_handle_t*)
+ZE_STUB(
+    zeContextMakeMemoryResident,
+    ze_context_handle_t,
+    ze_device_handle_t,
+    void*,
+    size_t)
 ZE_STUB(zeModuleBuildLogGetString, ze_module_build_log_handle_t, size_t*, char*)
 ZE_STUB(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
 

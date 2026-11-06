@@ -33,14 +33,15 @@ namespace at::xpu {
 // ATen/xpu/detail/LazyLevelZero.cpp accordingly (e.g., via one of the stub
 // macros).
 
-#define AT_FORALL_ZE(_)        \
-  _(zeModuleCreate)            \
-  _(zeModuleDestroy)           \
-  _(zeKernelCreate)            \
-  _(zeKernelDestroy)           \
-  _(zeKernelGetProperties)     \
-  _(zeMemGetAllocProperties)   \
-  _(zeModuleBuildLogGetString) \
+#define AT_FORALL_ZE(_)          \
+  _(zeModuleCreate)              \
+  _(zeModuleDestroy)             \
+  _(zeKernelCreate)              \
+  _(zeKernelDestroy)             \
+  _(zeKernelGetProperties)       \
+  _(zeMemGetAllocProperties)     \
+  _(zeContextMakeMemoryResident) \
+  _(zeModuleBuildLogGetString)   \
   _(zeModuleBuildLogDestroy)
 
 extern "C" typedef struct LevelZero {
