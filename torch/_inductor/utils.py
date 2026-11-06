@@ -3338,86 +3338,44 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
-@functools.cache
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
     from torch._inductor.virtualized import V
 
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
-
-    return (
-        V.graph.sizevars.statically_known_true(
-            sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
-            )
-        )
-        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
-        and not V.graph.cpp_wrapper
-        and config.triton.num_decompose_k_splits > 0
-        # Callers rely on False to retain the regular MM fallback.
-        and bool(get_k_splits(m, n, k))
+    large_k = sympy.And(
+        sympy.Ge(k, decompose_k_threshold * m),
+        sympy.Ge(k, decompose_k_threshold * n),
     )
-
-
-def dynamic_k_decompose_k_splits(m: _IntLike, n: _IntLike, k: sympy.Expr) -> list[int]:
-    """Splits offered for a dynamic K, keeping K / k_split >= 128 for the K hint
-    as get_k_splits does for a static K.
-
-    A split that does not divide K runs the leftover K rows as a separate MM. It
-    is only offered when M * N * K reaches 2**30 for the hints: below that the MM
-    takes microseconds, decompose_k does not win, and the extra autotune choices
-    only cost compile time. The size is read from hints without a guard.
-    """
-    from torch._inductor.virtualized import V
-
     sizevars = V.graph.sizevars
-    m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
-    large = m_hint * n_hint * k_hint >= 2**30
-    return [
-        s
-        for s in get_k_splits(m, n, k)
-        if k_hint // s >= 128
-        and (large or sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0)))
-    ]
-
-
-def use_dynamic_k_decompose_k_choice(
-    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
-) -> bool:
-    """decompose_k for a backed dynamic K, decided on its hint.
-
-    The base check guards K >= threshold * max(M, N) only when the hint
-    qualifies, so a later K below the threshold recompiles. A larger
-    threshold_multiple only trims the other candidates, so it reads the hint
-    without guarding. Not cached: the result installs a guard in the current
-    graph and depends on config.
-    """
-    from torch._inductor.virtualized import V
-
     if (
-        not isinstance(k, sympy.Expr)
-        or k.is_number
-        or V.graph.aot_mode
+        V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         or V.graph.cpp_wrapper
         or config.triton.num_decompose_k_splits <= 0
+        # Callers rely on False to retain the regular MM fallback.
+        or not get_k_splits(m, n, k)
     ):
         return False
-    if any(free_unbacked_symbols(x) for x in (m, n, k) if isinstance(x, sympy.Expr)):
-        return False
-    threshold = config.triton.decompose_k_threshold * threshold_multiple
-    sizevars = V.graph.sizevars
-    m_hint, n_hint, k_hint = (sizevars.guarding_hint_or_throw(x) for x in (m, n, k))
-    if k_hint < threshold * max(m_hint, n_hint) or not dynamic_k_decompose_k_splits(
-        m, n, k
-    ):
-        return False
-    if threshold_multiple > 1:
+    if sizevars.statically_known_true(large_k):
         return True
-    return sizevars.guard_or_false(
-        sympy.And(sympy.Ge(k, threshold * m), sympy.Ge(k, threshold * n))
+    # A backed dynamic K is decided on its hint. Only the base threshold is
+    # guarded, so the one recompile is a later K below it; a larger
+    # threshold_multiple just trims the other choices.
+    if not isinstance(k, sympy.Expr) or k.is_number or free_unbacked_symbols(large_k):
+        return False
+    m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
+    divisible = any(
+        sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
+        for s in get_k_splits(m, n, k)
     )
+    # decomposeK runs the K rows a split leaves over as a separate MM. That is
+    # only worth the extra autotune choices when the MM is not tiny.
+    if not (divisible or m_hint * n_hint * k_hint >= 2**30):
+        return False
+    if k_hint < decompose_k_threshold * max(m_hint, n_hint):
+        return False
+    return threshold_multiple > 1 or sizevars.guard_or_false(large_k)
 
 
 @functools.cache

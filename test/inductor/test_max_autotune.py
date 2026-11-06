@@ -114,12 +114,7 @@ from torch.utils._triton import (
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import (
-    fresh_cache,
-    get_k_splits,
-    run_and_get_code,
-    use_decompose_k_choice,
-)
+from torch._inductor.utils import fresh_cache, get_k_splits, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -3320,7 +3315,6 @@ class TestMaxAutotune(TestCase):
         shapes = [(32, 32, 32768), (32, 32, 256)]
         for M, N, K in shapes:
             get_k_splits.cache_clear()
-            use_decompose_k_choice.cache_clear()
             a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
             b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
 
@@ -3549,7 +3543,6 @@ class TestMaxAutotune(TestCase):
 
         torch._dynamo.reset()
         get_k_splits.cache_clear()
-        use_decompose_k_choice.cache_clear()
         add_preprocessing_fn(record)
         try:
             with config.patch(
@@ -3563,7 +3556,6 @@ class TestMaxAutotune(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
             get_k_splits.cache_clear()
-            use_decompose_k_choice.cache_clear()
 
         self.assertEqual(actual, a @ b)
         self.assertTrue(any(name.startswith("triton_mm") for name in names), names)
