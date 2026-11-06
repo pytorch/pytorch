@@ -62,7 +62,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime_nccl_estimator,
 )
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .exc import GPUTooOldForTriton, NonLinearIndexingError, TritonMissing
+from .exc import GPUTooOldForTriton, NonAffineIndexingError, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
     assign_origin_node,
@@ -93,10 +93,10 @@ from .utils import (
     get_op_names,
     GraphPartitionMap,
     IndentedBuffer,
+    is_affine_indexing,
     is_collective,
     is_cudagraph_unsafe_op,
     is_gpu,
-    is_linear_indexing,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
@@ -303,17 +303,17 @@ class MixOrderReduction:
     """
 
     @staticmethod
-    def is_split_reduction(node: BaseSchedulerNode) -> bool:
+    def _split_origins(
+        node: BaseSchedulerNode,
+    ) -> OrderedSet[tuple[sympy.Expr, sympy.Expr]] | None:
         """
-        Whether node is (a fusion of) the first stage of split reductions
-        that can be re-derived from one original reduction. First stages of
-        reductions with different original shapes can still be fused when
-        their split loops coincide (a per-channel and a per-sample reduction
-        both split along the spatial dims); such a node is not one.
+        The (numel, reduction numel) of the original reductions whose first
+        split stages make up node; None when node is not a reduction or one
+        of its reductions is not a split stage.
         """
         if not node.is_reduction():
-            return False
-        originals: OrderedSet[tuple[sympy.Expr, sympy.Expr]] = OrderedSet()
+            return None
+        origins: OrderedSet[tuple[sympy.Expr, sympy.Expr]] = OrderedSet()
         for subnode in node.get_nodes():
             if not (
                 isinstance(subnode, SchedulerNode)
@@ -327,8 +327,8 @@ class MixOrderReduction:
                 or buf._original_ranges is None
                 or buf._original_reduction_ranges is None
             ):
-                return False
-            originals.add(
+                return None
+            origins.add(
                 (
                     V.graph.sizevars.simplify(sympy_product(buf._original_ranges)),
                     V.graph.sizevars.simplify(
@@ -336,7 +336,27 @@ class MixOrderReduction:
                     ),
                 )
             )
-        return len(originals) <= 1
+        return origins
+
+    @classmethod
+    def is_split_reduction(cls, node: BaseSchedulerNode) -> bool:
+        """
+        Whether node is (a fusion of) the first stage of split reductions
+        that can be reverted to one original reduction.
+        """
+        origins = cls._split_origins(node)
+        return origins is not None and len(origins) == 1
+
+    @classmethod
+    def has_mixed_split_origins(cls, node: BaseSchedulerNode) -> bool:
+        """
+        First stages of reductions with different original numels fuse
+        horizontally when their split loops coincide (a per-channel and a
+        per-sample reduction both split along the spatial dims). Such a node
+        cannot be reverted to one original reduction.
+        """
+        origins = cls._split_origins(node)
+        return origins is not None and len(origins) > 1
 
     @staticmethod
     def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
@@ -350,46 +370,10 @@ class MixOrderReduction:
 
     @classmethod
     def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
-        if cls.is_split_reduction(node):
-            xnumel = None
-            rnumel = None
-            for subnode in node.get_nodes():
-                if not (
-                    isinstance(subnode, SchedulerNode)
-                    and subnode.is_reduction()
-                    and isinstance(subnode.node, ComputedBuffer)
-                ):
-                    continue
-
-                if subnode.node._original_ranges is None:
-                    raise AssertionError(
-                        "expected subnode.node._original_ranges to be set"
-                    )
-                curxnumel = V.graph.sizevars.simplify(
-                    sympy_product(subnode.node._original_ranges)
-                )
-                if subnode.node._original_reduction_ranges is None:
-                    raise AssertionError(
-                        "expected subnode.node._original_reduction_ranges to be set"
-                    )
-                currnumel = V.graph.sizevars.simplify(
-                    sympy_product(subnode.node._original_reduction_ranges)
-                )
-
-                if xnumel is None:
-                    xnumel = curxnumel
-                    rnumel = currnumel
-                else:
-                    if not V.graph.sizevars.statically_known_equals(xnumel, curxnumel):
-                        raise AssertionError(f"{xnumel} v.s. {curxnumel}")
-                    if not V.graph.sizevars.statically_known_equals(rnumel, currnumel):
-                        raise AssertionError(f"{rnumel} v.s. {currnumel}")
-
-            if xnumel is None:
-                raise AssertionError("expected xnumel to be set")
-            return (xnumel, rnumel)
-        else:
-            return node.group[1]  # type: ignore[return-value]
+        origins = cls._split_origins(node)
+        if origins is not None and len(origins) == 1:
+            return next(iter(origins))
+        return node.group[1]  # type: ignore[return-value]
 
     @classmethod
     def has_mix_reduction_orders(
@@ -498,6 +482,10 @@ class MixOrderReduction:
         if not node1.is_reduction() or not node2.is_reduction():
             return False
         if node1.has_strict_reduction() or node2.has_strict_reduction():
+            return False
+        if cls.has_mixed_split_origins(node1) or cls.has_mixed_split_origins(node2):
+            # codegen reverts the split per reduction, which only works when
+            # they all come from one original reduction
             return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
@@ -650,6 +638,8 @@ class NestedReduction:
 
     MAX_INNER_R_GROUP_SIZE = 512
     MAX_NON_INNER_GROUP_SIZE = 128
+    # Persistent lane forwarding keeps each whole group tile live in registers.
+    MAX_PERSISTENT_LANE_GROUP = 128
 
     @staticmethod
     def _is_dependent_reduction_pair(
@@ -820,8 +810,6 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        if not cls._mutations_survive_hoisting(nodes):
-            return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
@@ -837,7 +825,25 @@ class NestedReduction:
             numel,
             rnumel,
         )
+        requires_persistent = grouping is None
+        if requires_persistent:
+            grouping = cls._persistent_lane_epilogue_candidates(
+                scheduler_nodes, numel, rnumel
+            )
         if grouping is None:
+            return None
+        if not requires_persistent:
+            if not cls._mutations_survive_hoisting(nodes):
+                return None
+        elif any(
+            not isinstance(owner := V.graph.get_buffer(alias), ir.ConcatKernel)
+            or not any(inp is buf.node for inp in owner.inputs)
+            for node in scheduler_nodes
+            for buf in node.get_outputs()
+            for alias in buf.get_aliases()
+        ):
+            # Persistent candidates have no mutations. Concat slices are disjoint
+            # and keep their own store indexing; other aliases are unsupported.
             return None
         output_groups = grouping.output_groups
         sub_parent_factor = grouping.factor
@@ -897,11 +903,16 @@ class NestedReduction:
         planned_source_names = OrderedSet(
             relation.source_accesses[0].name for relation in source_relations
         )
-        ordered_parent_nodes = cls._order_sub_parent_parent_nodes(
-            parent_nodes,
-            planned_source_names & parent_write_names,
-            numel,
-            rnumel,
+        # A persistent tile keeps every parent value live until the epilogue.
+        ordered_parent_nodes = (
+            OrderedParentNodes(parent_nodes, None)
+            if requires_persistent
+            else cls._order_sub_parent_parent_nodes(
+                parent_nodes,
+                planned_source_names & parent_write_names,
+                numel,
+                rnumel,
+            )
         )
         if ordered_parent_nodes is None:
             return None
@@ -928,6 +939,59 @@ class NestedReduction:
             required_post_reduction_index=(
                 ordered_parent_nodes.required_post_reduction_index
             ),
+            requires_persistent=requires_persistent,
+        )
+
+    @classmethod
+    def _persistent_lane_epilogue_candidates(
+        cls,
+        nodes: Sequence[SchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> SubParentEpilogueGrouping | None:
+        """Resolve reduced-width lane consumers using a complete persistent tile.
+
+        A reduced-width shape alone is insufficient: the caller must still prove
+        every fixed-lane source relation. Unlike the looped sub-parent path,
+        this stage may retain an internal value computed before the reduction.
+        """
+        if not config.triton.persistent_reductions or not isinstance(
+            rnumel, sympy.Integer
+        ):
+            return None
+        factor = int(rnumel)
+        if not 1 < factor <= cls.MAX_PERSISTENT_LANE_GROUP or not is_power_of_2(factor):
+            return None
+        # A single group gives epilogue nodes empty ranges, which the remapped
+        # pointwise codegen cannot split; there is also nothing to forward. A
+        # symbolic group count (dynamic K) can merge differently per node in
+        # Scheduler.merge_loops, after which codegen cannot re-derive the plan.
+        if V.graph.sizevars.statically_known_equals(numel, 1) or numel.has(FloorDiv):
+            return None
+        reductions = [node for node in nodes if node.is_reduction()]
+        if len(reductions) != 1 or any(
+            node.has_strict_reduction()
+            or any(buf.get_mutations() for buf in node.get_outputs())
+            for node in nodes
+        ):
+            return None
+        reduction = reductions[0]
+        # Leave reductions that the outer + grouped planner can own to it; it
+        # needs an upstream reduction over the same full domain.
+        full_numel = numel * rnumel
+        for name in reduction.ancestors:
+            upstream = reduction.scheduler.name_to_node.get(name)
+            if (
+                upstream is not None
+                and upstream.is_reduction()
+                and cls.is_candidate(upstream, reduction)
+                and V.graph.sizevars.statically_known_equals(
+                    sympy_product(upstream.group[1]), full_numel
+                )
+            ):
+                return None
+        return cls._sub_parent_epilogue_candidate_nodes(
+            nodes, numel, rnumel, persistent_factor=factor
         )
 
     @staticmethod
@@ -1028,11 +1092,14 @@ class NestedReduction:
         nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
+        *,
+        persistent_factor: int | None = None,
     ) -> SubParentEpilogueGrouping | None:
         """Group lane-resolution consumers and choose their lane factor.
 
         Other members must fit the parent reduction, reduced-output, or
-        full-parent domain.
+        full-parent domain. With a proved persistent tile, reduced-width
+        consumers may instead select fixed lanes of that tile.
         """
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidates: list[SubParentEpilogueCandidate] = []
@@ -1045,9 +1112,12 @@ class NestedReduction:
                 ):
                     return None
                 continue
-            # REDUCED takes precedence when rnumel == factor and its shape is
-            # indistinguishable from SUB_PARENT; decline the ambiguous latter.
+            # A looped parent cannot retain its full tile for reduced consumers.
             if cls._pointwise_node_matches_domain(node, numel, (numel,)):
+                if persistent_factor is not None:
+                    candidates.append(
+                        SubParentEpilogueCandidate(node, persistent_factor, 1)
+                    )
                 continue
             if cls._pointwise_node_matches_domain(node, full_numel, (numel, rnumel)):
                 continue
@@ -1183,30 +1253,33 @@ class NestedReduction:
         )
 
     @classmethod
-    def _r_grouped_stage_accesses_match(
+    def _try_get_r_grouped_lane_accesses(
         cls,
         outer_node: BaseSchedulerNode,
         grouped_node: BaseSchedulerNode,
         domain_context: PointwiseDomainContext,
         pointwise_domains: Sequence[tuple[SchedulerNode, PointwiseDomain]],
-    ) -> bool:
-        """Check cross-stage forwarding in the grouped R coordinate frame.
+    ) -> tuple[SubParentAccessRelation, ...] | None:
+        """Prove grouped R accesses, returning required lane projections or None.
 
-        Codegen forwards internal values positionally. Reindex every ordinary
+        Codegen normally forwards internal values positionally. Reindex every ordinary
         grouped-stage internal read, and its producer's write, into one frame
         spanning the parent ``[X, R]`` and grouped ``[X, R/G, G]`` geometries,
-        and require them to address the same element. Sub-parent edges use the
+        and require them to address the same element, or record a proved
+        fixed-lane projection for a reduced consumer. Sub-parent edges use the
         separate lane and broadcast proofs in the sub-parent planner.
         """
         from .utils import sympy_index_symbol
 
+        lane_accesses: list[SubParentAccessRelation] = []
+
         if domain_context.grouped_axis is not cls.GroupedAxis.R:
-            return False
+            return None
         if not all(
             isinstance(node, SchedulerNode) and isinstance(node.node, ComputedBuffer)
             for node in (*outer_node.get_nodes(), *grouped_node.get_nodes())
         ):
-            return False
+            return None
 
         parent_numel, parent_rnumel = domain_context.parent_full_domain
         group_size = domain_context.group_size
@@ -1229,7 +1302,7 @@ class NestedReduction:
             grouped_values = (parent_x * group_count + group_r, local_r)
             reduced_values = (parent_x * group_count + group_r,)
         else:
-            return False
+            return None
 
         # A coordinate with a single element is always zero. Keep it out of the
         # comparison so a degenerate extent does not look like a stride.
@@ -1331,21 +1404,72 @@ class NestedReduction:
                 writers = writers_by_name[dep.name]
                 consumer_frame = frames_by_node.get(consumer)
                 if consumer_frame is None or len(writers) != 1:
-                    return False
+                    return None
                 writer_frame = frames_by_node.get(writers[0])
                 if writer_frame is None or writers[0] is consumer:
-                    return False
+                    return None
                 read = frame_index(consumer, dep, consumer_frame)
-                writes = [
-                    frame_index(writers[0], write, writer_frame)
+                source_writes = tuple(
+                    write
                     for write in read_writes(writers[0]).writes
                     if write.name == dep.name
+                )
+                writes = [
+                    frame_index(writers[0], write, writer_frame)
+                    for write in source_writes
                 ]
                 if read is None or not writes or any(w is None for w in writes):
-                    return False
-                if not any(cls._index_exprs_equal(read, write) for write in writes):
-                    return False
-        return True
+                    return None
+                if any(cls._index_exprs_equal(read, write) for write in writes):
+                    continue
+                # A reduced epilogue can select a fixed lane of a live
+                # parent tile. Require a unique, unit-stride write and
+                # prove that the read stays within that same local group.
+                # An unclassified outer writer belongs to an earlier pass.
+                if (
+                    domains_by_node.get(consumer) is not cls.PointwiseDomain.REDUCED
+                    or domains_by_node.get(writers[0])
+                    not in (
+                        cls.PointwiseDomain.LOCAL_REDUCTION_INPUT,
+                        cls.PointwiseDomain.PARENT_FULL,
+                    )
+                    or writers[0].is_reduction()
+                    or len(source_writes) != 1
+                    or not isinstance(dep, MemoryDep)
+                    or dep.mode is not None
+                    or not isinstance(source_writes[0], MemoryDep)
+                    or source_writes[0].mode is not None
+                ):
+                    return None
+                write = writes[0]
+                if write is None or write.diff(local_r) != 1:
+                    return None
+                base = write.subs(local_r, 0)
+                lane = V.graph.sizevars.simplify(read - base)
+                if (
+                    not isinstance(lane, sympy.Integer)
+                    or not 0 <= lane < group_size
+                    # Codegen recovers the lane as index mod G (_planned_lane).
+                    or not V.graph.sizevars.statically_known_multiple_of(
+                        base, group_size
+                    )
+                ):
+                    return None
+                if not cls._sub_parent_access_preserves_x_boundary(
+                    source_writes[0], parent_numel, parent_rnumel, {}
+                ) or not cls._sub_parent_access_preserves_x_boundary(
+                    dep, parent_numel, group_count, {}
+                ):
+                    return None
+                lane_accesses.append(
+                    SubParentAccessRelation(
+                        source_accesses=(source_writes[0],),
+                        consumer_access=dep,
+                        parent_lane=int(lane),
+                        requires_live_source=True,
+                    )
+                )
+        return tuple(lane_accesses)
 
     @staticmethod
     def _index_exprs_equal(left: sympy.Expr, right: sympy.Expr) -> bool:
@@ -1423,6 +1547,16 @@ class NestedReduction:
             return False
         active_vars = OrderedSet(dep.var_names) & dep.index.free_symbols
         if len(active_vars) <= 1:
+            return True
+        # A flat contiguous access over the whole frame splits at any boundary.
+        normalized = dep.normalize()
+        if (
+            len(normalized.var_names) == 1
+            and normalized.index == normalized.var_names[0]
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(normalized.size), parent_numel * rnumel
+            )
+        ):
             return True
         sizes = tuple(sympy_subs(size, extent_subs) for size in dep.size)
         for split in range(len(sizes) + 1):
@@ -1567,8 +1701,13 @@ class NestedReduction:
                 )
                 if lane_value is None:
                     return None
+                child_coordinate = (
+                    sympy.S.Zero
+                    if V.graph.sizevars.statically_known_equals(child_rnumel, 1)
+                    else child_r
+                )
                 expected = parent_index.subs(
-                    parent_r, sub_parent_factor * child_r + lane_value
+                    parent_r, sub_parent_factor * child_coordinate + lane_value
                 )
                 if not V.graph.sizevars.statically_known_equals(child_index, expected):
                     return None
@@ -2214,6 +2353,12 @@ class NestedReduction:
         # Splitting X forces a minimum XBLOCK and has consistently lost to the
         # unfused kernels. Keep nested codegen to one [X, R/G, G] geometry.
         if grouped_axis is not cls.GroupedAxis.R:
+            fusion_log.debug(
+                "nested reduction: grouped axis of %s is %s, not R (ranges %s)",
+                block_local_reduction.get_name(),
+                grouped_axis,
+                block_local_reduction.get_ranges(),
+            )
             return None
         iter_ranges, _ = block_local_reduction.get_ranges()
         if len(iter_ranges) == 2:
@@ -2297,9 +2442,10 @@ class NestedReduction:
         # the local nodes after a dependent parent node would reverse that edge.
         if any(node.ancestors & local_stage_names for node in parent_nodes):
             return None
-        if not cls._r_grouped_stage_accesses_match(
+        lane_accesses = cls._try_get_r_grouped_lane_accesses(
             outer_node, grouped_node, domain_context, pointwise_domains
-        ):
+        )
+        if lane_accesses is None:
             return None
         sub_parent_nodes = OrderedSet(
             node
@@ -2308,6 +2454,8 @@ class NestedReduction:
         )
         sub_parent_stages: tuple[SubParentEpilogueStage, ...] = ()
         if sub_parent_nodes:
+            if lane_accesses:
+                return None
             sub_parent_stage = cls._plan_nested_sub_parent_stage(
                 outer_node,
                 grouped_node.get_nodes(),
@@ -2333,6 +2481,7 @@ class NestedReduction:
                 grouped_nodes=grouped_stage_nodes,
                 domain_context=domain_context,
                 pointwise_domains=tuple(pointwise_domains),
+                lane_accesses=lane_accesses,
             ),
             sub_parent_stages=sub_parent_stages,
         )
@@ -2470,6 +2619,7 @@ class NestedReductionStage:
     grouped_nodes: tuple[BaseSchedulerNode, ...]
     domain_context: NestedReduction.PointwiseDomainContext
     pointwise_domains: tuple[tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...]
+    lane_accesses: tuple[SubParentAccessRelation, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2579,6 +2729,7 @@ class StagedReductionPlan:
     sub_parent_stages: tuple[SubParentEpilogueStage, ...]
     # First parent node that must follow a completed reduction loop.
     required_post_reduction_index: int | None = None
+    requires_persistent: bool = False
 
     def __post_init__(self) -> None:
         if self.nested_stage is None and not self.sub_parent_stages:
@@ -3866,15 +4017,19 @@ class SchedulerNode(BaseSchedulerNode):
                     self._body, *self._sizes, normalize=should_normalize
                 )
             )
-        if config.test_configs.raise_on_modular_indexing:
-            self._check_linear_indexing(self.node)
+        self._check_affine_indexing()
 
-    def _check_linear_indexing(self, node: ir.Operation) -> None:
+    def _check_affine_indexing(self) -> None:
+        if not config.test_configs.raise_on_modular_indexing:
+            return
+        node = self.node
+        if node is None:
+            raise AssertionError("expected a node")
         for dep in self.read_writes.reads_and_writes():
-            if isinstance(dep, MemoryDep) and not is_linear_indexing(dep.index):
+            if isinstance(dep, MemoryDep) and not is_affine_indexing(dep.index):
                 origins = ", ".join(f"{o.name}={o.target}" for o in node.get_origins())
-                raise NonLinearIndexingError(
-                    f"non-linear indexing in {self.get_name()}: {dep!r}\n"
+                raise NonAffineIndexingError(
+                    f"non-affine indexing in {self.get_name()}: {dep!r}\n"
                     f"origins: {origins}\n{self.debug_str()}"
                 )
 
@@ -3916,6 +4071,7 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache)
+        self._check_affine_indexing()
 
     def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
         self.clear_read_writes_dependent_caches()
@@ -3965,12 +4121,23 @@ class SchedulerNode(BaseSchedulerNode):
         # also restores cache validity.
         self._loop_state_gen += 1
 
-    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
+    def _allows_loop_reindexing(self) -> bool:
+        """
+        Loop reindexing and index inversion rebuild the loop variables with
+        FloorDiv/ModularIndexing, which would undo affine indexing after every
+        lowering kept its indices affine.
+        """
+        return V.choices.use_modular_indexing(self.get_device(), kind="reindex")
+
+    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> bool:
         if self._body is None:
             raise AssertionError("expected a loop body")
+        if not self._allows_loop_reindexing():
+            return False
         self._before_loop_state_mutation()
         self._body = self._body.with_indexing_exprs(replacements)
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        return True
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -3981,11 +4148,13 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
+    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> bool:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
+        if not self._allows_loop_reindexing():
+            return False
 
         self._before_loop_state_mutation()
         self._body = self._body.reindex_iter_loops(new_iter_sizes)
@@ -3996,6 +4165,7 @@ class SchedulerNode(BaseSchedulerNode):
         self.group = (device, group_fn(self._sizes))
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+        return True
 
     def swap_pw_red_dimension(self) -> None:
         num_rdims = self._body.get_original_num_rdims()
@@ -4024,11 +4194,13 @@ class SchedulerNode(BaseSchedulerNode):
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
-    ) -> None:
+    ) -> bool:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
+        if not self._allows_loop_reindexing():
+            return False
 
         self._before_loop_state_mutation()
         self._body = self._body.expand_dimension_for_pointwise_node(
@@ -4042,6 +4214,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         # Need normalize the prefix name to facilitate finding common dependencies
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        return True
 
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
@@ -9697,7 +9870,8 @@ class Scheduler:
             node1_write, node2_read, node2_write, node2, read_expr
         )
         if can_reindex:
-            node2.apply_loop_reindexing([sympy_product(node1_write.size)])
+            if not node2.apply_loop_reindexing([sympy_product(node1_write.size)]):
+                return -1
             # Re-enter with refreshed dependencies; inverse lookup uses the cache.
             return self.shared_data_after_inverting_indexing(node1, node2)
 
@@ -9747,12 +9921,13 @@ class Scheduler:
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
-        node2.apply_indexing_exprs(
+        if not node2.apply_indexing_exprs(
             {
                 read_expr_index: body.indexing_exprs[write_expr_index],
                 write_expr_index: inverse_formula,
             }
-        )
+        ):
+            return -1
 
         # Calculate fusion score
         score = self.score_fusion_memory(node1, node2)
@@ -10098,7 +10273,9 @@ class Scheduler:
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
         for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+            if not sn.apply_loop_reindexing([red_numel, red_rnumel]):
+                rollback_snapshot.restore()
+                return False
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
@@ -10388,6 +10565,13 @@ class Scheduler:
             MemoryDepMatch(source, read)
             for source, read in plan.sub_parent_access_pairs()
         )
+        grouped_lane_matches = OrderedSet(
+            MemoryDepMatch(source.normalize(), relation.consumer_access.normalize())
+            for relation in (
+                () if plan.nested_stage is None else plan.nested_stage.lane_accesses
+            )
+            for source in relation.source_accesses
+        )
         nested_stage_reads = OrderedSet(
             dep
             for node in (
@@ -10427,6 +10611,15 @@ class Scheduler:
             if self.fusable_read_and_write(read, write):
                 continue
             match = MemoryDepMatch(write, read)
+            if (
+                is_nested_stage_read
+                and MemoryDepMatch(raw_write.normalize(), raw_read.normalize())
+                in grouped_lane_matches
+            ):
+                if not self._memory_dep_supports_index_equivalence(read, write):
+                    return None
+                matches.add(match)
+                continue
             if is_sub_parent_read:
                 raw_match = MemoryDepMatch(raw_write, raw_read)
                 if raw_match not in relation_matches or not (
@@ -10795,6 +10988,19 @@ class Scheduler:
         elif NestedReduction.is_candidate(node1, node2):
             # Path 2: initially form an outer + grouped reduction pipeline.
             plan = NestedReduction.plan(node1, node2)
+            if plan is None:
+                why("nested reduction plan declined")
+        elif (
+            NestedReduction._is_enabled_for(node1, node2)
+            and type(node2) is FusedStagedReduction
+            and not node1.is_reduction()
+        ):
+            # A persistent tile can absorb its pointwise input producer after
+            # the reduction and fixed-lane epilogue have already fused.
+            _, (numel, rnumel) = node2.group
+            plan = NestedReduction.sub_parent_epilogue_plan(
+                [*node1.get_nodes(), *node2.get_nodes()], numel, rnumel
+            )
         elif (
             NestedReduction._is_enabled_for(node1, node2)
             and node1.is_reduction()
@@ -10834,6 +11040,33 @@ class Scheduler:
         else:
             plan = None
 
+        if plan is not None and plan.requires_persistent:
+            # Only the backend knows whether it will emit the persistent kernel
+            # that serves the lane reads; otherwise prove the fusion ordinarily.
+            fused_nodes = [*node1.get_nodes(), *node2.get_nodes()]
+            if not self.get_backend(device).has_sub_parent_epilogue(fused_nodes):
+                why("backend declined the persistent lane plan")
+                plan = None
+        if plan is None or not plan.requires_persistent:
+            # A looped plan, or codegen's re-plan of an ordinary fusion such as a
+            # reduction pair, demotes a persistent group's lane readers to
+            # ordinary loads, which cannot read a lane of a value the kernel stores.
+            for node in (node1, node2):
+                if type(node) is not FusedStagedReduction:
+                    continue
+                _, (numel, rnumel) = node.group
+                existing = NestedReduction.sub_parent_epilogue_plan(
+                    node.get_nodes(), numel, rnumel
+                )
+                live_lanes = existing is not None and any(
+                    relation.requires_live_source and relation.parent_lane is not None
+                    for stage in existing.sub_parent_stages
+                    for relation in stage.access_relations
+                )
+                if existing is None or (existing.requires_persistent and live_lanes):
+                    why("persistent lane group cannot become a looped plan")
+                    return False
+
         # A plan authorizes fusion only after every cross-domain producer
         # dependency is proved.
         staged_matches = None
@@ -10867,11 +11100,13 @@ class Scheduler:
             )
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis
-            smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
-            shared_data_score = self._score_fusion_memory_for_can_fuse(
-                node1,
-                node2,
-            )
+            if smaller_node.expand_dimension_for_pointwise_node(
+                expand_dim, expand_size
+            ):
+                shared_data_score = self._score_fusion_memory_for_can_fuse(
+                    node1,
+                    node2,
+                )
 
         if (
             plan is None
@@ -11170,6 +11405,7 @@ class Scheduler:
             and (
                 write.normalize().is_contiguous()
                 or write.normalize_with_stride_order().is_contiguous()
+                or write.is_non_overlapping()
             )
         )
 

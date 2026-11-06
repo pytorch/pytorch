@@ -42,9 +42,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -54,10 +54,10 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -152,8 +152,15 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+# Not a module-level skip: other test files import this one, including on GPU
+# jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
@@ -547,11 +554,6 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     def test_nn_fold_permuted_input(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
-
         # Fix https://github.com/pytorch/pytorch/issues/191837
         def fn(x):
             x = x.permute(0, 1, 4, 3, 2)
@@ -563,8 +565,10 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="inductor")
             actual, code = run_and_get_cpp_code(opt_fn, v)
-        FileCheck().check("transpose_mxn").run(code)
-        FileCheck().check("atomic_add_vec").run(code)
+        if not config.avoid_modular_indexing:
+            # the realized permute + reshape changes the generated kernels
+            FileCheck().check("transpose_mxn").run(code)
+            FileCheck().check("atomic_add_vec").run(code)
         self.assertEqual(fn(v), actual, atol=1e-4, rtol=1e-4)
 
     def test_conv_max_pool_where_backward_mutation_dep(self):
@@ -2723,22 +2727,16 @@ class CPUReproTests(TestCase):
                 channel_shuffle,
                 (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
             )
-            check_metrics_vec_kernel_count(2)
+            if not config.avoid_modular_indexing:
+                # the realized channel shuffle changes the vectorized kernels
+                check_metrics_vec_kernel_count(2)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
         self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.uint8)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_int8(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
         self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.int8)
 
     @requires_vectorization
@@ -3967,9 +3965,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (input, eps))
 
     @slowTest
-    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
-    # for the ~1h this test takes.
-    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -4798,10 +4793,6 @@ class CPUReproTests(TestCase):
     @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
         """code and shape extracted from shufflenet_v2_x1_0"""
 
         def channel_shuffle(x, groups):
@@ -4818,7 +4809,9 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                check_metrics_vec_kernel_count(2)
+                if not config.avoid_modular_indexing:
+                    # the realized channel shuffle changes the vectorized kernels
+                    check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -5803,11 +5796,6 @@ class CPUReproTests(TestCase):
         self.assertEqual(compiled.shape, eager.shape)
 
     def test_group_norm_vec(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
-
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -5829,6 +5817,9 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
+                if config.avoid_modular_indexing:
+                    # the dim-aligned split of var_mean changes the kernels
+                    continue
                 # 3 generated kernels (first one for var_mean, last two for result)
                 check_metrics_vec_kernel_count(3)
 
@@ -6847,11 +6838,6 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
     def test_masked_handle_scalar_var(self):
-        if config.avoid_modular_indexing:
-            raise unittest.SkipTest(
-                "asserts the kernel count or codegen of inlined modular indexing"
-            )
-
         def fn():
             # Simplified reproducer of https://github.com/pytorch/pytorch/issues/173626
             window_size = 7
@@ -6895,7 +6881,9 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         self.common(fn, ())
-        check_metrics_vec_kernel_count(1)
+        if not config.avoid_modular_indexing:
+            # the realized window partition changes the vectorized kernels
+            check_metrics_vec_kernel_count(1)
 
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
@@ -8098,7 +8086,6 @@ class CPUReproTests(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if RUN_CPU and not IS_MACOS:
         run_tests(needs="filelock")
