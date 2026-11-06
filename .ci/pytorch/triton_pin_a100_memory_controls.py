@@ -134,11 +134,11 @@ compiler.compile = triton.compiler.compile = triton.compile = traced_compile
             "PYTHONPATH": os.pathsep.join(
                 (str(package), str(overlay), str(NATIVE), "/torchbench")
             ),
-            "TORCH_CUSTOM_PYTHONPATH": "",
             "TORCH_CUDA_ARCH_LIST": "8.0",
             "OMP_NUM_THREADS": "4",
             "TRITON_CACHE_DIR": str(DEBUG / phase / "triton-cache"),
             "TORCHINDUCTOR_CACHE_DIR": str(DEBUG / phase / "inductor-cache"),
+            "TORCHINDUCTOR_WORKER_LOGPATH": str(REPORT / phase / "compile-worker.log"),
             "PIN_A100_NATIVE_SITE": str(NATIVE),
             "PIN_A100_NATIVE_HEAD": NATIVE_SHA,
             "PIN_A100_TRITON_SITE": str(package),
@@ -146,8 +146,13 @@ compiler.compile = triton.compiler.compile = triton.compile = traced_compile
             "PIN_A100_TRITON_NATIVE_SHA256": pin["native_sha256"],
         }
     )
-    preflight = """import json, pathlib, subprocess, torch, torchvision, triton
+    environment["TORCH_CUSTOM_PYTHONPATH"] = environment["PYTHONPATH"]
+    preflight = """import json, os, pathlib, subprocess, torch, torchvision, triton
 from triton._C import libtriton
+from torch._inductor.utils import python_subprocess_env
+worker_pythonpath = python_subprocess_env()["PYTHONPATH"]
+if worker_pythonpath != os.environ["PYTHONPATH"]:
+    raise RuntimeError("Compiler subprocess does not preserve the complete package paths")
 gpu=torch.cuda.get_device_name()
 if "A100" not in gpu or "sm_80" not in torch.cuda.get_arch_list():
     raise RuntimeError("Original A100/native architecture mismatch")
@@ -157,7 +162,8 @@ print(json.dumps(dict(torch_sha=torch.version.git_version, cuda=torch.version.cu
  cudnn=torch.backends.cudnn.version(), gpu=gpu, arches=torch.cuda.get_arch_list(),
  torch_package=torch.__file__, torchvision_package=torchvision.__file__,
  torchvision_version=torchvision.__version__, triton_package=triton.__file__,
- triton_native=libtriton.__file__, config=torch.__config__.show(),
+ triton_native=libtriton.__file__, compiler_subprocess_pythonpath=worker_pythonpath,
+ config=torch.__config__.show(),
  nvidia_smi=subprocess.check_output(["nvidia-smi"], text=True)), indent=2))
 """
     preflight_log = REPORT / phase / "preflight.json"
