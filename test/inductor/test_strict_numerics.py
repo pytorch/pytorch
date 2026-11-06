@@ -1815,6 +1815,143 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
         self.assertIn("div_rn", "\n".join(codes))
 
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("requires_grad", (False, True))
+    def test_mul_nan_payload_local_mutation(
+        self, device, dtype, numerics, requires_grad
+    ):
+        def fn(z, x, y):
+            z.add_(3)
+            a = x.clone()
+            a.mul_(y)
+            return a
+
+        def operands(offset):
+            x = torch.arange(2048 + offset, device=device, dtype=dtype)[offset:]
+            x[::4].view(torch.int64).fill_(0x7FF8000000000011)
+            y = torch.full((2048,), 0.5, device=device, dtype=dtype)
+            y[::4].view(torch.int64).fill_(0x7FF8000000000022)
+            return (
+                torch.arange(8, device=device, dtype=dtype),
+                x,
+                y.requires_grad_(requires_grad),
+            )
+
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, fullgraph=True)
+            for offset in (0, 1):
+                with self.subTest(offset=offset):
+                    eager_z, eager_x, eager_y = operands(offset)
+                    z, x, y = operands(offset)
+                    expected = fn(eager_z, eager_x, eager_y)
+                    actual = compiled(z, x, y)
+                    self.assertEqual(
+                        actual.detach().view(torch.int64),
+                        expected.detach().view(torch.int64),
+                    )
+                    self.assertEqual(x.view(torch.int64), eager_x.view(torch.int64))
+                    self.assertEqual(z.view(torch.int64), eager_z.view(torch.int64))
+                    if requires_grad:
+                        gradient = torch.arange(2048, device=device, dtype=dtype) / 8
+                        expected_grad = torch.autograd.grad(
+                            expected, eager_y, gradient
+                        )[0]
+                        actual_grad = torch.autograd.grad(actual, y, gradient)[0]
+                        self.assertEqual(
+                            actual_grad.view(torch.int64),
+                            expected_grad.view(torch.int64),
+                        )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("index", (-1, 1))
+    def test_mul_nan_payload_view_mutation_backward(
+        self, device, dtype, numerics, index
+    ):
+        def fn(z, x, y):
+            z.add_(3)
+            x.add_(1)
+            selected = x[index]
+            selected.mul_(y)
+            return selected
+
+        def operands(offset):
+            x = torch.arange(
+                2 * 4097 + 2048 + offset, device=device, dtype=dtype
+            ).as_strided((3, 2048), (4097, 1), offset)
+            x[:, ::4].view(torch.int64).fill_(0x7FF8000000000011)
+            y = torch.full((2048,), 0.5, device=device, dtype=dtype)
+            y[::4].view(torch.int64).fill_(0x7FF8000000000022)
+            # An earlier unrelated mutation must not supply x's provenance.
+            return torch.arange(8, device=device, dtype=dtype), x, y.requires_grad_()
+
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, fullgraph=True)
+            for offset in (1, 0):
+                with self.subTest(offset=offset):
+                    eager_z, eager_x, eager_y = operands(offset)
+                    z, x, y = operands(offset)
+                    expected = fn(eager_z, eager_x, eager_y)
+                    actual = compiled(z, x, y)
+                    self.assertEqual(
+                        actual.detach().view(torch.int64),
+                        expected.detach().view(torch.int64),
+                    )
+                    self.assertEqual(x.view(torch.int64), eager_x.view(torch.int64))
+                    self.assertEqual(z.view(torch.int64), eager_z.view(torch.int64))
+                    gradient = torch.arange(2048, device=device, dtype=dtype) / 8
+                    expected_grad = torch.autograd.grad(expected, eager_y, gradient)[0]
+                    actual_grad = torch.autograd.grad(actual, y, gradient)[0]
+                    self.assertEqual(
+                        actual_grad.view(torch.int64),
+                        expected_grad.view(torch.int64),
+                    )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("unbacked", (False, True))
+    @parametrize("layout", ((2048, 1), (4096, 2), (4097, 1)))
+    @parametrize("view", ("select", "slice"))
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_mul_nan_payload_unbacked_mutation_provenance(
+        self, device, dtype, numerics, unbacked, layout, view
+    ):
+        def fn(x, idx, y):
+            x.add_(1)
+            index_value = idx.item() if unbacked else index
+            selected = x[index_value] if view == "select" else x[index_value:]
+            selected.add_(2)
+            return (selected if view == "select" else x) * y
+
+        def inputs(offset):
+            x = torch.arange(
+                2 * layout[0] + 2047 * layout[1] + 1 + offset,
+                dtype=dtype,
+                device=device,
+            ).as_strided((3, 2048), layout, offset)
+            x[:, ::4].view(torch.int64).fill_(0x7FF8000000000011)
+            y = torch.full((2048,), 0.5, dtype=dtype, device=device)
+            y[::4].view(torch.int64).fill_(0x7FF8000000000022)
+            return x, torch.tensor(index), y
+
+        with config.patch(numerics=numerics):
+            compiled = torch.compile(fn, fullgraph=True)
+            for index in (-1, 1) if view == "select" else (-1, 1, -4, 3):
+                for offset in (1, 0):
+                    with self.subTest(index=index, offset=offset):
+                        expected_inputs = inputs(offset)
+                        actual_inputs = inputs(offset)
+                        expected = fn(*expected_inputs)
+                        actual = compiled(*actual_inputs)
+                        self.assertEqual(
+                            actual.view(torch.int64), expected.view(torch.int64)
+                        )
+                        self.assertEqual(
+                            actual_inputs[0].view(torch.int64),
+                            expected_inputs[0].view(torch.int64),
+                        )
+
 
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON
@@ -2363,11 +2500,7 @@ POINTWISE_XFAIL = frozenset(
     }
 )
 
-BACKWARD_XFAIL = frozenset(
-    {
-        ("float_power", "float32"),
-    }
-)
+BACKWARD_XFAIL: frozenset[tuple[str, str]] = frozenset()
 
 NONFLOAT_XFAIL = frozenset(
     {
