@@ -59,8 +59,8 @@ class MPSBasicTests(TestCase):
 
     @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
     def test_small_int_arithmetic_wraps(self, dtype):
-        # Metal promotes char, uchar and short to int, so intermediates must be
-        # cast back to wrap like eager
+        # Check that uint8, int8 and int16 overflow behavior under various
+        # operations is the same for compiled and eager execution.
         def fn(x):
             y = x * 2 + x
             out = [y.float(), y > 50, (~x) // 3, (x << 3).float(), (x - 100) // 3]
