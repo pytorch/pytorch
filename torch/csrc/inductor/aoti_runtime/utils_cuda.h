@@ -27,6 +27,12 @@ inline void delete_cuda_stream_guard(void* ptr) {
       reinterpret_cast<CUDAStreamGuardHandle>(ptr)));
 }
 
+inline void delete_cuda_tunableop_dynamic_dims_guard(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_delete_cuda_tunableop_dynamic_dims_guard(
+          reinterpret_cast<CUDATunableOpDynamicDimsGuardHandle>(ptr)));
+}
+
 class AOTICudaGuard {
  public:
   AOTICudaGuard(int32_t device_index) : guard_(nullptr, delete_cuda_guard) {
@@ -57,6 +63,21 @@ class AOTICudaStreamGuard {
 
  private:
   std::unique_ptr<CUDAStreamGuardOpaque, DeleterFnPtr> guard_;
+};
+
+class AOTICudaTunableOpDynamicDimsGuard {
+ public:
+  explicit AOTICudaTunableOpDynamicDimsGuard(uint8_t dynamic_dims_mask)
+      : guard_(nullptr, delete_cuda_tunableop_dynamic_dims_guard) {
+    CUDATunableOpDynamicDimsGuardHandle ptr = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_create_cuda_tunableop_dynamic_dims_guard(
+            dynamic_dims_mask, &ptr));
+    guard_.reset(ptr);
+  }
+
+ private:
+  std::unique_ptr<CUDATunableOpDynamicDimsGuardOpaque, DeleterFnPtr> guard_;
 };
 
 } // namespace torch::aot_inductor

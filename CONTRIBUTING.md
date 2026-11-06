@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -81,12 +82,13 @@ This workflow is being rolled out and not all of it is live yet, see [Current st
 Issues are a way to report feedback or make suggestions. PyTorch uses issues to track ongoing efforts and considerations for improving the codebase. Before opening an issue, please check to see if there's already an existing issue for your topic, as it may be more effective to contribute there!
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart LR
     new[New issue] --> ai(AI triage)
-    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged<br/>“triaged” + “module: *” / “oncall: *” labels"]
+    ai -- "fails, or “no automated triage”" --> manual(Manual triage) --> triaged
     triaged --> mtriage("Module-level triage<br/>any module maintainer")
-    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
+    mtriage --> full["Fully triaged<br/>“needs reproduction” / “needs research” /<br/>“needs design” / “actionable” / “won't fix”"]
     full -- "remove the label to request<br/>re-evaluation" --> triaged
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
@@ -123,22 +125,23 @@ Two other labels are orthogonal to the states above:
 ### PR lifecycle
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart TD
     draft[Draft PR] -- author marks ready --> ready[Ready PR]
-    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ready --> ai("AI triage<br/>CODEOWNERS, “module: *”, linked issue")
     ai -- fails pre-conditions --> closed[Closed]
-    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
+    ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
     triaged --> pre(Pre-review)
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
-    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
+    pre -- every assigned reviewer accepts --> dev["In development by author<br/>“in progress”"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
     auto -- changes needed --> dev
-    dev -- "#quot;no automated review#quot;" --> rfr
+    dev -- "“no automated review”" --> rfr
     rfr --> review(Human review)
     review -- "needs significant changes,<br/>automated review enabled" --> dev
-    review -- "needs significant changes,<br/>#quot;no automated review#quot;" --> rfr
+    review -- "needs significant changes,<br/>“no automated review”" --> rfr
     review -- any reviewer accepts --> accepted[Accepted]
     ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
     accepted -- "@pytorchbot merge" --> merged[Merged]
@@ -162,6 +165,8 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
 
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
@@ -236,7 +241,8 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
 * When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
-  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; compiled output is not redirected.)
+  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; the compiled output is installed into `build/install/<wheel tag>/` in the checkout and loaded from there.)
+  The install tree is keyed by wheel tag only. If you point `SKBUILD_BUILD_DIR` at a second build tree (another CUDA toolkit, a Debug build), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share `build/install/<wheel tag>/` and the last one installed wins.
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
@@ -360,6 +366,9 @@ To install the nightly binaries built with ROCm, you can pass in the flag `--roc
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
+
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
 
 You can also use this tool to pull the nightly commits into the current branch:
 
@@ -655,6 +664,17 @@ preserve it, so you do not need to repeat the prefix on each update.
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
 
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
+
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
 
@@ -664,6 +684,10 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
+The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
+
+A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
+
 ## GreenLight
 
 GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
@@ -672,7 +696,7 @@ A PR is eligible when one rule in `merge_rules.yaml` names you and covers every 
 
 The Dr. CI comment on your PR (the pytorchbot comment) shows whether the PR is eligible, when GreenLight's review starts, and whether the result is `PR approved to be merged without human review` or `PR requires human review`. An approval appears on the PR as a review from `pytorchgreenlight[bot]`.
 
-You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a stacked merge (ghstack or GitHub-native) every PR that the merge lands is checked, so one PR without a current approval holds up all of them. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
 
 `PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
 
