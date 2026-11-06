@@ -3,12 +3,14 @@
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import contextlib
+import dataclasses
 import functools
 import inspect
 import logging
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from typing import NamedTuple
 from unittest import mock
@@ -18,14 +20,32 @@ import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import ReInplaceTrigger
+from torch._higher_order_ops.reinplace_trigger import TRIGGER_DSLS
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     maybe_unpack_host_tma_descriptor,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
+from torch._higher_order_ops.user_kernel_hop import (
+    _user_kernel_hops,
+    functional_hop_dense,
+    functional_hop_fake,
+    get_user_kernel_hop_info,
+    is_user_kernel_functional_hop,
+    is_user_kernel_mutation_hop,
+    register_user_kernel_hop,
+    register_user_kernel_hop_dispatch,
+    trace_user_kernel_wrapper,
+    user_kernel_hop_infos,
+    UserKernelHOPInfo,
+    UserKernelWrapperHOP,
+)
+from torch._higher_order_ops.utils import register_fake
 from torch._inductor import config as inductor_config, metrics
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
@@ -39,6 +59,7 @@ from torch._inductor.utils import (
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -270,6 +291,96 @@ if HAS_GPU:
             return output
 
         return f
+
+
+class _ScaleKernelWrapper(UserKernelWrapperHOP):
+    def __call__(self, /, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+
+# A second user-kernel DSL for the DSL-agnostic passes, built with the helpers that
+# Triton's HOP pair uses. Its kernel writes kwargs["x"] * scale into kwargs["out"].
+scale_kernel_wrapper_mutation = _ScaleKernelWrapper("scale_kernel_wrapper_mutation")
+scale_kernel_wrapper_functional = _ScaleKernelWrapper("scale_kernel_wrapper_functional")
+
+
+@scale_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
+def scale_kernel_wrapper_mutation_dense(*, scale, kwargs):
+    kwargs["out"].copy_(kwargs["x"] * scale)
+
+
+@register_fake(scale_kernel_wrapper_mutation, skip_cache=True)
+def scale_kernel_wrapper_mutation_fake(*, scale, kwargs):
+    return None
+
+
+@scale_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
+def scale_kernel_wrapper_mutation_proxy(mode, **kwargs):
+    return trace_user_kernel_wrapper(mode, scale_kernel_wrapper_mutation, kwargs)
+
+
+@scale_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
+def scale_kernel_wrapper_functional_dense(
+    *, scale, kwargs, tensors_to_clone, tensor_bases=None
+):
+    return functional_hop_dense(
+        scale_kernel_wrapper_mutation,
+        hop_kwargs={"scale": scale},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
+
+
+@register_fake(scale_kernel_wrapper_functional, skip_cache=True)
+def scale_kernel_wrapper_functional_fake(
+    *, scale, kwargs, tensors_to_clone, tensor_bases=None
+):
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
+
+
+@scale_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
+def scale_kernel_wrapper_functional_proxy(mode, **kwargs):
+    return trace_user_kernel_wrapper(mode, scale_kernel_wrapper_functional, kwargs)
+
+
+register_user_kernel_hop_dispatch(
+    scale_kernel_wrapper_mutation, scale_kernel_wrapper_functional
+)
+
+# Has no CompositeExplicitAutograd py_impl, so it cannot be registered.
+scale_kernel_wrapper_no_dense = _ScaleKernelWrapper("scale_kernel_wrapper_no_dense")
+
+# Registered only while a test that uses it runs.
+scale_kernel_hop_info = UserKernelHOPInfo(
+    dsl="scale",
+    mutation=scale_kernel_wrapper_mutation,
+    functional=scale_kernel_wrapper_functional,
+    get_mutated_tensors=lambda hop_kwargs, kwargs: ["out"],
+    get_kernel_name=lambda hop_kwargs: "scale_kernel",
+    get_layout_constraint=lambda: "needs_fixed_stride_order",
+    reinplace_trigger=ReInplaceTrigger.USER_KERNEL_OPS,
+    serializable=False,
+)
+
+# Another HOP pair, which test_user_kernel_hop_registry only registers.
+other_kernel_wrapper_mutation = _ScaleKernelWrapper("other_kernel_wrapper_mutation")
+other_kernel_wrapper_functional = _ScaleKernelWrapper("other_kernel_wrapper_functional")
+
+
+@other_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
+def other_kernel_wrapper_functional_dense(
+    *, kwargs, tensors_to_clone, tensor_bases=None
+):
+    return functional_hop_dense(
+        other_kernel_wrapper_mutation,
+        hop_kwargs={},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1044,6 +1155,242 @@ def forward(self, x_1, output_1):
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
         )
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_registry(self):
+        info = scale_kernel_hop_info
+        scale_mutation = scale_kernel_wrapper_mutation
+        scale_functional = scale_kernel_wrapper_functional
+        infos = user_kernel_hop_infos()
+        register_user_kernel_hop(info)
+        # Registering the same object again changes nothing.
+        register_user_kernel_hop(info)
+        self.assertEqual(user_kernel_hop_infos(), [*infos, info])
+        for hop in (scale_mutation, scale_functional):
+            self.assertIs(get_user_kernel_hop_info(hop), info)
+        self.assertIsNone(get_user_kernel_hop_info(torch.ops.higher_order.cond))
+        self.assertIs(get_user_kernel_hop_info(scale_mutation, "mutation"), info)
+        self.assertIs(get_user_kernel_hop_info(scale_functional, "functional"), info)
+        self.assertTrue(is_user_kernel_mutation_hop(scale_mutation))
+        self.assertFalse(is_user_kernel_mutation_hop(scale_functional))
+        self.assertTrue(is_user_kernel_functional_hop(scale_functional))
+        self.assertFalse(is_user_kernel_functional_hop(scale_mutation))
+        # Infos compare by identity, so an equal copy is refused.
+        msg = (
+            "scale_kernel_wrapper_mutation is already registered by the scale DSL with "
+            "another UserKernelHOPInfo object; only that object can be registered again"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            register_user_kernel_hop(dataclasses.replace(info))
+        # Only a DSL of another name is refused a member other than USER_KERNEL_OPS
+        # (test_user_kernel_hop_registration_refused): a third DSL can count its
+        # reinplacing under USER_KERNEL_OPS as the scale DSL does, and a DSL can
+        # register a second pair with its own member, as the triton DSL does here.
+        for dsl, trigger in (
+            ("other", ReInplaceTrigger.USER_KERNEL_OPS),
+            ("triton", ReInplaceTrigger.TRITON_OPS),
+        ):
+            other = dataclasses.replace(
+                info,
+                dsl=dsl,
+                mutation=other_kernel_wrapper_mutation,
+                functional=other_kernel_wrapper_functional,
+                reinplace_trigger=trigger,
+            )
+            with mock.patch.dict(_user_kernel_hops):
+                register_user_kernel_hop(other)
+                self.assertEqual(user_kernel_hop_infos(), [*infos, info, other])
+
+    @common_utils.parametrize(
+        "field,value,error,msg",
+        [
+            (
+                "mutation",
+                triton_kernel_wrapper_mutation,
+                RuntimeError,
+                "triton_kernel_wrapper_mutation is already registered by the triton "
+                "DSL with another UserKernelHOPInfo object",
+            ),
+            (
+                "functional",
+                triton_kernel_wrapper_functional,
+                RuntimeError,
+                "triton_kernel_wrapper_functional is already registered by the triton "
+                "DSL with another UserKernelHOPInfo object",
+            ),
+            (
+                "functional",
+                torch.ops.higher_order.cond,
+                TypeError,
+                "cond is not a UserKernelWrapperHOP",
+            ),
+            (
+                "functional",
+                scale_kernel_wrapper_no_dense,
+                TypeError,
+                "scale_kernel_wrapper_no_dense has no CompositeExplicitAutograd "
+                "py_impl",
+            ),
+            (
+                "functional",
+                scale_kernel_wrapper_mutation,
+                ValueError,
+                "scale_kernel_wrapper_mutation cannot be both the mutation and the "
+                "functional HOP of the scale DSL",
+            ),
+            (
+                "reinplace_trigger",
+                "USER_KERNEL_OPS",
+                TypeError,
+                "'USER_KERNEL_OPS' is not a ReInplaceTrigger",
+            ),
+            common_utils.subtest(
+                (
+                    "reinplace_trigger",
+                    ReInplaceTrigger.TRITON_OPS,
+                    ValueError,
+                    "ReInplaceTrigger.TRITON_OPS belongs to the triton DSL; register "
+                    "the scale DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member "
+                    "of its own",
+                ),
+                name="reinplace_trigger_TRITON_OPS",
+            ),
+        ],
+        name_fn=lambda field, value, error, msg: f"{field}_{value}",
+    )
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_registration_refused(self, field, value, error, msg):
+        # A refused registration leaves the registry as it was.
+        registry = dict(_user_kernel_hops)
+        info = dataclasses.replace(scale_kernel_hop_info, **{field: value})
+        with self.assertRaisesRegex(error, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, registry)
+
+    def test_user_kernel_hop_registry_lock(self):
+        registry = "torch._higher_order_ops.user_kernel_hop._user_kernel_hops"
+        # Two threads register equal copies of the scale pair. Each registry lookup
+        # waits for the other thread after reading, so without the lock both would
+        # pass the ownership checks before either writes, and both would register.
+        barrier = threading.Barrier(2, timeout=0.5)
+
+        class WaitingRegistry(dict):
+            def get(self, key, default=None):
+                value = super().get(key, default)
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    barrier.wait()
+                return value
+
+        infos = [dataclasses.replace(scale_kernel_hop_info) for _ in range(2)]
+        refused = []
+
+        def register(info):
+            try:
+                register_user_kernel_hop(info)
+            except RuntimeError:
+                refused.append(info)
+
+        with mock.patch(registry, WaitingRegistry()):
+            threads = [threading.Thread(target=register, args=(i,)) for i in infos]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(len(refused), 1)
+            self.assertEqual(
+                user_kernel_hop_infos(), [i for i in infos if i not in refused]
+            )
+
+        # A lookup made between a registration's two writes waits for the lock
+        # instead of finding the pair half registered.
+        info = scale_kernel_hop_info
+        first_written, looked_up = threading.Event(), threading.Event()
+        found = []
+
+        class PausingRegistry(dict):
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value)
+                if len(self) == 1:
+                    first_written.set()
+                    looked_up.wait(timeout=0.5)
+
+        def look_up():
+            first_written.wait(timeout=5)
+            found.append(get_user_kernel_hop_info(info.functional))
+            looked_up.set()
+
+        with mock.patch(registry, PausingRegistry()):
+            reader = threading.Thread(target=look_up)
+            reader.start()
+            register_user_kernel_hop(info)
+            reader.join()
+        self.assertEqual(found, [info])
+
+    @common_utils.parametrize("trigger", ["AUTO_FUNC_V1", "AUTO_FUNC_V2"])
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_auto_functionalize_trigger_refused(self, trigger):
+        # auto_functionalize's triggers would merge a DSL's reinplacing counters into
+        # auto_functionalize's, and AUTO_FUNC_V2 would also keep reinplacing from
+        # rewriting the getitem users of the DSL's functional HOP.
+        registry = dict(_user_kernel_hops)
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger[trigger]
+        )
+        msg = "register the scale DSL with ReInplaceTrigger.USER_KERNEL_OPS"
+        with self.assertRaisesRegex(ValueError, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, registry)
+
+    @mock.patch.dict(_user_kernel_hops, clear=True)
+    def test_user_kernel_hop_trigger_refused_before_its_dsl_registers(self):
+        # TRITON_OPS belongs to the triton DSL whether or not Triton has registered
+        # yet (it registers when triton_kernel_wrap is first imported), so another DSL
+        # registering first cannot take it and make Triton's own registration fail.
+        msg = (
+            "ReInplaceTrigger.TRITON_OPS belongs to the triton DSL; register the scale "
+            "DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger.TRITON_OPS
+        )
+        with self.assertRaisesRegex(ValueError, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, {})
+
+    @mock.patch.dict(TRIGGER_DSLS, clear=True)
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_trigger_without_an_entry_refused(self):
+        # A DSL-specific member without a TRIGGER_DSLS entry belongs to no DSL, so no
+        # DSL can register with it: a DSL that adds a member must add its entry.
+        registry = dict(_user_kernel_hops)
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger.TRITON_OPS
+        )
+        msg = (
+            "^ReInplaceTrigger.TRITON_OPS has no entry in TRIGGER_DSLS; add one naming "
+            "the DSL it belongs to$"
+        )
+        with self.assertRaisesRegex(ValueError, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, registry)
+
+    @common_utils.parametrize("value", ["needs_fixed_stride_order", "flexible_layout"])
+    def test_triton_layout_constraint_config(self, value):
+        info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
+        with inductor_config.patch(triton_kernel_default_layout_constraint=value):
+            self.assertEqual(info.get_layout_constraint(), value)
+
+    def test_triton_layout_constraint_config_checked(self):
+        # The config module does not check values against their Literal type, so
+        # Triton's getter does, and names the setting to fix.
+        info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
+        setting = "triton_kernel_default_layout_constraint"
+        msg = f"Unknown {setting}: fixed_stride_order"
+        with (
+            inductor_config.patch(setting, "fixed_stride_order"),
+            self.assertRaisesRegex(RuntimeError, msg),
+        ):
+            info.get_layout_constraint()
 
     @requires_gpu
     def test_triton_kernel_mutation_type(self):
