@@ -2224,9 +2224,12 @@ def check_stacked_pr_merge_rule(
     ignore_current_checks: set[tuple[int, str]] | None,
 ) -> None:
     """find_matching_merge_rule for `pr`, which lands below the PR being merged, with
-    any refusal naming `pr`."""
+    any refusal naming `pr`. Unless `skip_mandatory_checks`, `pr` is then held to the
+    checks merge() holds the merged PR to, not only the mandatory ones of its rule: a
+    startup failure, or a failure Dr.CI does not excuse, refuses and a pending check
+    waits."""
     try:
-        find_matching_merge_rule(
+        _, pending, failing, _ = find_matching_merge_rule(
             pr,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -2238,6 +2241,26 @@ def check_stacked_pr_merge_rule(
             f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
             ex.rule,
         ) from ex
+    if skip_mandatory_checks:
+        return
+    startup_failures = filter_checks_with_lambda(
+        pr.get_checkrun_conclusions(), lambda status: status == "STARTUP_FAILURE"
+    )
+    if startup_failures:
+        raise RuntimeError(
+            f"{len(startup_failures)} STARTUP failures reported on stacked PR #{pr.pr_num}, please check workflows syntax! "
+            + ", ".join(f"[{x.name}]({x.url})" for x in startup_failures[:5])
+        )
+    if failing:
+        raise RuntimeError(
+            f"{len(failing)} jobs have failed on stacked PR #{pr.pr_num}, first few of them are: "
+            + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
+        )
+    if pending:
+        raise MandatoryChecksMissingError(
+            f"Still waiting for {len(pending)} jobs to finish on stacked PR #{pr.pr_num}, "
+            + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+        )
 
 
 # One merge command runs as one process, and its retry loop re-asks this question every
