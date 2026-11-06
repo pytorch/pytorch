@@ -1601,7 +1601,10 @@ Returns:
 The operation a pre/post hook is firing for. Values mostly follow the
 dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
-``recv`` from any source reports ``RECV``.)")
+``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
+``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
+``SPLIT`` and ``NEW_WINDOW``, which pass the new ``group`` or ``window``
+instead.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1626,6 +1629,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
+      .value("RECONFIGURE", ::c10d::HookOpName::RECONFIGURE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(
@@ -1661,6 +1665,10 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
+#if PYBIND11_VERSION_MAJOR >= 3
+      // A kept copy may hold the last reference to a group or work.
+      py::release_gil_before_calling_cpp_dtor(),
+#endif
       "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
       .def_readwrite(
@@ -1674,11 +1682,23 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None``.")
+          "``Work`` handle of the issued operation; ``None`` for ``SPLIT`` and "
+          "``NEW_WINDOW`` and may be ``None`` for synchronous operations.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
-          "Same ``op_id`` as the matching pre-hook call.");
+          "Same ``op_id`` as the matching pre-hook call.")
+      .def_readwrite(
+          "group",
+          &::c10d::PostHookArgs::group,
+          "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
+          "for other operations. When created by ``torch.distributed.split_group``, "
+          "the hook runs before the group is registered, so lookups such as "
+          "``get_rank(group)`` or ``get_process_group_ranks`` fail on it.")
+      .def_readwrite(
+          "window",
+          &::c10d::PostHookArgs::window,
+          "New window for ``NEW_WINDOW``; ``None`` for other operations.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3441,7 +3461,8 @@ Args:
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
 ``PostHookArgs.work`` to observe completion. If a hook raises, the operation
-has already been issued but its ``Work`` is not returned to the caller.
+has already been issued but its result (``Work``, new group or window) is not
+returned to the caller.
 Otherwise behaves like ``register_pre_hook``.
 
 Args:

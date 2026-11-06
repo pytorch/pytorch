@@ -64,10 +64,10 @@ std::string_view hookOpName(HookOpName name) {
       return "scatter";
     case HookOpName::GATHER:
       return "gather";
+    // Lifecycle ops are never recorded.
     case HookOpName::SPLIT:
-      return "split";
     case HookOpName::NEW_WINDOW:
-      return "new_window";
+    case HookOpName::RECONFIGURE:
     case HookOpName::UNKNOWN:
       break;
   }
@@ -76,6 +76,13 @@ std::string_view hookOpName(HookOpName name) {
 
 bool isP2POp(HookOpName name) {
   return name == HookOpName::SEND || name == HookOpName::RECV;
+}
+
+// Group lifecycle ops, not collectives: native backends do not record them and
+// the analyzer would read one as a collective every member must match.
+bool isLifecycleOp(HookOpName name) {
+  return name == HookOpName::SPLIT || name == HookOpName::NEW_WINDOW ||
+      name == HookOpName::RECONFIGURE;
 }
 
 // The dispatcher schema for these has a single tensor list because they
@@ -458,6 +465,9 @@ void FlightRecorderHook::onResult(int64_t op_id, bool success) {
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
+  if (isLifecycleOp(args.name)) {
+    return;
+  }
   auto device = opDevice(args);
   const auto& target = targetFor(device);
   auto* recorder = target.recorder;
@@ -666,11 +676,21 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     released.swap(released_works_);
+    if (args.name == HookOpName::RECONFIGURE) {
+      // Restart numbering so old and new members agree in the reconfigured
+      // group; entries from before and after can share seq ids, which the FR
+      // analyzer may misgroup in a dump spanning the reconfigure. Membership
+      // is not republished: nccl2 does not update global_ranks_in_group on
+      // reconfigure, so there is no current mapping.
+      collective_seq_ = 0;
+      p2p_seq_ = 0;
+      return;
+    }
     auto it = inflight_.find(args.op_id);
     if (it == inflight_.end()) {
-      // Nothing was recorded for this op -- the backend records natively, the
-      // op was issued under a graph capture, or the hook was removed in
-      // between.
+      // Nothing was recorded for this op -- a lifecycle op, the backend
+      // records natively, the op was issued under a graph capture, or the hook
+      // was removed in between.
       return;
     }
     if (!args.work) {
