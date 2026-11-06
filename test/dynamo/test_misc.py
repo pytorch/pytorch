@@ -2390,6 +2390,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             opt(5)
 
+    def test_int_base_symint_type_error(self):
+        def fn(x):
+            try:
+                return int(x.size(0), 16)
+            except TypeError as e:
+                return str(e)
+
+        opt = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        x = torch.ones(5)
+        self.assertEqual(opt(x), fn(x))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -5853,6 +5864,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(y, t.sin())
         self.assertEqual(w.__wrapped__, x)
 
+    def test_object_sentinel_identity(self):
+        sentinel = object()
+
+        def fn(x, o, s=sentinel):
+            a, b = object(), object()
+            return x + 1 if o is s else x - 1, a is a, a is b, a == b, o == s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x, sentinel), fn(x, sentinel))
+
     def test_object_setattr(self):
         @dataclasses.dataclass
         class A:
@@ -7580,6 +7602,176 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_type_mro_method(self):
+        class Foo:
+            pass
+
+        class Bar(Foo):
+            pass
+
+        class Baz:
+            pass
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(cls, x):
+            return cls.mro(), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(fn(Bar, x)[0], [Bar, Foo, object])
+        self.assertEqual(fn(Baz, x)[0], [Baz, object])
+        self.assertEqual(fn(Bar, x)[0], [Bar, Foo, object])
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_type_mro_method_returns_new_list(self):
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            mro = cls.mro()
+            mro.append(1)
+            return mro, cls.mro()
+
+        self.assertEqual(fn(Foo), ([Foo, object, 1], [Foo, object]))
+
+    def test_type_mro_method_not_cached_mro(self):
+        class Base:
+            pass
+
+        class Meta(type):
+            def mro(cls):
+                return [cls, object]
+
+        class Foo(Base, metaclass=Meta):
+            pass
+
+        del Meta.mro
+
+        @torch.compile(backend="eager")
+        def fn(cls, x):
+            return cls.mro(), x + 1
+
+        self.assertEqual(Foo.__mro__, (Foo, object))
+        self.assertEqual(fn(Foo, torch.ones(1))[0], [Foo, Base, object])
+
+    @parametrize("on_base", [False, True])
+    def test_type_mro_method_overridden_after_compile(self, on_base):
+        class Base:
+            pass
+
+        class Foo(Base):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Foo), [Foo, Base, object])
+        # The override must run exactly once, in the recompiled frame, and
+        # never inside a guard.
+        results = [[Foo, object], [Foo, object]]
+        (Base if on_base else Foo).mro = staticmethod(results.pop)
+        self.assertEqual(fn(Foo), [Foo, object])
+        self.assertEqual(len(results), 1)
+
+    def test_type_mro_method_after_bases_assignment(self):
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        class C(A):
+            pass
+
+        def fn(cls, base, x):
+            cls.__bases__ = (base,)
+            return x + len(cls.__mro__) + len(cls.mro())
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Write to unmodeled getset/member attribute"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(C, B, torch.ones(1))
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(C, B, torch.ones(1)), torch.full((1,), 9.0))
+
+    def test_type_mro_method_shared_base_after_bases_assignment(self):
+        class Base:
+            pass
+
+        class A(Base):
+            pass
+
+        class B(Base):
+            pass
+
+        class Other:
+            @classmethod
+            def mro(cls):
+                return [cls]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, b, x):
+            return x + 1, len(a.mro()), len(b.mro())
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(A, B, x), (x + 1, 3, 3))
+        # Base is in both MROs, but only B's changes.
+        B.__bases__ = (Other,)
+        self.assertEqual(fn(A, B, x), (x + 1, 3, 1))
+
+    def test_type_mro_method_static_base_moves(self):
+        class Mixin:
+            pass
+
+        class A(Mixin, dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            return x + len(cls.mro())
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(A, x), x + 4)
+        # dict, a static type, moves into Mixin's slot, and Mixin now defines
+        # mro. The MRO length is unchanged, so only the per-slot guards notice.
+        A.__bases__ = (dict, Mixin)
+        Mixin.mro = staticmethod(lambda: [Mixin])
+        self.assertEqual(fn(A, x), x + 1)
+
+    def test_type_mro_method_pending_base_override(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            pass
+
+        def shadow():
+            return [Base]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, base, x):
+            base.mro = shadow
+            return x + len(cls.mro())
+
+        self.assertEqual(fn(Child, Base, torch.ones(1)), torch.full((1,), 2.0))
+
+    def test_type_mro_method_pending_own_override(self):
+        class Foo:
+            pass
+
+        def shadow():
+            return [Foo]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            cls.mro = staticmethod(shadow)
+            return x + len(cls.mro())
+
+        self.assertEqual(fn(Foo, torch.ones(1)), torch.full((1,), 2.0))
+
     def test_builtin_str_on_user_defined_function(self):
         def another_fn():
             pass
@@ -7879,6 +8071,27 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertIsNone(finalizer())
             self.assertFalse(finalizer.alive)
         self.assertEqual(calls, [token] * 3)
+
+    def test_weakref_finalize_frame_entry(self):
+        class Target:
+            pass
+
+        def callback(value):
+            value.add_(1)
+            return value * 2
+
+        target = Target()
+        x = torch.ones(2)
+        finalizer = weakref.finalize(target, callback, x)
+        self.addCleanup(finalizer.detach)
+        counter = CompileCounter()
+        compiled = torch.compile(weakref.finalize.__call__, backend=counter)
+        self.assertEqual(compiled(finalizer), torch.tensor([4.0, 4.0]))
+        self.assertEqual(x, torch.tensor([2.0, 2.0]))
+        self.assertIsNone(compiled(finalizer))
+        self.assertEqual(x, torch.tensor([2.0, 2.0]))
+        self.assertFalse(finalizer.alive)
+        self.assertEqual(counter.frame_count, 1)
 
     @parametrize(
         "operation", ["call", "detach", "peek", "alive", "atexit", "set_atexit", "repr"]
@@ -10460,7 +10673,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # worker_thread.
         torch._C._stash_obj_in_tls(torch.compiler._IS_COMPILING, True)
         try:
-            self.assertTrue(torch.compiler.is_compiling())
+            # With no session running the readers never reach TLS, so this bare
+            # copy is invisible until some session runs; the key itself stays.
+            self.assertFalse(torch.compiler.is_compiling())
+            self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
             with torch.compiler._compile_session_context():
                 self.assertTrue(torch.compiler.is_compiling())
             self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
@@ -10476,15 +10692,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_exporting())
 
     def test_tracing_flags_scriptable(self):
+        # Only is_compiling() is scriptable: its is_scripting() check predates
+        # the per-thread flags and lets the JIT dead-code the TLS read. The
+        # other readers were never scriptable.
         @torch.jit.script
         def scripted_flags():
-            return (
-                torch.compiler.is_compiling(),
-                torch.compiler.is_exporting(),
-                torch.compiler._is_non_strict_tracing(),
-            )
+            return torch.compiler.is_compiling()
 
-        self.assertEqual(scripted_flags(), (False, False, False))
+        self.assertEqual(scripted_flags(), False)
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
@@ -10544,6 +10759,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertTrue(torch.compiler.is_exporting())
         self.assertFalse(torch.compiler.is_exporting())
         self.assertFalse(torch.compiler.is_compiling())
+
+    def test_tracing_flags_session_gate(self):
+        with _compiling_state_context():
+            self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 1)
+            with torch.compiler._compile_session_context():
+                self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 2)
+        with self.assertRaisesRegex(RuntimeError, "gate boom"):
+            with _compiling_state_context():
+                raise RuntimeError("gate boom")
+        self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
+
+        # The count gates the TLS probe, so a flag set without entering a
+        # session is invisible to the public readers until some session runs.
+        torch._C._stash_obj_in_tls(torch.compiler._IS_EXPORTING, True)
+        try:
+            self.assertFalse(torch.compiler.is_exporting())
+            with torch.compiler._compile_session_context():
+                self.assertTrue(torch.compiler.is_exporting())
+        finally:
+            torch._C._remove_obj_from_tls(torch.compiler._IS_EXPORTING)
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
 
     @unittest.skipIf(not TEST_CUDA, "cuda needed")
     def test_tracing_flags_autograd_worker_thread(self):
