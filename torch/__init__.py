@@ -3097,10 +3097,17 @@ def compile(
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
 ):
-    """
+    r"""
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
     to compile the module inplace without changing its structure.
+
+    .. deprecated:: 2.16
+        Passing a TorchScript module, function, or method directly to ``torch.compile``
+        is deprecated. This input support will be removed no earlier than 2.18
+        and after at least 180 days of nightly warnings. Pass the original eager
+        Python module/function instead; use :func:`torch.export.export` for
+        archival workflows. See https://github.com/pytorch/pytorch/issues/201298.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
