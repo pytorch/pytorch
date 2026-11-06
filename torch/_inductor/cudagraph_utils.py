@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
@@ -344,6 +345,70 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
     return None
 
 
+def get_single_accelerator_device_type(
+    device_types: AbstractSet[str],
+) -> str | None:
+    accelerator_types = [
+        device_type
+        for device_type in device_types
+        if device_type not in ("cpu", "meta")
+    ]
+    if len(accelerator_types) == 1:
+        return accelerator_types[0]
+    return None
+
+
+def is_graph_capture_runtime_ready(
+    device_types: AbstractSet[str],
+    device_indexes: AbstractSet[int] | None = None,
+) -> bool:
+    """Whether post-compile may dispatch to a graph capture runtime.
+
+    CUDA is always ready. Other accelerators require
+    ``DeviceInterface.is_graph_capture_supported(device)`` on the registered
+    backend. ``device_indexes`` are the graph's devices, not the process
+    current device. Every index must support capture.
+    """
+    device_type = get_single_accelerator_device_type(device_types)
+    if device_type is None:
+        return False
+    if device_type == "cuda":
+        return True
+    try:
+        interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    if not device_indexes:
+        return interface.is_graph_capture_supported()
+    for index in device_indexes:
+        if not interface.is_graph_capture_supported(torch.device(device_type, index)):
+            return False
+    return True
+
+
+def _graph_capture_compatible_device_type(device_type: str) -> bool:
+    """Whether a single-device FX graph may pass the cudagraph device gate.
+
+    Devices listed in ``_CUDAGRAPH_SUPPORTED_DEVICE_TYPES`` always pass.
+    Out-of-tree backends share the PrivateUse1 slot: only after rename
+    (name differs from the default ``privateuseone``) and with a registered
+    ``DeviceInterface``. This gate does not perform capture; backends still
+    supply their own graph runtime (e.g. NPUGraph via OOT).
+    """
+    if device_type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
+        return True
+    privateuse1_name = torch._C._get_privateuse1_backend_name()
+    if privateuse1_name == "privateuseone":
+        return False
+    if device_type != privateuse1_name:
+        return False
+    try:
+        get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    return True
+
+
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
@@ -362,11 +427,10 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
-    if (
-        len(device_node_mapping) == 1
-        and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
-    ):
-        return None
+    if len(device_node_mapping) == 1:
+        device_type = next(iter(device_node_mapping.keys())).type
+        if _graph_capture_compatible_device_type(device_type):
+            return None
 
     keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
@@ -394,11 +458,13 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    device_type: str = "cuda",
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
-    )
+    if device_type == "cuda":
+        if reason := check_caching_allocator_for_cudagraphs():
+            return reason
+
+    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
