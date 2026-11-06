@@ -5497,7 +5497,8 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 Records the operations of a process group into the flight recorder using
 pre/post hooks, for backends without a native flight recorder. Attached
-automatically to new process groups unless the buffer size
+automatically to groups from init_process_group, new_group and
+torch.distributed.split_group (see attach) unless the buffer size
 (``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
 every backend of the group records natively.)")
       .def_static(
@@ -5509,7 +5510,7 @@ every backend of the group records natively.)")
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
-that records natively (nccl-legacy, xccl). Groups from init_process_group,
+that records natively (ProcessGroupNCCL, xccl). Groups from init_process_group,
 new_group and torch.distributed.split_group already have one attached, unless
 the default group provides its own new_group; attaching another records each
 op twice, under separate pg_ids. The hook detaches when remove()
