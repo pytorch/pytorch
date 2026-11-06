@@ -140,6 +140,13 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
+    Each call's parameters form one group whose sharded data lives in one
+    bucket of the FlexShard engine shared with
+    :func:`torch.distributed.fsdp.experimental.flex_shard.flex_shard`, which
+    all-gathers and reduce-scatters the bucket. Setting the environment variable
+    ``TORCH_FSDP_ENGINE=legacy`` restores the previous per-parameter storage
+    and collectives; this escape hatch is deprecated.
+
     Parameter dtypes and ``grad_dtype`` may change (e.g. ``module.bfloat16()``)
     until lazy initialization at the first forward or
     :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit

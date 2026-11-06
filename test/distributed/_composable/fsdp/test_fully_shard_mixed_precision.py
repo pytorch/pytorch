@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -13,10 +14,14 @@ import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard.placements.shard import (
+    _reduce_scatter_copy_in as engine_reduce_scatter_copy_in,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_engine import engine_enabled
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     DefaultAllGatherLayout,
@@ -61,16 +66,30 @@ from torch.utils.checkpoint import checkpoint
 device_type = torch.device(get_devtype())
 
 
+@contextlib.contextmanager
 def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
     def copy_in(grads, buffer, world_size):
         grad_dtypes.append(tuple(grad.dtype for grad in grads))
         foreach_reduce_scatter_copy_in(grads, buffer, world_size)
 
-    return patch(
-        "torch.distributed.fsdp._fully_shard._fsdp_collectives."
-        "foreach_reduce_scatter_copy_in",
-        copy_in,
-    )
+    # The FlexShard engine bucket's copy-in
+    def engine_copy_in(grads, num_leading_dims, world_size, out):
+        grad_dtypes.append(tuple(grad.dtype for grad in grads))
+        engine_reduce_scatter_copy_in(grads, num_leading_dims, world_size, out)
+
+    with (
+        patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+            "foreach_reduce_scatter_copy_in",
+            copy_in,
+        ),
+        patch(
+            "torch.distributed.fsdp._flex_shard.placements.shard."
+            "_reduce_scatter_copy_in",
+            engine_copy_in,
+        ),
+    ):
+        yield
 
 
 def add_all_gather_extension(param: nn.Parameter) -> None:
@@ -1245,7 +1264,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 loss.backward()
             models.append(model)
         dtypes = [torch.bfloat16, torch.float32]
-        self.assertEqual(copy_ins, [(dtypes, None), (dtypes, [1, 0])])
+        # The FlexShard engine's default copy-in is the native one
+        default = [1, 0] if engine_enabled() else None
+        self.assertEqual(copy_ins, [(dtypes, default), (dtypes, [1, 0])])
         ref_model, model = models
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.full_tensor(), ref_param.grad.full_tensor())

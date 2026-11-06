@@ -43,6 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
     TrainingState,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_engine import FSDPEngineBucket
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
@@ -3374,9 +3375,22 @@ class TestFullyShardShareCommContext(FSDPTest):
                 prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
             )
 
+        # Groups on the FlexShard engine all-gather through their bucket
+        orig_engine_all_gather = FSDPEngineBucket.all_gather
+
+        def engine_all_gather_with_assert(bucket, group, async_op):
+            streams = group.comm_ctx.get_all_gather_streams(
+                async_op, group._training_state
+            )
+            all_gather_streams.add(streams[1])
+            return orig_engine_all_gather(bucket, group, async_op)
+
         with (
             patch_foreach_all_gather(foreach_all_gather_with_assert),
             patch_foreach_reduce(foreach_reduce_with_assert),
+            mock.patch.object(
+                FSDPEngineBucket, "all_gather", engine_all_gather_with_assert
+            ),
         ):
             loss = model(inp).sum()
             self.assertEqual(ref_loss, loss)

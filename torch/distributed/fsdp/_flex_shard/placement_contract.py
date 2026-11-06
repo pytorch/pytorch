@@ -13,7 +13,7 @@ from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.distributed.checkpoint import CheckpointableTensor
+from torch.distributed.checkpoint.protocol import CheckpointableTensor
 
 
 if TYPE_CHECKING:

@@ -55,6 +55,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
     TrainingState,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_engine import engine_enabled
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
@@ -954,10 +955,12 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # Backward reduce-scatters the root's weight before model[0]'s
         model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
         self.assertEqual(record_copy_ins(), [[1], [1]])
+        # The FlexShard engine's default copy-in is the native one
+        default = [1] if engine_enabled() else None
         model.set_reduce_scatter_input_fn(None, recurse=False)
-        self.assertEqual(record_copy_ins(), [None, [1]])
+        self.assertEqual(record_copy_ins(), [default, [1]])
         model.set_reduce_scatter_input_fn(None)
-        self.assertEqual(record_copy_ins(), [None, None])
+        self.assertEqual(record_copy_ins(), [default, default])
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
@@ -1054,8 +1057,10 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
                 actual.sum().backward()
             self.assertEqual(actual, expected)
             for direction, op in native_ops.items():
+                # The FlexShard engine's default copies are the native ones
                 self.assertEqual(
-                    native_counts[op] > 0, native_copy and direction == collective
+                    native_counts[op] > 0,
+                    engine_enabled() or (native_copy and direction == collective),
                 )
             dist.all_reduce(reference.weight.grad)
             reference.weight.grad.div_(self.world_size)

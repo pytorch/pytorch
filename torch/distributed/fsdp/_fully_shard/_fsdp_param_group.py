@@ -21,6 +21,9 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from .._flex_shard.placements.shard import (
+    reduce_scatter_input_fn as engine_reduce_scatter_input_fn,
+)
 from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
@@ -53,6 +56,12 @@ from ._fsdp_common import (
     is_bw,
     ShardPlacementFnResult,
     TrainingState,
+)
+from ._fsdp_engine import (
+    dynamic_general_path_reason,
+    engine_enabled,
+    FSDPEngineBucket,
+    static_general_path_reason,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
@@ -334,6 +343,12 @@ class FSDPParamGroup:
         # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
+        # The FlexShard engine bucket holding the sharded parameters, or None
+        # for FSDP2's per-parameter storage (see _fsdp_engine)
+        self._engine: FSDPEngineBucket | None = None
+        self._engine_requested = engine_enabled()
+        if static_general_path_reason(self, self._engine_requested) is None:
+            self._engine = FSDPEngineBucket(self.fsdp_params)
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -397,6 +412,23 @@ class FSDPParamGroup:
         self._init_mp_dtypes()
         self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
+        self._lazy_init_engine()
+
+    @_disable_functorch_if_active
+    def _lazy_init_engine(self) -> None:
+        if static_general_path_reason(self, self._engine_requested) is not None:
+            self._engine = None
+        elif self._engine is None:
+            self._engine = FSDPEngineBucket(self.fsdp_params)
+        elif not self._engine.homed(self.fsdp_params):
+            # Parameters replaced since construction (to_empty,
+            # load_state_dict(assign=True)) were re-padded into new tensors
+            self._engine.home(self.fsdp_params)
+        else:
+            self._engine.build_infos(self.fsdp_params)
+
+    def _uses_engine(self) -> bool:
+        return self._engine is not None and dynamic_general_path_reason(self) is None
 
     def _check_all_gather_replaceable(self) -> None:
         # Only the layout that created a group's outputs can refill them, and a
@@ -529,15 +561,35 @@ class FSDPParamGroup:
             return
 
         with record_function(self._with_fqn("FSDP::all_gather")):
-            self._all_gather_result = foreach_all_gather(
-                self.fsdp_params,
-                self._all_gather_process_group,
-                async_op,
-                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
-                self.device,
-                self._all_gather_comm,
-                self._all_gather_layout,
-            )
+            self._all_gather_result = self._all_gather(async_op)
+
+    def _all_gather(self, async_op: bool) -> AllGatherResult:
+        """Issue this group's all-gather on a multi-rank shard group."""
+        if self._uses_engine():
+            return self._engine.all_gather(self, async_op)
+        return foreach_all_gather(
+            self.fsdp_params,
+            self._all_gather_process_group,
+            async_op,
+            *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
+            self.device,
+            self._all_gather_comm,
+            self._all_gather_layout,
+        )
+
+    def _all_gather_copy_out(self) -> None:
+        """Copy the pending all-gather's output into the all-gather outputs."""
+        if self._all_gather_result is None:
+            raise AssertionError("Expected a pending all-gather")
+        if self._engine is not None and self._engine.prepared is not None:
+            self._engine.copy_out(self)
+            return
+        self._all_gather_buffers = foreach_all_gather_copy_out(
+            self._all_gather_result,
+            self.fsdp_params,
+            self._all_gather_process_group,
+            self._all_gather_buffers,
+        )
 
     @_disable_functorch_if_active
     def wait_for_unshard(self):
@@ -594,12 +646,7 @@ class FSDPParamGroup:
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
                 try:
-                    self._all_gather_buffers = foreach_all_gather_copy_out(
-                        self._all_gather_result,
-                        self.fsdp_params,
-                        self._all_gather_process_group,
-                        self._all_gather_buffers,
-                    )
+                    self._all_gather_copy_out()
                 except ValueError:
                     # Drop the completed all-gather once its streams wait for the
                     # rejected copy-out, so that a layout whose first unshard was
@@ -657,6 +704,8 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+        if self._engine is not None:
+            self._engine.prepared = None
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -858,31 +907,12 @@ class FSDPParamGroup:
                     all_reduce_input,
                     all_reduce_event,
                     self._partial_reduce_output,
-                ) = foreach_reduce(
+                ) = self._reduce(
                     fsdp_params_with_grad,
                     unsharded_grads,
-                    (
-                        # pyrefly: ignore [bad-argument-type]
-                        self._reduce_scatter_process_group
-                        if isinstance(self.mesh_info, FSDPMeshInfo)
-                        else None  # pyre-fixme[6]
-                    ),
-                    self.comm_ctx.reduce_scatter_stream,
-                    self._reduce_scatter_comm,
                     reduce_dtype,
-                    self.device,
-                    self.gradient_divide_factor,
-                    (
-                        self._all_reduce_process_group
-                        if isinstance(self.mesh_info, DDPMeshInfo)
-                        else None
-                    ),
                     all_reduce_stream,
-                    self.all_reduce_grads,
                     partial_input,
-                    self._all_reduce_hook,
-                    self.force_sum_reduction_for_comms,
-                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -940,6 +970,49 @@ class FSDPParamGroup:
                         all_reduce_input, all_reduce_event
                     )
 
+    def _reduce(
+        self,
+        fsdp_params: list[FSDPParam],
+        unsharded_grads: list[torch.Tensor],
+        reduce_dtype: torch.dtype,
+        all_reduce_stream: torch.Stream,
+        partial_reduce_output: torch.Tensor | None,
+    ):
+        """Reduce the unsharded gradients into the sharded gradients."""
+        prepare_reduce_scatter_inputs = self._prepare_reduce_scatter_inputs
+        if (
+            self._engine is not None
+            and prepare_reduce_scatter_inputs is _default_reduce_scatter_input_fn
+        ):
+            # The engine bucket placement's copy-in
+            prepare_reduce_scatter_inputs = engine_reduce_scatter_input_fn
+        return foreach_reduce(
+            fsdp_params,
+            unsharded_grads,
+            (
+                # pyrefly: ignore [bad-argument-type]
+                self._reduce_scatter_process_group
+                if isinstance(self.mesh_info, FSDPMeshInfo)
+                else None  # pyre-fixme[6]
+            ),
+            self.comm_ctx.reduce_scatter_stream,
+            self._reduce_scatter_comm,
+            reduce_dtype,
+            self.device,
+            self.gradient_divide_factor,
+            (
+                self._all_reduce_process_group
+                if isinstance(self.mesh_info, DDPMeshInfo)
+                else None
+            ),
+            all_reduce_stream,
+            self.all_reduce_grads,
+            partial_reduce_output,
+            self._all_reduce_hook,
+            self.force_sum_reduction_for_comms,
+            prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+        )
+
     def finalize_backward(self):
         self._post_reduce_event = None
         self._all_reduce_state = None
@@ -952,6 +1025,8 @@ class FSDPParamGroup:
             # then we wait here and clear the unshard
             _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            if self._engine is not None:
+                self._engine.prepared = None
         self._post_forward_indices.clear()
 
     def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
@@ -1180,13 +1255,19 @@ class FSDPParamGroup:
                 # cannot copy out, so wait for it and discard it
                 _wait_all_gather(self._all_gather_result)
                 self._all_gather_result = None
+                if self._engine is not None:
+                    self._engine.prepared = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
             self._free_all_gather_buffers()
 
     def _to_sharded_post_forward(self):
-        if not self.is_sharded_post_forward:
+        if not self.is_sharded_post_forward and self._uses_engine():
+            self._engine.to_sharded_post_forward(self)
+            self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._free_all_gather_buffers()
+        elif not self.is_sharded_post_forward:
             # Check every parameter before resharding any
             for fsdp_param in self.fsdp_params:
                 fsdp_param.check_post_forward_reshard()
