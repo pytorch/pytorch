@@ -21,6 +21,8 @@ from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     HAS_GPU,
     RUN_CPU,
+    RUN_PRIVATEUSE1,
+    RUN_TPU,
 )
 
 
@@ -771,5 +773,5 @@ if not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or HAS_GPU:
+    if RUN_CPU or HAS_GPU or RUN_TPU or RUN_PRIVATEUSE1:
         run_tests(needs="filelock")
