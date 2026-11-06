@@ -2677,7 +2677,10 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def log_ndtr(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_log_ndtr({x})"
         return cast(Any, TritonOverrides).log_ndtr(x)
 
@@ -2770,7 +2773,10 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def erfcx(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_erfcx({x})"
         return f"libdevice.erfcx({x})"
 
