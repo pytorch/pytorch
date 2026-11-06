@@ -634,33 +634,6 @@ class TestTransformersAccelerator(NNTestCase):
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
-    @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
-    def test_self_attn_TxT_attn_mask(self, device):
-        embed_dim = 16
-        num_heads = 4
-        batch_size = 10
-        tgt_len = 16
-
-        query = torch.rand(batch_size, tgt_len, embed_dim, device=device)  # [N, T, D]
-        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len), device=device).float()  # [T, T]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, 0.0)
-
-        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
-
-        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).to(device)
-        mta_model.eval()
-
-        # Generate 3D results
-        with torch.inference_mode():
-            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
-            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
-
-            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
-            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
-
-            self.assertEqual(output_mask_4d, output_mask_TxT)
-
     @slowTest
     def test_train_with_pad_and_catch_error(self, device):
         iters = 100
