@@ -14,7 +14,7 @@ from .base import SourceLocation, VariableTracker, VariableTrackerMeta
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing_extensions import Self
+    from typing import Self
 
     from ..symbolic_convert import InstructionTranslatorBase
     from .tensor import SymNodeVariable
