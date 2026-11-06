@@ -62,6 +62,34 @@ class TestNCCL4PyBackendUnit(TestCase):
         self.assertEqual(backend.options.backend, "nccl4py")
         backend.shutdown()
 
+    def test_get_future_result_pending_after_abort(self):
+        backend = NCCL4PyBackend(
+            dist.HashStore(), 0, 1, timeout=torch.distributed.default_pg_timeout
+        )
+        self.addCleanup(backend.abort)
+        backend_mod = torch.distributed._nccl4py.backend
+
+        def issue():
+            t = torch.ones(4, device=backend._device)
+            work = backend.allreduce([t], dist.AllreduceOptions())
+            with mock.patch.object(backend_mod, "stream_complete") as monitor:
+                result = work.get_future_result()
+            self.assertIs(work.get_future_result(), result)
+            # Cancels the timeout handle.
+            work.wait()
+            return result, monitor.call_args.args[0]
+
+        result, on_complete = issue()
+        on_complete()
+        self.assertTrue(result.done())
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
+
+        # Kernels cut short by abort() also complete their events.
+        result, on_complete = issue()
+        backend.abort()
+        on_complete()
+        self.assertFalse(result.done())
+
 
 @skip_unless_nccl4py
 @unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
@@ -311,8 +339,10 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
         self.assertEqual(t, torch.full((4,), 3.0, device=device))
 
-        # wait() clears the events; the result still tracks the kernels.
-        work = dist.all_reduce(t, async_op=True)
+        # wait() clears the events; the result still tracks the kernels. On the
+        # backend directly: FlightRecorderHook requests the result at issue.
+        backend = dist.distributed_c10d._get_default_group()._get_backend(device)
+        work = backend.allreduce([t], dist.AllreduceOptions())
         work.wait()
         backend_mod = torch.distributed._nccl4py.backend
         with mock.patch.object(

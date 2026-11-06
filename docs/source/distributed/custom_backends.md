@@ -131,11 +131,12 @@ above. `is_completed()`, `synchronize()`, `source_rank()` (used by
 `get_future_result()` can also be overridden. Other `Work` methods can't be
 overridden from Python.
 
-FlightRecorder calls `get_future_result()` once per op as it is issued and
-records the op as completed when the returned future completes. A
-`torch.futures.Future()` can't report failure: any value, including one set
-with `set_exception()`, counts as success. It must be cheap and must not block. Ops whose Work doesn't override it are retired at
-issue.
+FlightRecorder calls `get_future_result()` once per op as it is issued, so an
+override must be cheap and must not block. FlightRecorder records the op as
+completed when the returned future completes. A `torch.futures.Future()` can't
+report failure: any value, including one set with `set_exception()`, counts as
+success. Ops whose Work doesn't override it, or whose override raises, are
+retired at issue.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,
