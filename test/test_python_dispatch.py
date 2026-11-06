@@ -636,6 +636,24 @@ class TestPythonRegistration(TestCase):
                     x = torch.tensor([1, 2])
                     self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
 
+    @parametrize("alias_analysis", ("", "FROM_SCHEMA", "CONSERVATIVE"))
+    def test_alias_analysis_compilation_unit(self, alias_analysis):
+        with _scoped_library(self.test_ns, "DEF") as library:
+
+            @torch.library.define(
+                library, "_op() -> None", alias_analysis=alias_analysis
+            )
+            def operation():
+                return None
+
+            unit = torch.jit.CompilationUnit(
+                f"def check_alias() -> None:\n    torch.ops.{self.test_ns}._op()\n"
+            )
+            self.assertEqual(
+                f"{self.test_ns}::_op" in str(unit.check_alias.graph),
+                alias_analysis == "CONSERVATIVE",
+            )
+
     def test_error_for_unsupported_ns_or_kind(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
             my_lib1 = Library("myns", "BLA")  # noqa: SCOPED_LIBRARY

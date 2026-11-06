@@ -14151,6 +14151,19 @@ class TestCudaAutocast(TestAutocast):
             loss = output.sum()
         loss.backward()
 
+    def test_autocast_boxed_cpu_cat_stack(self):
+        unit = torch.jit.CompilationUnit(
+            "def boxed_cat_stack(a: Tensor, b: Tensor) -> Tensor:\n"
+            "    c = torch.cat([a, b], 0)\n"
+            "    return torch.stack([c, c], 0)\n"
+        )
+        a = torch.randn(1, device="cpu")
+        b = torch.randn(1, device="cpu")
+        with torch.autocast("cuda", enabled=True):
+            result = unit.boxed_cat_stack(a, b)
+        c = torch.cat([a, b], 0)
+        self.assertEqual(result, torch.stack([c, c], 0))
+
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).

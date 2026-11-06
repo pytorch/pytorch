@@ -1265,7 +1265,6 @@ ownership:
       - /test/backends/
       - /test/bench_mps_ops.py
       - /test/conftest.py
-      - /test/create_dummy_torchscript_model.py
       - /test/error_messages/
       - /test/expect/HasDecompTest.test_aten_core_operators.expect
       - /test/expect/HasDecompTest.test_has_decomposition.expect
@@ -1304,7 +1303,6 @@ ownership:
       - /test/forward_backward_compatibility/
       - /test/lazy/
       - /test/linear.py
-      - /test/load_torchscript_model.py
       - /test/minioptest_failures_dict.json
       - /test/mkl_verbose.py
       - /test/mkldnn_verbose.py
