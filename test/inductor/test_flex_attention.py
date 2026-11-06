@@ -11641,7 +11641,7 @@ class TestLearnableBiases(InductorTestCase):
             )
 
 
-class TestFlexAttentionCUDAOnly(InductorTestCase):
+class TestFlexAttentionCUDA(InductorTestCase):
     @supported_platform
     def test_flex_flash_honors_sparse_metadata_with_trivial_mask(self, device):
         """FLASH should honor BlockMask metadata without relying on mask_mod."""
@@ -11747,7 +11747,7 @@ class TestFlexAttentionCUDAOnly(InductorTestCase):
                 self.assertEqual(out, ref, atol=5e-2, rtol=5e-2)
 
 
-instantiate_device_type_tests(TestFlexAttentionCUDAOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexAttentionCUDA, globals(), only_for="cuda")
 
 
 instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
