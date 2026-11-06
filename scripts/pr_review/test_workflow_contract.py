@@ -1480,15 +1480,18 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 "model output to a log.",
             )
 
-    def test_only_pytorch_bot_may_trigger_the_review(self):
-        """pytorch-bot applies the label on a maintainer's behalf; a wildcard
-        would let any bot that can label a pull request start the review.
+    def test_only_named_bots_may_trigger_the_review(self):
+        """pytorch-bot applies the label on a maintainer's behalf, and
+        meta-codesync pushes a co-dev PR's re-exports; a wildcard would let any
+        bot that can label or push to a pull request start the review.
         """
         review = strip_comments(job_block(STAGE2.read_text(), "review"))
         for step_id in MODEL_STEP_IDS:
             inputs = "\n".join(with_block(model_step(review, step_id)))
             bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
-            self.assertEqual(bots, ['"pytorch-bot[bot]"'], f"step {step_id}")
+            self.assertEqual(
+                bots, ['"pytorch-bot[bot],meta-codesync[bot]"'], f"step {step_id}"
+            )
 
     def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.

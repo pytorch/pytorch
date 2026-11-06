@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -193,12 +194,6 @@ compilation_time_metrics: dict[str, list[float]] = {}
 cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
-
-
-class ReInplaceTrigger(enum.Enum):
-    AUTO_FUNC_V1 = 1
-    AUTO_FUNC_V2 = 2
-    TRITON_OPS = 3
 
 
 class ReinplaceCounters:

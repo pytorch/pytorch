@@ -924,6 +924,23 @@ class TestMPS(TestCaseMPS):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
 
+    def test_stream_device(self):
+        for device in [None, torch.device("mps"), torch.device("mps", 0), "mps", "mps:0", 0, -10]:
+            s = torch.mps.Stream(device=device)
+            self.assertEqual(s.device.type, "mps")
+            self.assertEqual(s.device.index, 0)
+
+        with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+            torch.mps.Stream(device=10000)
+
+        for device in [torch.device("mps", 1000), "mps:1000"]:
+            with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+                torch.mps.Stream(device=device)
+
+        for device in [torch.device("cpu"), "cpu"]:
+            with self.assertRaisesRegex(ValueError, r"Expected an mps device"):
+                torch.mps.Stream(device=device)
+
     # Tests that `torch.mps.empty_cache` empties unused buffers on any stream
     @parametrize("stream", ["default", "pool"])
     @serialTest()
