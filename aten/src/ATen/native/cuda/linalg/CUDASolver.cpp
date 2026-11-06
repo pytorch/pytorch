@@ -2129,7 +2129,7 @@ void xgeev<c10::complex<double>>(
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 
 template <>
-cusolverStatus_t xsyevBatched_bufferSize<float>(
+void xsyevBatched_bufferSize<float>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t  jobz,
@@ -2141,7 +2141,7 @@ cusolverStatus_t xsyevBatched_bufferSize<float>(
     size_t *workspaceInBytesOnDevice,
     size_t *workspaceInBytesOnHost,
     int64_t batchSize) {
-  return cusolverDnXsyevBatched_bufferSize(
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
        handle,
        params,
        jobz,
@@ -2155,11 +2155,11 @@ cusolverStatus_t xsyevBatched_bufferSize<float>(
        CUDA_R_32F,
        workspaceInBytesOnDevice,
        workspaceInBytesOnHost,
-       batchSize);
+       batchSize));
 }
 
 template <>
-cusolverStatus_t xsyevBatched_bufferSize<double>(
+void xsyevBatched_bufferSize<double>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t  jobz,
@@ -2171,7 +2171,7 @@ cusolverStatus_t xsyevBatched_bufferSize<double>(
     size_t *workspaceInBytesOnDevice,
     size_t *workspaceInBytesOnHost,
     int64_t batchSize) {
-  return cusolverDnXsyevBatched_bufferSize(
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
        handle,
        params,
        jobz,
@@ -2185,11 +2185,11 @@ cusolverStatus_t xsyevBatched_bufferSize<double>(
        CUDA_R_64F,
        workspaceInBytesOnDevice,
        workspaceInBytesOnHost,
-       batchSize);
+       batchSize));
 }
 
 template <>
-cusolverStatus_t xsyevBatched_bufferSize<c10::complex<float>, float>(
+void xsyevBatched_bufferSize<c10::complex<float>, float>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t  jobz,
@@ -2201,7 +2201,7 @@ cusolverStatus_t xsyevBatched_bufferSize<c10::complex<float>, float>(
     size_t *workspaceInBytesOnDevice,
     size_t *workspaceInBytesOnHost,
     int64_t batchSize) {
-  return cusolverDnXsyevBatched_bufferSize(
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
        handle,
        params,
        jobz,
@@ -2215,11 +2215,11 @@ cusolverStatus_t xsyevBatched_bufferSize<c10::complex<float>, float>(
        CUDA_C_32F,
        workspaceInBytesOnDevice,
        workspaceInBytesOnHost,
-       batchSize);
+       batchSize));
 }
 
 template <>
-cusolverStatus_t xsyevBatched_bufferSize<c10::complex<double>, double>(
+void xsyevBatched_bufferSize<c10::complex<double>, double>(
     cusolverDnHandle_t handle,
     cusolverDnParams_t params,
     cusolverEigMode_t  jobz,
@@ -2231,7 +2231,7 @@ cusolverStatus_t xsyevBatched_bufferSize<c10::complex<double>, double>(
     size_t *workspaceInBytesOnDevice,
     size_t *workspaceInBytesOnHost,
     int64_t batchSize) {
-  return cusolverDnXsyevBatched_bufferSize(
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
        handle,
        params,
        jobz,
@@ -2245,7 +2245,7 @@ cusolverStatus_t xsyevBatched_bufferSize<c10::complex<double>, double>(
        CUDA_C_64F,
        workspaceInBytesOnDevice,
        workspaceInBytesOnHost,
-       batchSize);
+       batchSize));
 }
 
 template <>
