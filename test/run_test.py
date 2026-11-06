@@ -2653,7 +2653,7 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
-    test_prioritizations = import_results()
+    test_prioritizations, previous_failures = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
