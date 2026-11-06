@@ -6737,13 +6737,11 @@ def exponential(self, rate=1, generator=None):
 
     uniform_val = torch.rand_like(self)
 
-    # copying numerics of transformation::exponential see comment:
-    # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-    # we need log to be not 0, and not underflow when converted to half
-    # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+    # -log1p(-u) takes small results from u near 0, where rand_like is dense; -log(u) would take them from u near 1
+    # and lose the small tail (see standard_exponential in aten/src/ATen/native/cuda/DistributionTemplates.h).
+    # rand_like can return 0, and the exponential distribution excludes 0.
     epsilon = torch.finfo(uniform_val.dtype).eps / 2
-    condition = uniform_val >= 1.0 - epsilon
-    log_uniform = torch.where(condition, -epsilon, torch.log(uniform_val))
+    log_uniform = torch.where(uniform_val == 0, -epsilon, torch.log1p(-uniform_val))
 
     return -1 / rate * log_uniform
 
