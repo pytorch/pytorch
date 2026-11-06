@@ -1,26 +1,52 @@
 from __future__ import annotations
 
 import functools
+import io
+import json
 import random
+import subprocess
 import sys
+import tempfile
 import unittest
 from collections import defaultdict
 from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
+    from tools.testing import test_selections
+    from tools.testing.target_determination import gen_artifact
+    from tools.testing.target_determination.heuristics.interface import (
+        TestPrioritizations,
+    )
     from tools.testing.test_run import ShardedTest, TestRun
     from tools.testing.test_selections import (
         calculate_shards,
+        CallSplit,
         get_job_base_name,
+        run_test_split,
+        split_tests,
         THRESHOLD,
     )
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
+
+# Only the llm_selector tests fail if the experimental package does not import.
+try:
+    from tools.testing.llm_selector import selection
+    from tools.testing.llm_selector.selection import Selection
+except Exception as e:
+    LLM_SELECTOR_IMPORT_ERROR: Exception | None = e
+else:
+    LLM_SELECTOR_IMPORT_ERROR = None
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 
 def gen_class_times(test_times: dict[str, float]) -> dict[str, dict[str, float]]:
@@ -659,6 +685,336 @@ class TestGetJobBaseName(unittest.TestCase):
             "env / build",
         ):
             self.assertEqual(get_job_base_name(name), name)
+
+
+class LlmSelectorTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if LLM_SELECTOR_IMPORT_ERROR is not None:
+            raise LLM_SELECTOR_IMPORT_ERROR
+
+
+class TestSplitTests(LlmSelectorTestCase):
+    TD_LINE = "Running 25% of tests based on TD\n"
+
+    def split(
+        self,
+        sel: Selection | str | None,
+        prev: Collection[str] | None = (),
+        td_enabled: bool = True,
+        record: bool = True,
+        test_config: str = "default",
+        enforcement: bool = True,
+    ) -> tuple[CallSplit, str, list[dict]]:
+        """split_tests' result, its stderr and the artifacts it wrote, with the
+        selection file holding `sel` (a str is written as is)."""
+        tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})
+        stderr = io.StringIO()
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(selection, "ENFORCEMENT_ENABLED", enforcement),
+            mock.patch.object(selection, "get_pr_number", return_value=1),
+            mock.patch.object(gen_artifact, "REPO_ROOT", Path(d)),
+            mock.patch("sys.stderr", stderr),
+        ):
+            reports = Path(d) / "test" / "test-reports"
+            reports.mkdir(parents=True)
+            selection_file = Path(d) / "llm_selection.json"
+            if isinstance(sel, Selection):
+                sel = json.dumps(sel.to_json())
+            if sel is not None:
+                selection_file.write_text(sel)
+            split = split_tests(
+                tp,
+                {"a": 1, "p": 1},
+                selection_file=selection_file,
+                test_config=test_config,
+                td_enabled=td_enabled,
+                previous_failures=prev,
+                record=record,
+            )
+            artifacts = [json.loads(x.read_text()) for x in reports.iterdir()]
+        return split, stderr.getvalue(), artifacts
+
+    def assertSplit(self, split: CallSplit, inc: list[str], exc: list[str]) -> None:
+        runs = ([str(x) for x in split.include], [str(x) for x in split.exclude])
+        self.assertEqual(runs, (inc, exc))
+
+    def test_td_split_without_a_selection(self) -> None:
+        for sel in (None, "{"):
+            split, stderr, artifacts = self.split(sel)
+            self.assertIsNone(split.llm)
+            self.assertFalse(split.llm_enforced)
+            self.assertSplit(split, ["p"], ["a"])
+            self.assertTrue(stderr.endswith(self.TD_LINE), stderr)
+            warned = "::warning::Ignoring the LLM selection" in stderr
+            self.assertEqual(warned, sel == "{")
+            a, p = TestRun("a").to_json(), TestRun("p").to_json()
+            expected = {
+                "included": [p],
+                "excluded": [a],
+                "source": "td",
+                "td_excluded": [a],
+            }
+            self.assertEqual(artifacts, [expected])
+
+    def test_shadow_selection_keeps_td(self) -> None:
+        split, stderr, artifacts = self.split(Selection(files={"a"}, candidates={"a"}))
+        if split.llm is None:
+            raise AssertionError("no selection read")
+        self.assertFalse(split.llm_enforced)
+        self.assertEqual(split.llm.split.covered, {"a", "p"})
+        self.assertSplit(split, ["p"], ["a"])
+        self.assertEqual(stderr, self.TD_LINE)
+        self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+    def test_enforcement_disabled_keeps_td(self) -> None:
+        shadow, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        split, stderr, artifacts = self.split(sel, enforcement=False)
+        if split.llm is None or shadow.llm is None:
+            raise AssertionError("no selection read")
+        self.assertFalse(split.llm_enforced)
+        self.assertFalse(split.llm.kept_td)
+        self.assertSplit(split, ["p"], ["a"])
+        self.assertEqual(stderr, self.TD_LINE)
+        self.assertEqual([x["source"] for x in artifacts], ["td"])
+        metric = {
+            **shadow.llm.selection_metric,
+            "enforce_requested": True,
+            "enforce": True,
+            "would_enforce": True,
+            "enforcement_enabled": False,
+        }
+        self.assertEqual(split.llm.selection_metric, metric)
+
+    def test_enforced_selection_replaces_td(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        split, stderr, artifacts = self.split(sel)
+        self.assertTrue(split.llm_enforced)
+        self.assertSplit(split, ["p", "a"], [])
+        # Only the selection's line: TD's split does not run.
+        self.assertEqual(
+            stderr,
+            "LLM selection: running 2 of 2 test files (2 covered; 0 previous failures added; 0 hedged within 0s)\n",
+        )
+        a, p = TestRun("a").to_json(), TestRun("p").to_json()
+        expected = {
+            "included": [p, a],
+            "excluded": [],
+            "source": "llm_selection",
+            "td_excluded": [a],
+        }
+        self.assertEqual(artifacts, [expected])
+
+    def test_sweep_covers_only_its_config(self) -> None:
+        sel = Selection(sweeps={"dynamo_wrapped"}, enforce=True, candidates={"a", "p"})
+        for config, covered in (("dynamo_wrapped", {"a", "p"}), ("default", set())):
+            split, _, _ = self.split(sel, test_config=config)
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(split.llm.split.covered, covered, config)
+            self.assertEqual(split.llm_enforced, bool(covered), config)
+
+    def test_not_recorded_outside_ci(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        for s in (None, sel):
+            split, _, artifacts = self.split(s, record=False)
+            self.assertEqual((split.llm_enforced, artifacts), (s is not None, []))
+
+    def test_td_disabled(self) -> None:
+        for sel in (None, Selection(files={"a"}, enforce=True, candidates={"a"})):
+            split, stderr, artifacts = self.split(sel, td_enabled=False)
+            self.assertFalse(split.llm_enforced)
+            self.assertSplit(split, ["p", "a"], [])
+            self.assertEqual(stderr, "Running all tests\n")
+            self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+    def test_failed_selector_is_not_enforced(self) -> None:
+        # select_tests clears enforce when the selector failed, and a file
+        # that sets both is not enforced either; a deliberate run_all is.
+        failed = Selection(
+            run_all=True, reason="selector failed: x", enforce=True, error="x"
+        )
+        deliberate = Selection(run_all=True, reason="infra", enforce=True)
+        failed_line = "LLM selection: the selector failed ('x'), using TD\n"
+        enforced_line = "LLM selection: running 2 of 2 test files (2 covered; 0 previous failures added; 0 hedged within 0s)\n"
+        for sel, error, enforced, lines in (
+            (failed, "x", False, failed_line + self.TD_LINE),
+            (deliberate, None, True, enforced_line),
+        ):
+            split, stderr, artifacts = self.split(sel)
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(split.llm_enforced, enforced)
+            self.assertFalse(split.llm.kept_td)
+            self.assertSplit(
+                split, ["p", "a"] if enforced else ["p"], [] if enforced else ["a"]
+            )
+            self.assertEqual(stderr, lines)
+            self.assertEqual(split.llm.selection_metric["selector_error"], error)
+            source = "llm_selection" if enforced else "td"
+            self.assertEqual([x["source"] for x in artifacts], [source])
+
+    def test_failed_selector_line_only_when_it_would_enforce(self) -> None:
+        failed_line = "LLM selection: the selector failed ('x'), using TD\n"
+        shadow = Selection(run_all=True, reason="selector failed: x", error="x")
+        requested = Selection(
+            run_all=True, reason="selector failed: x", error="x", enforce_requested=True
+        )
+        for sel, td_enabled, enforcement, printed in (
+            (shadow, True, True, False),
+            (requested, True, True, True),
+            (requested, False, True, False),
+            (requested, True, False, False),
+        ):
+            split, stderr, _ = self.split(
+                sel, td_enabled=td_enabled, enforcement=enforcement
+            )
+            self.assertEqual(
+                failed_line in stderr, printed, (sel, td_enabled, enforcement)
+            )
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(
+                split.llm.selection_metric["enforcement_enabled"], enforcement
+            )
+
+    def test_broken_llm_selector_keeps_td(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        broken = (
+            mock.patch.dict(sys.modules, {selection.__name__: None}),
+            mock.patch.object(Selection, "load", side_effect=RuntimeError("bug")),
+            mock.patch.object(Selection, "split", side_effect=RuntimeError("bug")),
+            mock.patch.object(selection, "apply_selection", side_effect=RuntimeError),
+        )
+        for patch in broken:
+            with patch:
+                split, stderr, artifacts = self.split(sel)
+            self.assertIsNone(split.llm)
+            self.assertSplit(split, ["p"], ["a"])
+            self.assertTrue(stderr.startswith("::warning::Ignoring the LLM selection"))
+            self.assertTrue(stderr.endswith(self.TD_LINE), stderr)
+            self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+    def test_selection_metrics(self) -> None:
+        split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        if split.llm is None:
+            raise AssertionError("no selection read")
+        metric = split.llm.selection_metric
+        self.assertEqual(split.selection_metrics(True), [("llm_selection", metric)])
+        self.assertEqual(split.selection_metrics(False), [])
+        self.assertEqual(CallSplit([], [], None).selection_metrics(True), [])
+
+    def test_failure_metrics(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        test, stats = TestRun("a"), {"test_name": "a"}
+        td = {"selected_tests": ["a", "p"], "failure": "a", "test_name": "a"}
+        for s in (None, sel):
+            split, _, _ = self.split(s)
+            metrics = split.failure_metrics(test, ["a", "p"], stats)
+            row = {**td, "llm_enforced": s is not None}
+            expected: list[tuple[str, object]] = [("td_test_failure_stats_v2", row)]
+            if split.llm is not None:
+                expected.append(
+                    ("llm_selection_failure", split.llm.failure_metric(test))
+                )
+            self.assertEqual(metrics, expected)
+
+    def test_broken_llm_selector_metrics_are_skipped(self) -> None:
+        split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        bug = RuntimeError("bug")
+        with (
+            mock.patch.object(
+                selection.AppliedSelection,
+                "selection_metric",
+                property(mock.Mock(side_effect=bug)),
+            ),
+            mock.patch.object(
+                selection.AppliedSelection, "failure_metric", side_effect=bug
+            ),
+            mock.patch("sys.stderr", io.StringIO()) as stderr,
+        ):
+            self.assertEqual(split.selection_metrics(True), [])
+            metrics = split.failure_metrics(TestRun("a"), [], {})
+        self.assertEqual([name for name, _ in metrics], ["td_test_failure_stats_v2"])
+        self.assertEqual(
+            stderr.getvalue(),
+            "::warning::Not emitting llm_selection: RuntimeError('bug')\n"
+            "::warning::Not emitting llm_selection_failure: RuntimeError('bug')\n",
+        )
+
+    def test_unknown_previous_failures_keep_td(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        split, stderr, artifacts = self.split(sel, prev=None)
+        if split.llm is None:
+            raise AssertionError("no selection read")
+        self.assertTrue(split.llm.kept_td)
+        self.assertSplit(split, ["p"], ["a"])
+        fallback = "LLM selection: previous failures not recorded in the TD results, using TD\n"
+        self.assertEqual(stderr, fallback + self.TD_LINE)
+        self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+
+class TestRunTestSplit(LlmSelectorTestCase):
+    def test_forwards_run_test_values(self) -> None:
+        tp = TestPrioritizations(["a"], {})
+        for prev, is_ci in ((None, True), (set(), False), ({"a"}, True)):
+            with mock.patch.object(test_selections, "split_tests") as split:
+                run_test_split(
+                    tp,
+                    {"a": 1},
+                    previous_failures=prev,
+                    test_config="cfg",
+                    td_enabled=True,
+                    is_ci=is_ci,
+                    repo_root=Path("/r"),
+                )
+            split.assert_called_once_with(
+                tp,
+                {"a": 1},
+                selection_file=Path("/r/.additional_ci_files/llm_selection.json"),
+                test_config="cfg",
+                td_enabled=True,
+                previous_failures=prev,
+                record=is_ci,
+            )
+            self.assertIs(split.call_args.kwargs["previous_failures"], prev)
+
+    def test_runs_without_llm_selector(self) -> None:
+        self.assertEqual(
+            test_selections.LLM_SELECTION_FILE, selection.LLM_SELECTION_FILE
+        )
+        code = "import sys; sys.modules['tools.testing.llm_selector'] = None; import tools.testing.test_selections"
+        subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, check=True)
+
+    def test_unknown_previous_failures_keep_td(self) -> None:
+        tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(selection, "ENFORCEMENT_ENABLED", True),
+            mock.patch.object(selection, "get_pr_number", return_value=1),
+            mock.patch("sys.stderr", io.StringIO()),
+        ):
+            folder = Path(d) / ".additional_ci_files"
+            folder.mkdir()
+            (folder / "llm_selection.json").write_text(json.dumps(sel.to_json()))
+            for prev, enforced in ((None, False), (set(), True)):
+                split = run_test_split(
+                    tp,
+                    {"a": 1, "p": 1},
+                    previous_failures=prev,
+                    test_config="default",
+                    td_enabled=True,
+                    is_ci=False,
+                    repo_root=Path(d),
+                )
+                if split.llm is None:
+                    raise AssertionError("no selection read")
+                self.assertEqual(
+                    (split.llm_enforced, split.llm.kept_td), (enforced, not enforced)
+                )
 
 
 if __name__ == "__main__":

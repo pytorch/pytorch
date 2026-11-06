@@ -4,10 +4,17 @@ import math
 import os
 import re
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
-from tools.stats.import_test_stats import get_disabled_tests
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_disabled_tests
+from tools.testing.target_determination.gen_artifact import (
+    gen_ci_artifact,
+    LLM_SELECTION_SOURCE,
+    TD_SOURCE,
+)
 from tools.testing.test_run import ShardedTest, TestRun
 
 
@@ -22,10 +29,18 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
+
+    from tools.testing.llm_selector.selection import AppliedSelection
+    from tools.testing.target_determination.heuristics.interface import (
+        TestPrioritizations,
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# tools/testing/llm_selector/selection.py's LLM_SELECTION_FILE, which is imported
+# only when the file exists, so the experimental package cannot break run_test.py.
+LLM_SELECTION_FILE = "llm_selection.json"
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
@@ -326,3 +341,131 @@ JOB_BASE_NAME_RE = re.compile(r" / test(?:-osdc)? \(")
 
 def get_job_base_name(job_name: str) -> str:
     return JOB_BASE_NAME_RE.split(job_name, maxsplit=1)[0]
+
+
+@dataclass
+class CallSplit:
+    """The split of one run_test.py call's tests that runs, and the LLM test
+    selection applied to TD's split if CI downloaded one."""
+
+    include: list[TestRun]
+    exclude: list[TestRun]
+    llm: AppliedSelection | None
+
+    @property
+    def llm_enforced(self) -> bool:
+        return self.llm is not None and self.llm.enforced
+
+    def selection_metrics(self, is_ci: bool) -> list[tuple[str, dict[str, Any]]]:
+        """The (name, payload) metrics run_test.py emits before running the
+        tests: llm_selection, in CI with a selection."""
+        if not is_ci or (llm := self.llm) is None:
+            return []
+        return _llm_metric("llm_selection", lambda: llm.selection_metric)
+
+    def failure_metrics(
+        self, test: TestRun, selected_tests: list[str], test_stats: dict[str, Any]
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """The (name, payload) metrics run_test.py emits in CI for a failed
+        `test`: td_test_failure_stats_v2 and, with a selection, llm_selection_failure."""
+        stats = {
+            "selected_tests": selected_tests,
+            "failure": str(test),
+            "llm_enforced": self.llm_enforced,
+            **test_stats,
+        }
+        metrics = [("td_test_failure_stats_v2", stats)]
+        if (llm := self.llm) is not None:
+            metrics += _llm_metric(
+                "llm_selection_failure", lambda: llm.failure_metric(test)
+            )
+        return metrics
+
+
+def _llm_metric(
+    name: str, payload: Callable[[], dict[str, Any]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """[(name, payload())], or none, with a ::warning::, if the experimental
+    llm_selector package raises."""
+    try:
+        return [(name, payload())]
+    except Exception as e:
+        print(f"::warning::Not emitting {name}: {e!r}", file=sys.stderr)
+        return []
+
+
+def split_tests(
+    test_prioritizations: TestPrioritizations,
+    test_times: dict[str, float],
+    *,
+    selection_file: Path,
+    test_config: str,
+    td_enabled: bool,
+    previous_failures: Collection[str] | None,
+    record: bool,
+) -> CallSplit:
+    """TD's split, 25% with TD enabled and everything otherwise, replaced by
+    the LLM test selection in `selection_file` when apply_selection enforces
+    it (see tools/testing/llm_selector). With `record` (in CI), gen_ci_artifact
+    records the split that runs and what TD's split excluded. A selection
+    that fails to import, load or apply keeps TD's split. run_test.py emits
+    CallSplit's metrics, since emit_metric records its caller."""
+    percent_to_run = 25 if td_enabled else 100
+    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    llm: AppliedSelection | None = None
+    if selection_file.exists():
+        try:
+            from tools.testing.llm_selector.selection import apply_selection, Selection
+
+            selection = Selection.load(selection_file)
+            if selection is not None:
+                llm = apply_selection(
+                    selection,
+                    include,
+                    exclude,
+                    test_prioritizations.get_score,
+                    test_times,
+                    test_config=test_config,
+                    td_enabled=td_enabled,
+                    previous_failures=previous_failures,
+                )
+        except Exception as e:
+            print(f"::warning::Ignoring the LLM selection: {e!r}", file=sys.stderr)
+    if llm is not None and llm.enforced:
+        split = CallSplit(llm.split.include, llm.split.exclude, llm)
+    else:
+        split = CallSplit(include, exclude, llm)
+        td_line = f"Running {percent_to_run}% of tests based on TD"
+        print(td_line if td_enabled else "Running all tests", file=sys.stderr)
+    if record:
+        gen_ci_artifact(
+            [x.to_json() for x in split.include],
+            [x.to_json() for x in split.exclude],
+            source=LLM_SELECTION_SOURCE if split.llm_enforced else TD_SOURCE,
+            td_excluded=[x.to_json() for x in exclude],
+        )
+    return split
+
+
+def run_test_split(
+    test_prioritizations: TestPrioritizations,
+    test_times: dict[str, float],
+    *,
+    previous_failures: Collection[str] | None,
+    test_config: str,
+    td_enabled: bool,
+    is_ci: bool,
+    repo_root: Path = REPO_ROOT,
+) -> CallSplit:
+    """split_tests as run_test.py calls it: the selection CI downloaded, and
+    the split recorded only in CI. `previous_failures` is import_results'
+    value, None when unknown, which keeps TD's split."""
+    return split_tests(
+        test_prioritizations,
+        test_times,
+        selection_file=repo_root / ADDITIONAL_CI_FILES_FOLDER / LLM_SELECTION_FILE,
+        test_config=test_config,
+        td_enabled=td_enabled,
+        previous_failures=previous_failures,
+        record=is_ci,
+    )
