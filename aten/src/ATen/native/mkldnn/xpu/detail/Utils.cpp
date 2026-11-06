@@ -19,11 +19,13 @@ dnnl::memory make_onednn_memory(
       ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
 }
 
-dnnl::memory make_onednn_memory(
+dnnl::memory make_onednn_grouped_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    const void* ptr) {
-  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
+    void* ptr,
+    void* offs_ptr) {
+  return dnnl::sycl_interop::make_memory(
+      md, engine, dnnl::sycl_interop::memory_kind::usm, {ptr, offs_ptr});
 }
 
 dnnl::memory::format_tag get_dnnl_default_format(

@@ -6,7 +6,7 @@ PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
-CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.10.1 3.11.0 3.12.0 3.13.0 3.14.0 3.14.0t 3.15.0 3.15.0t"}
+CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.11.0 3.12.0 3.13.0 3.14.0 3.14.0t 3.15.0 3.15.0t"}
 
 # Function to retry functions that sometimes timeout or have flaky failures
 retry () {
@@ -95,11 +95,6 @@ function build_cpython {
     if [[ "${py_suffix}" == *"t" ]]; then
         py_suffix=${py_suffix::-1}
         py_folder=$py_suffix
-    fi
-    # 3.15.0 has no final release yet; build the latest release candidate
-    # (the ABI is frozen from rc1 on).
-    if [ "$py_suffix" == "3.15.0" ]; then
-        py_suffix="3.15.0rc2"
     fi
     retry wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
     do_cpython_build $py_ver Python-$py_suffix
