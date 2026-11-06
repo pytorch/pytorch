@@ -1343,11 +1343,12 @@ class CppFlexAttentionTemplate(CppTemplate):
             else None
         )
         self.other_ptr_data = {}
+        self.input_dtype = self.input_nodes[0].get_dtype()
         # Gate every AMX region on the ISA inductor will compile with.
         vec_isa = pick_vec_isa()
         self.amx_supported = isinstance(vec_isa, VecAMX) and (
-            layout.dtype == torch.bfloat16
-            or (layout.dtype == torch.float16 and vec_isa.is_amx_fp16_supported())
+            self.input_dtype == torch.bfloat16
+            or (self.input_dtype == torch.float16 and vec_isa.is_amx_fp16_supported())
         )
 
     def update_kernel_args(self, kernel_args):
@@ -1601,7 +1602,6 @@ class CppFlexAttentionTemplate(CppTemplate):
         key = kernel.permute(self.input_nodes[1], [0, 2, 1, 3])
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
-        self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
