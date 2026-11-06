@@ -287,6 +287,7 @@ g () {
         sources: dict[str, str],
         candidates: set[str],
         changed: list[str],
+        deleted: tuple[str, ...] = (),
     ) -> Selection:
         """from_model_output with an empty answer and select_tests.git_grep over `sources`, a test/ tree."""
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -319,6 +320,7 @@ g () {
                 candidates,
                 changed,
                 lambda p: select_tests.git_grep(p, "HEAD"),
+                deleted,
             )
 
     def test_importers_are_selected(self) -> None:
@@ -451,11 +453,12 @@ g () {
         ]:
             error = error or f"{type(e).__name__}: {e}"
             # The first answer greps every path, the second only for importers
-            # or, for a failure list, for the class it names.
+            # or, for a failure list or a data file, for its class or readers.
             for out, changed in [
                 (answer(tests=[{"file": "jit/test_freezing"}]), "test/test_nn.py"),
                 (answer(), "test/test_nn.py"),
                 (answer(), "test/dynamo_expected_failures/TestNN.test_x"),
+                (answer(), "test/data.json"),
             ]:
                 grep = mock.Mock(side_effect=e)
                 sel = Selection.from_model_output(out, CANDIDATES, [changed], grep)
@@ -565,6 +568,251 @@ g () {
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
 
+    def test_data_file_readers_are_selected(self) -> None:
+        sources = {
+            "test_public_bindings.py": 'open("allowlist_for_publicAPI.json")\n',
+            "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n    # Reads comment_only.json\nx = 1  # Reads trailing.json\n',
+            "test_nn.py": "class TestNN(TestCase):\n",
+            "dynamo/test_misc.py": "from test_nn import TestNN\n",
+            "test_tensorboard.py": 'class TestTensorBoardSummary(TestCase):\n    path = "TestTensorBoard." + name\n',
+            "distributed/launcher/test_run.py": 'path("bin/test_script.sh")\n',
+            "distributed/launcher/bin/test_script.sh": "",
+            "distributed/launcher/bin/unused.py": "",
+            "README.md": "notes.txt\n",
+            "run_test.py": 'open("run_only.json")\n',
+            "cpp/api/CMakeLists.txt": "cpp_data.bin\ncpp_shared.bin\n",
+            "test_torch.py": 'import random\nopen("cpp_shared.bin")\n',
+            "inductor/test_compile.py": 'os.path.join(tmp_dir, "CMakeLists.txt")\n',
+            "helpers/random.py": "",
+            "test_mobile_ops.py": "from mobile.model_test import math_ops\n",
+            "custom_operator/test_out_variant.py": "from pointwise import f\n",
+            "jit/test_save_load_for_op_version.py": '"/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl"\n',
+            "test_jit.py": "from cpp.jit import tests_setup\n",
+            "typing/test_python_operators.py": 'Path(__file__).parent / "pass/arithmetic_ops.py"\n',
+            "typing/fail/arithmetic_ops.py": "# See ../pass/arithmetic_ops.py\n",
+        }
+        drivers = {
+            "test_cpp_extensions_aot_ninja",
+            "test_cpp_extensions_aot_no_ninja",
+            "test_cpp_extensions_jit",
+            "test_cpp_extensions_mtia_backend",
+            "test_cpp_extensions_stream_and_event",
+            "test_autoload_enable",
+            "test_autoload_disable",
+        }
+        inductor_lib = {
+            "inductor/test_aot_inductor_custom_ops",
+            "inductor/test_gpu_cpp_wrapper",
+        }
+        candidates = (
+            CANDIDATES
+            | drivers
+            | {
+                "test_public_bindings",
+                "test_tensorboard",
+                "distributed/launcher/test_run",
+                "test_torch",
+                "inductor/test_compile",
+                "test_cpython_diff_sync",
+                "test_mobile_ops",
+                "custom_operator/test_out_variant",
+                "test_jit",
+                "test_cpp_api_parity",
+                "test_typing",
+                "typing/test_python_operators",
+            }
+            | inductor_lib
+        )
+        for changed, expected in [
+            ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
+            # The drivers build every extension, and test_ops loads this one by its path.
+            ("test/cpp_extensions/my_ext.cpp", {"test_ops"} | drivers),
+            ("test/cpp_extensions/ext.cpp", drivers),
+            ("test/cpp_extensions/doubler.h", drivers),
+            ("test/cpp_data.bin", set()),
+            ("test/cpp_shared.bin", {"test_torch"}),
+            ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
+            # test_tensorboard.py builds this path for TestTensorBoardSummary.
+            ("test/expect/TestTensorBoard.test_x.expect", {"test_tensorboard"}),
+            # test_run.py runs this file by its path.
+            (
+                "test/distributed/launcher/bin/test_script.sh",
+                {"distributed/launcher/test_run"},
+            ),
+            ("test/cpp/api/any.cpp", set()),
+            # Only the C++ tests read it, whatever else names a CMakeLists.txt.
+            ("test/cpp/api/CMakeLists.txt", set()),
+            # CI scripts build and run these; run_test.py never does.
+            ("test/custom_backend/custom_backend.h", set()),
+            ("test/custom_operator/op.cpp", set()),
+            ("test/mobile/nnc/test_context.cpp", set()),
+            ("test/mobile/nnc/aot_test_model.py", set()),
+            ("test/custom_backend/backend.py", set()),
+            ("test/jit_hooks/model.py", set()),
+            ("test/jit_hooks/test_jit_hooks.cpp", set()),
+            ("test/inductor/cpp/test_cpp_prefix.cpp", set()),
+            ("test/cpp/jit/torch_python_test.cpp", set()),
+            ("test/cpp/shim/run_test.sh", set()),
+            # Their importers still read these.
+            ("test/mobile/model_test/math_ops.py", {"test_mobile_ops"}),
+            ("test/custom_operator/pointwise.py", {"custom_operator/test_out_variant"}),
+            ("test/cpp/jit/tests_setup.py", {"test_jit"}),
+            # test_save_load_for_op_version.py loads it by its path.
+            (
+                "test/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl",
+                {"test_jit"},
+            ),
+            ("test/README.md", set()),
+            ("test/cpython/v3_13/test_set.diff", {"test_cpython_diff_sync"}),
+            (
+                "test/cpython/v3_13/test_set.py",
+                {"cpython/v3_13/test_set", "test_cpython_diff_sync"},
+            ),
+            ("tools/cpython_diff_sync.py", {"test_cpython_diff_sync"}),
+            ("test/inductor/custom_ops.cpp", inductor_lib),
+            ("test/inductor/CMakeLists.txt", inductor_lib | {"inductor/test_compile"}),
+            ("test/cpp_api_parity/parity-tracker.md", {"test_cpp_api_parity"}),
+            ("test/run_doctests.sh", set()),
+            ("test/forward_backward_compatibility/dump_all_function_schemas.py", set()),
+            ("test/scripts/run_cuda_memcheck.py", set()),
+            # test_python_operators.py also reads it by its path.
+            (
+                "test/typing/pass/arithmetic_ops.py",
+                {"test_typing", "typing/test_python_operators"},
+            ),
+            ("test/trailing.json", {"test_ops"}),
+        ]:
+            sel = self.select_in_tree(sources, candidates, [changed])
+            self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+        # `import random` imports the standard library's random; no class
+        # TestGone exists; nothing names unused.py; and the others are named
+        # only by a README, by run_test.py, which no test imports, or by a
+        # comment line.
+        for changed in (
+            "test/helpers/random.py",
+            "test/expect/TestGone.test_x.expect",
+            "test/distributed/launcher/bin/unused.py",
+            "test/notes.txt",
+            "test/run_only.json",
+            "test/comment_only.json",
+            "test/custom_operator/model.py",
+            "test/cpp/api/data.pt",
+        ):
+            sel = self.select_in_tree(
+                sources, candidates, ["test/allowlist_for_publicAPI.json", changed]
+            )
+            self.assertEqual(
+                (sel.run_all, sel.reason, sel.error),
+                (True, f"nothing found that reads {changed}", None),
+            )
+        sel = self.select_in_tree(
+            sources | {"allowlist_for_publicAPI.json": "b.json\n"},
+            candidates,
+            ["test/allowlist_for_publicAPI.json", "test/b.json"],
+        )
+        self.assertEqual(
+            (sel.run_all, sel.reason), (True, "nothing found that reads test/b.json")
+        )
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/cpp_extensions/ext.cpp"])
+        self.assertEqual(
+            (sel.run_all, sel.reason),
+            (True, "nothing found that reads test/cpp_extensions/ext.cpp"),
+        )
+        # Changes outside test/ need no reader.
+        allowlist = "test/allowlist_for_publicAPI.json"
+        for changed in (["torch/a.py"], ["torch/a.py", allowlist]):
+            sel = self.select_in_tree(sources, candidates, changed)
+            self.assertEqual(sel.run_all, False, changed)
+        # A deleted file, or the old path of a moved one, needs no reader.
+        gone = ["test/gone.json", "test/distributed/launcher/bin/unused.py"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), (set(), False))
+        # Its readers are still selected.
+        reader = {"test_public_bindings.py": 'open("gone.json")\n'}
+        sel = self.select_in_tree(sources | reader, candidates, gone, tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), ({"test_public_bindings"}, False))
+        # Except an expect file, which the tests of its class still assert against.
+        gone = ["test/expect/TestNNCPU.test_x-y.expect"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual(
+            (sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False)
+        )
+        # Including one that only a test class's name prefix reads.
+        gone = ["test/expect/TestTensorBoard.test_x.expect"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), ({"test_tensorboard"}, False))
+        # A deleted file NO_READER_RE matches still selects the tests naming it.
+        gone = ["test/custom_operator/op.cpp"]
+        reader = {"test_nn.py": 'class TestNN(TestCase):\n    open("op.cpp")\n'}
+        sel = self.select_in_tree(sources | reader, candidates, gone, tuple(gone))
+        self.assertEqual(
+            (sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False)
+        )
+        many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
+        sel = self.select_in_tree(sources, candidates, many)
+        reason = f"more than {selection.MAX_DATA_FILES} edited files under test/ need a reader"
+        self.assertEqual((sel.run_all, sel.reason, sel.error), (True, reason, None))
+
+    def test_cpp_docs_and_comments_do_not_read_data_files(self) -> None:
+        sources = {
+            "cpp/jit/README.md": "doc_only.json\n",
+            "cpp/jit/test_save_load.cpp": '// Reads comment_only.json\n  //comment_only.json\nload("real.json");\n',
+        }
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/real.json"])
+        self.assertEqual((sel.files, sel.run_all), (set(), False))
+        for changed in ("test/doc_only.json", "test/comment_only.json"):
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual(
+                (sel.run_all, sel.reason), (True, f"nothing found that reads {changed}")
+            )
+
+    def test_non_candidate_test_modules_need_no_reader(self) -> None:
+        sources = {
+            "test_static_runtime.py": "",
+            "mobile/test_lite.py": 'open("lite.ptl")\nopen("shared.ptl")\n',
+            "test_nn.py": 'open("shared.ptl")\n',
+        }
+        for changed, expected in [
+            ("test/test_static_runtime.py", set()),
+            ("test/lite.ptl", set()),
+            ("test/shared.ptl", {"test_nn"}),
+        ]:
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+
+    def test_data_file_reader_hop_limit(self) -> None:
+        reason = "test modules import the change through too many hops"
+        hops = selection.MAX_IMPORT_HOPS
+        name = selection.alts(["data.json"])
+        for depth, run_all in [(hops, False), (hops + 1, True)]:
+            # test/m1.py reads the data file and test/m<k + 1>.py imports test/m<k>.py.
+            imports = {
+                selection.import_pattern([f"test/m{k}.py"]): [f"test/m{k + 1}.py"]
+                for k in range(1, depth)
+            }
+
+            grepped: list[str] = []
+
+            def grep(pattern: str) -> list[str]:
+                grepped.append(pattern)
+                return ["test/m1.py"] if name in pattern else imports.get(pattern, [])
+
+            candidates = CANDIDATES | {f"m{depth}"}
+            changed = ["test/data.json"]
+            sel = Selection.from_model_output(answer(), candidates, changed, grep)
+            hops_reason = sel.reason.startswith(reason)
+            self.assertEqual(
+                (sel.run_all, hops_reason, sel.error), (run_all, run_all, None)
+            )
+            # One grep for the readers of data.json, then one per import hop from test/m1.py.
+            hop_greps = [
+                selection.import_pattern([f"test/m{k}.py"]) for k in range(1, hops + 1)
+            ]
+            self.assertIn(name, grepped[0])
+            self.assertEqual(grepped[1:], hop_greps)
+            if not run_all:
+                self.assertEqual(sel.files, {f"m{depth}"})
+
     def test_import_chain_hop_limit(self) -> None:
         reason = "test modules import the change through too many hops"
         hops = selection.MAX_IMPORT_HOPS
@@ -586,7 +834,7 @@ g () {
             # The module found in the last round that finds one is a candidate.
             candidates = CANDIDATES | {f"m{depth}"}
             sel = Selection.from_model_output(
-                answer(), candidates, ["test/test_nn.py"], grep
+                answer(reason="why"), candidates, ["test/test_nn.py"], grep
             )
             self.assertEqual((sel.run_all, sel.error), (run_all, None), depth)
             self.assertEqual(sel.reason == reason, run_all, depth)
