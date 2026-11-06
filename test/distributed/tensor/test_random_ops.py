@@ -115,14 +115,23 @@ class DistTensorRandomInitTest(DTensorTestBase):
         ],
     )
     @parametrize("placement", [Shard(0), Replicate()])
-    @parametrize("init_tracker", [False, True])
-    def test_random_op_device_mismatch(self, op, placement, init_tracker):
-        mesh = self.build_device_mesh()
+    @parametrize("tracker_mode", ["uninitialized", "same_mesh", "different_mesh"])
+    def test_random_op_device_mismatch(self, op, placement, tracker_mode):
+        tracker_mesh = self.build_device_mesh()
+        mesh = (
+            init_device_mesh("cpu", (self.world_size,))
+            if tracker_mode == "different_mesh"
+            else tracker_mesh
+        )
         meta_dt = DTensor.from_local(
             torch.empty(8, 4, device="meta"), mesh, [placement]
         )
         dt = torch.empty_like(meta_dt, device="cpu").fill_(1)
-        tracker = OffsetBasedRNGTracker(mesh) if init_tracker else None
+        tracker = (
+            OffsetBasedRNGTracker(tracker_mesh)
+            if tracker_mode != "uninitialized"
+            else None
+        )
         device_module = torch.get_device_module(self.device_type)
         cpu_state = torch.get_rng_state()
         device_state = device_module.get_rng_state()
@@ -207,10 +216,15 @@ class DistTensorRandomInitTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @parametrize("op", [torch.rand_like, torch.randn_like])
     @parametrize("placement", [Shard(0), Replicate()])
-    @parametrize("init_tracker", [False, True])
+    @parametrize("tracker_mode", ["uninitialized", "same_mesh", "different_mesh"])
     @parametrize("input_device", ["cpu", "meta"])
-    def test_random_op_device_override(self, op, placement, init_tracker, input_device):
-        mesh = self.build_device_mesh()
+    def test_random_op_device_override(self, op, placement, tracker_mode, input_device):
+        tracker_mesh = self.build_device_mesh()
+        mesh = (
+            init_device_mesh("cpu", (self.world_size,))
+            if tracker_mode == "different_mesh"
+            else tracker_mesh
+        )
         meta_dt = DTensor.from_local(
             torch.empty(8, 4, device="meta"), mesh, [placement]
         )
@@ -223,7 +237,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
         for arg in (dt, device_dt):
             torch.manual_seed(1234)
             cpu_state = torch.get_rng_state()
-            tracker = OffsetBasedRNGTracker(mesh) if init_tracker else None
+            tracker = (
+                OffsetBasedRNGTracker(tracker_mesh)
+                if tracker_mode != "uninitialized"
+                else None
+            )
             with patch.object(random, "_rng_tracker", tracker):
                 outputs.append(
                     [op(arg, device=self.device_type).to_local() for _ in range(2)]
@@ -241,6 +259,40 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(states[0], states[1])
         if not dt.is_meta:
             self.assertEqual(dt.to_local(), torch.ones_like(dt.to_local()))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize("op", [torch.Tensor.normal_, torch.Tensor.uniform_])
+    @parametrize("placement", [Shard(0), Replicate()])
+    def test_random_op_different_tracker_mesh(self, op, placement):
+        tracker_mesh = self.build_device_mesh()
+        cpu_mesh = init_device_mesh("cpu", (self.world_size,))
+        device_module = torch.get_device_module(self.device_type)
+        outputs = []
+        states = []
+
+        for mesh in (cpu_mesh, tracker_mesh):
+            meta_dt = DTensor.from_local(
+                torch.empty(8, 4, device="meta"), mesh, [placement]
+            )
+            dt = torch.empty_like(meta_dt, device=self.device_type)
+            torch.manual_seed(1234)
+            cpu_state = torch.get_rng_state()
+            tracker = OffsetBasedRNGTracker(tracker_mesh)
+            with patch.object(random, "_rng_tracker", tracker):
+                outputs.append([op(dt).to_local().clone() for _ in range(2)])
+                self.assertIs(random._rng_tracker, tracker)
+            states.append(device_module.get_rng_state())
+            self.assertEqual(torch.get_rng_state(), cpu_state)
+
+        @maybe_run_for_local_tensor
+        def check_outputs(first, second, expected_first, expected_second):
+            self.assertEqual(first, expected_first)
+            self.assertEqual(second, expected_second)
+            self.assertNotEqual(first, second)
+
+        check_outputs(*outputs[0], *outputs[1])
+        self.assertEqual(states[0], states[1])
 
     @with_comms
     @skip_unless_torch_gpu

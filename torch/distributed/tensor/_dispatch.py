@@ -390,17 +390,22 @@ class OpDispatcher:
                     if random._rng_tracker
                     else init_rng_tracker
                 )
+                rng_device_type = (
+                    random._rng_tracker._device.type
+                    if random._rng_tracker
+                    else mesh.device_type
+                )
                 if (
                     use_rng_tracker
                     and random_device.type != "meta"
-                    and random_device.type != mesh.device_type
+                    and random_device.type != rng_device_type
                 ):
-                    # The mesh RNG tracker cannot advance a different device's RNG.
+                    # The existing tracker may have been initialized by another mesh.
                     raise RuntimeError(
                         f"DTensor random op {op_call} requires the output device "
-                        f"({random_device}) to match the device mesh "
-                        f"({mesh.device_type}) while distributed RNG is enabled. "
-                        "Initialize on the mesh device before offloading, or initialize "
+                        f"({random_device}) to match the RNG tracker device "
+                        f"({rng_device_type}) while distributed RNG is enabled. "
+                        "Initialize on the tracker device before offloading, or initialize "
                         "the tensor returned by DTensor.to_local() under torch.no_grad() "
                         "with an explicitly seeded generator."
                     )
