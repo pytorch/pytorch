@@ -992,6 +992,102 @@ class TestFlopCounter(TestCase):
         )
         self.assertEqual(flops, expected)
 
+    def test_efficient_attention_cross_attention_flop_layout(self):
+        # Query and key/value sequence lengths differ, so a BMHK/BHSD mixup
+        # cannot cancel out between the two bmms.
+        B, S_q, S_kv, H, D = 2, 128, 32, 8, 64
+        q = torch.randn(B, S_q, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(B, S_kv, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(B, S_kv, H, D, device="meta", dtype=torch.float16)
+        out = torch.randn(B, S_q, H, D, device="meta", dtype=torch.float16)
+        grad_out = torch.randn(B, S_q, H, D, device="meta", dtype=torch.float16)
+        logsumexp = torch.randn(B, H, S_q, device="meta", dtype=torch.float32)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                0,
+                False,
+            )
+        expected = sdpa_flop_count((B, H, S_q, D), (B, H, S_kv, D), (B, H, S_kv, D))
+        self.assertEqual(int(get_total_flops(mode)), expected)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_backward(
+                grad_out,
+                q,
+                k,
+                v,
+                None,
+                out,
+                None,
+                None,
+                S_q,
+                S_kv,
+                logsumexp,
+                0.0,
+                torch.tensor(0),
+                torch.tensor(0),
+                0,
+                False,
+            )
+        expected = sdpa_backward_flop_count(
+            (B, H, S_q, D),
+            (B, H, S_q, D),
+            (B, H, S_kv, D),
+            (B, H, S_kv, D),
+        )
+        self.assertEqual(int(get_total_flops(mode)), expected)
+
+    def test_efficient_attention_varlen_backward_flop_unchanged(self):
+        # backward counterpart of test_efficient_attention_varlen_flop_unchanged
+        H, D = 8, 64
+        lengths = [4, 6]
+        total = sum(lengths)
+        cu_seqlens = torch.tensor([0, 4, 10], dtype=torch.int32)
+        q = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        k = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        v = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        out = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        grad_out = torch.randn(1, total, H, D, device="meta", dtype=torch.float16)
+        logsumexp = torch.randn(1, H, total, device="meta", dtype=torch.float32)
+
+        with FlopCounterMode() as mode:
+            torch.ops.aten._efficient_attention_backward(
+                grad_out,
+                q,
+                k,
+                v,
+                None,
+                out,
+                cu_seqlens,
+                cu_seqlens,
+                max(lengths),
+                max(lengths),
+                logsumexp,
+                0.0,
+                torch.tensor(0),
+                torch.tensor(0),
+                0,
+                False,
+            )
+
+        expected = sum(
+            sdpa_backward_flop_count(
+                (1, H, n, D), (1, H, n, D), (1, H, n, D), (1, H, n, D)
+            )
+            for n in lengths
+        )
+        self.assertEqual(int(get_total_flops(mode)), expected)
+
     def test_addmm_out(self):
         def f(x):
             y = torch.zeros(10, 10)
