@@ -71,6 +71,8 @@ jobs:
         timeout-minutes: 40
         shell: bash
         working-directory: test-infra/tools/torchci
+        env:
+          HF_HOME: ${{ runner.temp }}/hf
         run: |
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/llm"
