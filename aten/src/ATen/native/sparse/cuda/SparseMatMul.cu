@@ -50,7 +50,7 @@ Tensor _to_csr_int(const Tensor& rowIndices, int64_t dim, int64_t nnz) {
   Tensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
   rowIndicesInt.copy_(rowIndices);
   sparse::cuda::Xcoo2csr(
-      rowIndicesInt.data_ptr<int32_t>(), nnz, dim, csr.data_ptr<int32_t>());
+      rowIndicesInt.const_data_ptr<int32_t>(), nnz, dim, csr.mutable_data_ptr<int32_t>());
   return csr;
 }
 
@@ -86,9 +86,9 @@ void create_general_description_(cusparseMatDescr_t& description_) {
 // Moreover this implements a RAII guard for a cusparse descriptor
 template<class scalar_t>
 struct csrMatrixRef {
-  int* csr_indices_{nullptr};
-  int* csr_pointers_{nullptr};
-  scalar_t* csr_values_{nullptr};
+  const int* csr_indices_{nullptr};
+  const int* csr_pointers_{nullptr};
+  const scalar_t* csr_values_{nullptr};
   int nnz_{0};
   std::vector<int> size_{};
 
@@ -97,9 +97,9 @@ struct csrMatrixRef {
   csrMatrixRef() = default;
 
   csrMatrixRef(
-      int* csr_indices,
-      int* csr_pointers,
-      scalar_t* csr_values,
+      const int* csr_indices,
+      const int* csr_pointers,
+      const scalar_t* csr_values,
       int nnz,
       const std::vector<int>& size)
       : csr_indices_{csr_indices},
@@ -108,14 +108,15 @@ struct csrMatrixRef {
         nnz_{nnz},
         size_{size} {
       cudaDataType cuda_data_type = at::cuda::getCudaDataType<scalar_t>();
+      // The descriptor API requires non-const pointers, including for inputs.
       TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
         &description_,
         this->size(0),
         this->size(1),
         this->nnz_,
-        this->csr_pointers_,
-        this->csr_indices_,
-        this->csr_values_,
+        const_cast<int*>(this->csr_pointers_),
+        const_cast<int*>(this->csr_indices_),
+        const_cast<scalar_t*>(this->csr_values_),
         CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_BASE_ZERO,
@@ -214,7 +215,7 @@ struct CusparseMatrixMultiplyOp {
 
     out.csr_pointers_ = at::empty({out.size(0) + 1}, output_indices.options().dtype(kInt));
 
-    int* dC_csrOffsets = out.csr_pointers_.data_ptr<int>();
+    int* dC_csrOffsets = out.csr_pointers_.mutable_data_ptr<int>();
     int* dC_columns = nullptr;
     scalar_t* dC_values = nullptr;
 
@@ -338,8 +339,8 @@ struct CusparseMatrixMultiplyOp {
 
     out.csr_indices_ = at::empty({out.nnz_}, output_indices.options().dtype(kInt));
     out.csr_values_ = at::empty({out.nnz_}, output_values.options());
-    dC_columns = out.csr_indices_.data_ptr<int>();
-    dC_values = out.csr_values_.data_ptr<scalar_t>();
+    dC_columns = out.csr_indices_.mutable_data_ptr<int>();
+    dC_values = out.csr_values_.mutable_data_ptr<scalar_t>();
 
     // update matC with the new pointers
     TORCH_CUDASPARSE_CHECK(
@@ -423,16 +424,16 @@ void sparse_sparse_matmul_cuda_kernel(
   }
 
   csrMatrixRef<scalar_t> csr_mat1(
-      mat1_indices.data_ptr<int>(),
-      mat1_indptr.data_ptr<int>(),
-      mat1_values.data_ptr<scalar_t>(),
+      mat1_indices.const_data_ptr<int>(),
+      mat1_indptr.const_data_ptr<int>(),
+      mat1_values.const_data_ptr<scalar_t>(),
       (int)mat1._nnz(),
       {(int)mat1.size(0), (int)mat1.size(1)});
 
   csrMatrixRef<scalar_t> csr_mat2(
-      mat2_indices.data_ptr<int>(),
-      mat2_indptr.data_ptr<int>(),
-      mat2_values.data_ptr<scalar_t>(),
+      mat2_indices.const_data_ptr<int>(),
+      mat2_indptr.const_data_ptr<int>(),
+      mat2_values.const_data_ptr<scalar_t>(),
       (int)mat2._nnz(),
       {(int)mat2.size(0), (int)mat2.size(1)});
 

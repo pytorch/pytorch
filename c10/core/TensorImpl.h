@@ -238,7 +238,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
 // this doesn't have caching because we're not implementing it
-// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+// no in_kernel_invocation flag; that state is thread-local in C++
+// (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
@@ -248,8 +249,9 @@ struct C10_API FakeTensorMode {
   // torch/csrc/FakeTensorMode.cpp.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
-  // when false, disallow a fake tensor from having a 'meta' device
-  bool allow_meta_ = true;
+  // when false, disallow a fake tensor from having a 'meta' device. Atomic, as
+  // Python can assign it while another thread reads it.
+  std::atomic<bool> allow_meta_{true};
 
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
@@ -304,6 +306,16 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // The SymInt memos of a C++ fake (nonzero_memo, unique_memo,
+  // unique_consecutive_memo), by name; see TensorImpl::set_fake_sym_memo. The
+  // copy constructor does not copy them, so a shallow copy (e.g. set_data)
+  // drops them.
+  struct FakeSymMemo {
+    c10::SymInt value;
+    std::optional<uint32_t> version;
+    uint64_t epoch = 0;
+  };
+  std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
   // See TensorImpl::symbolic_wrapped_number.
   c10::SymNode symbolic_wrapped_number_ = nullptr;
 
@@ -1562,6 +1574,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->real_tensor_;
   }
 
+  // Records memo as this fake's SymInt memo `name`, set in fake mode epoch
+  // `epoch`. Like fake_sym_memo, safe to call concurrently.
+  void set_fake_sym_memo(
+      const std::string& name,
+      c10::SymInt memo,
+      uint64_t epoch);
+
+  // The memo named `name`, or nullopt if there is none or it is stale: the
+  // tensor was mutated since, or it was set in an epoch other than `epoch`.
+  // A stale memo is dropped.
+  std::optional<c10::SymInt> fake_sym_memo(
+      const std::string& name,
+      uint64_t epoch);
+
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
   ExtraMeta* maybe_get_extra_meta() const {
@@ -2691,7 +2717,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else

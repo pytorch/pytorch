@@ -229,9 +229,13 @@ struct MockCuptiActivityBuffer {
       int64_t correlation,
       uint32_t eventId,
       uint32_t streamId = 1,
-      uint32_t contextId = 0) {
+      uint32_t contextId = 0,
+      [[maybe_unused]] uint64_t deviceTimestamp = 0) {
     auto& act = createActivity<CUpti_ActivityCudaEventType>(correlation);
     act.kind = CUPTI_ACTIVITY_KIND_CUDA_EVENT;
+#if CUDA_VERSION >= 12080
+    act.deviceTimestamp = deviceTimestamp;
+#endif
     act.eventId = eventId;
     act.streamId = streamId;
     act.contextId = contextId;
@@ -345,6 +349,31 @@ class MockCuptiActivities : public CuptiActivityApi {
   bool available{true};
 };
 
+TEST(CudaEventCaptureConfigTest, DeviceTimestampVersions) {
+  EXPECT_FALSE(cudaEventDeviceTimestampsSupported(130000, 13040));
+  EXPECT_FALSE(cudaEventDeviceTimestampsSupported(130399, 13040));
+  EXPECT_FALSE(cudaEventDeviceTimestampsSupported(130400, 13039));
+  EXPECT_FALSE(cudaEventDeviceTimestampsSupported(130400, 0));
+  EXPECT_TRUE(cudaEventDeviceTimestampsSupported(130400, 13040));
+  EXPECT_TRUE(cudaEventDeviceTimestampsSupported(130401, 13041));
+  EXPECT_FALSE(cudaEventDeviceTimestampsSupported(130401, 0));
+}
+
+TEST(CudaEventCaptureConfigTest, MissingDeviceTimestamp) {
+  const auto previousConverter = get_time_converter();
+  const bool previousUseTsc = use_cupti_tsc();
+  get_time_converter() = [](approx_time_t timestamp) { return timestamp + 1; };
+  use_cupti_tsc() = true;
+  CUpti_ActivityCudaEventType event{};
+  EXPECT_EQ(CudaEventActivity(&event, nullptr).timestamp(), 0);
+#if CUDA_VERSION >= 12080 && !defined(_WIN32)
+  event.deviceTimestamp = 10;
+  EXPECT_EQ(CudaEventActivity(&event, nullptr).timestamp(), 11);
+#endif
+  use_cupti_tsc() = previousUseTsc;
+  get_time_converter() = previousConverter;
+}
+
 #ifndef _WIN32
 TEST(CuptiActivityApiTest, ParsesBooleanEnvironmentValues) {
   constexpr auto* kTestEnvVar = "KINETO_TEST_BOOLEAN_ENV_VAR";
@@ -425,9 +454,14 @@ TEST(CuptiActivityApiTest, ClearsCompletedBuffers) {
 // Common setup / teardown and helper functions
 class CuptiActivityProfilerTest : public ::testing::Test {
  protected:
+  struct EventProfiler : CuptiActivityProfiler {
+    using CuptiActivityProfiler::CuptiActivityProfiler;
+    using GenericActivityProfiler::ecs_;
+  };
+
   void SetUp() override {
-    profiler_ = std::make_unique<CuptiActivityProfiler>(
-        cuptiActivities_, /*cpu only*/ false);
+    profiler_ =
+        std::make_unique<EventProfiler>(cuptiActivities_, /*cpu only*/ false);
     cfg_ = std::make_unique<Config>();
     cfg_->validate(std::chrono::system_clock::now());
     loggerFactory.addProtocol("file", [](const std::string& url) {
@@ -437,7 +471,7 @@ class CuptiActivityProfilerTest : public ::testing::Test {
 
   std::unique_ptr<Config> cfg_;
   MockCuptiActivities cuptiActivities_;
-  std::unique_ptr<CuptiActivityProfiler> profiler_;
+  std::unique_ptr<EventProfiler> profiler_;
   ActivityLoggerFactory loggerFactory;
 };
 
@@ -643,6 +677,39 @@ TEST_F(CuptiActivityProfilerTest, SyncTrace) {
 #endif
 }
 
+#if CUDA_VERSION >= 12080
+TEST_F(CuptiActivityProfilerTest, CudaEventWithDeviceTimestamp) {
+  const auto startTime = std::chrono::system_clock::now();
+  const auto startTimeNs = libkineto::timeSinceEpoch(startTime);
+  const auto eventTimestamp = startTimeNs + 100;
+  profiler_->configure(*cfg_, startTime);
+  profiler_->startTrace(startTime);
+  profiler_->stopTrace(timePointFromNs(startTimeNs + 300));
+
+  const auto previousConverter = get_time_converter();
+  get_time_converter() = [](approx_time_t timestamp) { return timestamp; };
+  auto gpuOps = std::make_unique<MockCuptiActivityBuffer>();
+  gpuOps->addCudaEventActivity(100, 7, 11, 3, eventTimestamp);
+  gpuOps->addKernelActivity(startTimeNs + 20, startTimeNs + 40, 1, 0, 3, 11);
+  cuptiActivities_.activityBuffer = std::move(gpuOps);
+
+  auto logger = std::make_unique<MemoryTraceLogger>(*cfg_);
+  profiler_->processTrace(*logger);
+  EXPECT_EQ(profiler_->ecs_.out_of_range_events, 0);
+  ActivityTrace trace(std::move(logger), loggerFactory);
+  int cudaEvents = 0;
+  for (const auto& activity : *trace.activities()) {
+    if (activity->type() == ActivityType::CUDA_EVENT) {
+      EXPECT_EQ(activity->timestamp(), eventTimestamp);
+      EXPECT_EQ(activity->correlationId(), 100);
+      ++cudaEvents;
+    }
+  }
+  EXPECT_EQ(cudaEvents, 1);
+  get_time_converter() = previousConverter;
+}
+#endif
+
 TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
   // Test that wait_on_cuda_event_record_corr_id is populated even when
   // SYNCHRONIZATION records appear before both the CUDA_EVENT and the kernel
@@ -650,7 +717,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
   std::vector<std::string> log_modules({"CuptiActivityProfiler.cpp"});
   SET_LOG_VERBOSITY_LEVEL(2, log_modules);
 
-  CuptiActivityProfiler profiler(cuptiActivities_, /*cpu only*/ false);
+  EventProfiler profiler(cuptiActivities_, /*cpu only*/ false);
   int64_t start_time_ns =
       libkineto::timeSinceEpoch(std::chrono::system_clock::now());
   int64_t duration_ns = 300;
@@ -714,6 +781,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
 
   auto logger = std::make_unique<MemoryTraceLogger>(*cfg_);
   profiler.processTrace(*logger);
+  EXPECT_EQ(profiler.ecs_.out_of_range_events, 0);
   profiler.reset();
 
   ActivityTrace trace(std::move(logger), loggerFactory);
@@ -722,6 +790,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
   int streamWaitFound = 0;
   int eventSyncFound = 0;
   for (auto& activity : *trace.activities()) {
+    EXPECT_NE(activity->type(), ActivityType::CUDA_EVENT);
     std::string metadata = activity->metadataJson();
     if (metadata.find("Stream Wait Event") != std::string::npos) {
       auto json = nlohmann::json::parse("{" + metadata + "}");

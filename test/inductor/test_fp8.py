@@ -930,6 +930,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
             "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
             "test_configs.max_mm_configs": 1,
@@ -987,6 +988,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
         }
     )
@@ -1020,6 +1022,7 @@ class TestFP8Lowering(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm_min_sms": 0,
             "triton.enable_persistent_tma_matmul": True,
             "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
             "test_configs.max_mm_configs": 1,
@@ -1959,6 +1962,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
