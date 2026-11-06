@@ -18,22 +18,16 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     CommonTemplate,
     copy_tests,
-    TestFailure,
 )
 
 
 importlib.import_module("filelock")
-
-# xfail by default, set is_skip=True to skip
-test_failures: dict[str, TestFailure] = {}
-
 
 AvoidModularIndexingCommonTemplate = make_test_cls_with_patches(
     CommonTemplate,
     "AvoidModularIndexing",
     "_avoid_modular_indexing",
     (config, "avoid_modular_indexing", True),
-    xfail_prop="_expected_failure_avoid_modular_indexing",
 )
 
 
@@ -43,12 +37,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(
-        AvoidModularIndexingCommonTemplate,
-        AvoidModularIndexingCpuTests,
-        "cpu",
-        test_failures,
-    )
+    copy_tests(AvoidModularIndexingCommonTemplate, AvoidModularIndexingCpuTests, "cpu")
 
 if HAS_GPU and not TEST_WITH_ASAN:
 
@@ -57,10 +46,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         device = GPU_TYPE
 
     copy_tests(
-        AvoidModularIndexingCommonTemplate,
-        AvoidModularIndexingGPUTests,
-        GPU_TYPE,
-        test_failures,
+        AvoidModularIndexingCommonTemplate, AvoidModularIndexingGPUTests, GPU_TYPE
     )
 
 
