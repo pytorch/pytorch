@@ -108,7 +108,7 @@ A real vendor's equivalent would be their device tracing SDK (e.g., CUPTI for CU
 
 ### PyTorch integration: IActivityProfiler and IActivityProfilerSession
 
-Implement the two Kineto interfaces from `third_party/kineto/libkineto/include/IActivityProfiler.h`. In OpenReg, these live in `torch_openreg/csrc/profiler/` — the backend extension integration layer.
+Implement the two Kineto interfaces from `torch/csrc/profiler/kineto/libkineto/include/IActivityProfiler.h`. In OpenReg, these live in `torch_openreg/csrc/profiler/` — the backend extension integration layer.
 
 * **`IActivityProfiler`** — stateless factory. Two `configure()` overloads both create and return a session:
   - `configure(activity_types, config)` — synchronous overload; required by the interface. The OpenReg stub implements this as the core session-creation path.
