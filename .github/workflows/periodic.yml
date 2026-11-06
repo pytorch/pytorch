@@ -109,6 +109,43 @@ jobs:
       cuda-version: "13.4"
     secrets: inherit
 
+  linux-jammy-cuda13_5-py3_11-gcc11-build:
+    name: linux-jammy-cuda13.5-py3.11-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-cuda13.5-py3.11-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.5-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '8.9'
+      test-matrix: |
+        { include: [
+          { config: "cuspy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+        ]}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.5"
+    secrets: inherit
+
+  linux-jammy-cuda13_5-py3_11-gcc11-test:
+    name: linux-jammy-cuda13.5-py3.11-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_5-py3_11-gcc11-build
+      - target-determination
+      - get-label-type
+    with:
+      timeout-minutes: 120
+      build-environment: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-build.outputs.test-matrix }}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.5"
+    secrets: inherit
+
   libtorch-linux-jammy-cuda13_4-py3_11-gcc11-debug-build:
     name: libtorch-linux-jammy-cuda13.4-py3.11-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
