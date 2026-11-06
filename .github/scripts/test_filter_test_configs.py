@@ -410,6 +410,52 @@ class TestConfigFilter(TestCase):
         self.assertEqual(len(scheduled["include"]), 2)
 
     @mock.patch("filter_test_configs.download_json")
+    def test_nested_daily_job_controls_preserve_hardware_identity(
+        self, download: Any
+    ) -> None:
+        for target_platform, target_job, all_hardware, same_scope in (
+            ("linux-cpu", "test (periodic_daily)", False, True),
+            ("periodic-tests", "linux-cpu / test (periodic_daily)", False, True),
+            ("periodic-tests", "test (periodic_daily)", True, True),
+            ("other-group", "linux-cpu / test (periodic_daily)", False, False),
+        ):
+            download.return_value = {
+                "record": [
+                    "author",
+                    "1",
+                    "https://github.com/pytorch/pytorch/issues/1",
+                    "daily",
+                    target_platform,
+                    target_job,
+                ]
+            }
+            for action in (remove_disabled_jobs, mark_unstable_jobs):
+                for platform in ("linux-cpu", "linux-cuda"):
+                    with self.subTest(
+                        title=(target_platform, target_job),
+                        action=action.__name__,
+                        platform=platform,
+                    ):
+                        actual = action(
+                            "daily",
+                            f"periodic-tests / {platform} / test (periodic_daily, 1, 1, runner)",
+                            {"include": [{"config": "periodic_daily"}]},
+                        )
+                        if not same_scope or (
+                            platform == "linux-cuda" and not all_hardware
+                        ):
+                            expected = {"include": [{"config": "periodic_daily"}]}
+                        elif action is remove_disabled_jobs:
+                            expected = {"include": []}
+                        else:
+                            expected = {
+                                "include": [
+                                    {"config": "periodic_daily", "unstable": "unstable"}
+                                ]
+                            }
+                        self.assertEqual(actual, expected)
+
+    @mock.patch("filter_test_configs.download_json")
     def test_remove_disabled_jobs(self, mock_download_json: Any) -> None:
         mock_download_json.return_value = MOCKED_DISABLED_UNSTABLE_JOBS
 

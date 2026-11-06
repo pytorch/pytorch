@@ -439,7 +439,7 @@ is_formatter = true
 
 [[linter]]
 code = 'GHA'
-include_patterns=['.github/workflows/**/*.yml']
+include_patterns=['.github/workflows/**/*.yml', '.github/workflows/**/*.yaml']
 command = [
     'uv',
     'run',
