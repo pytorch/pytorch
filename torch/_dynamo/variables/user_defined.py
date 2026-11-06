@@ -164,8 +164,12 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
+    Covers tp_hash and tp_richcompare slots for C extension types, used by
+    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
+    __getattribute__ wrappers of builtin types whose tp_getattro is
+    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
+    sets the slot explicitly gets its own wrapper, so identity with
+    object.__getattribute__ is not enough.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -187,6 +191,25 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
+        for tp in (
+            object,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            collections.deque,
+            range,
+            str,
+            bytes,
+            bytearray,
+            int,
+            float,
+            complex,
+            slice,
+            torch.Size,
+        ):
+            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
 
 
@@ -816,7 +839,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, self.value.__base__, source)
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
-        resolved = type.__getattribute__(self.value, name)
+        try:
+            resolved = type.__getattribute__(self.value, name)
+        except AttributeError as e:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=list(e.args),
+            )
+
         if source:
             return VariableTracker.build(tx, resolved, source)
         from . import ConstantVariable
@@ -4513,42 +4544,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
         return source
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-
-        if not self._object_has_getattribute:
-            type_attr = self.lookup_class_mro_attr(name)
-            if (
-                (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))
-                and hasattr(self.value, "__dict__")
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self,
-                    name,
-                    (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-                )
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-                )
-                and self.has_key_in_generic_dict(tx, name)
-            ):
-                return variables.ConstantVariable.create(True)
-
-        try:
-            var_vt = self.tp_getattro_impl(tx, name)
-            return VariableTracker.build(
-                tx, not isinstance(var_vt, variables.DeletedVariable)
-            )
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
-            return variables.ConstantVariable.create(False)
 
     def is_hashable(self) -> bool:
         # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.

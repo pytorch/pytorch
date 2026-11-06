@@ -79,6 +79,7 @@ from .hashable import HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -787,13 +788,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # correctness.
                 other.install_dict_keys_match_guard()
                 self.items.update(other.items)
-            elif (
-                isinstance(
-                    other,
-                    (variables.UserDefinedObjectVariable, MappingProxyVariable),
-                )
-                and other.call_obj_hasattr(tx, "keys").as_python_constant()
-            ):
+            elif isinstance(
+                other,
+                (variables.UserDefinedObjectVariable, MappingProxyVariable),
+            ) and generic_hasattr_str(tx, other, "keys"):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
                     self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
@@ -954,31 +952,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
@@ -1300,13 +1273,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
         return generic_richcompare(tx, self.dv_dict, other, op)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
@@ -1376,15 +1342,6 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
