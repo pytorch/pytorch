@@ -1608,27 +1608,50 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
   const int64_t matrix_stride = static_cast<int64_t>(lda) * n;
   int64_t max_batch_size =
       std::numeric_limits<int32_t>::max() / std::max<int64_t>(1, matrix_stride);
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 13050
-  // CUDA 13.5 documents cuSOLVER issue 6657796: XsyevBatched can fail
-  // for batch sizes above 65535 with sufficiently large matrices.
-  // Keep this workaround until NVIDIA documents a fixed release.
-  max_batch_size = std::min<int64_t>(max_batch_size, 65535);
+#ifndef USE_ROCM
+  static const int solver_version = [] {
+    int major, minor, patch;
+    TORCH_CUSOLVER_CHECK(cusolverGetProperty(MAJOR_VERSION, &major));
+    TORCH_CUSOLVER_CHECK(cusolverGetProperty(MINOR_VERSION, &minor));
+    TORCH_CUSOLVER_CHECK(cusolverGetProperty(PATCH_LEVEL, &patch));
+    return major * 1000 + minor * 100 + patch;
+  }();
+  if (solver_version < 11704) {
+    // Below the measured query limits for n=2..32 in cuSOLVER 11.7.1-11.7.3.
+    // Retry smaller chunks below for other matrix sizes.
+    max_batch_size = std::min<int64_t>(
+        max_batch_size, std::max<int64_t>(1, 32000 * 64 / (64 + n)));
+  } else if (solver_version < 12007 || n >= 128) {
+    // NVIDIA 6657796 (CUDA 13.5 notes): batches >65535 can fail silently
+    // (zero info, NaN eigenvalues), measured on cuSOLVER 11.7.4 (CUDA 12.9)
+    // through 12.4 (13.5). Before 12.0.7, small n also fails.
+    max_batch_size = std::min<int64_t>(max_batch_size, 65535);
+  }
 #endif
   TORCH_CHECK(max_batch_size > 0, "linalg.eigh: matrix is too large for cuSOLVER XsyevBatched");
 
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
   auto& host_allocator = *at::getCPUAllocator();
-  for (int64_t start = 0; start < batch_size; start += max_batch_size) {
-    const int64_t chunk_size = std::min<int64_t>(max_batch_size, batch_size - start);
+  for (int64_t start = 0; start < batch_size;) {
+    int64_t chunk_size = std::min<int64_t>(max_batch_size, batch_size - start);
     auto* chunk_vectors = vectors_data + start * matrix_stride;
     auto* chunk_values = values_data + start * n;
     auto* chunk_infos = infos_data + start;
 
     size_t worksize_device;
     size_t worksize_host;
-    at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
-        handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
-        chunk_values, &worksize_device, &worksize_host, chunk_size);
+    while (true) {
+      auto status = at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
+          handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
+          chunk_values, &worksize_device, &worksize_host, chunk_size);
+      if (status == CUSOLVER_STATUS_INVALID_VALUE && chunk_size > 1) {
+        chunk_size /= 2;
+        max_batch_size = chunk_size;
+        continue;
+      }
+      TORCH_CUSOLVER_CHECK(status);
+      break;
+    }
 
     auto work_device_data = device_allocator.allocate(worksize_device);
     auto work_host_data = host_allocator.allocate(worksize_host);
@@ -1636,6 +1659,7 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
         handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
         chunk_values, work_device_data.get(), worksize_device,
         work_host_data.get(), worksize_host, chunk_infos, chunk_size);
+    start += chunk_size;
   }
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(syev_params));
 

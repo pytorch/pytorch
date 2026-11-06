@@ -726,26 +726,27 @@ void xgeev<c10::complex<double>>(CUDASOLVER_XGEEV_ARGTYPES(c10::complex<double>)
     int64_t batchSize
 
 template <class scalar_t, class value_t = scalar_t>
-void xsyevBatched_bufferSize(
+cusolverStatus_t xsyevBatched_bufferSize(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
   static_assert(false&&sizeof(scalar_t),
       "at::cuda::solver::xsyevBatched_bufferSize: not implemented");
+  return CUSOLVER_STATUS_NOT_SUPPORTED;
 }
 
 template <>
-void xsyevBatched_bufferSize<float>(
+cusolverStatus_t xsyevBatched_bufferSize<float>(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(float, float));
 
 template <>
-void xsyevBatched_bufferSize<double>(
+cusolverStatus_t xsyevBatched_bufferSize<double>(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(double, double));
 
 template <>
-void xsyevBatched_bufferSize<c10::complex<float>, float>(
+cusolverStatus_t xsyevBatched_bufferSize<c10::complex<float>, float>(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
 
 template <>
-void xsyevBatched_bufferSize<c10::complex<double>, double>(
+cusolverStatus_t xsyevBatched_bufferSize<c10::complex<double>, double>(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
 
 #define CUDASOLVER_XSYEV_BATCHED_ARGTYPES(scalar_t, value_t) \
