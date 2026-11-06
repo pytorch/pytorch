@@ -31,6 +31,7 @@ from torch._decomp.decompositions import (
     hardswish_backward as decomp_hardswish_backward,
     logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
+    pw_cast_for_int_to_real,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
     sigmoid_backward as decomp_sigmoid_backward,
@@ -63,6 +64,7 @@ from torch._refs.nn.functional import (
     softplus as decomp_softplus,
 )
 from torch._refs.special import (
+    logit as decomp_logit,
     multigammaln as decomp_multigammaln,
     xlog1py as decomp_xlog1py,
 )
@@ -168,6 +170,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.mish_backward.default,
     aten.logaddexp2.default,
     aten.logit_backward.default,
+    aten.logit.default,
     aten.sigmoid_backward.default,
     aten.sgn,
     aten.silu_backward.default,
@@ -729,6 +732,21 @@ def logaddexp2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         maximum, torch.log1p(torch.exp2(minimum - maximum)), alpha=1 / math.log(2)
     )
     return torch.where(torch.isinf(a) & (a == b), a, result).to(dtype)
+
+
+@register_decomposition(aten.logit.default)
+@pw_cast_for_int_to_real
+def logit(self: torch.Tensor, eps: float | None = None) -> torch.Tensor:
+    if not is_strict_cuda_triton(self.device):
+        return decomp_logit(self, eps)
+    # CUDA tests the sign after converting epsilon to opmath precision.
+    lo = torch.ones((), dtype=self.dtype, device=self.device) * (
+        -1.0 if eps is None else eps
+    )
+    hi = 1.0 - lo
+    clipped = torch.where(self < lo, lo, torch.where(self > hi, hi, self))
+    value = torch.where(lo < 0, self, clipped)
+    return torch.log(value / (1.0 - value))
 
 
 @register_decomposition(aten.logit_backward.default)

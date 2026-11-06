@@ -201,6 +201,24 @@ class StrictNumericsConfigTest(TestCase):
 
 
 class StrictNumericsFallbackTest(TestCase):
+    @ops(
+        [op for op in op_db if op.name == "logit"],
+        allowed_dtypes=(torch.bool, torch.int64),
+    )
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_logit_integer_promotion(self, device, dtype, op, numerics):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+
+            def fn(x):
+                return op.op(x, *sample.args, **sample.kwargs)
+
+            actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+                sample.input
+            )
+            expected = fn(sample.input)
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual, expected)
+
     @dtypes(torch.float32, torch.float64)
     @parametrize("numerics", NUMERICS_MODES)
     def test_log_ndtr_without_decompositions(self, device, dtype, numerics):
