@@ -2703,6 +2703,102 @@ class TestFlyDSLHTIDevice(TestCase):
             msg=f"{bad_launches} of {launches} launches differ from the idle-GPU output",
         )
 
+    @largeTensorTest("1GB", device="cuda")
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_grouped_hti_two_k_tiles_with_concurrent_copy(self, device, dtype):
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            GEMM_DTYPE_BF16,
+            GEMM_DTYPE_FP16,
+            get_grouped_gemm_persistent_grid_size,
+            launch_gemm_gfx950_grouped,
+            make_gemm_gfx950_param,
+        )
+
+        # Two K tiles only execute the tail double tile. Concurrent memory
+        # traffic extends DMA latency and checks that all stage-1 copies retire.
+        m = n = 8192
+        k = 128
+        group_count = 1
+        param = make_gemm_gfx950_param(
+            dtype_id=GEMM_DTYPE_BF16 if dtype == torch.bfloat16 else GEMM_DTYPE_FP16,
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            m_waves=2,
+            n_waves=4,
+            use_half_tile_interleaved=True,
+            a_is_transposed=False,
+            b_is_transposed=False,
+        )
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(group_count, k, n, device=device, dtype=dtype)
+        offs = torch.tensor([m], device=device, dtype=torch.int32)
+        out = torch.empty(m, n, device=device, dtype=dtype)
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param,
+            m,
+            n,
+            group_count,
+            torch.cuda.get_device_properties(device),
+        )
+        group_count_arg = fx.Int32(group_count)
+        n_arg = fx.Int32(n)
+        k_arg = fx.Int32(k)
+        stream = fx.Stream(torch.cuda.current_stream(device).cuda_stream)
+        args = [
+            flyc.from_torch_tensor(t).mark_layout_dynamic() for t in (out, a, b, offs)
+        ]
+        compile_args = (
+            *args,
+            group_count_arg,
+            n_arg,
+            k_arg,
+            grid_size,
+            param,
+            stream,
+        )
+        launch = flyc.compile(launch_gemm_gfx950_grouped, *compile_args)
+        golden = out.clone()
+        self.assertEqual(golden, a @ b[0], atol=3e-2, rtol=2e-1)
+        torch.cuda.synchronize(device)
+
+        src = torch.empty(256 << 20, dtype=torch.uint8, device=device)
+        dst = torch.empty_like(src)
+        side_stream = torch.cuda.Stream(device=device)
+        bad_launches = torch.zeros((), dtype=torch.int64, device=device)
+        launches = 1000
+        dispatch_args = (
+            out,
+            a,
+            b,
+            offs,
+            group_count_arg,
+            n_arg,
+            k_arg,
+            grid_size,
+            param,
+            stream,
+        )
+        side_stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            for _ in range(launches):
+                with torch.cuda.stream(side_stream):
+                    dst.copy_(src)
+                out.fill_(float("nan"))
+                launch(*dispatch_args)
+                bad_launches += (out != golden).any()
+        finally:
+            torch.cuda.synchronize(device)
+        bad_launches = bad_launches.item()
+        self.assertEqual(
+            bad_launches,
+            0,
+            msg=f"{bad_launches} of {launches} launches differ from the idle-GPU output",
+        )
+
 
 instantiate_device_type_tests(TestFlyDSLHTIDevice, globals(), only_for="cuda")
 
