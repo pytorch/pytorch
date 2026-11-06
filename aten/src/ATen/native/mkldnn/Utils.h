@@ -87,12 +87,13 @@ const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_
 }
 
 #if defined(__aarch64__)
+// oneDNN relies on ACL for bf16/fp16 kernels on aarch64
 inline bool mkldnn_bf16_device_check_arm() {
-  return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
+  return AT_MKLDNN_ACL_ENABLED() && cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
 
 inline bool mkldnn_fp16_device_check_arm() {
-  return cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
+  return AT_MKLDNN_ACL_ENABLED() && cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
 }
 
 inline bool is_arm_neoverse() {
@@ -115,6 +116,16 @@ constexpr bool is_arm_neoverse() {
   return false;
 }
 #endif
+
+// Without ACL, oneDNN has no optimized kernels for aarch64 CPUs that lack SVE (e.g. Apple Silicon):
+// convolutions run via gemm and the NEON-only JIT binary kernel fails to build
+constexpr bool mkldnn_lacks_aarch64_kernels() {
+#if defined(__aarch64__) && !AT_MKLDNN_ACL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
 
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
