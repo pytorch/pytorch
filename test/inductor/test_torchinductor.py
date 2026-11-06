@@ -8029,6 +8029,18 @@ for dtype in (torch.int32, torch.int64):
                 (torch.randn([1, 2, 4, 8]),),
             )
 
+    def test_var_mean_empty(self):
+        # https://github.com/pytorch/pytorch/issues/197108
+        def fn(x):
+            return (
+                *torch.var_mean(x),
+                *torch.std_mean(x, correction=0),
+                *torch.var_mean(x, -1),
+            )
+
+        self.common(fn, (torch.randn([0]),))
+        self.common(fn, (torch.randn([4, 0]),))
+
     def test_var_mean_div_by(self):
         def fn(x):
             var, mean = torch.var_mean(x, dim=2, keepdim=True)
