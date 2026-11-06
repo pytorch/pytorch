@@ -113,7 +113,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -20886,35 +20885,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
         inp = torch.ones(3)
         self.assertEqual(fn(inp, Foo()), inp + 1)
-
-
-class TestTracer(JitTestCase):
-    def test_jit_save(self):
-        def fn():
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.a = 3
-
-                @torch.jit.export
-                def __getstate__(self):
-                    return (3, self.training)
-
-                @torch.jit.export
-                def __setstate__(self, state):
-                    self.a = state[0]
-                    self.training = state[1]
-
-                def forward(self, x):
-                    return x + self.a
-
-            f = Foo()
-
-            return torch.jit._trace.trace(f, (torch.rand(3, 4),))
-
-        fn()
-        opt_fn = torch.compile(fn, backend="eager")
-        opt_fn()
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):

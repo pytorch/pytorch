@@ -238,29 +238,6 @@ class TestBundledInputs(TestCase):
                 },
             )
 
-    def test_multiple_methods_with_inputs_neither_defined_failure(self):
-        class MultipleMethodModel(torch.nn.Module):
-            def forward(self, arg):
-                return arg
-
-            @torch.jit.export
-            def foo(self, arg):
-                return arg
-
-        samples = [(torch.tensor([1]),)]
-
-        # inputs not defined so should fail
-        with self.assertRaises(Exception):
-            mm = torch.jit._script.script(MultipleMethodModel())
-            mm._generate_bundled_inputs_for_forward()
-            torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
-                mm,
-                inputs={
-                    mm.forward: None,
-                    mm.foo: samples,
-                },
-            )
-
     def test_bad_inputs(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):

@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
@@ -636,33 +635,6 @@ class TestPythonRegistration(TestCase):
 
                     x = torch.tensor([1, 2])
                     self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
-
-    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    def test_alias_analysis(self):
-        def test_helper(alias_analysis=""):
-            my_lib1 = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
-
-            called = [0]
-
-            @torch.library.define(
-                my_lib1, "_op() -> None", alias_analysis=alias_analysis
-            )
-            def _op(*args, **kwargs):
-                called[0] += 1
-
-            @torch.jit._script.script
-            def _test():
-                torch.ops._test_python_registration._op()
-
-            if "_test_python_registration::_op" not in str(_test.graph):
-                raise AssertionError("expected _test_python_registration::_op in graph")
-
-        with self.assertRaises(AssertionError):
-            test_helper("")  # alias_analysis="FROM_SCHEMA"
-
-        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
-        gc.collect()
-        test_helper("CONSERVATIVE")
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):

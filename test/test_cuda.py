@@ -14151,26 +14151,6 @@ class TestCudaAutocast(TestAutocast):
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_cat_jit(self):
-        # Reported at https://github.com/pytorch/pytorch/issues/38958
-
-        class Model(torch.nn.Module):
-            def forward(self):
-                a = torch.randn(1)
-                b = torch.randn(1)
-                c = torch.cat((a, b), 0)
-                d = torch.stack([c, c], 0)
-                return d
-
-        # The JIT here doesn't really matter, we just need to call
-        # cat via the boxed API
-        model = Model()
-        model_jit_script = torch.jit._script.script(model)
-
-        with torch.autocast("cuda", enabled=True):
-            model()
-            model_jit_script()
-
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).

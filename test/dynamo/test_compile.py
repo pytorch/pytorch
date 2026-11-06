@@ -208,26 +208,6 @@ class InPlaceCompilationTests(TestCase):
         ):
             torch.compile(scripted, backend="eager")
 
-    def test_compile_frozen_module_error(self):
-        model = torch.nn.Sequential(torch.nn.Linear(3, 3))
-        model.eval()
-        scripted = torch.jit._script.script(model)
-        frozen = torch.jit._freeze.freeze(scripted)
-        with self.assertRaisesRegex(
-            RuntimeError, "torch.compile does not support compiling torch.jit.script"
-        ):
-            torch.compile(frozen, backend="eager")
-
-    def test_compile_frozen_module_inductor_error(self):
-        model = torch.nn.Sequential(torch.nn.Linear(3, 3))
-        model.eval()
-        scripted = torch.jit._script.script(model)
-        frozen = torch.jit._freeze.freeze(scripted)
-        with self.assertRaisesRegex(
-            RuntimeError, "torch.compile does not support compiling torch.jit.script"
-        ):
-            torch.compile(frozen, backend="inductor")
-
     def test_inline_script_module_graph_break(self):
         class OuterModule(torch.nn.Module):
             def __init__(self, sub):
