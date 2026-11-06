@@ -1206,9 +1206,9 @@ static void _scaled_mm_xpu_v2_impl(
     at::OptionalTensorRef bias,
     bool use_fast_accum,
     const Tensor& out,
-    const std::optional<Tensor>& accumulator = std::nullopt,
-    const Scalar& beta = 0,
-    const Scalar& alpha = 1) {
+    const std::optional<Tensor>& accumulator,
+    const Scalar& beta,
+    const Scalar& alpha) {
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
   std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
@@ -1548,7 +1548,10 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       swizzle_b,
       bias,
       use_fast_accum,
-      out);
+      out,
+      std::nullopt,
+      Scalar(0),
+      Scalar(1));
 }
 
 TORCH_IMPL_FUNC(_scaled_addmm_xpu_out)
