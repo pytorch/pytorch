@@ -45,6 +45,50 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         clear_caches()
 
+    @torch._dynamo.config.patch(automatic_dynamic_remote_pgo=False)
+    def test_sparse_grad_values_view(self):
+        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
+        self.assertFalse(torch._dynamo.config.suppress_errors)
+        self.reset()
+        module = torch.nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.float64)
+        module(torch.tensor([[0, 1, 0, 1]])).sum().backward()
+        gradient = module.weight.grad.coalesce()
+        values = gradient.values()
+        self.assertIs(values._base, gradient)
+        self.assertEqual(gradient.layout, torch.sparse_coo)
+
+        @torch.compile(backend="eager")
+        def clone(tensor):
+            return tensor.clone()
+
+        self.assertEqual(clone(values), values.clone())
+        base_entries = [
+            entry
+            for frame_state in torch._dynamo.pgo.get_code_state().values()
+            for source, entry in frame_state.automatic_dynamic.items()
+            if source.endswith("._base")
+        ]
+        self.assertTrue(
+            any(
+                entry.size == tuple(gradient.size()) and entry.stride == ()
+                for entry in base_entries
+            )
+        )
+
+        counter = CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def clone_strided(tensor):
+            return tensor.clone()
+
+        for tensor in (
+            gradient.indices(),
+            torch.randn(1, 3).expand(4, 3),
+            torch.randn(2, 3),
+        ):
+            self.assertEqual(clone_strided(tensor), tensor.clone())
+        self.assertGreater(counter.frame_count, 0)
+
     def test_basic(self):
         cnts = CompileCounter()
 

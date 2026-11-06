@@ -337,6 +337,8 @@ class FrameStateSizeEntry:
             return True
         if self.stride is auto_unset:
             return False
+        if self.stride == ():
+            return False
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
