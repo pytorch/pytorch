@@ -1756,6 +1756,23 @@ def forward(self, x):
     """,
         )
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonicalized_getitem_roundtrip_stable(self):
+        # Serialization reconstructs getitems next to their producer, so
+        # canonicalization must group them the same way for a stable roundtrip.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.split(x, 2)
+                b = torch.split(a[0], 1)
+                return b[0] + b[1] + a[1] + a[2]
+
+        ep = torch.export.export(M(), (torch.randn(6, 4),), strict=True)
+        deserialized_ep = deserialize(serialize(ep))
+        self.assertEqual(
+            [node.name for node in ep.graph.nodes],
+            [node.name for node in deserialized_ep.graph_module.graph.nodes],
+        )
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
