@@ -1551,6 +1551,15 @@ class TritonOverrides(OpOverrides):
             # inputs; nan/inf inputs should still produce nan like x - x.
             non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
             return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
+        if (
+            utils.is_strict_cuda_triton()
+            and cast(Any, get_dtype_handler()).sub(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+            # Fusing producers can reorder subtraction's NaN operand priority.
+            result = f"triton_helpers.eager_unary_nan({y}, {x} - {y})"
+            return f"triton_helpers.eager_unary_nan({x}, {result})"
         return f"{x} - {y}"
 
     @staticmethod
