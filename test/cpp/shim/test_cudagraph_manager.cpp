@@ -10,6 +10,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Sleep.h>
+#include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -173,6 +174,31 @@ void expect_error(Fn&& fn, const std::string& message) {
   }
 }
 
+std::atomic<int> foreach_copies{0};
+std::atomic<int> copies{0};
+
+// Counts this thread's _foreach_copy_ and copy_ calls while alive. The fused
+// kernel calls no copy_; its fallback and per-tensor copies do.
+struct CountForeachCopies {
+  CountForeachCopies() {
+    foreach_copies = copies = 0;
+    handle = at::addThreadLocalCallback(
+        at::RecordFunctionCallback(
+            [](const at::RecordFunction& fn)
+                -> std::unique_ptr<at::ObserverContext> {
+              std::string_view name = fn.name();
+              foreach_copies += name == "aten::_foreach_copy_";
+              copies += name == "aten::copy_";
+              return nullptr;
+            })
+            .scopes({at::RecordScope::FUNCTION}));
+  }
+  ~CountForeachCopies() {
+    at::removeCallback(handle);
+  }
+  at::CallbackHandle handle;
+};
+
 struct CollectWarnings : c10::WarningHandler {
   std::vector<std::string> messages;
   void process(const c10::Warning& warning) override {
@@ -289,6 +315,55 @@ TEST_F(CudaGraphManagerTest, NewThreadsWarmUpEvenWithAReusedId) {
   if (!reused) {
     GTEST_SKIP() << "the new thread got a new std::thread::id";
   }
+}
+
+TEST_F(CudaGraphManagerTest, ClonesOutputsWithTheirLayouts) {
+  // Dense outputs of three dtypes, some transposed, one with gaps and one
+  // overlapping.
+  CudaGraphManager manager(0, no_warmup());
+  auto compute = [](const at::Tensor& x) {
+    auto e8m0 = (x.abs() * 8).to(at::kByte).view(at::kFloat8_e8m0fnu);
+    return std::vector<at::Tensor>{
+        x * 2,
+        (x + 1).t(),
+        x.to(at::kHalf),
+        (x * 3).to(at::kHalf).t(),
+        e8m0,
+        e8m0.t(),
+        (x - 1).narrow(1, 1, 2),
+        (x * 4).narrow(0, 1, 1).expand({4, 6})};
+  };
+  Region region([&](AtenTensorHandle* inputs, AtenTensorHandle* outputs) {
+    auto results = compute(tensor_of(inputs[0]));
+    for (size_t i = 0; i < results.size(); ++i) {
+      outputs[i] = new_handle(results[i]);
+    }
+  });
+  auto bits = [](const at::Tensor& t) {
+    return t.scalar_type() == at::kFloat8_e8m0fnu ? t.view(at::kByte) : t;
+  };
+  run_with(manager, region, {at::randn({4, 6}, at::kCUDA)}, 8);
+  std::vector<std::unique_ptr<Outputs>> outs;
+  std::vector<std::vector<at::Tensor>> expected;
+  for (int i = 0; i < 2; ++i) {
+    auto x = at::randn({4, 6}, at::kCUDA);
+    CountForeachCopies counter;
+    outs.push_back(run_with(manager, region, {x}, 8));
+    // One per dtype the kernel fuses (float and half). copy_ runs for the lone
+    // input and the clones of the two float8_e8m0fnu outputs, the gapped one
+    // and the overlapping one.
+    EXPECT_EQ(foreach_copies, 2);
+    EXPECT_EQ(copies, 5);
+    expected.push_back(compute(x));
+  }
+  // The first replay's outputs survive the second.
+  for (size_t i = 0; i < outs.size(); ++i) {
+    for (size_t j = 0; j < expected[i].size(); ++j) {
+      EXPECT_TRUE(bits((*outs[i])[j]).equal(bits(expected[i][j]))) << j;
+      EXPECT_EQ((*outs[i])[j].strides(), expected[i][j].strides()) << j;
+    }
+  }
+  EXPECT_EQ(region.calls, 1);
 }
 
 TEST_F(CudaGraphManagerTest, ReturnsDuplicateAndNullOutputs) {
@@ -700,6 +775,11 @@ TEST_F(CudaGraphManagerTest, KeysOnAllInputs) {
 TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
   CudaGraphManager manager(0, no_warmup());
   auto make_inputs = [] {
+    // float8_e8m0fnu is one the fused copy kernel doesn't dispatch.
+    auto e8m0 = [](at::IntArrayRef sizes) {
+      auto bytes = at::TensorOptions(at::kCUDA).dtype(at::kByte);
+      return at::randint(0, 255, sizes, bytes).view(at::kFloat8_e8m0fnu);
+    };
     return std::vector<at::Tensor>{
         at::randn({8}, at::kCUDA),
         at::randn({6, 4}, at::kCUDA).t(),
@@ -709,12 +789,21 @@ TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
         at::randint(100, {5}, at::kCUDA),
         at::randn({7}, at::kCUDA).to(at::kHalf),
         at::randn({}, at::kCUDA),
-        at::randn({0, 4}, at::kCUDA)};
+        at::randn({0, 4}, at::kCUDA),
+        e8m0({8}),
+        e8m0({1, 6}).expand({4, 6}),
+        // Copied alone, being large.
+        at::randn({CudaGraphManager::kMaxFusedCopyBytes / 4}, at::kCUDA),
+        // Overlapping and gapped, each copied alone, being alone in its dtype.
+        at::randint(100, {1, 6}, at::TensorOptions(at::kCUDA).dtype(at::kInt))
+            .expand({4, 6}),
+        at::randn({6, 8}, at::kCUDA).to(at::kBFloat16).narrow(1, 2, 3)};
   };
   auto expected = [](const std::vector<at::Tensor>& xs) {
     std::vector<at::Tensor> flat;
     for (const auto& x : xs) {
-      flat.push_back(x.flatten().to(at::kFloat));
+      bool e8m0 = x.scalar_type() == at::kFloat8_e8m0fnu;
+      flat.push_back((e8m0 ? x.view(at::kByte) : x).flatten().to(at::kFloat));
     }
     return at::cat(flat);
   };
@@ -730,7 +819,14 @@ TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
   EXPECT_EQ(manager.num_graphs(), 1);
   for (int i = 0; i < 2; ++i) {
     auto xs = make_inputs();
-    EXPECT_TRUE((*run_with(manager, region, xs, 1))[0].equal(expected(xs)));
+    CountForeachCopies counter;
+    auto out = run_with(manager, region, xs, 1);
+    // The small float inputs, of any layout. copy_ runs for the seven inputs
+    // copied alone (empty, large, alone in their dtype, or float8_e8m0fnu,
+    // which the kernel doesn't fuse) and the output's clone.
+    EXPECT_EQ(foreach_copies, 1);
+    EXPECT_EQ(copies, 8);
+    EXPECT_TRUE((*out)[0].equal(expected(xs)));
   }
 }
 
