@@ -899,6 +899,30 @@ def eager_neg(x):
 
 
 @triton.jit
+def eager_div_rn(x, y):
+    # Triton's div_rn emits div.rn.ftz.f32 even when kernel FTZ is disabled.
+    return tl.inline_asm_elementwise(
+        "div.rn.f32 $0, $1, $2;",
+        constraints="=f,f,f",
+        args=[x, y],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=1,
+    )
+
+
+@triton.jit
+def eager_fmod(a, b):
+    if a.dtype == tl.float64:
+        return libdevice.fmod(a, b)
+    else:
+        # Binary32 fmod results are exactly representable in binary64. Avoid
+        # libdevice's float32 implementation, which flushes subnormals.
+        result = libdevice.fmod(a.to(tl.float64), b.to(tl.float64)).to(tl.float32)
+        return eager_unary_nan(result, result)
+
+
+@triton.jit
 def frexp(x):
     # Decompose the IEEE-754 bit pattern with integer ops rather than calling
     # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
