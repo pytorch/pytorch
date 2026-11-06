@@ -10185,6 +10185,7 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             wrapper.generate_fallback_kernel(self)
 
+        metrics.generated_fallback_kernel_count += 1
         self.codegen_unbacked_symbol_defs(wrapper)
         # After the unbacked symbol defs, which may read an unused output's size.
         wrapper.codegen_free_unused_outputs(self)
