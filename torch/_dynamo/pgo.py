@@ -349,12 +349,14 @@ class FrameStateSizeEntry:
 
     @classmethod
     def make_tensor(
-        cls, size: tuple[int, ...], stride: tuple[int, ...]
+        cls, size: tuple[int, ...], stride: tuple[int, ...] | AutoUnset
     ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_dynamic,
             size=cls._munge_symint(size),
-            stride=cls._munge_symint(stride),
+            # A stride tuple must have one entry per dim; callers that have no
+            # strides to report (sparse tensors) pass auto_unset instead.
+            stride=auto_unset if stride is auto_unset else cls._munge_symint(stride),
         )
 
     @classmethod
