@@ -1604,12 +1604,16 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   // cuSOLVER XsyevBatched requires n * lda * batchSize <= INT32_MAX.
-  // Some cuSOLVER versions also fail for batches larger than 65535
-  // (CUDA Toolkit release notes, issue 6657796).
   // Chunk the calls without copying the already contiguous output buffers.
   const int64_t matrix_stride = static_cast<int64_t>(lda) * n;
-  const int64_t max_batch_size = std::min<int64_t>(
-      65535, std::numeric_limits<int32_t>::max() / std::max<int64_t>(1, matrix_stride));
+  int64_t max_batch_size =
+      std::numeric_limits<int32_t>::max() / std::max<int64_t>(1, matrix_stride);
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13050
+  // CUDA 13.5 documents cuSOLVER issue 6657796: XsyevBatched can fail
+  // for batch sizes above 65535 with sufficiently large matrices.
+  // Keep this workaround until NVIDIA documents a fixed release.
+  max_batch_size = std::min<int64_t>(max_batch_size, 65535);
+#endif
   TORCH_CHECK(max_batch_size > 0, "linalg.eigh: matrix is too large for cuSOLVER XsyevBatched");
 
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
