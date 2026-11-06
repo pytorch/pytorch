@@ -573,44 +573,40 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(allreduce[0]["input_dtypes"], ["Float"])
         hook.remove()
 
-    def test_mixed_result_future_types(self):
-        # nccl2 returns a futureless sentinel for each op in a coalesced p2p
-        # batch. Those retire at issue; WorkNCCL ops on the same hook still
-        # retire from their result.
+    def test_coalesced_p2p_retires_from_batch_result(self):
+        # nccl2 returns a sentinel for each op in a coalesced p2p window. Its
+        # result future and duration are the batch's, so those entries read
+        # "completed" with the batch's duration_ms.
         if self.backend_name != "nccl2":
             self.skipTest("nccl2 coalesced p2p sentinel")
         pg = self._init_pg()
+        pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
-        dist.all_reduce(torch.ones(4, device=self.device))
         before = len(self._hook_entries())
 
         peer = 1 - self.rank
         send_t = torch.ones(4, device=self.device)
         recv_t = torch.empty(4, device=self.device)
-        ops = [
-            dist.P2POp(dist.isend, send_t, peer),
-            dist.P2POp(dist.irecv, recv_t, peer),
-        ]
-        for work in dist.batch_isend_irecv(ops):
-            work.wait()
-        _, done = self._issue_after_callback(
-            lambda: dist.all_reduce(torch.ones(4, device=self.device), async_op=True),
-            "mixed_result_future_types",
-        )
-        done.wait()
+        pg._start_coalescing(self.device)
+        try:
+            works = [dist.isend(send_t, peer), dist.irecv(recv_t, peer)]
+            # The batch can't complete inside the window, so these run after
+            # the hook's callbacks, added at issue.
+            done = [w.get_future_result().then(lambda f: f.value()) for w in works]
+        finally:
+            pg._end_coalescing(self.device)
+        for fut in done:
+            fut.wait()
 
         entries = self._hook_entries()[before:]
         p2p = [e for e in entries if e["is_p2p"]]
-        coll = [e for e in entries if e["profiling_name"] == self._name("all_reduce")]
         self.assertEqual(len(p2p), 2, msg=str(entries))
         for e in p2p:
-            self.assertTrue(e["retired"], msg=str(e))
-            self.assertEqual(e["state"], "scheduled", msg=str(e))
-            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
-            self.assertNotIn("duration_ms", e, msg=str(e))
-        self.assertEqual(len(coll), 1, msg=str(entries))
-        if self.rank == 0:
-            self.assertEqual(coll[0]["state"], "completed", msg=str(coll[0]))
+            self.assertEqual(e["state"], "completed", msg=str(e))
+            self.assertGreater(e["time_discovered_completed_ns"], 0, msg=str(e))
+            self.assertIn("duration_ms", e, msg=str(e))
+            self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
+        self.assertEqual(p2p[0]["duration_ms"], p2p[1]["duration_ms"])
         hook.remove()
 
     def test_p2p_and_collective_seq_ids(self):
