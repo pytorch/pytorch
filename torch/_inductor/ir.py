@@ -2297,6 +2297,38 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
+    def _dense_reduction_dim(
+        cls, reduction_sizes: list[int], input_node: IRNode | None
+    ) -> int | None:
+        """
+        The reduction dim to reduce innermost in a full reduction over
+        input_node: its dense dim, mapped from the input's dims to the
+        reduction dims (kept size-1 dims are not reduction dims). None when
+        there is none or it is the last reduction dim already.
+        """
+        dense = cls.check_for_split_dense_dim_reindexing(
+            sympy_product(reduction_sizes), input_node
+        )
+        if dense is None or input_node is None:
+            return None
+        input_size = input_node.get_size()
+        if not all(_is_static(s) for s in input_size):
+            return None
+        input_sizes = [int(s) for s in input_size]
+        if input_sizes == reduction_sizes:
+            pos = dense
+        else:
+            # the non-unit dims appear in the same order on both sides
+            input_dims = [i for i, s in enumerate(input_sizes) if s != 1]
+            reduction_dims = [i for i, s in enumerate(reduction_sizes) if s != 1]
+            if dense not in input_dims or [input_sizes[i] for i in input_dims] != [
+                reduction_sizes[i] for i in reduction_dims
+            ]:
+                return None
+            pos = reduction_dims[input_dims.index(dense)]
+        return None if pos == len(reduction_sizes) - 1 else pos
+
+    @classmethod
     def _split_reduction_ranges(
         cls,
         device: torch.device,
@@ -2323,9 +2355,7 @@ class Reduction(Loops):
             return None
         sizes = [int(r) for r in reduction_ranges]
         perm = None
-        dense = cls.check_for_split_dense_dim_reindexing(
-            sympy_product(reduction_ranges), input_node
-        )
+        dense = cls._dense_reduction_dim(sizes, input_node)
         if dense is not None:
             perm = [i for i in range(len(sizes)) if i != dense] + [dense]
             sizes = [sizes[i] for i in perm]
