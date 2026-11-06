@@ -434,6 +434,8 @@ if torch.distributed.is_available():
 
 @register_decomposition([aten.lerp.Scalar])
 def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
+    if is_strict_cuda_triton(start.device) and start.is_complex():
+        return NotImplemented
     # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
     # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
     # Convert end to start's memory format so the output preserves start's layout,
@@ -451,6 +453,8 @@ def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch
 def _lerp_tensor(
     start: torch.Tensor, end: torch.Tensor, weight: torch.Tensor
 ) -> torch.Tensor:
+    if is_strict_cuda_triton(start.device) and start.is_complex():
+        return NotImplemented
     # Same dual-formula as foreach_lerp polyfill: decompose into sub + addcmul.
     # Convert end to start's memory format so the output preserves start's layout.
     fmt = suggest_memory_format(start)
