@@ -56,13 +56,14 @@ from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.builder import GraphArg
 from torch._functorch._aot_autograd.descriptors import PlainAOTInput
 from torch._guards import CompileContext, CompileId
-from torch._inductor import lowering
+from torch._inductor import ir, lowering
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import maybe_fresh_cache, TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -19939,43 +19940,197 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
     @requires_gpu_and_triton
-    def test_cpu_scalar_with_gpu_tensor(self):
+    @parametrize("gpu_first", [False, True])
+    def test_cpu_scalar_with_gpu_tensor(self, gpu_first):
         def fn(a, b):
-            return a + b[0]
+            return a + b[0] if gpu_first else b[0] + a
 
         a = torch.rand(20, device=GPU_TYPE)
         b = torch.rand(4, device="cpu")
 
         torch._inductor.metrics.generated_kernel_count = 0
         eager = fn(a, b)
-        compiled = torch.compile(fn, backend="inductor")(a, b)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    def test_cpu_scalar_with_gpu_tensor_cpp(self):
-        def fn(a, b):
-            return a + b[0]
+    @parametrize("gpu_first", [False, True])
+    @parametrize("scalar_math", [False, True])
+    def test_cpu_squeezed_singleton_with_gpu_tensor(self, gpu_first, scalar_math):
+        def fn(x, lr):
+            scalar = lr.to(torch.float32).squeeze()
+            if scalar_math:
+                scalar = (1.0 - scalar) * 2.5
+            return x * scalar if gpu_first else scalar * x
 
-        a = torch.rand(20, device=GPU_TYPE)
-        b = torch.rand(4, device="cpu")
+        x = torch.rand(20, device=GPU_TYPE)
+        lr = torch.tensor([0.005], dtype=torch.float64)
 
-        eager = fn(a, b)
-        compiled = torch.compile(fn, backend="inductor")(a, b)
+        eager = fn(x, lr)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x, lr)
         self.assertEqual(eager, compiled)
 
     @requires_gpu_and_triton
-    def test_cpu_scalar_with_gpu_tensor_dynamic(self):
+    @parametrize("gpu_first", [False, True])
+    def test_cpu_scalar_expression_with_gpu_tensor(self, gpu_first):
+        def fn(x, lr):
+            scalar = (1.0 - lr.to(torch.float32)) * 2.5
+            return x * scalar if gpu_first else scalar * x
+
+        x = torch.rand(20, device=GPU_TYPE)
+        lr = torch.tensor(0.005, dtype=torch.float64)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(x, lr)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x, lr)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @parametrize("gpu_first", [False, True])
+    @parametrize("scalar_math", [False, True])
+    @config.patch(implicit_fallbacks=True)
+    def test_opaque_cpu_squeezed_singleton_with_gpu_tensor(
+        self, gpu_first, scalar_math
+    ):
+        with _scoped_library("inductor_cpu_scalar", "FRAGMENT") as lib:
+            lib.define("opaque(Tensor x) -> Tensor")
+
+            @torch.library.impl(lib, "opaque", "CPU")
+            def opaque(x):
+                return x.clone()
+
+            @torch.library.impl(lib, "opaque", "Meta")
+            def opaque_meta(x):
+                return torch.empty_like(x)
+
+            def fn(x, lr):
+                scalar = torch.ops.inductor_cpu_scalar.opaque.default(lr)
+                scalar = scalar.to(torch.float32).squeeze()
+                if scalar_math:
+                    scalar = (1.0 - scalar) * 2.5
+                return x * scalar if gpu_first else scalar * x
+
+            x = torch.rand(20, device=GPU_TYPE)
+            lr = torch.tensor([0.005], dtype=torch.float64)
+
+            eager = fn(x, lr)
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x, lr)
+            self.assertEqual(eager, compiled)
+
+    @parametrize("output_kind", ["none", "multiple"])
+    def test_cpu_scalar_non_tensor_output_spec(self, output_kind):
+        if self.device != "cpu":
+            self.skipTest("Device-independent CPU buffer check")
+        fx_graph = torch.fx.Graph()
+        fx_graph.output(())
+        graph = GraphLowering(torch.fx.GraphModule(torch.nn.Module(), fx_graph))
+        device = torch.device("cpu")
+        output_spec = (
+            ir.NoneLayout(device=device)
+            if output_kind == "none"
+            else ir.MultiOutputLayout(device=device)
+        )
+        with V.set_graph_handler(graph):
+            buffer = ir.Buffer(name="non_tensor", layout=output_spec)
+            graph.name_to_buffer[buffer.get_name()] = buffer
+            self.assertFalse(graph.is_zero_dim_cpu_buffer(buffer.get_name()))
+
+    @requires_gpu_and_triton
+    @parametrize("gpu_first", [False, True])
+    @config.patch(force_disable_caches=True)
+    def test_cpu_reduction_scalar_with_gpu_tensor(self, gpu_first):
+        def fn(x, values):
+            scalar = values.sum()
+            return x * scalar if gpu_first else scalar * x
+
+        x = torch.rand(20, device=GPU_TYPE)
+        values = torch.rand(17, device="cpu")
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(x, values)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x, values)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    @config.patch(
+        freezing=True, always_keep_tensor_constants=True, force_disable_caches=True
+    )
+    def test_cpu_tensor_constant_scalar_with_gpu_tensor(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("constant", torch.rand(16, device="cpu"))
+
+            def forward(self, x, scalar):
+                return x * (scalar - self.constant[3])
+
+        module = Module().eval()
+        x = torch.rand(20, device=GPU_TYPE)
+        scalar = torch.tensor(1.0, device="cpu")
+        torch._inductor.metrics.generated_kernel_count = 0
+        with torch.no_grad():
+            eager = module(x, scalar)
+            compiled = torch.compile(module, backend="inductor", fullgraph=True)(
+                x, scalar
+            )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @parametrize("use_foreach", [False, True])
+    @config.patch(force_disable_caches=True)
+    def test_cpu_scalar_shared_by_gpu_consumers(self, use_foreach):
+        def fn(x, y, z, lr):
+            scalar = (1.0 - lr.to(torch.float32).squeeze()) * 2.5
+            if use_foreach:
+                return torch._foreach_mul([x, y, z], scalar)
+            return [x * scalar, y * scalar, z * scalar]
+
+        x, y, z = (torch.rand(size, device=GPU_TYPE) for size in (20, 32, 64))
+        lr = torch.tensor([0.005], dtype=torch.float64)
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(x, y, z, lr)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x, y, z, lr)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, 2 if use_foreach else 4
+        )
+
+    @requires_gpu_and_triton
+    @parametrize("gpu_first", [False, True])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    def test_cpu_scalar_with_gpu_tensor_cpp(self, gpu_first):
         def fn(a, b):
-            return a + b[0]
+            return a + b[0] if gpu_first else b[0] + a
 
         a = torch.rand(20, device=GPU_TYPE)
         b = torch.rand(4, device="cpu")
 
+        torch._inductor.metrics.generated_kernel_count = 0
         eager = fn(a, b)
-        compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
         self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @parametrize("gpu_first", [False, True])
+    def test_cpu_scalar_with_gpu_tensor_dynamic(self, gpu_first):
+        def fn(a, b):
+            return a + b[0] if gpu_first else b[0] + a
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor", dynamic=True, fullgraph=True)(
+            a, b
+        )
+        self.assertEqual(eager, compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     def test_cpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
