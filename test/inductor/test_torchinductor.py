@@ -20795,6 +20795,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._check(v.size(0) > u.size(0))
             return v[: v.size(0) - u.size(0)].exp()
 
+        def checked_ne_slice_exp(v, u):
+            # v.size(0) - u.size(0) elements, nonzero only because of the
+            # != check
+            torch._check(v.size(0) >= u.size(0))
+            torch._check(v.size(0) != u.size(0))
+            return v[u.size(0) :].exp()
+
         def nonzero_sum(m):
             # reduces u0 rows into one element, so it launches whatever u0 is
             return torch.nonzero(m).float().sum(0)
@@ -20818,6 +20825,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for middle, args, kernel, patches in [
             (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp", {}),
             (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
+            (checked_ne_slice_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
             (nonzero_sum, (m,), "def triton_red_fused__to_copy_sum", {}),
             (native_matmul_row_sum, (a, b), "def triton_per_fused_add_mm_sum", native),
         ]:
