@@ -3064,3 +3064,15 @@ class Module:
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+
+
+# Keep original bindings before user code can replace methods during lazy compiler import.
+_MODULE_INSTANCE_DICT_GET = Module.__dict__["__dict__"].__get__
+_MODULE_CALL_IMPL = (Module._call_impl, Module._call_impl.__code__)
+_MODULE_BACKWARD_COLLECTIONS = tuple(
+    (name, function, function.__code__)
+    for name, function in (
+        ("_get_backward_hooks", Module._get_backward_hooks),
+        ("_get_backward_pre_hooks", Module._get_backward_pre_hooks),
+    )
+)

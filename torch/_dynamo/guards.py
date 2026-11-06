@@ -271,6 +271,187 @@ def _sequence_length(value: object) -> int:
     return len(cast("Sized", value))
 
 
+_NN_MODULE_DICT_GET = torch.nn.modules.module._MODULE_INSTANCE_DICT_GET
+_MODULE_DICT_GET = cast(Any, types.ModuleType).__dict__["__dict__"].__get__
+_MODULE_TYPE, _ORDERED_DICT_TYPE = types.ModuleType, collections.OrderedDict
+_NN_MODULE_BACKWARD_COLLECTIONS = torch.nn.modules.module._MODULE_BACKWARD_COLLECTIONS
+
+
+def _dict_str_keys_guard() -> Callable[[object], bool]:
+    type_of, dict_type, string_type, dict_keys = type, dict, str, dict.keys
+
+    def check(namespace: object) -> bool:
+        return type_of(namespace) is dict_type and all(
+            type_of(key) is string_type
+            for key in dict_keys(cast(dict[Any, Any], namespace))
+        )
+
+    return check
+
+
+def _class_str_keys_guard() -> Callable[[object], bool]:
+    type_of, string_type = type, str
+    mro_get = type.__dict__["__mro__"].__get__
+    dict_get = type.__dict__["__dict__"].__get__
+
+    def check(cls: object) -> bool:
+        return type_of(cls) is type_of and all(
+            type_of(key) is string_type
+            for base in mro_get(cls)
+            for key in dict_get(base)
+        )
+
+    return check
+
+
+def _instance_dict_bool_guard(
+    cls: type,
+) -> Callable[[object, str, bool], bool | None]:
+    cls_ref = weakref.ref(cls)
+    type_of, dict_type, getset_type = type, dict, types.GetSetDescriptorType
+    generic_getattr, getattr_static = object.__getattribute__, inspect.getattr_static
+    mro_get = type.__dict__["__mro__"].__get__
+    dict_get = type.__dict__["__dict__"].__get__
+    string_keys, class_keys = _dict_str_keys_guard(), _class_str_keys_guard()
+    missing = object()
+
+    def check(receiver: object, member: str, expected: bool) -> bool | None:
+        current_cls = type_of(receiver)
+        if not class_keys(current_cls):
+            return None
+        if (
+            getattr_static(current_cls, "__getattribute__", None) is not generic_getattr
+            or any("__slots__" in dict_get(base) for base in mro_get(current_cls))
+            or getattr_static(current_cls, member, missing) is not missing
+        ):
+            return None
+        descriptor = getattr_static(current_cls, "__dict__", None)
+        if (
+            type_of(descriptor) is not getset_type
+            or descriptor.__objclass__ is not current_cls
+        ):
+            return None
+        if current_cls is not cls_ref():
+            return False
+        namespace = descriptor.__get__(receiver)
+        if not string_keys(namespace):
+            return None
+        value = dict_type.get(namespace, member, missing)
+        if value is not True and value is not False:
+            return None
+        return value is expected
+
+    return check
+
+
+def _nn_module_backward_hooks_guard(
+    globals_module: types.ModuleType | None = None,
+) -> Callable[[object, object], bool | None]:
+    module_dict_get, globals_dict_get = _NN_MODULE_DICT_GET, _MODULE_DICT_GET
+    module_type, dict_type, ordered_dict_type = _MODULE_TYPE, dict, _ORDERED_DICT_TYPE
+    type_of, string_type, bool_type = type, str, bool
+    dict_keys, dict_get, dict_len = dict.keys, dict.get, dict.__len__
+    generic_getattr, getattr_static = object.__getattribute__, inspect.getattr_static
+    string_keys = _dict_str_keys_guard()
+    class_keys = _class_str_keys_guard()
+    collection_methods = _NN_MODULE_BACKWARD_COLLECTIONS
+    globals_ref = weakref.ref(globals_module) if globals_module is not None else None
+    missing = object()
+
+    def check(module: object, globals_module: object) -> bool | None:
+        if globals_ref is not None and (
+            globals_module is None or globals_module is not globals_ref()
+        ):
+            return False
+        if type_of(globals_module) is not module_type:
+            return None
+        try:
+            module_dict = module_dict_get(module)
+        except TypeError:
+            return None
+        globals_dict = globals_dict_get(globals_module)
+        if (
+            type_of(module_dict) is not dict_type
+            or type_of(globals_dict) is not dict_type
+        ):
+            return None
+        if any(
+            type_of(key) is not string_type for key in dict_keys(module_dict)
+        ) or any(type_of(key) is not string_type for key in dict_keys(globals_dict)):
+            return None
+        cls = type_of(module)
+        if (
+            not class_keys(cls)
+            or getattr_static(cls, "__getattribute__", None) is not generic_getattr
+            or any(
+                getattr_static(cls, name, missing) is not missing
+                for name in (
+                    "_backward_hooks",
+                    "_backward_pre_hooks",
+                    "_is_full_backward_hook",
+                )
+            )
+            or any(
+                name in module_dict
+                or getattr_static(cls, name, None) is not function
+                or function.__code__ is not code
+                for name, function, code in collection_methods
+            )
+        ):
+            return None
+        if any(
+            name not in module_dict
+            for name in (
+                "_backward_hooks",
+                "_backward_pre_hooks",
+                "_is_full_backward_hook",
+            )
+        ):
+            return None
+        if any(
+            name not in globals_dict
+            for name in (
+                "_global_backward_hooks",
+                "_global_backward_pre_hooks",
+                "_global_is_full_backward_hook",
+            )
+        ):
+            return None
+        local_backward = dict_get(module_dict, "_backward_hooks")
+        local_pre = dict_get(module_dict, "_backward_pre_hooks")
+        global_backward = dict_get(globals_dict, "_global_backward_hooks")
+        global_pre = dict_get(globals_dict, "_global_backward_pre_hooks")
+        registries = (local_backward, local_pre, global_backward, global_pre)
+        if any(
+            type_of(value) is not dict_type and type_of(value) is not ordered_dict_type
+            for value in registries
+        ):
+            return None
+        for value in registries:
+            if type_of(value) is ordered_dict_type:
+                namespace = generic_getattr(value, "__dict__")
+                if not string_keys(namespace) or "values" in namespace:
+                    return None
+        local_backward = cast(dict[Any, Any], local_backward)
+        local_pre = cast(dict[Any, Any], local_pre)
+        global_backward = cast(dict[Any, Any], global_backward)
+        global_pre = cast(dict[Any, Any], global_pre)
+        local_full = dict_get(module_dict, "_is_full_backward_hook")
+        global_full = dict_get(globals_dict, "_global_is_full_backward_hook")
+        if local_full is not None and type_of(local_full) is not bool_type:
+            return None
+        if global_full is not None and type_of(global_full) is not bool_type:
+            return None
+        return (
+            (local_full is True and dict_len(local_backward) != 0)
+            or dict_len(local_pre) != 0
+            or (global_full is True and dict_len(global_backward) != 0)
+            or dict_len(global_pre) != 0
+        )
+
+    return check
+
+
 _COW_TENSOR_UNSUPPORTED = object()
 
 
@@ -3848,6 +4029,67 @@ class GuardBuilder(GuardBuilderBase):
             return
         self.SEQUENCE_LENGTH(guard)
 
+    @unsupported_guard_check_spec
+    def INSTANCE_DICT_BOOL(self, guard: Guard, expected: bool) -> None:
+        source = guard.originating_source
+        if type(source) is not AttrSource:
+            raise AssertionError("Expected an attribute source for a stored bool")
+        ref = self.arg_ref(source.base.name)
+        check = _instance_dict_bool_guard(type(self.get(source.base)))
+        string_keys = _dict_str_keys_guard()
+        root_source = source.base
+        while isinstance(
+            root_source,
+            (
+                NNModuleSource,
+                UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
+            ),
+        ):
+            root_source = root_source.base
+        prefix = (
+            "not ___instance_dict_globals_str_keys(G) or "
+            if isinstance(root_source, GlobalSource)
+            else ""
+        )
+        code = [
+            f"{prefix}___instance_dict_bool({ref}, {source.member!r}, {expected!r}) is not False"
+        ]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars()
+            | {
+                "___instance_dict_bool": check,
+                "___instance_dict_globals_str_keys": string_keys,
+            },
+            is_epilogue=False,
+        )
+
+    @unsupported_guard_check_spec
+    def NN_MODULE_BACKWARD_HOOKS(
+        self, guard: Guard, globals_source: GlobalSource
+    ) -> None:
+        ref = self.arg_ref(guard)
+        globals_ref = f"G.get({globals_source.global_name!r})"
+        code = [
+            "not ___nn_module_globals_str_keys(G) or "
+            f"___nn_module_backward_hooks({ref}, {globals_ref}) is not False"
+        ]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars()
+            | {
+                "___nn_module_globals_str_keys": _dict_str_keys_guard(),
+                "___nn_module_backward_hooks": _nn_module_backward_hooks_guard(
+                    self.get(globals_source)
+                ),
+            },
+        )
+
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def GRAD_MODE(self, guard: Guard) -> None:
@@ -6157,6 +6399,8 @@ class CheckFunctionManager:
     # serialize_guards still accepts an ID_MATCH, FUNCTION_MATCH, CLASS_MATCH or
     # MODULE_MATCH that is_portable_identity_guard accepts.
     UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "INSTANCE_DICT_BOOL",
+        "NN_MODULE_BACKWARD_HOOKS",
         "DICT_VERSION",
         "NN_MODULE",
         "ID_MATCH",

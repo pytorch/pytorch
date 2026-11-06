@@ -20,6 +20,7 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
+import types
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -29,13 +30,30 @@ from .. import compiled_autograd
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _MODULE_DICT_GET,
+    _nn_module_backward_hooks_guard,
+    _NN_MODULE_DICT_GET,
+    GuardBuilder,
+    install_guard,
+)
 from ..source import AttrSource
-from .base import GetSet, Method, readonly_setter, VariableTracker
+from ..utils import get_type_mro_no_user_code
+from .base import GetSet, Method, NO_SUCH_SUBOBJ, readonly_setter, VariableTracker
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_MODULE_CALL_INNER_CODE = next(
+    (
+        code
+        for code in torch.nn.modules.module._MODULE_CALL_IMPL[1].co_consts
+        if isinstance(code, types.CodeType) and code.co_name == "inner"
+    ),
+    None,
+)
 
 
 class DistributedVariable(VariableTracker):
@@ -170,6 +188,64 @@ class BackwardHookVariable(VariableTracker):
         user_pre_hooks: VariableTracker,
     ) -> "BackwardHookVariable":
         if not compiled_autograd.compiled_autograd_enabled:
+            if (
+                tx.f_code is _MODULE_CALL_INNER_CODE
+                and tx.can_retain_retry_guards()
+                and module.source is not None
+                and type(tx.output.global_scope) is dict
+                and all(type(key) is str for key in tx.output.global_scope)
+            ):
+                receiver = tx.retry_guard_root(module.source)
+                cls = type(receiver)
+                type_guards = tuple(
+                    guard
+                    for guard in tx.output.guards.get_guards_for_source(module.source)
+                    if guard.inner_create_fn() is GuardBuilder.TYPE_MATCH
+                )
+                if receiver is not NO_SUCH_SUBOBJ and type_guards:
+                    globals_source = tx.import_source("torch.nn.modules.module")
+                    globals_module = tx.retry_guard_root(globals_source)
+                    if (
+                        _nn_module_backward_hooks_guard()(receiver, globals_module)
+                        is True
+                    ):
+                        module_dict = _NN_MODULE_DICT_GET(receiver)
+                        globals_dict = _MODULE_DICT_GET(globals_module)
+                        dependencies = (
+                            module_dict["_backward_hooks"],
+                            module_dict["_backward_pre_hooks"],
+                            globals_dict["_global_backward_hooks"],
+                            globals_dict["_global_backward_pre_hooks"],
+                            module_dict,
+                            globals_dict,
+                            *get_type_mro_no_user_code(cls),
+                            *(
+                                object.__getattribute__(value, "__dict__")
+                                for value in (
+                                    module_dict["_backward_hooks"],
+                                    module_dict["_backward_pre_hooks"],
+                                    globals_dict["_global_backward_hooks"],
+                                    globals_dict["_global_backward_pre_hooks"],
+                                )
+                                if type(value) is not dict
+                            ),
+                        )
+                        side_effects = tx.output.side_effects
+                        if tx.f_globals is globals_dict and not any(
+                            side_effects.is_modified(variable)
+                            for value in dependencies
+                            if (variable := side_effects.id_to_variable.get(id(value)))
+                            is not None
+                        ):
+                            tx.speculation_log.retry_guards.update(type_guards)
+                            tx.speculation_log.retry_guards.add(
+                                module.source.make_guard(
+                                    functools.partial(
+                                        GuardBuilder.NN_MODULE_BACKWARD_HOOKS,
+                                        globals_source=globals_source,
+                                    )
+                                )
+                            )
             unimplemented(
                 gb_type="Module-level backwards hooks require compiled autograd.",
                 context="",
