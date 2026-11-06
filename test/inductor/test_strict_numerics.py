@@ -628,6 +628,18 @@ class StrictNumericsCompileTest(TestCase):
         for scalar in (float("nan"), -float("nan"), 0.7):
             self._assert_bitwise_equal(compiled(scalar, nans), fn(scalar, nans))
 
+    @dtypes(torch.float32, torch.float64)
+    def test_empty_reshape_preserves_dtype_view_strides(self, device, dtype):
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+
+        def fn(x):
+            return (x + 1).reshape(0, 10, 6).view(complex_dtype)
+
+        x = torch.empty(0, 10, 3, 2, dtype=dtype, device=device)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, expected, exact_stride=True)
+
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("scalar_left", (False, True))
