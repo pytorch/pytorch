@@ -2613,6 +2613,22 @@ class TritonKernelOverrides(TritonOverrides):
     variables which are assumed to already be defined in the current scope.
     """
 
+    @staticmethod
+    def copysign(x, y):
+        if (
+            utils.is_strict_cuda_triton()
+            and cast(Any, get_dtype_handler()).copysign(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+            # Copy the sign without quieting or changing NaN payload bits.
+            return (
+                f"((({x}).to(tl.uint64, bitcast=True) & 0x7FFFFFFFFFFFFFFF) | "
+                f"(({y}).to(tl.uint64, bitcast=True) & 0x8000000000000000))"
+                ".to(tl.float64, bitcast=True)"
+            )
+        return TritonOverrides.copysign(x, y)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
