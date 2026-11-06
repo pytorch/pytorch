@@ -4408,6 +4408,8 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
