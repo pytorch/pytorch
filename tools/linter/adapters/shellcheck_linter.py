@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "shellcheck-py==0.7.2.1; platform_machine == 'x86_64'",
 # ]

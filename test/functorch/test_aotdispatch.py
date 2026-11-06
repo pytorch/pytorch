@@ -13095,6 +13095,40 @@ if not TEST_MKL:
             ),
         }
     )
+else:
+    # Eager and AOTDispatcher gradients of matmul differ by up to 5.1e-5 in float32
+    # with MKL 2026.2 (measured on the AVX-512 CI runners; the default atol is 1e-5).
+    # 1e-4 leaves about 2x headroom for the AVX2 and AMD runners, where MKL picks other
+    # kernels.
+    # linalg.pinv/pinverse gradients differ by ~1.4e-5 with MKL 2026.2.
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=1e-04, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=1e-04, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "linalg.pinv",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=5e-05, rtol=1.3e-06)}
+                ),
+            ),
+            decorate(
+                "pinverse",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=5e-05, rtol=1.3e-06)}
+                ),
+            ),
+        }
+    )
 
 symbolic_aot_autograd_failures = {
     xfail(
