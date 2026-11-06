@@ -16301,6 +16301,9 @@ def add_nn_module_test(*args, **kwargs):
                                     lambda x: x, f_args_variable,
                                     no_grad=no_grad or not any_requires_grad)
 
+    if test_name not in EXCLUDE_SCRIPT_MODULES and not kwargs.get('check_jit', True):
+        do_test = unittest.skip('module test skipped on JIT')(do_test)
+
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)
 
