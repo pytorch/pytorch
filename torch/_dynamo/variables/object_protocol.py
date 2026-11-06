@@ -35,11 +35,11 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
     unimplemented,
-    Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -2496,7 +2496,20 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
+    # Step 7: Attribute not found. With generic tp_getattro, no instance
+    # __dict__ and no __getattr__, the MRO walk was the whole lookup, so this
+    # is CPython's AttributeError; otherwise signal the caller to fall back.
+    from .user_defined import _safe_c_slots
+
+    if (
+        py_type.__dictoffset__ == 0
+        and py_type.__getattribute__ in _safe_c_slots()
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    ):
+        raise_attribute_error(
+            tx,
+            f"'{py_type.__name__}' object has no attribute '{name}'",
+        )
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2594,16 +2607,20 @@ def generic_hasattr_str(
     tp_getattro, so it cannot disagree with getattr();
     https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1321
     """
-    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-        value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
-        return not isinstance(value, variables.DeletedVariable)
+    if type(obj).call_obj_hasattr is not VariableTracker.call_obj_hasattr:
+        try:
+            return obj.call_obj_hasattr(tx, name).as_python_constant()
+        except NotImplementedError:
+            pass
 
     try:
-        # A GetAttrVariable means the read was deferred, not resolved, so it is
-        # no evidence the attribute exists; fall through to the probe below.
-        # A lazy VT wraps a real value, and realizing it would install guards
-        # on a value hasattr never reads.
-        value = obj.tp_getattro_impl(tx, name)
+        # generic_getattr, not tp_getattro_impl, so pending in-frame stores
+        # and tp_getset/tp_members resolve the same way getattr() sees them.
+        # A GetAttrVariable means the read was deferred, not resolved, so it
+        # is no evidence the attribute exists; fall through to the graph
+        # break. A lazy VT wraps a real value, and realizing it would install
+        # guards on a value hasattr never reads.
+        value = generic_getattr(tx, obj, name)
         if isinstance(value, variables.LazyVariableTracker) or not isinstance(
             value, variables.GetAttrVariable
         ):
@@ -2627,29 +2644,8 @@ def generic_hasattr_str(
                 )
             )
         return False
-    except (NotImplementedError, Unsupported):
+    except NotImplementedError:
         pass
-
-    # tp_getattro_impl could not resolve the name. generic_getattr would defer
-    # by wrapping it in a GetAttrVariable, which is indistinguishable from a
-    # missing attribute, so ask the concrete object (or its type) instead.
-    probe = NO_SUCH_SUBOBJ
-    for get_probe in (obj.get_real_python_backed_value, obj.python_type):
-        try:
-            probe = get_probe()
-        except (NotImplementedError, AttributeError):
-            continue
-        if probe is not NO_SUCH_SUBOBJ:
-            break
-    if probe is not NO_SUCH_SUBOBJ:
-        found = hasattr(probe, name)
-        if not found and obj.source:
-            install_guard(
-                obj.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-        return found
 
     unimplemented(
         gb_type="Unsupported hasattr call",

@@ -113,6 +113,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
     Member,
@@ -163,8 +164,12 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
+    Covers tp_hash and tp_richcompare slots for C extension types, used by
+    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
+    __getattribute__ wrappers of builtin types whose tp_getattro is
+    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
+    sets the slot explicitly gets its own wrapper, so identity with
+    object.__getattribute__ is not enough.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -186,6 +191,25 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
+        for tp in (
+            object,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            collections.deque,
+            range,
+            str,
+            bytes,
+            bytearray,
+            int,
+            float,
+            complex,
+            slice,
+            torch.Size,
+        ):
+            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
 
 
@@ -389,6 +413,22 @@ class UserDefinedVariable(VariableTracker):
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
+
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
 
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2132,6 +2172,51 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
         return new_fn is object.__new__
+
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable | None":
+        # A metaclass data descriptor wins over the MRO, as in tp_getattro_impl.
+        meta_attr = self.lookup_metaclass_attr(name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            return super()._hasattr_check_side_effects(tx, name)
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is None:
+            return None
+        value = tx.output.side_effects.load_attr(owner, name, deleted_ok=True)
+        # The lookup would run a metaclass __getattribute__ or the stored value's
+        # __get__, and either may raise AttributeError. Tracing that here would
+        # run it twice for getattr(cls, name, default), which looks the attribute
+        # up again after hasattr.
+        if self.lookup_metaclass_attr("__getattribute__") is not _type_getattribute or (
+            isinstance(value, UserDefinedVariable)
+            and mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+        ):
+            unimplemented(
+                gb_type="hasattr on a class attribute set earlier in the frame",
+                context=f"hasattr({self.value}, {name!r}), value {value}",
+                explanation="Dynamo cannot tell whether the lookup raises "
+                "AttributeError without running the stored value's __get__ "
+                "or the metaclass __getattribute__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return variables.ConstantVariable.create(
+            not isinstance(value, variables.DeletedVariable)
+        )
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        se_result = self._hasattr_check_side_effects(tx, name)
+        if se_result is not None:
+            return se_result
+        if self.source:
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+        return VariableTracker.build(tx, hasattr(self.value, name))
 
     def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if name == "__name__":
@@ -4267,19 +4352,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
-            # off TypeSource is not tag-safe.
-            if var_source is not None and can_guard_class_function_code(tx, type_attr):
-                im_func = variables.UserFunctionVariable.create_with_source(
-                    type_attr, var_source
-                )
+            fn_source = var_source or (
+                self.source and AttrSource(TypeSource(self.source), name)
+            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
             else:
-                im_func = VariableBuilder.create_internal_user_function(
-                    type_attr,
-                    source=var_source
-                    or (self.source and AttrSource(TypeSource(self.source), name)),
-                )
-            return variables.UserMethodVariable(im_func, self, source=source)
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
