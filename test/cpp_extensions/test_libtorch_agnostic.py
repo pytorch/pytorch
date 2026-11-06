@@ -856,6 +856,26 @@ class TestLibtorchAgnostic(TestCase):
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
 
+    def test_my_narrow_conj_neg_view(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        # narrow is backed by a c_shim_aten shim; it should return a view of a
+        # conj/neg view, not of a materialized copy.
+        conj_t = torch.randn(2, 5, dtype=torch.cfloat, device=device).conj()
+        neg_t = torch.randn(2, 5, device=device)._neg_view()
+        for t, fill_value in ((conj_t, 1 + 2j), (neg_t, 3.0)):
+            out = libtorch_agnostic.ops.my_narrow(t, 0, 0, 1)
+            self.assertEqual(out, torch.narrow(t, 0, 0, 1))
+            # only fixed in 2.16+
+            if _torchVersionLessThan(2, 16):
+                self.assertFalse(out.is_conj() or out.is_neg())
+                self.assertNotEqual(out.data_ptr(), t.data_ptr())
+                continue
+            self.assertEqual(out.is_conj(), t.is_conj())
+            self.assertEqual(out.is_neg(), t.is_neg())
+            out.fill_(fill_value)
+            self.assertEqual(t[0], torch.full_like(t[0], fill_value))
+
     @onlyCPU
     def test_my_narrow_symint(self, device):
         op = torch.ops.libtorch_agn_2_9.my_narrow_symint

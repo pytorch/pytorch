@@ -3544,7 +3544,7 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S), (S, 2 * L))
 
     for shape, sorted, return_inverse, return_counts, dim in \
             product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
@@ -3596,12 +3596,17 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2,)), output_size=(1,)),
+                     error_type=ValueError, error_regex="Expected 2D or 3D tensor")
+
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
-                     error_regex="'output_size' should contain one int")
+                     error_type=ValueError, error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3633,10 +3638,11 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 2")
+                     error_type=ValueError, error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3659,6 +3665,8 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
+    yield SampleInput(make_arg((2, 3, 8, 8, 6), memory_format=torch.channels_last_3d), args=((5, 7, 4),))
+
 
 def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -3669,10 +3677,11 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 3")
+                     error_type=ValueError, error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3792,6 +3801,7 @@ class _TestParamsMaxPoolBase:
     def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
+            # Overlapping stride first: inductor_one_sample (test_torchinductor_opinfo.py) runs only the first sample
             'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
@@ -3800,9 +3810,9 @@ class _TestParamsMaxPoolBase:
         }
 
         self.shapes = [
-            [1, 2, None],  # batch
+            [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first 1d sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -3825,32 +3835,35 @@ class _TestParamsMaxPoolBase:
         yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+    pass
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2)]
-        self.kwargs['stride'] += [(2, 1)]
-        self.kwargs['padding'] += [(1, 1)]
-        self.kwargs['dilation'] += [(1, 2)]
+        self.kwargs['kernel_size'] = [(3, 2)]
+        # Per-dim stride values differ: H overlaps and W tiles (both overlap with dilation)
+        self.kwargs['stride'] = [(1, 2), None]
+        self.kwargs['padding'] = [0, (1, 1)]
+        self.kwargs['dilation'] = [1, (1, 2)]
 
-        self.shapes.append([6])
+        self.shapes.append([5])  # odd, so the first sample has a partial ceil_mode window in W
+
+class _TestParamsMaxPool2dBackward(_TestParamsMaxPool2d):
+
+    def __init__(self) -> None:
+        super().__init__()
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        self.kwargs['return_indices'] = [True]
 
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2, 3)]
-        self.kwargs['stride'] += [(2, 1, 2)]
-        self.kwargs['dilation'] += [(1, 2, 1)]
+        self.kwargs['kernel_size'] = [(3, 2, 3)]
+        # Per-dim stride values all differ: D overlaps and H, W tile (H overlaps too with dilation)
+        self.kwargs['stride'] = [(1, 2, 3), None]
+        self.kwargs['dilation'] = [1, (1, 2, 1)]
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -3862,7 +3875,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
-        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2dBackward,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -6581,8 +6594,11 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
     A = make_fullrank_matrices_with_distinct_singular_values(S, S, S, dtype=dtype, device=device)
     for upper in (False, True):
         L = torch.linalg.cholesky(A @ A.mH, upper=upper)
+        # cholesky_solve does not read the other strict triangle of L. Filling it with
+        # nonzero values checks that the derivatives do not depend on it either. See #199069
+        unread = A.tril(-1) if upper else A.triu(1)
         yield SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                          args=(L.requires_grad_(requires_grad),), kwargs=dict(upper=upper))
+                          args=((L + unread).requires_grad_(requires_grad),), kwargs=dict(upper=upper))
 
 
 def sample_inputs_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -9927,7 +9943,9 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
-        if dmajor >= 10:
+        # SWIZZLE_32_4_4 and NVFP4 are NVIDIA-only; on ROCm dmajor is the gfx
+        # major (e.g. 12 on gfx120x), not an SM version.
+        if dmajor >= 10 and not torch.version.hip:
             # MXFP8
             scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
             scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
@@ -10487,8 +10505,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
-        indices = sample.args[0]
+    samples = list(sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs))
+    smallest_size = min((math.prod(s.kwargs['output_size'][2:]) for s in samples), default=None)
+    for sample in samples:
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
@@ -10504,8 +10523,11 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
         # indices.
-        # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Here we go with the solution 2, the easiest of all: non-overlapping
+        # windows (stride=None, i.e. stride == kernel_size) always give unique indices.
+        # gradcheck is expensive, so only the smallest max_pool input is kept;
+        # output_size is that input's shape (sample.input is the pooled output).
+        if sample.kwargs['stride'] is None and math.prod(sample.kwargs['output_size'][2:]) == smallest_size:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -12146,20 +12168,12 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
+                           dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
+                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
+                           dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
@@ -12865,23 +12879,6 @@ op_db: list[OpInfo] = [
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
-               # FIXME: AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               # FIXME: RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   device_type='mps',
-                   dtypes=(torch.complex64,)),
-               # RuntimeError: MPS device does not support addr for non-float input
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   device_type='mps',
-                   dtypes=(torch.int64,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -13307,8 +13304,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # https://github.com/pytorch/pytorch/issues/199069
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCPUIfNoLapack],
            skips=(
                # https://github.com/pytorch/pytorch/issues/165294
@@ -15254,13 +15249,6 @@ op_db: list[OpInfo] = [
            assert_autodiffed=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
-           ),
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -15782,14 +15770,6 @@ op_db: list[OpInfo] = [
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
-           skips=(
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -16320,10 +16300,6 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=5e-6)}),
-                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
-               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs) INTERNAL ASSERT FAILED at
@@ -16687,10 +16663,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
@@ -21291,10 +21263,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               # Allowed exception: sparse tensors don't have strides
-               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
-                            'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
@@ -23501,7 +23469,9 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
@@ -26444,14 +26414,6 @@ python_ref_db = [
         torch_opinfo_name="addr",
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # RuntimeError: MPS device does not support addr for non-float input
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.complex64, torch.bool,
-                )
-            ),
         ),
     ),
     PythonRefInfo(
