@@ -160,11 +160,15 @@ endmacro()
 #      value of an entry it adopts, and every caffe2_update_option()
 #      write restamps it with what it wrote, so a value that differs
 #      from the stamp is a ccmake / cmake-gui / hand edit of
-#      CMakeCache.txt, which is gh-114388's exact symptom, or a -C
-#      script that quoted the doc string into a fresh dir (no stamp
-#      yet). either way the new value is the user's. editing the value
-#      back to OFF this way withdraws the request on the run that sees
-#      it, which the early refusals in CMakeLists.txt read.
+#      CMakeCache.txt, which is gh-114388's exact symptom. editing the
+#      value back to OFF this way withdraws the request on the run that
+#      sees it, which the early refusals in CMakeLists.txt read. the
+#      comparison needs an existing stamp: a build dir from before the
+#      stamping (or a -C script that quoted the doc string into a fresh
+#      dir) has none, and reading the missing stamp as a value would
+#      record a request nobody made -- those entries are left to the
+#      declaration's own judgment, so a -C script that reuses the doc
+#      string is not recorded.
 #   3. otherwise the value is stable since the declaration last ran: a
 #      declaration default or an already-recorded request, and the marker
 #      is left alone.
@@ -191,7 +195,8 @@ function(pytorch_record_explicit_request option docstring)
     set(_request "")
     if(NOT _help STREQUAL "${docstring}")
       set(_request "${${option}}")
-    elseif(NOT "${${option}}" STREQUAL "${_last_seen}")
+    elseif(DEFINED CACHE{_${option}_LAST_SEEN}
+           AND NOT "${${option}}" STREQUAL "${_last_seen}")
       set(_request "${${option}}")
     endif()
     if(NOT _request STREQUAL "")

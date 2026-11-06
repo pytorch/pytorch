@@ -376,15 +376,34 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         self.edit_cache_value("ccmake-on", "USE_CUDA", "OFF")
         self.assert_ok("USE_CUDA", False, build="ccmake-on")
 
-    def test_initial_cache_script_with_docstring_records_request(self) -> None:
+    def test_initial_cache_script_with_docstring_left_alone(self) -> None:
         self.skip_if_cuda_installed()
-        # a -C script that reuses the declaration's doc string is still a
-        # request: the entry exists before any declaration ran, so no
-        # _LAST_SEEN stamp can vouch for it as a declaration default
+        # a -C script that reuses the declaration's doc string is
+        # indistinguishable from a build dir from before the stamping:
+        # entry, help string, and no stamp. signal 2 has to leave both
+        # alone rather than read the missing stamp as a value, so the
+        # request is not recorded and the option falls back
         init = self.tmp / "init-uses-docstring.cmake"
         init.write_text('set(USE_CUDA ON CACHE BOOL "Use CUDA")\n')
-        self.assert_fails(CUDA_GUARD_MESSAGE, "-C", str(init),
-                          build="c-script-docstring")
+        self.assert_ok("USE_CUDA", False, "-C", str(init),
+                       build="c-script-docstring")
+
+    def test_pre_stamping_cache_dir_reconfigures_cleanly(self) -> None:
+        # a build directory from before the _LAST_SEEN stamping carries
+        # cached values with no stamp to compare against; the first
+        # reconfigure must not record phantom requests (the bot's repro:
+        # an old CUDA dir with USE_NCCL=ON cached, reconfigured with
+        # USE_CUDA=0, used to stop at the NCCL refusal)
+        build = self.tmp / "pre-stamping-dir"
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text(
+            "//Use NCCL\n"
+            "USE_NCCL:BOOL=ON\n")
+        self.assert_ok("USE_NCCL", False, "-DUSE_CUDA=0", "-DUSE_ROCM=0",
+                       build="pre-stamping-dir")
+        # and the second run stays quiet too: no marker was ever written
+        self.assert_ok("USE_NCCL", False, "-DUSE_CUDA=0", "-DUSE_ROCM=0",
+                       build="pre-stamping-dir")
 
     def test_poisoned_default_cache_falls_back(self) -> None:
         self.skip_if_cuda_installed()
