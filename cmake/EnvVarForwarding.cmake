@@ -75,6 +75,8 @@
 #   TORCH_XPU_ARCH_LIST      XPU arches, e.g. "ats-m150,lnl-m" (passthrough)
 #   PYTORCH_ROCM_ARCH        AMD GPU targets, e.g. "gfx900;gfx906" (read from env
 #                            in cmake/public/utils.cmake)
+#   TORCH_CK_GEMM_ARCH_LIST  AMD GPU archs Composable Kernel GEMM is built and
+#                            enabled for, e.g. "gfx90a;gfx942;gfx950" (passthrough)
 #
 # Library/backend selection (passthrough or read from the environment):
 #   BLAS                     MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS; fails the
@@ -148,6 +150,7 @@ set(_ENV_PASSTHROUGH
   INSTALL_TEST
   INTEL_MKL_DIR
   INTEL_OMP_DIR
+  LLVM_BOLT_PROFILES_DIR
   MKL_THREADING
   MKLDNN_CPU_RUNTIME
   MSVC_Z7_OVERRIDE
@@ -163,6 +166,7 @@ set(_ENV_PASSTHROUGH
   STATIC_DISPATCH_BACKEND
   SELECTED_OP_LIST
   TORCH_CUDA_ARCH_LIST
+  TORCH_CK_GEMM_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
   PYTHON_SIX_SOURCE_DIR

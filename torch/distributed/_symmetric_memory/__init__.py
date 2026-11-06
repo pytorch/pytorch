@@ -2378,7 +2378,7 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
     build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
-    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
+    least 3.5.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2394,11 +2394,11 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
     and affects all subsequent calls to
-    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    :func:`torch.distributed._symmetric_memory.empty()`.  Note that the backend
     cannot be changed once a symmetric memory tensor has been allocated.
 
     Args:
-        backend (str): the backend for symmetric memory allocation. Currently,
+        name (str): the backend for symmetric memory allocation. Currently,
             only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
@@ -2479,8 +2479,10 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
 
-    The tensor allocations with this pool must be symmetric across ranks.  The
-    allocated tensors can be used with symmetric operations, for example,
+    The tensor allocations with this pool must be symmetric across ranks.
+    Do not call :meth:`torch.Tensor.record_stream` on CUDA tensors allocated
+    from this pool, since stream-dependent reuse can break that symmetry.
+    The allocated tensors can be used with symmetric operations, for example,
     operations defined under `torch.ops.symm_mem`.
 
     Args:

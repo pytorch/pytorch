@@ -1,11 +1,12 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import hashlib
+import json
 import math
 import os
 import sys
 import tempfile
-import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -39,6 +40,10 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.heuristics.triton_codegen.reduction import (
+    ROCmReductionHeuristic,
+    XPUReductionHeuristic,
+)
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -50,9 +55,11 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
+from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
+    _enforce_native_matmul_config_min_xblock,
     _enforce_reduction_config_block_minimums,
     _find_names,
     _num_warps,
@@ -105,6 +112,105 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    @staticmethod
+    def _config_with_extra_options(extra_options):
+        from torch._inductor.runtime.triton_compat import Config
+
+        cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        cfg.extra_options = extra_options
+        return cfg
+
+    def test_extra_options_distinguish_configs(self):
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        first = self._config_with_extra_options({"backend_option": 2})
+        second = self._config_with_extra_options({"backend_option": 4})
+        self.assertNotEqual(hash_configs([first]), hash_configs([second]))
+        self.assertNotEqual(
+            triton_config_to_hashable(first), triton_config_to_hashable(second)
+        )
+        duplicate = self._config_with_extra_options({"backend_option": 2})
+        self.assertEqual(unique_configs([first, second, duplicate]), [first, second])
+
+        saved = {
+            **first.kwargs,
+            "num_warps": first.num_warps,
+            "num_stages": first.num_stages,
+            "configs_hash": hash_configs([first]),
+            "extra_options": first.extra_options,
+        }
+        self.assertIsNone(
+            _load_cached_autotuning(saved, hash_configs([second]), [second], {})
+        )
+
+    def test_extra_options_order_and_serialization(self):
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        first = self._config_with_extra_options(
+            {"tile": (2, 4), "flags": {"a": True, "b": False}}
+        )
+        second = self._config_with_extra_options(
+            {"flags": {"b": False, "a": True}, "tile": [2, 4]}
+        )
+        restored = self._config_with_extra_options(
+            json.loads(json.dumps(first.extra_options))
+        )
+        for cfg in (second, restored):
+            self.assertEqual(hash_configs([first]), hash_configs([cfg]))
+            self.assertEqual(
+                triton_config_to_hashable(first), triton_config_to_hashable(cfg)
+            )
+            self.assertEqual(unique_configs([first, cfg]), [first])
+
+    @parametrize("options", [{"option": {1, 2}}, {1: "a", "option": "b"}])
+    def test_invalid_extra_options_error(self, options):
+        from torch._inductor.runtime.hints import HeuristicType
+        from torch._inductor.runtime.triton_heuristics import (
+            cached_autotune,
+            hash_configs,
+        )
+
+        message = "Config.extra_options cannot be serialized with sorted JSON keys"
+        cfg = self._config_with_extra_options(options)
+        with self.assertRaisesRegex(TypeError, message):
+            hash_configs([cfg])
+        with self.assertRaisesRegex(TypeError, message):
+            cached_autotune(
+                size_hints=None,
+                configs=[cfg],
+                triton_meta={},
+                heuristic_type=HeuristicType.POINTWISE,
+                inductor_meta={"force_disable_caches": True},
+            )
+
+    def test_empty_extra_options_preserve_identity(self):
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original = self._config_with_extra_options(None)
+        del original.extra_options
+        expected_hash = hashlib.sha256(
+            f"{sorted(original.kwargs.items())} {original.num_warps} {original.num_stages}\n".encode()
+        ).hexdigest()
+        for cfg in (
+            original,
+            self._config_with_extra_options(None),
+            self._config_with_extra_options({}),
+        ):
+            self.assertEqual(hash_configs([cfg]), expected_hash)
+            self.assertEqual(
+                triton_config_to_hashable(cfg), triton_config_to_hashable(original)
+            )
 
     def test_find_names_ignores_frame_locals(self):
         """
@@ -180,6 +286,19 @@ class TestTritonHeuristics(TestCase):
                     TRITON_MAX_TENSOR_NUMEL,
                 )
 
+        cfgs = _reduction_configs(
+            size_hints={"x": 64, "y": 256, "r0_": 2048},
+            inductor_meta={"min_xblock": 64},
+            triton_meta=triton_meta,
+        )
+        self.assertTrue(cfgs)
+        for cfg in cfgs:
+            self.assertGreaterEqual(cfg.kwargs["XBLOCK"], 64)
+            self.assertGreaterEqual(cfg.kwargs["R0_BLOCK"], 16)
+            self.assertLessEqual(
+                native_matmul_block_numel(cfg.kwargs), TRITON_MAX_TENSOR_NUMEL
+            )
+
         for size_hints, inductor_meta in (
             ({"x": 4096, "y": 4096, "r0_": 1}, {}),
             ({"x": 16384, "y": 2048, "r0_": 2048}, {}),
@@ -210,8 +329,190 @@ class TestTritonHeuristics(TestCase):
                     TRITON_MAX_TENSOR_NUMEL,
                 )
 
+        cfgs = _persistent_reduction_configs(
+            size_hints={"x": 128, "y": 256, "r0_": 1024},
+            inductor_meta={"min_xblock": 128},
+            triton_meta=triton_meta,
+        )
+        rblock = native_matmul_persistent_rblock(1024)
+        self.assertTrue(cfgs)
+        for cfg in cfgs:
+            self.assertGreaterEqual(cfg.kwargs["XBLOCK"], 128)
+            self.assertLessEqual(
+                native_matmul_block_numel(cfg.kwargs, r0_block=rblock),
+                TRITON_MAX_TENSOR_NUMEL,
+            )
+
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
+
+    @parametrize(
+        "xnumel,rnumel,reduction_hint,rsplit_size,expected_max_configs",
+        [
+            (2048, 128, ReductionHint.INNER, None, [(1, 2), (8, 2), (32, 2)]),
+            (2048, 128, ReductionHint.OUTER, None, [(32, 8), (1, 2), (8, 8)]),
+            (
+                2048,
+                128,
+                ReductionHint.OUTER_TINY,
+                None,
+                [(4, 4), (1, 2), (8, 8), (32, 8)],
+            ),
+            (512, 256, ReductionHint.INNER, None, [(1, 2), (8, 2)]),
+            (1024, 256, ReductionHint.INNER, None, [(4, 1), (1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.DEFAULT, None, [(1, 2), (8, 8)]),
+            (2048, 256, ReductionHint.INNER, None, [(4, 1), (1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.INNER, 128, [(1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.OUTER, None, [(8, 8), (1, 2)]),
+            (
+                2048,
+                256,
+                ReductionHint.OUTER_TINY,
+                None,
+                [(2, 4), (1, 2), (8, 8)],
+            ),
+            (2048, 512, ReductionHint.INNER, None, [(2, 1), (1, 4), (8, 4)]),
+            (2048, 512, ReductionHint.INNER, 128, [(1, 4), (8, 4)]),
+            (2048, 512, ReductionHint.OUTER, None, [(8, 8), (1, 4)]),
+            (2048, 512, ReductionHint.OUTER_TINY, None, [(1, 4), (8, 8)]),
+            (2048, 1024, ReductionHint.INNER, None, [(1, 1), (1, 8)]),
+            (2048, 1024, ReductionHint.INNER, 128, [(1, 8)]),
+            (2048, 1024, ReductionHint.OUTER, None, [(1, 8)]),
+            (2048, 1024, ReductionHint.OUTER_TINY, None, [(1, 8)]),
+            (2048, 2048, ReductionHint.INNER, None, [(1, 8)]),
+        ],
+    )
+    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    def test_persistent_max_autotune_includes_default_config(
+        self,
+        xnumel,
+        rnumel,
+        reduction_hint,
+        rsplit_size,
+        expected_max_configs,
+        max_autotune_flag,
+    ):
+        size_hints = {"x": xnumel, "r0_": rnumel}
+        inductor_meta = {} if rsplit_size is None else {"RSPLIT_SIZE": rsplit_size}
+        triton_meta = {"device": self._fake_cuda_device_properties()}
+
+        default_configs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=reduction_hint,
+            inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
+        )
+        max_autotune_configs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=reduction_hint,
+            inductor_meta={**inductor_meta, max_autotune_flag: True},
+            triton_meta=triton_meta,
+        )
+
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
+        self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
+        self.assertEqual(
+            [(c.kwargs["XBLOCK"], c.num_warps) for c in max_autotune_configs],
+            expected_max_configs,
+        )
+
+    @parametrize(
+        "heuristic_cls,device_type,warp_size,expected_max_configs",
+        [
+            (
+                ROCmReductionHeuristic,
+                "hip",
+                64,
+                [(4, 1), (1, 2), (4, 2), (8, 2), (16, 2), (2, 4)],
+            ),
+            (XPUReductionHeuristic, "xpu", 32, [(8, 8), (1, 2), (8, 2)]),
+        ],
+    )
+    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    def test_backend_persistent_max_autotune_retains_candidates(
+        self,
+        heuristic_cls,
+        device_type,
+        warp_size,
+        expected_max_configs,
+        max_autotune_flag,
+    ):
+        triton_meta = {
+            "device": DeviceProperties(
+                type=device_type,
+                index=0,
+                multi_processor_count=1,
+                cc=80,
+                major=8,
+                regs_per_multiprocessor=65536,
+                max_threads_per_multi_processor=2048,
+                max_threads_per_block=1024,
+                warp_size=warp_size,
+            )
+        }
+        heuristic = heuristic_cls()
+        kwargs = {
+            "size_hints": {"x": 2048, "r0_": 256},
+            "reduction_hint": ReductionHint.INNER,
+            "triton_meta": triton_meta,
+        }
+        default_configs = heuristic.get_persistent_configs(**kwargs, inductor_meta={})
+        max_autotune_configs = heuristic.get_persistent_configs(
+            **kwargs, inductor_meta={max_autotune_flag: True}
+        )
+
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
+        self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
+        self.assertEqual(
+            [(c.kwargs["XBLOCK"], c.num_warps) for c in max_autotune_configs],
+            expected_max_configs,
+        )
+
+    def test_rocm_persistent_tiled_max_autotune_configs_remain_tiled(self):
+        size_hints = {"x": 2048, "y": 16, "r0_": 512}
+        triton_meta = {"device": self._fake_rocm_device_properties()}
+        heuristic = ROCmReductionHeuristic()
+
+        default_configs = heuristic.get_persistent_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={},
+            triton_meta=triton_meta,
+        )
+        max_autotune_configs = heuristic.get_persistent_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={"max_autotune": True},
+            triton_meta=triton_meta,
+        )
+
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertTrue(max_autotune_configs)
+        self.assertEqual(max_autotune_keys, default_keys)
+        self.assertTrue(all("YBLOCK" in c.kwargs for c in max_autotune_configs))
+
+    def test_native_matmul_min_xblock_is_power_of_two(self):
+        cfgs = _enforce_native_matmul_config_min_xblock(
+            [triton.Config({"XBLOCK": 32, "YBLOCK": 64, "R0_BLOCK": 32})],
+            62,
+        )
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(cfgs[0].kwargs["XBLOCK"], 64)
+
+        cfgs = _enforce_native_matmul_config_min_xblock(
+            [triton.Config({"XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 32})],
+            128,
+        )
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(
+            cfgs[0].kwargs,
+            {"XBLOCK": 128, "YBLOCK": 8, "R0_BLOCK": 32},
+        )
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
@@ -229,6 +530,14 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    def test_reduction_min_block_rejects_yblock(self):
+        with self.assertRaisesRegex(AssertionError, "do not support YBLOCK"):
+            _enforce_reduction_config_block_minimums(
+                [triton.Config({"YBLOCK": 32, "XBLOCK": 8, "R0_BLOCK": 1024})],
+                {"x": 256, "y": 256, "r0_": 4096},
+                {"min_xblock": 16},
+            )
 
     @parametrize(
         "major,cc,expected_baseline_configs,expected_scalar_configs",
@@ -316,6 +625,55 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
+    def test_inner_reduction_no_split_threshold_is_nvidia_only(self):
+        from torch._inductor.choices import InductorChoices
+
+        choices = InductorChoices()
+        props = self._fake_cuda_device_properties()._replace(major=12)
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(
+                props._replace(type="hip"), xnumel=1, num_sm=16
+            ),
+            8192,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(props, xnumel=1, num_sm=16),
+            32768,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(props, xnumel=64, num_sm=16),
+            40960,
+        )
+        self.assertEqual(
+            choices._inner_reduction_no_split_threshold(
+                props._replace(major=None), xnumel=1, num_sm=16
+            ),
+            8192,
+        )
+
+    def test_reduction_r0_block_cap_is_nvidia_only(self):
+        from torch._inductor.heuristics.triton_codegen.reduction import (
+            ReductionHeuristic,
+            ROCmReductionHeuristic,
+        )
+
+        def first_r0_block(heuristic, major, cc):
+            configs = heuristic.get_configs(
+                size_hints={"x": 128, "r0_": 2048},
+                inductor_meta={"reduction_hint": ReductionHint.INNER},
+                triton_meta={
+                    "device": self._fake_cuda_device_properties()._replace(
+                        major=major, cc=cc
+                    )
+                },
+            )
+            return configs[0].kwargs["R0_BLOCK"]
+
+        self.assertEqual(first_r0_block(ReductionHeuristic(), 8, 80), 2048)
+        self.assertEqual(first_r0_block(ReductionHeuristic(), 10, 100), 1024)
+        self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 12, 120), 2048)
+        self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 9, 95), 2048)
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
@@ -353,6 +711,20 @@ class TestTritonHeuristics(TestCase):
             max_threads_per_multi_processor=2048,
             max_threads_per_block=1024,
             warp_size=32,
+        )
+
+    @staticmethod
+    def _fake_rocm_device_properties():
+        return DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            regs_per_multiprocessor=65536,
+            max_threads_per_multi_processor=2048,
+            max_threads_per_block=1024,
+            warp_size=64,
         )
 
     @staticmethod
@@ -609,33 +981,56 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
     @parametrize(
-        "hip_version, tlx_options, expected_kwargs",
+        "hip_version, tlx_options, waves_per_eu, expected_kwargs",
         [
             (
                 "7.2",
-                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack", "test_extra_option"),
+                0,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                    "test_extra_option": 7,
+                },
+            ),
+            (
+                "7.2",
+                (),
+                0,
                 {
                     "matrix_instr_nonkdim": 16,
                     "waves_per_eu": 0,
                     "kpack": 1,
                 },
             ),
-            ("7.2", (), {}),
+            (
+                "7.2",
+                (),
+                2,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 2,
+                    "kpack": 1,
+                },
+            ),
             (
                 None,
                 ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                0,
                 {},
             ),
         ],
     )
-    def test_template_function_preserves_tlx_hip_options(
-        self, hip_version, tlx_options, expected_kwargs
+    def test_template_function_preserves_hip_options(
+        self, hip_version, tlx_options, waves_per_eu, expected_kwargs
     ):
         triton_meta = {
             "device": MagicMock(),
             "matrix_instr_nonkdim": 16,
-            "waves_per_eu": 0,
+            "waves_per_eu": waves_per_eu,
             "kpack": 1,
+            "test_extra_option": 7,
         }
 
         def capture_configs(_size_hints, configs, **_kwargs):
@@ -644,7 +1039,7 @@ class TestTritonHeuristics(TestCase):
         with (
             patch.object(torch.version, "hip", hip_version),
             patch(
-                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                "torch._inductor.utils.tlx_only_hip_options",
                 return_value=tlx_options,
             ),
             patch(
@@ -1306,8 +1701,86 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
+@instantiate_parametrized_tests
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    @parametrize("tuned_options", [False, True])
+    def test_static_restore_selects_extra_options_winner(self, tuned_options):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.hints import DeviceProperties, HeuristicType
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        @triton.jit
+        def kernel(XBLOCK: tl.constexpr):
+            pass
+
+        configs = []
+        for value in (2, 4):
+            cfg = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = {"backend_option": value}
+            configs.append(cfg)
+        results = [self._make_compile_result(cfg) for cfg in configs]
+        winner = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = {"backend_option": 5 if tuned_options else 4}
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "coordinate_descent_tuning": False,
+            "is_fbcode": False,
+        }
+        reload_source = MagicMock(side_effect=AssertionError("unexpected compilation"))
+        with tempfile.TemporaryDirectory() as directory:
+            # Synthetic device properties avoid querying a GPU.
+            tuner = CachingAutotuner(
+                fn=kernel,
+                triton_meta={
+                    "device": DeviceProperties(
+                        type="cuda",
+                        index=0,
+                        multi_processor_count=1,
+                        cc=80,
+                        warp_size=32,
+                        max_threads_per_block=1024,
+                    ),
+                    "signature": {},
+                    "constants": {},
+                },
+                configs=configs,
+                save_cache_hook=None,
+                mutated_arg_names=[],
+                optimize_mem=True,
+                heuristic_type=HeuristicType.POINTWISE,
+                inductor_meta=inductor_meta,
+                filename=os.path.join(directory, "kernel.py"),
+            )
+            tuner.compile_results = results
+            cache = AutotuneCache.create(
+                tuner.inductor_meta, tuner.filename, hash_configs(configs)
+            )
+            self.assertIsNotNone(cache)
+            cache.save(winner, 1000)
+            compiled_winner = self._make_compile_result(winner)
+            with patch.object(
+                tuner, "_precompile_config", return_value=compiled_winner
+            ) as precompile:
+                tuner.recheck_autotune_cache(reload_source)
+        self.assertEqual(tuner.autotune_cache_info["autotune_cache_state"], "hit")
+        self.assertEqual(len(tuner.compile_results), 1)
+        if tuned_options:
+            precompile.assert_called_once()
+            self.assertEqual(
+                precompile.call_args.args[0].extra_options, winner.extra_options
+            )
+            self.assertIs(tuner.compile_results[0], compiled_winner)
+        else:
+            precompile.assert_not_called()
+            self.assertIs(tuner.compile_results[0], results[1])
+        self.assertEqual(
+            [cfg.extra_options for cfg in configs],
+            [{"backend_option": 2}, {"backend_option": 4}],
+        )
+        reload_source.assert_not_called()
 
     @staticmethod
     def _make_compile_result(cfg):
@@ -1568,70 +2041,6 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
-
-
-class TestFastLauncherDeviceSupport(TestCase):
-    @staticmethod
-    def _make_autotuner(device_type):
-        def triton_():
-            pass
-
-        device = DeviceProperties(
-            type=device_type,
-            index=0,
-            multi_processor_count=1,
-            cc=0,
-            max_threads_per_block=1024,
-            warp_size=32,
-        )
-        triton_meta = {
-            "signature": {},
-            "device": device,
-            "constants": {},
-            "configs": [],
-        }
-        return CachingAutotuner(
-            fn=triton_,
-            triton_meta=triton_meta,
-            configs=[triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)],
-            save_cache_hook=False,
-            mutated_arg_names=[],
-            reset_to_zero_arg_names=[],
-            optimize_mem=False,
-            heuristic_type=HeuristicType.POINTWISE,
-            inductor_meta={"use_fast_triton_launcher": True},
-        )
-
-    @staticmethod
-    def _make_static_launcher():
-        class Kernel:
-            function = 1
-            num_warps = 4
-            shared = 0
-            arg_tys = ""
-            has_global_scratch = False
-            has_profile_scratch = False
-
-            def run(self):
-                pass
-
-        def launcher_template():
-            pass
-
-        kernel = Kernel()
-        launcher = types.FunctionType(
-            launcher_template.__code__, {"runner": kernel.run}, "launcher"
-        )
-        launcher._is_static = True
-        return launcher
-
-    def test_fast_launcher_not_built_for_xpu(self):
-        autotuner = self._make_autotuner("xpu")
-        launcher = self._make_static_launcher()
-
-        with patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
-            self.assertIsNone(autotuner._build_fast_launcher(launcher))
-            fast_launcher.assert_not_called()
 
 
 class TestDynamicScaleRblockCacheInteraction(TestCase):
