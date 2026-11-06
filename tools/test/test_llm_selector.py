@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -883,6 +885,150 @@ class TestMain(unittest.TestCase):
         self.assertNotEqual(cwd, Path(wt))
         self.assertNotIn(REPO_ROOT, cwd.parents)
         self.assertFalse(cwd.exists())
+
+    def test_git_grep_failures_raise(self) -> None:
+        unreadable = b"error: 'HEAD:test/a.py': unable to read 1234\n"
+        for code, err in [
+            (0, b""),
+            (1, b""),
+            (0, unreadable),
+            (1, unreadable),
+            (2, b"fatal: x"),
+            (128, b"fatal: " + b"x" * 600 + b"\n"),
+            # A git killed by a signal usually writes nothing to stderr.
+            (-9, b""),
+        ]:
+            done = subprocess.CompletedProcess([], code, b"", err)
+            patch = mock.patch.object(select_tests.subprocess, "run", return_value=done)
+            with self.subTest(code=code, err=err[:20]), patch as run:
+                if code in (0, 1) and not err:
+                    self.assertEqual(select_tests.git_grep("x", "HEAD", timeout=3), [])
+                    self.assertEqual(run.call_args.kwargs["timeout"], 3)
+                else:
+                    why = f"git grep failed ({code}): {err.decode().strip()[-500:]}"
+                    with self.assertRaisesRegex(RuntimeError, f"^{re.escape(why)}$"):
+                        select_tests.git_grep("x", "HEAD")
+
+    def test_git_readers_refuse_an_option_as_a_rev(self) -> None:
+        with mock.patch.object(select_tests.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "^not a revision: '-Ofalse'$"):
+                select_tests.git_grep("x", "-Ofalse")
+            refused = "^not a revision: '--output=x'$"
+            with self.assertRaisesRegex(ValueError, refused):
+                select_tests.changed_files("--output=x", "HEAD")
+            with self.assertRaisesRegex(ValueError, refused):
+                select_tests.changed_files("HEAD", "--output=x")
+        run.assert_not_called()
+
+    def test_run_all_reason_counts_changed_files(self) -> None:
+        cap = select_tests.MAX_CHANGED_FILES
+        files = [f"torch/f{i}.py" for i in range(cap + 1)]
+        self.assertEqual(select_tests.run_all_reason([]), "no changed files")
+        self.assertIsNone(select_tests.run_all_reason(files[:cap]))
+        reason = f"more than {cap} changed files"
+        self.assertEqual(select_tests.run_all_reason(files), reason)
+
+    def test_run_all_reason_on_control_characters(self) -> None:
+        reason = "a changed path contains a control character"
+        paths = ["test/a\nb/conftest.py", "test/test_x.py\n", "test/a\rb.py"]
+        for path in paths + ["test/a\tb.py", "torch/a\x1b.py", "torch/a\x7f.py"]:
+            changed = ["torch/a.py", path]
+            self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
+
+    @contextlib.contextmanager
+    def scratch_repo(self) -> Any:
+        """A git repo with an empty commit, as REPO_ROOT.
+
+        HOME and XDG_CONFIG_HOME move too: git reads a global ignore or
+        attributes file under them even with GIT_CONFIG_GLOBAL set."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        with tempfile.TemporaryDirectory() as home:
+            env |= {
+                "HOME": home,
+                "XDG_CONFIG_HOME": home,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": "a",
+                "GIT_AUTHOR_EMAIL": "a@b.c",
+                "GIT_COMMITTER_NAME": "a",
+                "GIT_COMMITTER_EMAIL": "a@b.c",
+                "LC_ALL": "C",
+            }
+            repo = Path(home) / "repo"
+            repo.mkdir()
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(select_tests, "REPO_ROOT", repo),
+            ):
+                select_tests.git("init", "-q")
+                select_tests.git("commit", "-q", "--allow-empty", "-m", "base")
+                yield repo
+
+    def test_git_readers_on_a_rename(self) -> None:
+        with self.scratch_repo() as repo:
+            git = select_tests.git
+            for name in ("test/test_a.py", "torch/b.py"):
+                (repo / name).parent.mkdir(exist_ok=True)
+                (repo / name).write_text("import x\n")
+            git("add", "-A")
+            git("commit", "-qm", "add")
+            git("mv", "test/test_a.py", "test/test_c.py")
+            git("commit", "-qm", "move")
+            git("config", "color.ui", "always")
+            moved = ["test/test_a.py", "test/test_c.py"]
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), moved)
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), moved[1:])
+            # The worktree matches, but the base commit has no files.
+            self.assertEqual(select_tests.git_grep("import", "HEAD~2"), [])
+            self.assertEqual(select_tests.git_grep("-v", "HEAD"), [])
+            self.assertEqual(select_tests.git_grep("import (y|x)", "HEAD"), moved[1:])
+            failed = r"^git grep failed \(128\): fatal: "
+            with self.assertRaisesRegex(RuntimeError, failed):
+                select_tests.git_grep("x", "no-such-rev")
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD", "no-such-rev")
+            # Without the "--", git reads the path "test" as a pathspec.
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD~1", "test")
+
+    def test_non_ascii_paths_are_unquoted(self) -> None:
+        name = "test/test_caf\u00e9.py"
+        with self.scratch_repo() as repo:
+            git = select_tests.git
+            (repo / "test").mkdir()
+            (repo / name).write_text("import x\n")
+            git("add", "-A")
+            git("commit", "-qm", "add: x")
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD^{/d: x}"), [name])
+
+    def test_c_quoted_paths_are_read_verbatim(self) -> None:
+        # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
+        if sys.platform != "linux":
+            self.skipTest("needs a file system that takes these names")
+        conftest, reader = "test/a\tb/conftest.py", 'test/test_"q\\".py'
+        with self.scratch_repo() as repo:
+            git = select_tests.git
+            # A \r survives only without universal newlines, \xff only without strict UTF-8.
+            names = [conftest, reader, "test/x\ny.py", "test/x\ry.py"]
+            names.append(os.fsdecode(b"test/x\xffy.py"))
+            for name in names:
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                (repo / name).write_text("import x\n")
+            git("add", "-A")
+            git("commit", "-qm", "add")
+            changed = select_tests.changed_files("HEAD~1", "HEAD")
+            self.assertEqual(changed, names)
+            self.assertEqual(
+                select_tests.run_all_reason(changed),
+                "change touches test infrastructure",
+            )
+            self.assertIsNone(select_tests.run_all_reason([reader, names[-1]]))
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), changed)
+            self.assertEqual(
+                select_tests.git_paths("ls-tree", "-r", "--name-only", "HEAD"), changed
+            )
 
 
 if __name__ == "__main__":
