@@ -265,11 +265,7 @@ class HopJointGraph:
                 continue
             val = n.meta["val"]
             if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
-                if n.meta.get("recompute", None) is not None:
-                    raise AssertionError(
-                        f"node {n} with complex SymInt expression should not have recompute policy set"
-                    )
-
+                # Wins over any earlier tag: scan cannot stack a complex SymInt.
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
         self.joint_gm.graph.lint()
@@ -282,6 +278,18 @@ class HopJointGraph:
             logger.debug(
                 "before min_cut_partition:\n%s",
                 self.joint_gm.print_readable(print_output=False),
+            )
+
+        # Lets a caller tag the body's nodes (e.g. meta["recompute"]) before
+        # min-cut. It runs first, so the complex-SymInt tags below win.
+        from torch._functorch import config as functorch_config
+
+        if callable(functorch_config.hop_joint_custom_pass):
+            phs = self.joint_gm.graph.find_nodes(op="placeholder")
+            vals = [ph.meta.get("val") for ph in phs]
+            joint_inputs = (vals[: self.n_primals], vals[self.n_primals :])
+            self.joint_gm = functorch_config.hop_joint_custom_pass(
+                self.joint_gm, joint_inputs
             )
 
         if always_recompute_complex_exprs:

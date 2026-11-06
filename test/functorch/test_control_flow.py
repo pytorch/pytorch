@@ -10923,6 +10923,139 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
             functional_f(example_init, example_inputs), f(example_init, example_inputs)
         )
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_partition_runs_hop_joint_custom_pass(self):
+        # functorch's hop_joint_custom_pass sees the joint graph of scan's
+        # body, so it can choose what the body saves for backward.
+        from torch._functorch import config as functorch_config, partitioners
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        def tag_sin(policy):
+            def hop_joint_custom_pass(joint_gm, joint_inputs):
+                for n in joint_gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.sin.default
+                ):
+                    n.meta["recompute"] = policy
+                return joint_gm
+
+            return hop_joint_custom_pass
+
+        # The sin nodes each forward body returns for backward.
+        saved = []
+        min_cut = partitioners.min_cut_rematerialization_partition
+
+        def spy(joint_gm, *args, **kwargs):
+            fw_gm, bw_gm = min_cut(joint_gm, *args, **kwargs)
+            outs = fw_gm.graph.find_nodes(op="output")[0].args[0]
+            sin = torch.ops.aten.sin.default
+            saved.extend(n for n in outs if getattr(n, "target", None) is sin)
+            return fw_gm, bw_gm
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+        for policy, expect_saved in (
+            (CheckpointPolicy.MUST_SAVE, True),
+            (CheckpointPolicy.MUST_RECOMPUTE, False),
+        ):
+            saved.clear()
+            torch._dynamo.reset()
+            with (
+                unittest.mock.patch.object(
+                    partitioners, "min_cut_rematerialization_partition", spy
+                ),
+                functorch_config.patch(hop_joint_custom_pass=tag_sin(policy)),
+            ):
+                out = torch.compile(f, backend="aot_eager", fullgraph=True)(init, xs)
+            self.assertEqual(bool(saved), expect_saved)
+            self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+
+    @staticmethod
+    def _save_every_node(joint_gm):
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        for n in joint_gm.graph.nodes:
+            if n.op == "call_function":
+                n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        return joint_gm
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_hop_joint_custom_pass_nested(self):
+        # The pass sees both scan bodies, each with the fake values of its
+        # (primals, tangents) placeholders, as AOTAutograd's pass does.
+        from torch._functorch import config as functorch_config
+
+        def inner(c, x):
+            return (c * x).sin(), c.cos()
+
+        def outer(c, x):
+            c2, ys = scan(inner, c, x)
+            return c2, ys.sum(0)
+
+        def f(init, xs):
+            return scan(outer, init, xs)[0]
+
+        seen = set()
+
+        def hop_joint_custom_pass(joint_gm, joint_inputs):
+            primals, tangents = joint_inputs
+            phs = joint_gm.graph.find_nodes(op="placeholder")
+            for val, ph in zip([*primals, *tangents], phs, strict=True):
+                self.assertIs(val, ph.meta["val"])
+            self.assertTrue(phs[len(primals)].name.startswith("tangents"))
+            scan_op = torch.ops.higher_order.scan
+            scans = joint_gm.graph.find_nodes(op="call_function", target=scan_op)
+            for n in scans:
+                # Only AOTAutograd's top-level graph holds a scan of a scan.
+                sub = getattr(joint_gm, n.args[0].target)
+                self.assertFalse(
+                    sub.graph.find_nodes(op="call_function", target=scan_op)
+                )
+            seen.add("outer" if scans else "inner")
+            return self._save_every_node(joint_gm)
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 2, 4, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+        with functorch_config.patch(hop_joint_custom_pass=hop_joint_custom_pass):
+            out = torch.compile(f, backend="aot_eager", fullgraph=True)(init, xs)
+        self.assertEqual(seen, {"inner", "outer"})
+        self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_hop_joint_custom_pass_dynamic(self):
+        # A pass may tag every node MUST_SAVE under dynamic shapes. The
+        # partitioner still recomputes the complex SymInt (n - 1) after it.
+        from torch._functorch import config as functorch_config
+
+        def body(c, x):
+            n = x.shape[0]
+            y = c[: n - 1].sin()
+            return torch.cat([y, c[n - 1 :]]) * x, y.sum()
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        with functorch_config.patch(
+            hop_joint_custom_pass=lambda gm, _: self._save_every_node(gm)
+        ):
+            compiled = torch.compile(
+                f, backend="aot_eager", fullgraph=True, dynamic=True
+            )
+            for size in (5, 7):
+                init = torch.randn(size, requires_grad=True)
+                xs = torch.randn(3, size, requires_grad=True)
+                expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+                out = compiled(init, xs)
+                self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+
     def test_scan_functionalized_elem_mutation(self):
         def add1(x, y):
             x.add_(4)
