@@ -20,6 +20,7 @@ from torch.nn.attention.flex_attention import (
     FlexKernelOptions,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -102,6 +103,8 @@ CASES = [
 @unittest.skipUnless(HAS_HELION_SM100, "requires helion, its CuTe DSL and sm100")
 @instantiate_parametrized_tests
 class TestFlexHelion(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)

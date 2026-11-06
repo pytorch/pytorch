@@ -32,6 +32,7 @@ import sympy
 
 import torch
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
+from torch.utils._ordered_set import OrderedSet
 
 from ...ir import (
     as_storage_and_layout,
@@ -166,8 +167,12 @@ def _check_supported(
         raise _unavailable(
             "its CuTe flex kernels need a Blackwell (sm100) GPU; use BACKEND='TRITON'"
         )
-    dtypes = {query.get_dtype(), key.get_dtype(), value.get_dtype()}
-    if len(dtypes) != 1 or dtypes.pop() not in (torch.float16, torch.bfloat16):
+    dtype = query.get_dtype()
+    if (
+        key.get_dtype() != dtype
+        or value.get_dtype() != dtype
+        or dtype not in (torch.float16, torch.bfloat16)
+    ):
         raise _unavailable(
             "query, key and value must share one dtype, float16 or bfloat16"
         )
@@ -273,7 +278,7 @@ def _prepare_mod(
         ):
             node.replace_all_uses_with(src)
             graph.erase_node(node)
-    buffers = set(list(graph.find_nodes(op="placeholder"))[num_coords:])
+    buffers = OrderedSet(list(graph.find_nodes(op="placeholder"))[num_coords:])
     for node in graph.nodes:
         if node.target is aten.index.Tensor and node.args[0] in buffers:
             indices = list(node.args[1])
