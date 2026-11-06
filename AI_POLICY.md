@@ -26,6 +26,13 @@ Before submitting, simplify where possible and make sure the core change is easy
 for maintainers to review. If your PR is not ready for review, please use the
 GitHub draft PR feature.
 
+A human may explicitly ask an AI agent to open or update a draft PR before
+reviewing its exact patch or description. That request authorizes publication
+in draft mode without an additional content-approval step; all disclosure and
+human-commentary requirements still apply. Keep the PR in draft mode until the
+human has reviewed and understood the code and explicitly asks to mark it ready.
+This exception does not authorize comments, reviews, or merging.
+
 All contributions should involve a human who understands and can take
 responsibility for the work produced with AI assistance. *We do not accept
 contributions created by fully autonomous agents*, and we may close pull requests
