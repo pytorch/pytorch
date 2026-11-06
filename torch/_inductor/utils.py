@@ -57,6 +57,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -403,6 +404,39 @@ def _constexpr_type_repr_prefix(value: object) -> str | None:
     return None
 
 
+def sanitize_constexpr_for_repr(
+    value: object, *, canonicalize_namedtuples: bool = True
+) -> object:
+    """Prepare constexpr reprs with Enum values and collision-safe NamedTuples."""
+    if isinstance(value, enum.Enum):
+        return sanitize_constexpr_for_repr(
+            value.value, canonicalize_namedtuples=canonicalize_namedtuples
+        )
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        children = tuple(
+            sanitize_constexpr_for_repr(
+                child, canonicalize_namedtuples=canonicalize_namedtuples
+            )
+            for child in repr_children.values
+        )
+        unchanged = all(
+            child is original for child, original in zip(children, repr_children.values)
+        )
+        if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
+            cls = cast(type[NamedTuple], type(value))
+            helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
+            if cls is helper_type and unchanged:
+                return value
+            return helper_type(*children)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if unchanged:
+            return value
+        return repr_children.rebuild(children)
+    return value
+
+
 def _collect_importable_constexpr_types(
     value: object,
     result: dict[str, ImportableConstexprType],
@@ -411,6 +445,16 @@ def _collect_importable_constexpr_types(
     if id(value) in seen:
         return
     seen.add(id(value))
+
+    # NamedTuple tl.constexpr values are reconstructed by
+    # namedtuple_helpers.namedtuple_type (pickle-safe, works for __main__).
+    # Do not emit a user-module import for them.
+    if pytree.is_namedtuple_instance(value):
+        repr_children = get_constexpr_repr_children(value)
+        if repr_children is not None:
+            for child in repr_children.values:
+                _collect_importable_constexpr_types(child, result, seen)
+        return
 
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
@@ -448,7 +492,11 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
-        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+        # Structural NamedTuple aliases are emitted before user-type imports.
+        # Reserve their namespace so an import cannot replace an emitted type.
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES or root_name.startswith(
+            "_NamedTuple_"
+        ):
             raise ImportError(
                 "Triton constexpr value type "
                 f"{type_module}.{type_qualname} requires import name {root_name}, "
@@ -706,14 +754,16 @@ def do_bench_using_profiling(
     # But that's not trivial due to so many call sites in and out of pytorch.
 
     from torch._inductor.runtime.benchmarking import (
+        _triton_benchmarking_context,
         gpu_benchmark_lock,
         may_distort_benchmarking_result,
     )
 
     locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
-    return may_distort_benchmarking_result(locked_bench)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
+    with _triton_benchmarking_context()():
+        return may_distort_benchmarking_result(locked_bench)(
+            fn, warmup, rep, is_vetted_benchmarking
+        )
 
 
 def _get_do_bench_profile_result(
@@ -2113,13 +2163,19 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    # Resolve the threshold outside of the cache so that changing
+    # config.max_autotune_gemm_min_sms after the first call takes effect.
+    return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
+
+
+@functools.cache
+def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -2132,7 +2188,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = min_sms_override
+    if min_sms is None:
+        min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2398,9 +2456,11 @@ def can_use_tma(
 
     Sizes are never specialized; only these requirements are checked. With
     ``add_guards=True``, a requirement that depends on a dynamic size is decided
-    from the example inputs and guarded either way, so an input on the other
-    side of the decision recompiles (an aligned size after an unaligned one gets
-    TMA on the recompile). Under AOTI, where those guards are not checked at
+    from the example inputs. Requirements that held are guarded only once TMA is
+    accepted. If TMA is rejected only by requirements on dynamic sizes, it is
+    guarded that one of them still fails, so an input meeting all of them
+    recompiles (an aligned size after an unaligned one gets TMA); a static
+    failure rejects TMA for every input and guards nothing. Under AOTI, where those guards are not checked at
     runtime, a requirement must instead be statically provable. With
     ``add_guards=False``, requirements are decided from size hints and nothing
     is guarded.
@@ -2409,21 +2469,38 @@ def can_use_tma(
 
     from .virtualized import V
 
-    def _holds(requirement: sympy.Basic, add_guards: bool) -> bool:
-        sizevars = V.graph.sizevars
-        if not add_guards:
-            hints = {
-                s: sizevars.replace_backed_symbols_with_hints(s)
-                for s in requirement.free_symbols
-            }
-            return sizevars.statically_known_true(requirement.xreplace(hints))
-        # AOTI does not check Inductor's guards at runtime.
-        if V.graph.aot_mode:
-            return sizevars.statically_known_true(requirement)
-        return sizevars.guard_or_false(requirement)
+    # Requirements decided on the hints, guarded only once the outcome is known.
+    # Guarding each as it is checked would leave guards behind that don't
+    # decide the result, recompiling inputs that get the same graph.
+    held: list[sympy.Basic] = []
+    failed: list[sympy.Basic] = []
 
-    def _aligned(expr_bytes: _IntLike, add_guards: bool) -> bool:
-        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0), add_guards)
+    def _holds(requirement: sympy.Basic) -> bool:
+        sizevars = V.graph.sizevars
+        # AOTI does not check Inductor's guards at runtime.
+        if add_guards and V.graph.aot_mode:
+            return sizevars.statically_known_true(requirement)
+        hints = {
+            s: sizevars.replace_backed_symbols_with_hints(s)
+            for s in requirement.free_symbols
+        }
+        if not sizevars.statically_known_true(requirement.xreplace(hints)):
+            if (
+                not add_guards
+                or not requirement.free_symbols
+                or free_unbacked_symbols(requirement)
+            ):
+                return False
+            # Fails on the hints but depends on backed sizes: keep checking, as
+            # a later static failure would reject TMA for every input anyway.
+            failed.append(requirement)
+            return True
+        if add_guards and requirement.free_symbols:
+            held.append(requirement)
+        return True
+
+    def _aligned(expr_bytes: _IntLike) -> bool:
+        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0))
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2433,7 +2510,7 @@ def can_use_tma(
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
-        if not _aligned(layout.offset, add_guards):
+        if not _aligned(layout.offset):
             return False
 
         return _is_tma_compatible(sizes, strides, dtype)
@@ -2474,16 +2551,16 @@ def can_use_tma(
         for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
-            if not _aligned(st * itemsize, add_guards):
+            if not _aligned(st * itemsize):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
         inner_dim = sizes[inner_idx]
-        if not _aligned(inner_dim * itemsize, add_guards):
+        if not _aligned(inner_dim * itemsize):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32), add_guards):
+        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32)):
             return False
 
         return True
@@ -2510,11 +2587,20 @@ def can_use_tma(
 
         return True
 
-    return (
+    if not (
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
-    )
+    ):
+        return False
+    if failed:
+        # Only dynamic requirements reject TMA: guard that one still fails, so
+        # an input meeting all of them recompiles and gets TMA.
+        V.graph.sizevars.guard_or_false(sympy.Or(*(sympy.Not(r) for r in failed)))
+        return False
+    # Guarded one by one rather than as a single And, so later static checks
+    # (e.g. statically_known_multiple_of) still see each fact.
+    return all(V.graph.sizevars.guard_or_false(r) for r in held)
 
 
 def _descriptor_shapes_fit_in_int32(
