@@ -6011,58 +6011,6 @@ class TestSDPAAccelerator(NNTestCase):
                         self.assertRaises(RuntimeError, lambda:
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
-    @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
-    def test_mem_eff_backwards_determinism(self, device):
-        # Need big seq_len to ensure that num_splits > 1
-        dtype = torch.float32
-        batch_size, seq_len, n_heads, head_dim = 1, 1024, 8, 64
-        query = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-        key = torch.rand(batch_size, n_heads, seq_len, head_dim, device=device,
-                         dtype=dtype, requires_grad=True)
-        value = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            # Run once to establish baseline
-            out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # not deterministic
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
-                out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertTrue(diff_anwser_once)
-
-        with use_deterministic_algorithims(True, warn_only=False):
-            query.grad = None
-            out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # deterministic now that we have enforced it
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
-                out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertFalse(diff_anwser_once)
-
     # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
