@@ -77,6 +77,7 @@ from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_ARM64,
@@ -84,6 +85,7 @@ from torch.testing._internal.common_utils import (
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -5393,9 +5395,9 @@ graph():
             """\
 graph():
     %x_1 : [num_users=1] = placeholder[target=x_1]
+    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
     %y_1 : [num_users=1] = placeholder[target=y_1]
     %nonzero : [num_users=2] = call_function[target=torch.ops.aten.nonzero.default](args = (%y_1,), kwargs = {})
-    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
     %sym_size_int_1 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%nonzero, 0), kwargs = {})
     %floordiv : [num_users=1] = call_function[target=operator.floordiv](args = (%sym_size_int_1, %sym_size_int), kwargs = {})
     %add : [num_users=1] = call_function[target=operator.add](args = (1, %floordiv), kwargs = {})
@@ -5410,6 +5412,111 @@ graph():
         self.assertIsInstance(divisor_arg, torch.fx.Node)
         self.assertEqual(divisor_arg.target, torch.ops.aten.sym_size.int)
         self.assertIs(divisor_arg.args[0], tensor_ph)
+
+
+@instantiate_parametrized_tests
+class TestFXSymbolicStrideMaterialization(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "source", ("power", "product", "floor", "difference", "sum", "two_sources")
+    )
+    def test_whole_stride_polynomial(self, source):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        u, v, k = [env.create_unbacked_symint() for _ in range(3)]
+        torch._check(u >= 3)
+        torch._check(v >= 3)
+        torch._check(u > v)
+        strides = {
+            "power": (u**2, 1),
+            "product": (u * v, 1),
+            "floor": (u // 2, 1),
+            "difference": (u - v, 1),
+            "sum": (u**2 + v**2, 1),
+            "two_sources": (u**2, v**2),
+        }[source]
+        mode = FakeTensorMode(shape_env=env)
+        with mode:
+            fake = torch.empty_strided((3, 3), strides, device="meta")
+        env.pending_fresh_unbacked_symbols.clear()
+        graph = torch.fx.Graph()
+        tensor = graph.placeholder("x")
+        tensor.meta["val"] = fake
+        scalar = graph.placeholder("k")
+        scalar.meta["val"] = k
+        first, second = strides
+        values = (first**2 * second + k**2, first**3 * second**2 - k // 2)
+        graph.output(tuple(graph.materialize_symints(values)))
+        graph.lint()
+        gm = torch.fx.GraphModule({}, graph)
+        for first, second, known in ((9, 7, 3), (10, 3, -5), (0, 1, 0)):
+            if source != "two_sources":
+                second = 1
+            tensor = torch.empty_strided((3, 3), (first, second))
+            self.assertEqual(
+                gm(tensor, known),
+                (first**2 * second + known**2, first**3 * second**2 - known // 2),
+            )
+        for node in graph.nodes:
+            if node.op == "call_function":
+                self.assertIsNotNone(node.meta.get("val"))
+                self.assertNotIn(node.target, (operator.truediv, torch._check))
+
+    @parametrize("power", (1, 3))
+    def test_whole_stride_does_not_recover_components(self, power):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        u = env.create_unbacked_symint()
+        mode = FakeTensorMode(shape_env=env)
+        with mode:
+            fake = torch.empty_strided((3, 3), (u**2, 1), device="meta")
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["val"] = fake
+        with self.assertRaisesRegex(AssertionError, "no producer"):
+            graph.materialize_symints((u**power,))
+
+    @parametrize("meta_key", ("missing", "val", "example_value"))
+    @parametrize("binding", ("item", "size"))
+    def test_binding_metadata_is_optional(self, meta_key, binding):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import CallMethodKey, ShapeEnv
+        from torch.utils._pytree import SequenceKey
+
+        env = ShapeEnv()
+        u = env.create_unbacked_symint()
+        torch._check(u >= 0)
+        graph = torch.fx.Graph()
+        tensor = graph.placeholder("x")
+        producer = graph.call_function(
+            torch.ops.aten.item.default if binding == "item" else torch.ops.aten.nonzero.default,
+            (tensor,),
+        )
+        keypath = () if binding == "item" else (CallMethodKey("size"), SequenceKey(0))
+        producer.meta["unbacked_bindings"] = {u.node.expr: keypath}
+        if meta_key != "missing":
+            if binding == "item":
+                value = u
+            else:
+                with FakeTensorMode(shape_env=env):
+                    value = torch.empty((u, 1), device="meta")
+            producer.meta[meta_key] = value
+        graph.output(graph.materialize_symints((u + 1, (u + 1)**2)))
+        graph.lint()
+        gm = torch.fx.GraphModule({}, graph)
+        for count in (7, 11):
+            tensor = torch.tensor(count) if binding == "item" else torch.ones(count)
+            self.assertEqual(gm(tensor), [count + 1, (count + 1)**2])
+        if meta_key == "missing":
+            self.assertNotIn("val", producer.meta)
+        elif binding == "size":
+            query = next(n for n in graph.nodes if n.target == torch.ops.aten.sym_size.int)
+            self.assertIsInstance(query.meta.get(meta_key), torch.SymInt)
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
