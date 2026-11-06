@@ -874,7 +874,8 @@ class TestJunitXml(TestCase):
 class TestPeriodicDecorator(TestCase):
     @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
+    @parametrize("hours", [4, 24])
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled, hours):
         calls = []
         with unittest.mock.patch.multiple(
             "torch.testing._internal.common_utils",
@@ -886,7 +887,7 @@ class TestPeriodicDecorator(TestCase):
                 def setUp(self):
                     calls.append("setUp")
 
-                @periodic
+                @periodic(hours=hours)
                 def test_p(self):
                     calls.append("test")
 
@@ -895,7 +896,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
-        self.assertIn("periodic", marks)
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUp", "test"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -903,7 +904,8 @@ class TestPeriodicDecorator(TestCase):
 
     @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
+    @parametrize("hours", [4, 24])
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled, hours):
         calls = []
         with unittest.mock.patch.multiple(
             "torch.testing._internal.common_utils",
@@ -911,7 +913,7 @@ class TestPeriodicDecorator(TestCase):
             IS_SANDCASTLE=on_sandcastle,
             TEST_WITH_PERIODIC=periodic_enabled,
         ):
-            @periodic
+            @periodic(hours=hours)
             class TestP(unittest.TestCase):
                 @classmethod
                 def setUpClass(cls):
@@ -929,7 +931,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
-        self.assertIn("periodic", marks)
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -939,9 +941,14 @@ class TestPeriodicDecorator(TestCase):
         IS_FBCODE, "run_test.py periodic filtering is only exercised by OSS CI"
     )
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
-    def test_periodic_config_selects_only_periodic_tests(self):
+    @parametrize("periodic_config", ["periodic", "periodic_daily"])
+    def test_periodic_config_selects_only_periodic_tests(self, periodic_config):
         source = """\
-from torch.testing._internal.common_utils import periodic, run_tests, serialTest
+import os
+from torch.testing._internal.common_utils import TEST_WITH_PERIODIC, TestCase, periodic, run_tests, serialTest
+
+if os.environ.get("TEST_CONFIG") in ("periodic", "periodic_daily") and not TEST_WITH_PERIODIC:
+    raise AssertionError("periodic test configs must enable the shared periodic gate")
 
 def test_plain_pytest():
     print("PLAIN_PYTEST_RAN")
@@ -954,6 +961,24 @@ def test_periodic_pytest():
 @periodic
 def test_periodic_serial_pytest():
     print("PERIODIC_SERIAL_PYTEST_RAN")
+
+@periodic(hours=24)
+def test_daily_pytest():
+    print("DAILY_PYTEST_RAN")
+
+@serialTest()
+@periodic(hours=24)
+def test_daily_serial_pytest():
+    print("DAILY_SERIAL_PYTEST_RAN")
+
+@periodic
+class TestClassPeriodic(TestCase):
+    def test_class_periodic(self):
+        print("CLASS_REGULAR_RAN")
+
+    @periodic(hours=24)
+    def test_class_daily(self):
+        print("CLASS_DAILY_RAN")
 
 if __name__ == "__main__":
     run_tests()
@@ -984,12 +1009,13 @@ if __name__ == "__main__":
             def run_test(periodic_mode):
                 test_env = env.copy()
                 if periodic_mode:
-                    test_env["TEST_CONFIG"] = "periodic"
+                    test_env["TEST_CONFIG"] = periodic_config
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
                 else:
                     test_env.pop("TEST_CONFIG", None)
+                args = [sys.executable, "run_test.py", "--include", test_name, "-s"]
                 result = subprocess.run(
-                    [sys.executable, "run_test.py", "--include", test_name, "-s"],
+                    args,
                     cwd=test_dir,
                     env=test_env,
                     capture_output=True,
@@ -1000,22 +1026,34 @@ if __name__ == "__main__":
                 return output
 
             periodic_output = run_test(periodic_mode=True)
-            default_output = run_test(periodic_mode=False)
+            default_output = (
+                run_test(periodic_mode=False) if periodic_config == "periodic" else None
+            )
 
-        self.assertIn("PERIODIC_PYTEST_RAN", periodic_output)
-        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
+        self.assertEqual("PERIODIC_PYTEST_RAN" in periodic_output, periodic_config == "periodic", msg=periodic_output)
+        self.assertEqual("PERIODIC_SERIAL_PYTEST_RAN" in periodic_output, periodic_config == "periodic", msg=periodic_output)
+        self.assertEqual("DAILY_PYTEST_RAN" in periodic_output, periodic_config == "periodic_daily", msg=periodic_output)
+        self.assertEqual("DAILY_SERIAL_PYTEST_RAN" in periodic_output, periodic_config == "periodic_daily", msg=periodic_output)
+        self.assertEqual("CLASS_REGULAR_RAN" in periodic_output, periodic_config == "periodic", msg=periodic_output)
+        self.assertEqual("CLASS_DAILY_RAN" in periodic_output, periodic_config == "periodic_daily", msg=periodic_output)
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
-        self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        if default_output is not None:
+            self.assertIn("PLAIN_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_SERIAL_PYTEST_RAN", default_output)
+            self.assertIn("CLASS_REGULAR_RAN", default_output)
+            self.assertIn("CLASS_DAILY_RAN", default_output)
 
-    def test_periodic_does_not_leak_across_parametrized_tests(self):
+    @parametrize("hours", [4, 24])
+    def test_periodic_does_not_leak_across_parametrized_tests(self, hours):
         with unittest.mock.patch(
             "torch.testing._internal.common_utils.TEST_WITH_PERIODIC", True
         ):
             class TestP(unittest.TestCase):
                 @parametrize("x", [1, 2])
-                @decorateIf(periodic, lambda params: params["x"] == 1)
+                @decorateIf(periodic(hours=hours), lambda params: params["x"] == 1)
                 def test_p(self, x):
                     pass
 
@@ -1023,12 +1061,30 @@ if __name__ == "__main__":
 
         marked = TestP.test_p_x_1
         plain = TestP.test_p_x_2
-        self.assertIn("periodic", {mark.name for mark in marked.pytestmark})
+        marker = "periodic_daily" if hours == 24 else "periodic"
+        self.assertEqual({mark.name for mark in marked.pytestmark}, {marker})
         plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
-        self.assertNotIn("periodic", plain_marks)
+        self.assertEqual(plain_marks, set())
 
-    @periodic
-    def test_periodic_smoke(self):
+    def test_periodic_rejects_unsupported_cadences(self):
+        with self.assertRaisesRegex(ValueError, "only hours=4 or hours=24"):
+            periodic(hours=12)
+
+    def test_periodic_default_factory(self):
+        @periodic()
+        def test_p():
+            pass
+
+        self.assertEqual({mark.name for mark in test_p.pytestmark}, {"periodic"})
+
+    def test_periodic_rejects_positional_hours(self):
+        with self.assertRaisesRegex(TypeError, "test function or class, got int; pass hours by keyword"):
+            periodic(24)
+
+    @parametrize("hours", [4, 24])
+    @decorateIf(periodic, lambda params: params["hours"] == 4)
+    @decorateIf(periodic(hours=24), lambda params: params["hours"] == 24)
+    def test_periodic_smoke(self, hours):
         self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 

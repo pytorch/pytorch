@@ -33,7 +33,11 @@ def should_check(filename: Path) -> bool:
 
 if __name__ == "__main__":
     errors_found = False
-    files = [f for f in WORKFLOWS.glob("*.yml") if should_check(f)]
+    files = [
+        f
+        for f in (*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml"))
+        if should_check(f)
+    ]
     names = set()
     for filename in files:
         with open(filename) as f:

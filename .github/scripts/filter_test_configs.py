@@ -355,13 +355,15 @@ def process_jobs(
     }
     """
     try:
-        # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
-        # it into its two components first
-        current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
+        # Reusable calls can prefix PLATFORM / JOB (CONFIG) with caller jobs.
+        current_platform, _ = (
+            n.strip() for n in job_name.rsplit(JOB_NAME_SEP, 2)[-2:] if n
+        )
     except ValueError:
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
+    current_platforms = {current_platform, job_name.split(JOB_NAME_SEP, 1)[0].strip()}
     for record in download_json(url=url, headers={}).values():
         (
             author,
@@ -376,6 +378,14 @@ def process_jobs(
             # The current workflow doesn't match this record
             continue
 
+        if JOB_NAME_SEP in target_job_cfg:
+            # Copied nested titles must retain their caller-group scope.
+            target_path = [n.strip() for n in target_job_cfg.split(JOB_NAME_SEP)]
+            current_callers = [n.strip() for n in job_name.split(JOB_NAME_SEP)[:-2]]
+            if [target_platform, *target_path[:-2]] != current_callers:
+                continue
+            target_platform, target_job_cfg = target_path[-2:]
+
         cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
         # There is an exception here for binary build workflows in which the platform
         # names have the build and test suffix. For example, we have a build job called
@@ -383,11 +393,13 @@ def process_jobs(
         # manywheel-py3-cuda11_8-test / test. So they are linked, but their suffixes
         # are different
         target_platform_no_suffix = re.sub(cleanup_regex, "", target_platform)
-        current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
+        current_platforms_no_suffix = {
+            re.sub(cleanup_regex, "", platform) for platform in current_platforms
+        }
 
         if (
-            target_platform != current_platform
-            and target_platform_no_suffix != current_platform_no_suffix
+            target_platform not in current_platforms
+            and target_platform_no_suffix not in current_platforms_no_suffix
         ):
             # The current platform doesn't match this record
             continue
