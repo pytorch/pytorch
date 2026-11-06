@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import gc
 import re
+import subprocess
 import sys
 import types
 import unittest
@@ -832,6 +833,68 @@ class <lambda>(torch.nn.Module):
             return x + 1
 
         fn(torch.ones(2, 2, device=device))
+
+    def test_aot_eager_tracing_does_not_initialize_accelerator(self, device) -> None:
+        # Lazy device init can't be undone in-process, so check in a fresh one.
+        script = f"""
+import torch
+
+device_module = torch.get_device_module("{torch.device(device).type}")
+
+for backend in ("eager", "aot_eager"):
+    x = torch.randn(4, requires_grad=True)
+    torch.compile(lambda x: x.sin() * 2, backend=backend)(x).sum().backward()
+initialized_by_cpu_compile = device_module.is_initialized()
+
+@torch.compile(backend="eager", fullgraph=True)
+def fn(x):
+    return x + 1, torch.accelerator.current_stream()
+
+_, stream = fn(torch.randn(4))
+print(initialized_by_cpu_compile, stream == torch.accelerator.current_stream())
+"""
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        self.assertEqual(out.splitlines()[-1], "False True")
+
+    def test_stream_context_before_current_stream_query(self, device) -> None:
+        # The deferred current stream must go below streams entered before it.
+        script = f"""
+import torch
+
+@torch.compile(backend="eager", fullgraph=True)
+def fn(x):
+    s = torch.Stream(device="{device}")
+    with s:
+        inner = torch.accelerator.current_stream()
+    return x + 1, s, inner, torch.accelerator.current_stream()
+
+_, s, inner, outer = fn(torch.randn(4))
+print("result:", inner == s, outer == torch.accelerator.current_stream())
+"""
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        self.assertIn("result: True True", out)
+
+    def test_event_record_after_input_mutation_before_accelerator_init(
+        self, device
+    ) -> None:
+        # Mutations seen before the current stream is queried must still count.
+        script = f"""
+import torch
+
+def fn(x):
+    e = torch.Event(device="{device}")
+    x.add_(1)
+    e.record()
+    return e
+
+try:
+    torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
+    print("no error")
+except RuntimeError as e:
+    print("An event was recorded on a stream" in str(e))
+"""
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        self.assertEqual(out.splitlines()[-1], "True")
 
     def test_current_stream_api(self, device) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
