@@ -254,28 +254,28 @@ struct C10_API FakeTensorMode {
   // rebuilt wrapper still reports it. Set once, when the wrapper is created.
   std::shared_ptr<c10::SafePyObject> stack_trace_;
 
-  // when false, disallow a fake tensor from having a 'meta' device. Atomic, as
-  // Python can assign it while another thread reads it.
-  std::atomic<bool> allow_meta_{true};
+  // The fields below are plain, like a Python FakeTensorMode's attributes, and
+  // must not be changed while another thread is using the mode.
+
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
 
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
   // thread-local override used by dynamo's nonstrict_trace, takes precedence,
-  // so read this through PyInterpreterVTable::allow_non_fake_inputs(). Atomic,
-  // like allow_meta_.
-  std::atomic<bool> allow_non_fake_inputs_{false};
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
+  bool allow_non_fake_inputs_ = false;
 
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
-  // Python's _allow_unsafe_data_ptr_access, exposed under that name. Atomic,
-  // like allow_meta_.
-  std::atomic<bool> allow_unsafe_data_ptr_access_{true};
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
+  bool allow_unsafe_data_ptr_access_ = true;
 
   // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
   // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
   // mode's Python wrapper, which must expose epoch as a property forwarding
-  // here. Atomic, like allow_meta_.
-  std::atomic<uint64_t> epoch_{0};
+  // here.
+  uint64_t epoch_ = 0;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,

@@ -16,7 +16,8 @@ TORCH_API void set_and_normalize_fake_device(
     c10::TensorImpl* impl,
     c10::Device device);
 
-// Makes impl a fake of mode on device and marks its storage so that reading its
+// Mutates impl, and the storage it may share with other tensors: makes impl a
+// fake of mode on device and marks its storage so that reading its
 // mutable data pointer warns, or throws if the mode disallows unsafe data
 // pointer access, as Python's FakeTensor.__new__ does for every fake it makes,
 // a view op's output included. Views made within a kernel's implementation
@@ -34,8 +35,7 @@ TORCH_API void set_and_normalize_fake_device(
 // real tensor and recorded dispatch keys (see Note [C++ fake dispatch keys]).
 // init_cpp_fake itself replaces only the fake device and mode and keeps the
 // rest of the ExtraMeta; the fallback then sets the real tensor and dispatch
-// keys as Python does for an op's output. A rejected impl is left unchanged,
-// unless another thread sets allow_meta to False during the call.
+// keys as Python does for an op's output. A rejected impl is left unchanged.
 TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
