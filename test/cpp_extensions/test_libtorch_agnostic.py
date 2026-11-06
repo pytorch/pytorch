@@ -1275,6 +1275,22 @@ for warning in w:
             enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
         self.assertEqual(enabled, warn_always)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("flag", ["conj", "neg", "inference"])
+    def test_is_conj_is_neg_is_inference(self, device, flag):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(flag == "inference"):
+            t = torch.ones(2, device=device, dtype=torch.complex64)
+        if flag == "conj":
+            t = t.conj()
+        elif flag == "neg":
+            t = torch._neg_view(t)
+
+        for name in ("conj", "neg", "inference"):
+            actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
+            self.assertEqual(actual, name == flag)
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
