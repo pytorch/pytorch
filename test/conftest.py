@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
 xml_key = StashKey["LogXMLReruns"]()
+# Under pytest's cache (<cache_dir>/v/). run_test.py reads these files, and the
+# torchci report writer publishes next to them (StepcurrentPlugin.directory).
 STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 
@@ -117,7 +119,34 @@ def pytest_addoption(parser: Parser) -> None:
         "without it are unaffected. Layered on top of `-m multigpu` so a "
         "larger-runner config can run just the >2-GPU distributed tests.",
     )
+    parser.addoption(
+        "--nodeid-file",
+        action="store",
+        default=None,
+        dest="nodeid_file",
+        metavar="path",
+        help="run only the tests whose node ids are listed, one per line, in this file",
+    )
     shard_addoptions(parser)
+
+
+class NodeidFilePlugin:
+    """Selects a fixed set of tests by node id (see --nodeid-file). run_test.py
+    uses it to rerun the failures of an xdist pass through its retries."""
+
+    def __init__(self, path: str) -> None:
+        with open(path) as f:
+            self.nodeids = {line.strip() for line in f if line.strip()}
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected = [item for item in items if item.nodeid in self.nodeids]
+        if not selected:
+            # An empty selection would exit 5, which run_test.py treats as success.
+            raise pytest.UsageError("--nodeid-file selected no tests")
+        config.hook.pytest_deselected(
+            items=[item for item in items if item.nodeid not in self.nodeids]
+        )
+        items[:] = selected
 
 
 class HardwareClassificationPytestPlugin:
@@ -174,6 +203,10 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("nodeid_file"):
+        config.pluginmanager.register(
+            NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
+        )
     if config.getoption("hw_classification"):
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
@@ -194,6 +227,16 @@ def pytest_unconfigure(config: Config) -> None:
 
 
 class _NodeReporterReruns(_NodeReporter):
+    """Writes captured output without pytest's per-stream header and omits it
+    when empty, so tests that print nothing don't each get <system-out> and
+    <system-err> elements (pytest.ini sets junit_logging_reruns = all). Also
+    escapes skip reasons, which pytest<8 leaves unescaped.
+
+    pytest constructs these reporters and LogXMLReruns.node_reporter only
+    reassigns __class__, so this class may override methods but must not add
+    state or change how instance data is represented.
+    """
+
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
@@ -260,43 +303,37 @@ class LogXMLReruns(LogXML):
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
-        nodeid: str | TestReport = getattr(report, "nodeid", report)
-        # Local hack to handle xdist report order.
-        workernode = getattr(report, "node", None)
-
-        key = nodeid, workernode
-
-        if key in self.node_reporters:
-            # TODO: breaks for --dist=each
-            return self.node_reporters[key]
-
-        reporter = _NodeReporterReruns(nodeid, self)
-
-        self.node_reporters[key] = reporter
-        self.node_reporters_ordered.append(reporter)
-
+        # The reporter key type varies across pytest versions, so let pytest build it.
+        reporter = super().node_reporter(report)
+        if not issubclass(_NodeReporterReruns, type(reporter)):
+            raise AssertionError(f"unexpected node reporter type {type(reporter)}")
+        reporter.__class__ = _NodeReporterReruns
         return reporter
 
 
-# imitating summary_failures in pytest's terminal.py
-# both hookwrapper and tryfirst to make sure this runs before pytest's
+# pytest-rerunfailures only lists reruns, so print why each attempt failed, like
+# pytest's FAILURES section. hookwrapper and tryfirst so this runs before pytest's.
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    # prints stack traces for reruns
-    if terminalreporter.config.option.tbstyle != "no":
-        reports = terminalreporter.getreports("rerun")
-        if reports:
-            terminalreporter.write_sep("=", "RERUNS")
-            if terminalreporter.config.option.tbstyle == "line":
-                for rep in reports:
-                    line = terminalreporter._getcrashline(rep)
-                    terminalreporter.write_line(line)
-            else:
-                for rep in reports:
-                    msg = terminalreporter._getfailureheadline(rep)
-                    terminalreporter.write_sep("_", msg, red=True, bold=True)
-                    terminalreporter._outrep_summary(rep)
-                    terminalreporter._handle_teardown_sections(rep.nodeid)
+    reports = terminalreporter.getreports("rerun")
+    if reports and config.option.tbstyle != "no":
+        terminalreporter.write_sep("=", "RERUNS")
+        for rep in reports:
+            if config.option.tbstyle == "line":
+                # As in pytest's own --tb=line: an xdist worker crash's rerun report has a
+                # plain-string longrepr, and pytest 7.3.2 leaves reprcrash None for pytrace=False.
+                crash = getattr(rep.longrepr, "reprcrash", None)
+                terminalreporter.write_line(
+                    str(crash) if crash is not None else str(rep.longrepr)[:50]
+                )
+                continue
+            title = rep.head_line or rep.nodeid
+            terminalreporter.write_sep("_", title, red=True, bold=True)
+            rep.toterminal(config.get_terminal_writer())
+            for name, content in rep.sections:
+                if config.option.showcapture in ("all", *name.split()):
+                    terminalreporter.write_sep("-", name)
+                    terminalreporter.write_line(content.removesuffix("\n"))
     yield
 
 
@@ -490,14 +527,14 @@ class StepcurrentPlugin:
         if config.cache is None:
             raise AssertionError("Expected config.cache to not be None")
         self.cache: pytest.Cache = config.cache
-        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun_location = f"{directory}/lastrun"
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{self.directory}/lastrun"
         self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
 
-        self.made_failing_xml_location = f"{directory}/made_failing_xml"
+        self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
