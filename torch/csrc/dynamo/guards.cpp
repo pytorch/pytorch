@@ -4926,11 +4926,6 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
     // Integrating certain guards or accessors directly within the
@@ -4943,6 +4938,11 @@ class DictGuardManager : public GuardManager {
       _fail_count += 1;
       // No need to shuffle the child guards, just return.
       return false;
+    }
+
+    // Early return
+    if (_size == 0) {
+      return true;
     }
 
     PyObject *key = nullptr, *value = nullptr;
@@ -4984,11 +4984,6 @@ class DictGuardManager : public GuardManager {
           false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
     }
 
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
-    }
-
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
     // Integrating certain guards or accessors directly within the
@@ -4999,6 +4994,11 @@ class DictGuardManager : public GuardManager {
     // than embedding these functionalities within the DictGuardManager itself.
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(obj);
     if (!debug_info.result) {
+      return debug_info;
+    }
+
+    // Early return
+    if (_size == 0) {
       return debug_info;
     }
 
