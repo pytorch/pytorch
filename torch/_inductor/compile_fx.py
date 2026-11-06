@@ -3555,6 +3555,7 @@ def _compile_fx_main(
                     ignore_shape_env=ignore_shape_env,
                     pre_grad_passes=run_pre_grad_passes,
                     compile_region_name=compile_region_name,
+                    preserve_tangent_layout=config.strict_pointwise,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
@@ -3813,4 +3814,5 @@ def autograd_cache_key(
             decompositions=decompositions,
             compiler_config_extra=compiler_config_extra,
             keep_inference_input_mutations=True,
+            preserve_tangent_layout=config.strict_pointwise,
         )

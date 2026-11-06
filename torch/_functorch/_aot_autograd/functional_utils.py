@@ -638,6 +638,23 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     return mutation_count
 
 
+def normalize_backward_views(gm: torch.fx.GraphModule) -> None:
+    """Remove view layout assumptions from a captured functional backward.
+
+    Reshape preserves an alias when possible and copies when a runtime tangent
+    layout requires it. Functionalization has made input writes explicit copies
+    into the original placeholders, so these targets remain unchanged.
+    """
+    for module in gm.modules():
+        if isinstance(module, torch.fx.GraphModule):
+            assert_functional_graph(module.graph)
+            for node in module.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.view.default
+            ):
+                node.target = torch.ops.aten.reshape.default
+            module.recompile()
+
+
 def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
     placeholders = set()
     for n in fx_g.nodes:
