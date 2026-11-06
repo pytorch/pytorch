@@ -44,6 +44,7 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -156,60 +157,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         self._global_scratch_kernel(
             asm={"hsaco": b"hsaco"}, global_scratch_size=0, tmem_size=1024
         ).load_kernel(0)
-
-    @parametrize("retry_succeeds", [False, True])
-    @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @skipIfRocm
-    def test_tensor_memory_autotuner_retries_without_pipelining(self, retry_succeeds):
-        config = triton.Config({"NUM_STAGES": 3}, num_stages=3)
-        compile_meta = {
-            "device": 0,
-            "device_type": "cuda",
-            "signature": {0: "*fp32"},
-            "constants": {},
-        }
-        inductor_meta = {"grid_type": "FixedGrid", "fixed_grid": [1, 1, 1]}
-        impl = mock.Mock()
-        impl._load_kernel.return_value = (1, 2, 3, 4)
-
-        def compile_config(cfg):
-            tmem_size = 512 if retry_succeeds and cfg.num_stages == 1 else 513
-            kernel, _ = self._can_statically_launch(
-                "tmem_kernel", ["tmem_kernel.cubin"], tmem_size=tmem_size
-            )
-            self.assertIsInstance(kernel, StaticallyLaunchedCudaKernel)
-            kernel.C_impl = impl
-            return StaticTritonCompileResult(kernel, cfg, compile_meta, inductor_meta)
-
-        autotuner = object.__new__(CachingAutotuner)
-        autotuner.configs = [config]
-        autotuner.compile_results = []
-        autotuner.launchers = []
-        autotuner.inductor_meta = inductor_meta
-        autotuner.device_props = SimpleNamespace(type="cuda", index=0)
-        autotuner._precompile_config = mock.Mock(side_effect=compile_config)
-        autotuner._ensure_kernel_loaded = mock.Mock()
-        autotuner.get_device_interface = mock.Mock()
-        autotuner._precompile_worker()
-        self.assertIsInstance(autotuner.compile_results[0], StaticTritonCompileResult)
-        impl._load_kernel.assert_not_called()
-        with mock.patch(
-            "torch._dynamo.device_interface.DeviceGuard", return_value=nullcontext()
-        ):
-            if retry_succeeds:
-                autotuner._make_launchers()
-                self.assertEqual(len(autotuner.launchers), 1)
-                impl._load_kernel.assert_called_once()
-            else:
-                with self.assertRaises(OutOfResources) as error:
-                    autotuner._make_launchers()
-                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
-                self.assertEqual(autotuner.launchers, [])
-                impl._load_kernel.assert_not_called()
-        self.assertEqual(autotuner._precompile_config.call_count, 2)
-        retried_config = autotuner._precompile_config.call_args.args[0]
-        self.assertEqual(retried_config.num_stages, 1)
-        self.assertEqual(retried_config.kwargs["NUM_STAGES"], 1)
 
     def _compile_result_for_repeated_launcher(self, device=0):
         kernel = self._global_scratch_kernel(global_scratch_size=0)
@@ -672,6 +619,82 @@ class StaticLauncherTestMixin:
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
+
+
+@instantiate_parametrized_tests
+class TestStaticTritonLauncherUnitCuda(TestCase):
+    """Unit tests of the CUDA-family launcher runtime (CUDAAutotuner /
+    StaticallyLaunchedCudaKernel) that cannot run on RoCm, split out of
+    TestStaticTritonLauncherUnit so that class holds only device-independent
+    tests and can be declared GENERIC.
+
+    Classified CUDA and not instantiated: the bodies exercise CUDA-internal
+    behavior through mocks and gain nothing from running under XPU or
+    PrivateUse1 class variants. Shared helpers stay on the unit class and are
+    delegated here by reference (staticmethod keeps the factory signature; the
+    plain function rebinds as a method), so nothing is copied that could drift.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    _global_scratch_kernel = staticmethod(
+        TestStaticTritonLauncherUnit._global_scratch_kernel
+    )
+    _can_statically_launch = TestStaticTritonLauncherUnit._can_statically_launch
+
+    @parametrize("retry_succeeds", [False, True])
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @skipIfRocm
+    def test_tensor_memory_autotuner_retries_without_pipelining(self, retry_succeeds):
+        config = triton.Config({"NUM_STAGES": 3}, num_stages=3)
+        compile_meta = {
+            "device": 0,
+            "device_type": "cuda",
+            "signature": {0: "*fp32"},
+            "constants": {},
+        }
+        inductor_meta = {"grid_type": "FixedGrid", "fixed_grid": [1, 1, 1]}
+        impl = mock.Mock()
+        impl._load_kernel.return_value = (1, 2, 3, 4)
+
+        def compile_config(cfg):
+            tmem_size = 512 if retry_succeeds and cfg.num_stages == 1 else 513
+            kernel, _ = self._can_statically_launch(
+                "tmem_kernel", ["tmem_kernel.cubin"], tmem_size=tmem_size
+            )
+            self.assertIsInstance(kernel, StaticallyLaunchedCudaKernel)
+            kernel.C_impl = impl
+            return StaticTritonCompileResult(kernel, cfg, compile_meta, inductor_meta)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.configs = [config]
+        autotuner.compile_results = []
+        autotuner.launchers = []
+        autotuner.inductor_meta = inductor_meta
+        autotuner.device_props = SimpleNamespace(type="cuda", index=0)
+        autotuner._precompile_config = mock.Mock(side_effect=compile_config)
+        autotuner._ensure_kernel_loaded = mock.Mock()
+        autotuner.get_device_interface = mock.Mock()
+        autotuner._precompile_worker()
+        self.assertIsInstance(autotuner.compile_results[0], StaticTritonCompileResult)
+        impl._load_kernel.assert_not_called()
+        with mock.patch(
+            "torch._dynamo.device_interface.DeviceGuard", return_value=nullcontext()
+        ):
+            if retry_succeeds:
+                autotuner._make_launchers()
+                self.assertEqual(len(autotuner.launchers), 1)
+                impl._load_kernel.assert_called_once()
+            else:
+                with self.assertRaises(OutOfResources) as error:
+                    autotuner._make_launchers()
+                self.assertEqual(error.exception.args, (513, 512, "tensor memory"))
+                self.assertEqual(autotuner.launchers, [])
+                impl._load_kernel.assert_not_called()
+        self.assertEqual(autotuner._precompile_config.call_count, 2)
+        retried_config = autotuner._precompile_config.call_args.args[0]
+        self.assertEqual(retried_config.num_stages, 1)
+        self.assertEqual(retried_config.kwargs["NUM_STAGES"], 1)
 
 
 @requires_gpu_and_triton
