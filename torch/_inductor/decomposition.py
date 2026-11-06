@@ -31,6 +31,7 @@ from torch._decomp.decompositions import (
     hardswish_backward as decomp_hardswish_backward,
     logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
+    mv as decomp_mv,
     pw_cast_for_int_to_real,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -180,6 +181,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
     aten.mvlgamma,  # preserve eager rounding and reduction order
+    aten.mv.default,
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -214,6 +216,15 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten.mv.default)
+def mv(self, vec):
+    if is_strict_cuda_triton(self.device) and (
+        self.is_floating_point() or self.is_complex()
+    ):
+        return NotImplemented
+    return decomp_mv(self, vec)
 
 
 @register_decomposition(aten.adaptive_max_pool3d.default)
