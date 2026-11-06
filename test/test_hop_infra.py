@@ -2,6 +2,7 @@
 import collections
 import copy
 import dataclasses
+import enum
 import importlib
 import logging
 import pkgutil
@@ -514,6 +515,7 @@ class TestCuteDSLHOPHelpers(TestCase):
         )
         rules = CUTEDSL_CONSTANT_RULES
         side_table = KernelSideTable(constant_rules=rules)
+        root_handlers = logging.root.handlers
         for value, name, path in cycles:
             msg = f"^a constant kernel argument of type {name} refers to itself "
             msg += f"through {path}$"
@@ -522,11 +524,8 @@ class TestCuteDSLHOPHelpers(TestCase):
                     walk(value, rules)
             with self.assertRaisesRegex(ValueError, msg):
                 side_table.add_constant_args({"cfg": value})
-        # A logger of the process: which cycle its walk meets first depends on the
-        # process.
-        msg = r"^a constant kernel argument of type \w+ refers to itself through .+$"
-        with self.assertRaisesRegex(ValueError, msg):
-            constant_key(Cfg(1.0, log=logging.getLogger(__name__)), rules)
+        # _snapshot copied the private RootLogger without writing onto the process's.
+        self.assertIs(logging.root.handlers, root_handlers)
 
         shared = Cfg(1.0, lookup={"k": [0.5]})
         twice = Cfg(2.0, a=shared, b=[shared], c=shared.lookup)
@@ -534,6 +533,56 @@ class TestCuteDSLHOPHelpers(TestCase):
         self.assertEqual(constant_key(snapshot, rules), constant_key(twice, rules))
         self.assertTrue(all(c is not shared for c in (snapshot.a, snapshot.b[0])))
         self.assertIsNot(snapshot.c, shared.lookup)
+
+    def test_snapshot_of_a_value_whose_copy_is_itself(self):
+        # copy.copy returns whatever a class's __copy__ or __reduce__ returns, even
+        # the object itself, and a stored constant that is the caller's object changes
+        # with it. _snapshot makes a plain object with object.__new__, as copy.copy
+        # does by default, keeps an enum member, which cannot change, and refuses any
+        # other value whose copy is itself.
+        class SelfCopy:
+            def __copy__(self):
+                return self
+
+        class Cfg(SelfCopy):
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class NewCfg(Cfg):  # defines __new__, so copied by copy.copy
+            def __new__(cls, alpha):
+                return super().__new__(cls)
+
+        class Numeric(SelfCopy):  # keyed like a cutlass Numeric
+            __module__ = "cutlass.fake"
+
+            def __init__(self, value):
+                self.value = value
+
+        class Group(enum.Enum):  # keyed like a cutlass enum, such as CtaGroup.ONE
+            __module__ = "cutlass.fake"
+            ONE = 1
+
+        class Items(SelfCopy, list):
+            pass
+
+        class Table(SelfCopy, dict):
+            pass
+
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+
+        def add(c):
+            return table.add_constant_args({"c": c})
+
+        cfg = Cfg(1.0)
+        stored = table.get_constant_args(add(cfg))["c"]
+        self.assertIsNot(stored, cfg)
+        self.assertEqual((type(stored), vars(stored)), (Cfg, {"alpha": 1.0}))
+        self.assertIs(table.get_constant_args(add(Group.ONE))["c"], Group.ONE)
+        msg = "^a constant kernel argument of type {} cannot be copied: copy.copy "
+        msg += "returns the object itself$"
+        for value in (NewCfg(1.0), Numeric(2.0), Items([1.0]), Table(a=1.0)):
+            with self.assertRaisesRegex(TypeError, msg.format(type(value).__name__)):
+                add(value)
 
     def test_constants_holding_tensors_are_refused(self):
         # Keyed by identity, a tensor inside a constant would stay alive with its
