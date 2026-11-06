@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -296,41 +297,41 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
-    def test_embedding_bag_include_last_offset_invalid_offsets(self, device):
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)  # MPS does not support float64 (#115350)
+    @skipXPUIf(
+        True,
+        "XPU embedding_bag is out-of-tree (torch-xpu-ops) and does not have this check yet",
+    )
+    def test_embedding_bag_include_last_offset_invalid_offsets(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/190044
+        # float64 crashed (offset2bag becomes -1 on the slow path, MAX mode then
+        # indexes bag_empty[-1]); float32 used to silently return a (0, D) tensor
+        # via the fbgemm fast path, so both dtypes pin the new behavior.
         error_msg = (
             r"embedding_bag: when include_last_offset is True and indices are non-empty, "
             r"offsets must have at least 2 elements"
         )
         indices = torch.tensor([0, 1, 2], dtype=torch.int64, device=device)
         offsets = torch.tensor([0], dtype=torch.int64, device=device)
+        weight = torch.randn(5, 3, dtype=dtype, device=device)
 
-        for dtype in (torch.float32, torch.float64):
-            weight = torch.randn(5, 3, dtype=dtype, device=device)
-            for mode in (0, 2):  # SUM and MAX
-                with self.assertRaisesRegex(RuntimeError, error_msg):
-                    torch.embedding_bag(
-                        weight,
-                        indices,
-                        offsets,
-                        False,
-                        mode,
-                        False,
-                        None,
-                        True,
-                        None,
-                    )
+        # SUM, MEAN and MAX must all reject the degenerate offsets
+        for mode in (0, 1, 2):
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.embedding_bag(
+                    weight, indices, offsets, False, mode, False, None, True, None
+                )
 
-        # nn.EmbeddingBag with explicit offsets
-        embeddingbag = nn.EmbeddingBag(
-            5, 3, include_last_offset=True
-        ).to(device=device, dtype=torch.float64)
+        # through the public module API
+        embeddingbag = nn.EmbeddingBag(5, 3, include_last_offset=True).to(
+            device=device, dtype=dtype
+        )
         with self.assertRaisesRegex(RuntimeError, error_msg):
             embeddingbag(indices, offsets)
 
-        # 0 bags with 0 indices is still valid
+        # zero bags with zero indices is still valid
         empty_indices = torch.tensor([], dtype=torch.int64, device=device)
-        weight = torch.randn(5, 3, dtype=torch.float64, device=device)
         result = torch.embedding_bag(
             weight, empty_indices, offsets, False, 0, False, None, True, None
         )
