@@ -202,17 +202,15 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
       inserted = km.at(params_signature);  // snapshot for I/O after unlocking
     }
   }
-   if (!is_new) return;  // only write once per unique (op, params)
+  if (!is_new) return;  // only write once per unique (op, params)
 
-   TuningContext* ctx = getTuningContext();
-  if (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
-    InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
-
-    if (is_new && realtime_out_ && realtime_out_->good()) {
-      AppendResultLine(op_signature, params_signature, inserted);
-    }
+  TuningContext* ctx = getTuningContext();
+  const auto validators = ctx->GetTuningResultsValidator().GetAllValidators();
+  std::scoped_lock fl{realtime_file_mutex_};
+  if (ctx->IsTunableOpEnabled() && ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
+    InitRealtimeAppendLocked(ctx->GetFilename(), validators);
+    AppendResultLineLocked(op_signature, params_signature, inserted);
   }
-
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
@@ -259,9 +257,7 @@ void TuningResultsManager::ClearAll() {
   untuned_results_.clear();
 }
 
-void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
-  std::scoped_lock fl{realtime_file_mutex_};
-
+void TuningResultsManager::InitRealtimeAppendLocked(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
   if (realtime_out_ && realtime_out_->good() && realtime_filename_ == filename) {
     return;
   }
@@ -305,9 +301,7 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
   realtime_filename_ = filename;
 }
 
-void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std::string& param_sig, const ResultEntry& result) {
-  std::scoped_lock fl{realtime_file_mutex_};
-
+void TuningResultsManager::AppendResultLineLocked(const std::string& op_sig, const std::string& param_sig, const ResultEntry& result) {
   if(!realtime_out_ || !realtime_out_->good()) {
     return;
   }
@@ -627,6 +621,7 @@ void TuningContext::EnableTunableOp(bool value) {
   }
   else {
     TUNABLE_LOG1("Disable TunableOp");
+    manager_.CloseRealtimeAppend();
   }
 }
 
@@ -645,6 +640,7 @@ void TuningContext::EnableTuning(bool value) {
   }
   else {
     TUNABLE_LOG1("Disable Tuning for TunableOp");
+    manager_.CloseRealtimeAppend();
   }
 }
 
@@ -652,6 +648,7 @@ void TuningContext::EnableRecordUntuned(bool value) {
   record_untuned_enable_ = value;
   if (value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
+    manager_.CloseRealtimeAppend();
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
     TUNABLE_LOG1("Closing Untuned GEMM Results File");
@@ -907,38 +904,41 @@ TuningStatus TuningContext::LoadTuningResults(const TuningResults& tr) {
 }
 
 void TuningContext::SetFilename(const std::string& filename, bool insert_device_ordinal) {
-  filename_ = filename;
+  std::string new_filename = filename;
 
-  if (filename_.empty()) {
-    return;
-  }
-
-  if (insert_device_ordinal) {
+  if (!new_filename.empty() && insert_device_ordinal) {
     // differentiate filename based on device ordinal to avoid
     // use case of one process per device writing to same file
     std::string device = c10::str(int(c10::cuda::current_device()));
 
     // does filename contain %d to insert device ordinal in specific location?
     const std::string TOKEN("%d");
-    std::size_t found = filename_.find(TOKEN);
+    std::size_t found = new_filename.find(TOKEN);
     if (found != std::string::npos) {
-      filename_.replace(found, TOKEN.length(), device);
+      new_filename.replace(found, TOKEN.length(), device);
     }
     else {
       // no %d present, so append device ordinal before final '.'
-      found = filename_.rfind('.');
+      found = new_filename.rfind('.');
       if (found != std::string::npos) {
-        filename_.insert(found, device);
+        new_filename.insert(found, device);
       }
       else {
         // all else fails, just append
-        filename_.append(device);
+        new_filename.append(device);
       }
     }
   }
+
+  {
+    std::scoped_lock l{filename_mutex_};
+    filename_ = std::move(new_filename);
+  }
+  manager_.CloseRealtimeAppend();
 }
 
 std::string TuningContext::GetFilename() const {
+  std::scoped_lock l{filename_mutex_};
   return filename_;
 }
 
