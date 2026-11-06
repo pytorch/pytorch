@@ -4,6 +4,7 @@
 #endif
 #include <structmember.h>
 
+#include <c10/core/CachingDeviceAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/IPCTypes.h>
@@ -18,7 +19,6 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -306,8 +306,8 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
   THPObjectPtr _event_handle(Py_NewRef(Py_None));
   THPObjectPtr _event_sync_required(Py_NewRef(Py_None));
   if (storage.data()) {
-    auto shandle =
-        c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
+    auto shandle = c10::getDeviceAllocator(storage.device_type())
+                       ->shareIpcHandle(storage.mutable_data());
     _handle = PyBytes_FromStringAndSize(
         shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
     _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
@@ -451,6 +451,7 @@ static PyObject* THPStorage_newSharedCuda(
 
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
+  const auto acc_type = at::accelerator::getAccelerator(true).value();
   at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {
@@ -471,7 +472,7 @@ static PyObject* THPStorage_newSharedCuda(
     return nullptr;
   }
   std::shared_ptr<void> basePtr =
-      c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);
+      c10::getDeviceAllocator(acc_type)->getIpcDevPtr(s_handle);
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
