@@ -5750,10 +5750,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIsNone(torch._C._unset_dispatch_mode(fake))
         finally:
             # A rejection that regressed can leave both a Python and a C++ mode
-            # installed, and unsetting removes the Python one first. The
-            # wrappers are still alive, so unsetting does not rebuild them.
-            for _ in range(2):
-                torch._C._unset_dispatch_mode(fake)
+            # installed, which _unset_dispatch_mode rejects, so the Python one
+            # is popped first. The wrappers are still alive, so unsetting does
+            # not rebuild them.
+            if torch._C._get_dispatch_mode(fake) is python_mode:
+                torch._C._pop_torch_dispatch_stack(fake)
+            torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its wrapper")
