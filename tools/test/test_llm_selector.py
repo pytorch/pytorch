@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from unittest import mock
@@ -19,7 +20,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
-from tools.testing.llm_selector import select_tests, selection
+from tools.testing.llm_selector import resolve_selection, select_tests, selection
 from tools.testing.llm_selector.selection import (
     apply_selection,
     DRIVER_MAPPINGS,
@@ -2846,6 +2847,213 @@ class TestMain(unittest.TestCase):
         record, _ = self.run_in_repo(answer)
         self.assertIn("malformed", record["error"])
         self.assertTrue(record["run_all"])
+
+
+SHA = "a" * 40
+REPO = "pytorch/pytorch"
+ARTIFACT = f"llm_selection_7_{SHA}"
+
+
+def selector_run(id: int, **kw: object) -> dict:
+    """An llm-selector.yml run that passes every provenance check; higher ids are newer."""
+    run = {
+        "id": id,
+        "created_at": f"2026-11-0{id}T00:00:00Z",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{id}",
+        "path": ".github/workflows/llm-selector.yml",
+        "event": "pull_request_target",
+        "head_sha": SHA,
+        "head_repository": {"id": 1},
+        "repository": {"id": 1},
+        "status": "completed",
+        "conclusion": "success",
+    }
+    return {**run, **kw}
+
+
+def pending_run(id: int, status: str = "in_progress") -> dict:
+    return selector_run(id, status=status, conclusion=None)
+
+
+class TestResolveSelection(unittest.TestCase):
+    # What the last resolve() slept, downloaded and printed.
+    sleeps: list[float]
+    fetched: list[str]
+    logs: list[str]
+
+    def resolve(
+        self,
+        *polls: list[dict],
+        labels: tuple[str, ...] = ("ci-llm-selector",),
+        head_repo: str = REPO,
+        author: str = "MEMBER",
+        selected_enforce: bool = True,
+        enforcement: bool = True,
+        **env: str,
+    ) -> dict | None:
+        """Run main() against a fake API that lists the next of `polls` on each
+        poll (repeating the last), and return the selection it writes."""
+        polls_left = list(polls)
+        now = [0.0]
+        self.sleeps, self.fetched, self.logs = [], [], []
+        pr = {
+            "head": {"repo": {"full_name": head_repo}},
+            "labels": [{"name": n} for n in labels],
+            "author_association": author,
+        }
+
+        def get(path: str) -> dict:
+            if path == "pulls/7":
+                return pr
+            if path.startswith("actions/workflows/llm-selector.yml/runs?"):
+                self.assertIn(f"head_sha={SHA}", path)
+                runs = polls_left.pop(0) if len(polls_left) > 1 else polls_left[0]
+                return {"workflow_runs": runs}
+            run_id = path.split("/")[2]
+            self.assertEqual(path, f"actions/runs/{run_id}/artifacts?name={ARTIFACT}")
+            url = f"zip/{run_id}"
+            artifact = {"name": ARTIFACT, "expired": False, "archive_download_url": url}
+            return {"artifacts": [artifact]}
+
+        def fetch(url: str) -> bytes:
+            self.fetched.append(url)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                nn = {"test_nn"}
+                sel = Selection(nn, enforce=selected_enforce, candidates=nn)
+                # llm-selector.yml always passes --enforce.
+                sel.enforce_requested = True
+                z.writestr("llm_selection.json", json.dumps(sel.to_json()))
+            return buf.getvalue()
+
+        def sleep(t: float) -> None:
+            self.sleeps.append(t)
+            now[0] += t
+
+        env = {"GITHUB_REPOSITORY": REPO, "HEAD_SHA": SHA, "PR_NUMBER": "7", **env}
+        env.setdefault("TD_ENABLED", "true")
+        time = resolve_selection.time
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(resolve_selection, "ENFORCEMENT_ENABLED", enforcement),
+            mock.patch.object(resolve_selection, "get", get),
+            mock.patch.object(resolve_selection, "fetch", fetch),
+            mock.patch.object(time, "monotonic", lambda: now[0]),
+            mock.patch.object(time, "sleep", sleep),
+            mock.patch("builtins.print", self.logs.append),
+        ):
+            output = Path(tmp) / "out.json"
+            resolve_selection.main(output)
+            record = json.loads(output.read_text()) if output.exists() else None
+        return record
+
+    def selected(self, *polls: list[dict], **kw: Any) -> dict:
+        record = self.resolve(*polls, **kw)
+        if record is None:
+            raise AssertionError(f"no selection written; logs: {self.logs}")
+        return record
+
+    def test_enforce_takes_the_newest_run_not_the_first_listed(self) -> None:
+        record = self.selected([selector_run(1), selector_run(2)])
+        self.assertEqual(self.fetched, ["zip/2"])
+        self.assertTrue(record["enforce"])
+        self.assertEqual(record["files"], ["test_nn"])
+        self.assertEqual(self.sleeps, [])
+
+    def test_untrusted_runs_are_ignored(self) -> None:
+        for bad in [
+            {"path": ".github/workflows/pull.yml"},
+            {"event": "pull_request"},
+            {"head_sha": "b" * 40},
+            {"head_repository": {"id": 2}},
+            {"head_repository": None},
+        ]:
+            with self.subTest(bad=bad):
+                untrusted = selector_run(2, **bad)
+                self.resolve([selector_run(1), untrusted])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertIsNone(self.resolve([untrusted]))
+                self.assertEqual(self.fetched, [])
+
+    def test_waits_for_a_pending_run(self) -> None:
+        for status in ["queued", "in_progress", "waiting", "requested", "pending"]:
+            with self.subTest(status=status):
+                old, new = selector_run(1), pending_run(2, status)
+                record = self.selected([old, new], [old, new], [old, selector_run(2)])
+                self.assertEqual(self.fetched, ["zip/2"])
+                self.assertTrue(record["enforce"])
+                self.assertEqual(self.sleeps, [15, 30])
+
+    def test_skipped_runs_are_ignored(self) -> None:
+        skipped = selector_run(2, conclusion="skipped")
+        self.resolve([selector_run(1), skipped])
+        self.assertEqual(self.fetched, ["zip/1"])
+
+    def test_enforce_gives_up_at_the_deadline(self) -> None:
+        record = self.resolve([selector_run(1), pending_run(2)])
+        self.assertIsNone(record)
+        self.assertEqual(self.fetched, [])
+        self.assertEqual(sum(self.sleeps), resolve_selection.WAIT_SECONDS)
+        self.assertIn("Gave up", self.logs[-1])
+
+    def test_enforce_does_not_fall_back_to_an_older_run(self) -> None:
+        for conclusion in ["failure", "cancelled", "timed_out"]:
+            with self.subTest(conclusion=conclusion):
+                failed = selector_run(2, conclusion=conclusion)
+                record = self.resolve([selector_run(1), failed])
+                self.assertIsNone(record)
+                self.assertEqual(self.fetched, [])
+
+    def test_shadow_unless_labeled_and_td_enabled(self) -> None:
+        for labels, td_enabled in [
+            ((), "true"),
+            (("ci-llm-selector", "ci-no-td"), "true"),
+            (("ci-llm-selector",), "false"),
+        ]:
+            with self.subTest(labels=labels, td_enabled=td_enabled):
+                runs = [selector_run(1), pending_run(2, "queued")]
+                record = self.selected(runs, labels=labels, TD_ENABLED=td_enabled)
+                self.assertFalse(record["enforce"])
+                self.assertFalse(record["enforce_requested"])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertEqual(self.sleeps, [])
+
+    def test_only_trusted_authors_are_enforced(self) -> None:
+        for author in ("OWNER", "MEMBER", "COLLABORATOR"):
+            self.assertTrue(self.selected([selector_run(1)], author=author)["enforce"])
+        for author in ("CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "NONE"):
+            with self.subTest(author=author):
+                record = self.selected([selector_run(1), pending_run(2)], author=author)
+                self.assertFalse(record["enforce"])
+                self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
+
+    def test_enforcement_disabled_neither_waits_nor_enforces(self) -> None:
+        # run_test.py gates on ENFORCEMENT_ENABLED itself; keep enforce so it
+        # can record what enforcing would have done.
+        runs = [selector_run(1), pending_run(2)]
+        record = self.selected(runs, enforcement=False)
+        self.assertTrue(record["enforce"])
+        self.assertTrue(record["enforce_requested"])
+        self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
+
+    def test_failed_selection_is_not_enforced(self) -> None:
+        # select_tests writes enforce=False when the model call failed.
+        record = self.selected([selector_run(1)], selected_enforce=False)
+        self.assertFalse(record["enforce"])
+        self.assertTrue(record["enforce_requested"])
+
+    def test_pr_number(self) -> None:
+        runs = [selector_run(1)]
+        tag = "refs/tags/ciflow/trunk/7"
+        self.assertTrue(self.selected(runs, PR_NUMBER="", GITHUB_REF=tag)["enforce"])
+        branch = "refs/heads/main"
+        self.assertIsNone(self.resolve(runs, PR_NUMBER="", GITHUB_REF=branch))
+        self.assertIsNone(self.resolve(runs, HEAD_SHA=""))
+
+    def test_fork_pr_gets_nothing(self) -> None:
+        self.assertIsNone(self.resolve([selector_run(1)], head_repo="someone/pytorch"))
+        self.assertEqual(self.fetched, [])
 
 
 if __name__ == "__main__":
