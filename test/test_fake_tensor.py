@@ -6350,24 +6350,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNotNone(outer)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), outer)
 
-    def test_cpp_fake_tensor_mode_nested_with_python_mode(self):
-        # Either kind of fake mode suspends the other while entered inside it
-        from torch._subclasses.fake_tensor import CppFakeTensorMode
-        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
-
-        self.assertFalse(is_in_torch_dispatch_mode())
-        cpp_mode = CppFakeTensorMode()
-        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        for outer, inner in ((cpp_mode, python_mode), (python_mode, cpp_mode)):
-            with outer:
-                with inner:
-                    self.assertEqual(self._installed(), (inner, inner is cpp_mode))
-                    self.assertTrue(is_in_torch_dispatch_mode())
-                self.assertEqual(self._installed(), (outer, outer is cpp_mode))
-                self.assertTrue(is_in_torch_dispatch_mode())
-            self.assertEqual(self._installed(), (None, False))
-            self.assertFalse(is_in_torch_dispatch_mode())
-
     def _restore_fake_mode_state(self):
         # Undoes a manual enter whose exit failed partway, so the failure does
         # not leak into later tests
@@ -6418,6 +6400,15 @@ class TestCppFakeTensorModeBindings(TestCase):
             with mode:
                 pass
             self.assertTrue(is_in_torch_dispatch_mode())
+
+        # A Python FakeTensorMode cannot be entered inside a C++ one, or the
+        # reverse
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        for outer, inner in ((mode, python_mode), (python_mode, mode)):
+            with outer:
+                with self.assertRaisesRegex(AssertionError, "cannot enter"):
+                    inner.__enter__()
+                self.assertEqual(self._installed(), (outer, outer is mode))
 
         # An entered mode is kept alive until it exits, so exiting it through
         # the FAKE slot still finds its enter_stack
