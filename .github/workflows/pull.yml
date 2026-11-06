@@ -468,6 +468,7 @@ jobs:
       - linux-jammy-py3_14-clang21-build
       - job-filter
       - get-label-type
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.docker-image }}
@@ -603,7 +604,7 @@ jobs:
   dynamo-cpython-test:
     name: dynamo-cpython-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: [get-label-type, dynamo-cpython-build]
+    needs: [get-label-type, dynamo-cpython-build, target-determination]
     with:
       build-environment: linux-jammy-py3.13-clang21
       docker-image: ${{ needs.dynamo-cpython-build.outputs.docker-image }}

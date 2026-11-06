@@ -1,0 +1,73 @@
+name: llm-selector
+
+# Shadow LLM test selection (tools/testing/llm_selector). pull_request_target runs this
+# file from the default branch and the job checks out main, so the bedrock role is
+# only ever handed to reviewed code. The PR is read through git, never executed.
+# The target-determination job of each test workflow resolves one selection per
+# workflow run from this workflow's newest run for the head (resolve_selection.py).
+# --enforce marks a selection enforceable unless the selector failed; it is
+# enforced only while the PR is labeled ci-llm-selector and its author is a member or
+# collaborator, waiting for a pending run first, and run_test.py applies it only
+# where TD is enabled.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  llm-test-selection:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bedrock
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+          filter: tree:0
+          persist-credentials: false
+
+      - name: Fetch the PR base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags --filter=tree:0 origin "$BASE_SHA" "$HEAD_SHA"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.280
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Select tests
+        env:
+          CLAUDE_CODE_USE_BEDROCK: "1"
+          # The PR's own base, so a ghstack PR is diffed against the PR below it.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -m tools.testing.llm_selector.select_tests --base "$BASE_SHA" --head "$HEAD_SHA" --output llm_selection.json --enforce
+
+      - name: Upload selection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: llm_selection_${{ github.event.pull_request.number }}_${{ github.event.pull_request.head.sha }}
+          overwrite: true
+          retention-days: 3
+          if-no-files-found: error
+          path: llm_selection.json

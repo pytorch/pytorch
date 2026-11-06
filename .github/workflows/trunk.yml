@@ -47,6 +47,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: dynamo-unittest
     uses: ./.github/workflows/dynamo-unittest.yml
+    needs: target-determination
     secrets: inherit
 
   llm-td:
@@ -98,6 +99,7 @@ jobs:
     name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs:
+      - target-determination
       - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
       - get-label-type
       - job-filter
@@ -543,6 +545,7 @@ jobs:
     needs:
       - linux-jammy-aarch64-py3_11-gcc13-build
       - get-label-type
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.docker-image }}
