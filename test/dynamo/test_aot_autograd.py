@@ -835,6 +835,56 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="aot_eager")
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_original_aten_symbolic_view_mutation_metadata(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.utils import make_boxed_func
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(query, scores, window):
+            batch, seq_len, heads, _ = query.shape
+            chunks = torch.div(seq_len, window, rounding_mode="trunc") - 1
+            output = scores.new_zeros(
+                (batch * heads, chunks + 1, window, 2 * window + 1)
+            )
+            output[:, :-1, :, window:] = scores[:, :, :window, : window + 1]
+            output = output.view(batch, heads, seq_len, 2 * window + 1).transpose(2, 1)
+            view = output[:, :window, :, : window + 1]
+            output[:, :window, :, : window + 1] = torch.full_like(view, -float("inf"))
+            return output
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            decompositions=select_decomp_table(),
+        )
+        args = (torch.randn(1, 8, 1, 2), torch.randn(1, 3, 2, 3), 2)
+        compiled = torch.compile(fn, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(*args), fn(*args))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_original_aten_unbacked_select_mutation_metadata(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.utils import make_boxed_func
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(indices, initialize):
+            output = torch.zeros(indices.shape[0])
+            if initialize:
+                output.add_(1)
+            for i in range(indices.shape[0]):
+                output[indices[i].item()] += 1
+            return output
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            decompositions=select_decomp_table(),
+        )
+        indices = torch.tensor([-1, 1, -2])
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for initialize in (False, True):
+            with self.subTest(initialize=initialize):
+                self.assertEqual(compiled(indices, initialize), fn(indices, initialize))
+
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -936,8 +986,8 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
 0|aten.convolution.default|conv2d|
-0|aten.add.Tensor|add_|
-1|aten._native_batch_norm_legit_functional.default|batch_norm|
+0|aten.add_.Tensor|add_|
+1|aten._native_batch_norm_legit.default|batch_norm|
 2|aten.relu.default|relu|
 2|aten.detach.default|relu|
 3|aten.add.Tensor|add|

@@ -132,7 +132,7 @@ class SymPyOps:
         return TypedExpr(x.expr - y.expr, result_type)
 
     @staticmethod
-    def mul(x: TypedExpr, y: TypedExpr) -> TypedExpr:
+    def mul(x: TypedExpr, y: TypedExpr, *, native_cuda_execution=None) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr * y.expr, result_type)
 
@@ -315,6 +315,9 @@ class IndexPropagation(DefaultHandler):
         return IndexPropVar.new_symbolic(new_expr)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        # Constant folding must not discard the native multiplication's NaN priority.
+        if name == "mul" and kwargs.get("native_cuda_execution") is not None:
+            return self.fallback(name, args, kwargs)
         if not hasattr(SymPyOps, name):
             return self.fallback(name, args, kwargs)
 

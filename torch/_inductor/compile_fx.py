@@ -2117,7 +2117,7 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         self.compile_region_name,
                         graph_kwargs,
-                        inputs_to_check,
+                        graph.inputs_to_check or (),
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,

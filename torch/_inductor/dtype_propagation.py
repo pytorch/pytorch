@@ -297,7 +297,7 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def mul(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+    def mul(a: DTypeArg, b: DTypeArg, *, native_cuda_execution=None) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
