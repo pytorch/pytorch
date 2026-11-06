@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     HardwareClassification,
     IS_LINUX,
     isRocmArchAnyOf,
@@ -2130,6 +2131,27 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
             check_train=True,
         )
+
+    add_skip_condition(
+        _test_pattern_fuses_with_symint_scale,
+        lambda cls: cls.use_static_shapes,
+        "the scale is only symbolic under dynamic shapes",
+    )
+    add_skip_condition(
+        _test_pattern_fuses_with_symint_scale_div,
+        lambda cls: cls.use_static_shapes,
+        "the scale is only symbolic under dynamic shapes",
+    )
+    add_skip_condition(
+        _test_pattern_fails_with_symfloat_scale,
+        lambda cls: cls.use_static_shapes,
+        "the scale is only symbolic under dynamic shapes",
+    )
+    add_skip_condition(
+        _test_pattern_fails_with_unsupported_mask,
+        lambda cls: not cls.use_static_shapes,
+        "Causes shape specialization. TODO: investigate",
+    )
 
 
 class TestSDPAPatternRegistration(TestCase):

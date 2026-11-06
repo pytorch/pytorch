@@ -2831,6 +2831,44 @@ class TestSkipReasonAtCollection(TestCase):
                 Lazy("test_lazy").test_lazy()
             condition.assert_called_once_with()
 
+    def test_inductor_device_skip_uses_captured_condition(self):
+        from torch.testing._internal.inductor_utils import skipDeviceIf
+
+        enabled = [True]
+        checks = []
+        calls = []
+
+        class Condition:
+            def __bool__(self):
+                checks.append("checked")
+                return enabled[0]
+
+        class Fixed(TestCase):
+            device = "cpu"
+            _device_at_collection = "cpu"
+
+            @skipDeviceIf(Condition(), "existing CPU skip", device="cpu")
+            def test_runs(self):
+                calls.append(self.device)
+
+        class Other(Fixed):
+            device = "cuda"
+            _device_at_collection = "cuda"
+
+        class Unrecorded(Fixed):
+            device = "cuda"
+
+        enabled[0] = False
+        with self._lists():
+            self.assertEqual(self._reason(Fixed, "test_runs"), "existing CPU skip")
+            with self.assertRaisesRegex(unittest.SkipTest, "existing CPU skip"):
+                Fixed("test_runs").test_runs()
+            for cls in (Other, Unrecorded):
+                self.assertIsNone(self._reason(cls, "test_runs"))
+                cls("test_runs").test_runs()
+        self.assertEqual(checks, ["checked"])
+        self.assertEqual(calls, ["cuda", "cuda"])
+
     def test_python_version_predicate_stays_lazy(self):
         from torch.testing._internal.common_utils import skipIfPythonVersionMismatch
 

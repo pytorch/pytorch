@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -135,6 +136,19 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+
+
+_skip_if_gpu_unavailable = decorateIf(
+    unittest.skip(f"requires {GPU_TYPE}"),
+    lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+)
+_skip_if_cuda_bfloat16_unsupported = decorateIf(
+    unittest.skip("requires SM80 or later"),
+    lambda params: params["device"] == "cuda"
+    and torch.version.hip is None
+    and (params["dtype"] == torch.bfloat16)
+    and (not SM80OrLater),
+)
 
 
 @instantiate_parametrized_tests
@@ -882,6 +896,17 @@ class TestFxGraphCache(TestCase):
             any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
+    @decorateIf(
+        unittest.skip("Static triton launcher requires cuda/xpu and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1144,6 +1169,17 @@ class TestFxGraphCache(TestCase):
             torch.set_default_dtype(old_dtype)
             FxGraphCache.clear()
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
+    @decorateIf(
+        unittest.skip("Static cuda launcher requires cuda and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -1215,6 +1251,8 @@ class TestFxGraphCache(TestCase):
         for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @requires_triton()
     @config.patch(
         {
@@ -1307,6 +1345,8 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @requires_triton()
     @config.patch(
         {
@@ -1777,6 +1817,7 @@ class TestFxGraphCache(TestCase):
         _, cache_info = artifacts
         self.assertEqual(len(cache_info.test_artifacts), 1)
 
+    @_skip_if_gpu_unavailable
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1817,6 +1858,14 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("requires CUDA SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @largeTensorTest("64GB", device=GPU_TYPE, inductor=True)
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1872,6 +1921,8 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(res1, res2)
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2000,6 +2051,7 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @_skip_if_gpu_unavailable
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2873,6 +2925,13 @@ class TestFxGraphCache(TestCase):
         # without any additional cache misses or dynamo recompilations.
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("mkldnn tensors unsupported"),
+        lambda params: params["device"] == "cpu"
+        and torch.backends.mkldnn.is_available()
+        and torch.ops.mkldnn._is_mkldnn_fp16_supported(),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
@@ -2982,6 +3041,11 @@ class TestStandaloneCompile(TestCase):
 
         return inner
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("AOT mode does not support unpacked format"),
+        lambda params: params["is_aot"] and params["format"] == "unpacked",
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -3208,6 +3272,7 @@ class TestStandaloneCompile(TestCase):
                 )
                 self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
 
+    @_skip_if_gpu_unavailable
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})

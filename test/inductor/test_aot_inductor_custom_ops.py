@@ -608,6 +608,10 @@ class AOTInductorLoggingTest(LoggingTestCase):
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
+@unittest.skipIf(
+    IS_MACOS and not (IS_SANDCASTLE or IS_FBCODE),
+    "non-portable load_library call used in test",
+)
 class AOTICustomOpTestCase(TestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_FBCODE:
