@@ -2621,6 +2621,23 @@ class TestSDPAFailureModes(NNTestCase):
         # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    @unittest.skipIf(TEST_WITH_ROCM, "The stride check is in the CUDA CUTLASS backward")
+    @parametrize("name", ["query", "key", "value"])
+    def test_mem_eff_attention_backward_rejects_int32_overflowing_stride(self, name):
+        # The backward kernel takes 32-bit row strides; larger ones used to
+        # wrap and read out of bounds. A length-1 sequence keeps the stride
+        # without the storage.
+        make_tensor = partial(torch.randn, 1, 1, 1, 64, device="cuda")
+        inputs = {"query": make_tensor(), "key": make_tensor(), "value": make_tensor()}
+        out, lse, seed, offset, _, _ = torch.ops.aten._efficient_attention_forward(*inputs.values(), None, None, None, 1, 1, 0.0, 0, True)
+        inputs[name] = inputs[name].as_strided((1, 1, 1, 64), (0, 2**31, 64, 1))
+        with self.assertRaisesRegex(RuntimeError, f"{name}.stride\\(1\\) overflows int32"):
+            torch.ops.aten._efficient_attention_backward(
+                torch.randn_like(out), *inputs.values(), None, out, None, None, 1, 1, lse, 0.0, seed, offset, 0, False
+            )
+
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
