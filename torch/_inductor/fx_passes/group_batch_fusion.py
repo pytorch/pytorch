@@ -10,7 +10,7 @@ import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -522,31 +522,39 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int | None, Any] | None:
+    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
         if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            weight_val = weight.meta["example_value"]
+            # An empty projection adds no GEMM columns or fusion benefit, but
+            # grouping it with non-empty projections can change its eager stride.
+            if not statically_known_true(weight_val.shape[0] > 0):
+                return None
             # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
             # fuse() calls torch.cat on the weight example_values, which fails for
             # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
             # do implement aten.cat (e.g. future torchao versions) still get fused.
-            weight_val = weight.meta.get("example_value", weight.meta.get("val"))
-            if weight_val is not None and type(weight_val) not in (
-                torch.Tensor,
-                FakeTensor,
-            ):
+            if type(weight_val) not in (torch.Tensor, FakeTensor):
                 try:
                     _ = torch.cat([weight_val[:1], weight_val[:1]], dim=0)
                 except (RuntimeError, TypeError):
                     return None
             bias_tensor = None
             if bias is not None:
-                bias_tensor = bias.meta.get("val", bias.meta.get("example_value"))
-            bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
-            group_key = ("batch_linear_lhs", bias_dim, input)
+                bias_tensor = bias.meta.get("example_value")
+                if (
+                    bias_tensor is None
+                    or bias_tensor.ndim != 1
+                    or not statically_known_true(
+                        bias_tensor.shape[0] == weight_val.shape[0]
+                    )
+                ):
+                    return None
+            group_key = ("batch_linear_lhs", bias is not None, input)
         else:
             group_key = None
         return group_key

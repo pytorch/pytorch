@@ -1,0 +1,61 @@
+import torch
+
+
+# =============================================================================
+# Proxy for inherited ops (from libtorch_agn_2_9, 2_10, 2_11, 2_12, 2_13, 2_14,
+# and 2_15 csrc/)
+#
+# Ops compiled from previous versions' csrc directories are accessible via
+# the module-level __getattr__. For example:
+#     libtorch_agn_2_16.ops.sgd_out_of_place(...)  # from 2.9
+#     libtorch_agn_2_16.ops.my_sum(...)            # from 2.10
+#
+# Ops defined in this package's csrc/ (e.g. my_add) are
+# registered on ``torch.ops.libtorch_agn_2_16`` and wrapped explicitly below.
+# =============================================================================
+
+_NAMESPACE = "libtorch_agn_2_16"
+
+
+def my_add(self, other, alpha=1.0) -> torch.Tensor:
+    """Stable ``add.Tensor`` (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
+
+
+def my_is_warn_always_enabled() -> bool:
+    """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
+
+
+def test_stable_torch_warn_once(value) -> None:
+    """
+    Tests STABLE_TORCH_WARN_ONCE with one call site for negative values and one
+    for non-negative values.
+
+    Args:
+        value: int - selects the call site
+    """
+    torch.ops.libtorch_agn_2_16.test_stable_torch_warn_once.default(value)
+
+
+def __getattr__(name):
+    """Proxy for inherited ops from previous versions."""
+    if name.startswith("_"):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    ops_namespace = getattr(torch.ops, _NAMESPACE)
+    op = getattr(ops_namespace, name, None)
+    if op is None:
+        raise AttributeError(f"No op named '{name}' in {_NAMESPACE}")
+    return op.default
+
+
+def __dir__():
+    """List all available ops (native + inherited)."""
+    native = [
+        name
+        for name in globals()
+        if not name.startswith("_") and callable(globals().get(name))
+    ]
+    ops_namespace = getattr(torch.ops, _NAMESPACE)
+    inherited = [n for n in dir(ops_namespace) if not n.startswith("_")]
+    return sorted(set(native + inherited))

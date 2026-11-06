@@ -20,9 +20,8 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
-from unittest import mock
+from typing import Any, Generic, Never, TYPE_CHECKING, TypeVar
+from typing_extensions import override, ParamSpec, Protocol, TypedDict, Unpack
 
 import torch._inductor.async_compile
 import torch.fx
@@ -62,6 +61,7 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
+from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -103,6 +103,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -126,7 +127,7 @@ from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import (
-    decompose_triton_kernel_wrapper_functional,
+    decompose_user_kernel_wrapper_functional,
     post_grad_passes,
     view_to_reshape,
 )
@@ -783,30 +784,31 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
-                # triton_kernel_wrapper_functional (a user-defined Triton kernel already
-                # in the model) has no inductor lowering; post_grad_passes normally
-                # decomposes it into its mutation form, which lowers to a
-                # UserDefinedTritonKernel and compiles into the AOT artifact. With
-                # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
-                # run just that decomposition -- it is a correctness pass, not an
-                # optimization -- so such kernels keep compiling instead of hard-erroring
-                # at lowering (the functional HOP is neither an OpOverload with a lowering
-                # nor serializable by the proxy executor). Gated on the graph actually
-                # containing one so a lite-mode graph without user Triton kernels -- the
-                # common case -- pays neither the pattern match nor the recompile.
+                # A user-kernel functional HOP (e.g. triton_kernel_wrapper_functional,
+                # a user-defined Triton kernel already in the model) has no inductor
+                # lowering; post_grad_passes normally decomposes it into its mutation
+                # form, which lowers to a UserDefined*Kernel and compiles into the AOT
+                # artifact. With post-grad passes disabled (e.g. lite mode /
+                # fallback_by_default), still run just that decomposition -- it is a
+                # correctness pass, not an optimization -- so such kernels keep
+                # compiling instead of hard-erroring at lowering (the functional HOP is
+                # neither an OpOverload with a lowering nor serializable by the proxy
+                # executor). Gated on the graph actually containing one so a lite-mode
+                # graph without user kernels -- the common case -- pays neither the
+                # pattern match nor the recompile.
                 #
                 # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
                 # mutation node" and relies on it to mark which clones are unnecessary,
-                # so without it every user Triton kernel pays a device-to-device copy.
-                if gm.graph.find_nodes(
-                    op="call_function",
-                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                # so without it every user kernel pays a device-to-device copy.
+                if any(
+                    gm.graph.find_nodes(op="call_function", target=info.functional)
+                    for info in user_kernel_hop_infos()
                 ):
                     from .fx_passes.reinplace import reinplace_inplaceable_ops
                     from .fx_utils import FakeTensorUpdater
 
                     reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
-                    decompose_triton_kernel_wrapper_functional(gm.graph)
+                    decompose_user_kernel_wrapper_functional(gm.graph)
                     gm.recompile()
                 return
 
@@ -965,7 +967,7 @@ def fake_tensor_prop(
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
-                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+                else allow_non_fake_inputs_temporarily(fake_mode)
             )
             with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -1601,7 +1603,7 @@ class _InProcessFxCompile(FxCompile):
 
             # lift the maximum depth of the Python interpreter stack
             # to adapt large/deep models
-            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 3000))
 
             _step_logger()(
                 logging.INFO,
@@ -2377,7 +2379,10 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
+    num_rng_states = max(
+        8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
+    )
+    graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
@@ -2594,7 +2599,7 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with allow_non_fake_inputs_temporarily(fake_mode):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -3038,6 +3043,11 @@ def compile_fx_backward(
             for i in candidate_idxs
             if placeholders[i].meta.get("is_static_input", True)
         ]
+
+        # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
+        # which can already be channels-last for convolution_backward (#197514).
+        _recursive_record_original_output_strides(gm)
+
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -3153,6 +3163,10 @@ def compile_fx(
     else:
         get_decomp_fn = select_decomp_table
 
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Inductor graph compilation")
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -3195,15 +3209,8 @@ def compile_fx(
             # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
             # emit a non-portable artifact.
             #
-            # NB cudagraphs is deliberately NOT refused here. Its device dependence
-            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
-            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
-            # artifact is not shared across ranks today: the FX graph cache key embeds the
-            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
-            # and that is what the device-agnostic launcher handles. Whoever makes the FX
-            # graph cache key device-agnostic must revisit device_idxs (and re-check that
-            # graph-partition functions still define _coor_device_idx in their own scope)
-            # before cudagraphs can ride on a shared artifact.
+            # cudagraphs is not refused: CompiledFxGraph.device_index() resolves its
+            # device at load time, so the shared artifact carries no rank's index.
             raise RuntimeError(
                 "compile-on-one-rank (device-as-parameter) is not supported with "
                 "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "

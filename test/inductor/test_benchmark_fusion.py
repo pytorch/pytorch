@@ -363,7 +363,7 @@ if HAS_GPU_AND_TRITON:
             out, code = run_and_get_code(torch.compile(f), a, b, bias)
             self.assertEqual(out, f(a, b, bias), atol=1e-1, rtol=1e-2)
             FileCheck().check("triton_tem_fused").check_count(
-                "async_compile.triton(", 1, exactly=True
+                "@triton.jit", 1, exactly=True
             ).run(code[0])
 
         @unittest.skipIf(

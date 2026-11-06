@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Resize.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ResizeCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
