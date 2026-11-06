@@ -308,8 +308,7 @@ static __global__ void chunk_cat_cuda_kernel(
     int64_t* pad_tensor_chunk_sizes,
     int64_t* num_blocks_per_tensor_chunk,
     int64_t slice_size,
-    int64_t chunk_size,
-    int64_t dst_to_src_ratio) {
+    int64_t chunk_size) {
   const int64_t slice_idx = blockIdx.z;
   const int64_t chunk_idx = blockIdx.y;
   const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
@@ -319,19 +318,20 @@ static __global__ void chunk_cat_cuda_kernel(
   const int64_t num_threads =
       num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
   const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
+  // Chunk sizes are in dst bytes; the same number of src elements may be
+  // wider or narrower.
+  const int64_t src_chunk_size =
+      pad_tensor_chunk_sizes[tensor_idx] / sizeof(dst_t) * sizeof(src_t);
   char* src_addr = reinterpret_cast<char**>(src)[tensor_idx] +
-      slice_idx * actual_tensor_sizes[tensor_idx] +
-      chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio;
+      slice_idx * actual_tensor_sizes[tensor_idx] + chunk_idx * src_chunk_size;
   char* dst_addr = reinterpret_cast<char*>(dst) + slice_idx * slice_size +
       chunk_idx * chunk_size + tensor_idx_to_start_tensor_bytes[tensor_idx];
   // Compute the actual number of bytes to copy from src.
   const int64_t actual_copy_size = std::min(
-      pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio,
+      src_chunk_size,
       std::max(
           (int64_t)0,
-          actual_tensor_sizes[tensor_idx] -
-              chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
-                  dst_to_src_ratio));
+          actual_tensor_sizes[tensor_idx] - chunk_idx * src_chunk_size));
   copy_chunk_with_pad<dst_t, src_t>(
       reinterpret_cast<dst_t*>(dst_addr),
       reinterpret_cast<src_t*>(src_addr),
@@ -363,21 +363,23 @@ void launch_chunk_cat(
           ptrs[5],
           ptrs[6],
           /*slice_size=*/num_chunks * chunk_size,
-          chunk_size,
-          /*dst_to_src_ratio=*/sizeof(dst_t) / sizeof(src_t));
+          chunk_size);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // Inputs already in out's dtype are copied by one launch, and cast_dtype inputs
-// into an fp32 out are cast by a second one. The output layout doesn't depend
-// on input dtypes, so both launches share one metadata upload and differ only
-// in their block_idx_to_tensor_idx ranges.
+// are cast by a second one: bf16 or fp16 into an fp32 out, or fp32 into a bf16
+// or fp16 out. The output layout doesn't depend on input dtypes, so both
+// launches share one metadata upload and differ only in their
+// block_idx_to_tensor_idx ranges.
 // start_block_idx_per_tensor_chunk is relative to each tensor's launch.
 // Each index into the first num_leading_dims[i] dims of tensors[i] is a
-// separate _chunk_cat input. Empty num_leading_dims means all zeros.
+// separate _chunk_cat input. Empty num_leading_dims means all zeros, and empty
+// padded_dim_sizes means ceil(size / num_chunks) rows per chunk.
 void fused_chunk_cat(
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
+    at::IntArrayRef padded_dim_sizes,
     int64_t num_chunks,
     at::ScalarType cast_dtype,
     at::Tensor& out) {
@@ -404,17 +406,21 @@ void fused_chunk_cat(
     const auto sizes = tensor.sizes();
     const int64_t dim = num_leading_dims.empty() ? 0 : num_leading_dims[i];
     const int64_t row_numel = c10::multiply_integers(sizes.slice(dim + 1));
+    const int64_t chunk_rows = padded_dim_sizes.empty()
+        ? div_up(sizes[dim], num_chunks)
+        : padded_dim_sizes[i] / num_chunks;
     const int64_t pad_tensor_chunk_size =
-        div_up(sizes[dim], num_chunks) * row_numel * out.element_size();
+        chunk_rows * row_numel * out.element_size();
     const int64_t actual_tensor_size =
         sizes[dim] * row_numel * tensor.element_size();
     const int64_t num_blocks = div_up(pad_tensor_chunk_size, BYTES_PER_BLOCK);
     auto& blocks =
         tensor.scalar_type() == out_dtype ? copy_blocks : cast_blocks;
-    // The cast launch below reads cast_dtype and writes fp32
+    // The cast launch below reads cast_dtype, and one of it and out is fp32
     TORCH_INTERNAL_ASSERT(
         tensor.scalar_type() == out_dtype ||
-        (tensor.scalar_type() == cast_dtype && out_dtype == at::kFloat));
+        (tensor.scalar_type() == cast_dtype &&
+         (out_dtype == at::kFloat) != (cast_dtype == at::kFloat)));
     const auto src = reinterpret_cast<int64_t>(tensor.const_data_ptr());
     const int64_t num_slices = c10::multiply_integers(sizes.slice(0, dim));
     for (const auto slice : c10::irange(num_slices)) {
@@ -452,9 +458,19 @@ void fused_chunk_cat(
     launch_chunk_cat<char, char>(
         ptrs, ptrs[1], num_copy_blocks, num_chunks, chunk_size, out);
   }
-  if (num_cast_blocks > 0) {
+  if (num_cast_blocks > 0 && out_dtype == at::kFloat) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(cast_dtype, "fused_chunk_cat", [&] {
       launch_chunk_cat<float, scalar_t>(
+          ptrs,
+          ptrs[1] + num_copy_blocks,
+          num_cast_blocks,
+          num_chunks,
+          chunk_size,
+          out);
+    });
+  } else if (num_cast_blocks > 0) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(out_dtype, "fused_chunk_cat", [&] {
+      launch_chunk_cat<scalar_t, float>(
           ptrs,
           ptrs[1] + num_copy_blocks,
           num_cast_blocks,
@@ -586,23 +602,28 @@ void all_gather_copy_out_cuda(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// Uniform groups without leading dims take the composite, which forwards them
-// to _chunk_cat. So do dim != 0, which FSDP doesn't use, and dtypes the fused
-// kernel can't cast.
+// Uniform groups without leading dims or padded dim sizes take the composite,
+// which forwards them to _chunk_cat. So do dim != 0, which FSDP doesn't use,
+// and dtypes the fused kernel can't cast.
 void chunk_cat_mixed_dtype_cuda(
     at::TensorList tensors,
     int64_t dim,
     int64_t num_chunks,
     at::Tensor& out,
-    at::OptionalIntArrayRef num_leading_dims) {
-  const bool leading_dims = has_leading_dims(num_leading_dims);
+    at::OptionalIntArrayRef num_leading_dims,
+    at::OptionalIntArrayRef padded_dim_sizes) {
+  const bool leading_dims =
+      has_leading_dims(num_leading_dims) || padded_dim_sizes.has_value();
   const auto out_dtype = out.scalar_type();
   const bool mixed_dtypes =
       std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.scalar_type() != tensors[0].scalar_type();
       });
   // The fused kernel copies inputs of out's dtype and casts at most one other
-  // dtype, bf16 or fp16, into an fp32 out.
+  // dtype: bf16 or fp16 into an fp32 out, or fp32 into a bf16 or fp16 out.
+  const auto reduced = [](at::ScalarType dtype) {
+    return dtype == at::kBFloat16 || dtype == at::kHalf;
+  };
   std::optional<at::ScalarType> cast_dtype;
   const bool fused_dtypes =
       std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
@@ -610,39 +631,49 @@ void chunk_cat_mixed_dtype_cuda(
         if (dtype == out_dtype) {
           return true;
         }
-        if (out_dtype != at::kFloat ||
-            (dtype != at::kBFloat16 && dtype != at::kHalf) ||
+        if (!((out_dtype == at::kFloat && reduced(dtype)) ||
+              (dtype == at::kFloat && reduced(out_dtype))) ||
             cast_dtype.value_or(dtype) != dtype) {
           return false;
         }
         cast_dtype = dtype;
         return true;
       });
+  // With padded dim sizes, an empty input is all padding
   const bool use_fused_kernel = (mixed_dtypes || leading_dims) &&
       fused_dtypes && dim == 0 && num_chunks >= 1 &&
       std::all_of(tensors.begin(),
                   tensors.end(),
-                  [](const at::Tensor& t) {
-                    return t.dim() > 0 && t.numel() > 0;
+                  [&](const at::Tensor& t) {
+                    return t.dim() > 0 &&
+                        (t.numel() > 0 || padded_dim_sizes.has_value());
                   }) &&
       !use_composite(tensors, out);
   if (!use_fused_kernel) {
-    chunk_cat_mixed_dtype(tensors, dim, num_chunks, out, num_leading_dims);
+    chunk_cat_mixed_dtype(
+        tensors, dim, num_chunks, out, num_leading_dims, padded_dim_sizes);
     return;
   }
   const auto fused_cast_dtype = cast_dtype.value_or(at::kBFloat16);
   if (!leading_dims) {
-    fused_chunk_cat(tensors, {}, num_chunks, fused_cast_dtype, out);
+    fused_chunk_cat(tensors, {}, {}, num_chunks, fused_cast_dtype, out);
     return;
   }
+  const auto dims = leading_dims_or_zeros(num_leading_dims, tensors.size());
   check_chunk_cat_leading_dims_inputs(
-      tensors, *num_leading_dims, num_chunks, out);
+      tensors, dims, num_chunks, out, padded_dim_sizes);
   // A chunked dim that num_chunks does not divide needs no special case:
-  // fused_chunk_cat sizes each chunk with div_up, and chunk_cat_cuda_kernel
-  // clamps each rank's copy and zero-fills the rest of its chunk.
+  // fused_chunk_cat sizes each chunk with div_up or from padded_dim_sizes, and
+  // chunk_cat_cuda_kernel clamps each rank's copy and zero-fills the rest of
+  // its chunk.
   auto chunks = out.view({num_chunks, -1});
   fused_chunk_cat(
-      tensors, *num_leading_dims, num_chunks, fused_cast_dtype, chunks);
+      tensors,
+      dims,
+      padded_dim_sizes.value_or(at::IntArrayRef{}),
+      num_chunks,
+      fused_cast_dtype,
+      chunks);
 }
 
 TORCH_LIBRARY_IMPL(fsdp, CUDA, m) {

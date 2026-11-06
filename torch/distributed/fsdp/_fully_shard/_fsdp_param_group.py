@@ -231,6 +231,11 @@ class FSDPParamGroup:
             )
             for param, module_info in zip(params, param_module_infos)
         ]
+        # Whether this rank pads a Shard(i), i > 0, shard for all-gathers, which
+        # foreach_all_gather can then do in its copy-in
+        self._needs_nonzero_dim_padding = any(
+            fsdp_param.needs_nonzero_dim_padding for fsdp_param in self.fsdp_params
+        )
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
@@ -491,6 +496,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                needs_nonzero_dim_padding=self._needs_nonzero_dim_padding,
             )
 
     @_disable_functorch_if_active

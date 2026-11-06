@@ -15,7 +15,8 @@ void chunk_cat_mixed_dtype_ad_inplace_or_view(
     int64_t dim,
     int64_t num_chunks,
     at::Tensor& out,
-    at::OptionalIntArrayRef num_leading_dims) {
+    at::OptionalIntArrayRef num_leading_dims,
+    at::OptionalIntArrayRef padded_dim_sizes) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("fsdp::chunk_cat_mixed_dtype", "")
                        .typed<void(
@@ -23,6 +24,7 @@ void chunk_cat_mixed_dtype_ad_inplace_or_view(
                            int64_t,
                            int64_t,
                            at::Tensor&,
+                           at::OptionalIntArrayRef,
                            at::OptionalIntArrayRef)>();
   {
     at::AutoDispatchBelowADInplaceOrView guard;
@@ -32,7 +34,8 @@ void chunk_cat_mixed_dtype_ad_inplace_or_view(
         dim,
         num_chunks,
         out,
-        num_leading_dims);
+        num_leading_dims,
+        padded_dim_sizes);
   }
   torch::autograd::impl::bump_version(out);
 }
@@ -41,9 +44,10 @@ void chunk_cat_with_leading_dims(
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
     int64_t num_chunks,
-    at::Tensor& out) {
+    at::Tensor& out,
+    at::OptionalIntArrayRef padded_dim_sizes) {
   check_chunk_cat_leading_dims_inputs(
-      tensors, num_leading_dims, num_chunks, out);
+      tensors, num_leading_dims, num_chunks, out, padded_dim_sizes);
   auto chunks = out.view({num_chunks, -1});
   c10::SymInt offset = 0;
   for (const auto i : c10::irange(tensors.size())) {
@@ -53,20 +57,23 @@ void chunk_cat_with_leading_dims(
     const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
     const auto& dim_size = sizes[dim];
     // Like torch.chunk, every rank's chunk spans ceil(dim_size / num_chunks)
-    // rows of the chunked dim; rows past the tensor are zero padding.
-    const auto chunk_rows = (dim_size + num_chunks - 1) / num_chunks;
+    // rows of the chunked dim, or padded_dim_sizes[i] / num_chunks if given;
+    // rows past the tensor are zero padding.
+    const auto chunk_rows = padded_dim_sizes.has_value()
+        ? c10::SymInt((*padded_dim_sizes)[i] / num_chunks)
+        : (dim_size + num_chunks - 1) / num_chunks;
     const auto row_numel = c10::multiply_integers(sizes.slice(dim + 1));
     const auto inner_size = chunk_rows * row_numel;
     auto chunk = chunks.narrow_symint(1, offset, outer_size * inner_size);
     offset += outer_size * inner_size;
     // copy_ casts to out's dtype
-    if (dim == 0) {
+    if (dim == 0 && !padded_dim_sizes.has_value()) {
       chunk.copy_(at::_chunk_cat(tensor, 0, num_chunks));
       continue;
     }
     // (num_chunks, outer_size, inner_size): each rank's rows of this input
     auto rank_chunks = chunk.view_symint({num_chunks, outer_size, inner_size});
-    if (dim_size % num_chunks == 0) {
+    if (dim_size == chunk_rows * num_chunks) {
       // One strided copy per input keeps traced graphs linear in inputs.
       rank_chunks.copy_(tensor.view_symint({outer_size, num_chunks, inner_size})
                             .transpose(0, 1));
@@ -74,9 +81,10 @@ void chunk_cat_with_leading_dims(
     }
     // Uneven: the first num_full ranks get chunk_rows rows each, the next one
     // gets the remaining tail_rows rows followed by padding, and any later
-    // ranks get only padding. dim_size > 0 here (an empty dim divides evenly),
-    // so chunk_rows > 0 and 1 <= num_full < num_chunks. A constant number of
-    // copies and fills per input keeps traced graphs linear in inputs.
+    // ranks get only padding. chunk_rows > 0 here (zero rows divide evenly),
+    // and num_full < num_chunks; num_full is 0 when padded_dim_sizes pads a
+    // single chunk. A constant number of copies and fills per input keeps
+    // traced graphs linear in inputs.
     const auto num_full = dim_size / chunk_rows;
     const auto tail_rows = dim_size - num_full * chunk_rows;
     const auto rows = tensor.view_symint({outer_size, dim_size * row_numel});
@@ -105,11 +113,21 @@ bool has_leading_dims(at::OptionalIntArrayRef num_leading_dims) {
       dims.begin(), dims.end(), [](int64_t dim) { return dim != 0; });
 }
 
+std::vector<int64_t> leading_dims_or_zeros(
+    at::OptionalIntArrayRef num_leading_dims,
+    size_t num_tensors) {
+  if (num_leading_dims.has_value() && !num_leading_dims->empty()) {
+    return num_leading_dims->vec();
+  }
+  return std::vector<int64_t>(num_tensors, 0);
+}
+
 void check_chunk_cat_leading_dims_inputs(
     at::TensorList tensors,
     at::IntArrayRef num_leading_dims,
     int64_t num_chunks,
-    const at::Tensor& out) {
+    const at::Tensor& out,
+    at::OptionalIntArrayRef padded_dim_sizes) {
   TORCH_CHECK_VALUE(
       num_chunks > 0, "expected positive num_chunks, but got ", num_chunks);
   TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty input tensor list");
@@ -120,6 +138,14 @@ void check_chunk_cat_leading_dims_inputs(
       " inputs and ",
       num_leading_dims.size(),
       " counts");
+  TORCH_CHECK_VALUE(
+      !padded_dim_sizes.has_value() ||
+          padded_dim_sizes->size() == tensors.size(),
+      "expected one padded dim size per input, but got ",
+      tensors.size(),
+      " inputs and ",
+      padded_dim_sizes.has_value() ? padded_dim_sizes->size() : 0,
+      " sizes");
   TORCH_CHECK_VALUE(
       out.layout() == at::kStrided,
       "expected a strided output, but got ",
@@ -162,22 +188,41 @@ void check_chunk_cat_leading_dims_inputs(
     const auto sizes = tensor.sym_sizes();
     const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
     // A chunked dim need not divide by num_chunks: like dim 0, it pads every
-    // rank's chunk to ceil(sizes[dim] / num_chunks) rows.
+    // rank's chunk to ceil(sizes[dim] / num_chunks) rows, or to
+    // padded_dim_sizes[i] / num_chunks rows if given.
+    auto chunk_rows = (sizes[dim] + num_chunks - 1) / num_chunks;
+    if (padded_dim_sizes.has_value()) {
+      const auto padded_dim_size = (*padded_dim_sizes)[i];
+      TORCH_CHECK_VALUE(
+          padded_dim_size % num_chunks == 0 && sizes[dim] <= padded_dim_size,
+          "expected a multiple of num_chunks (",
+          num_chunks,
+          ") of at least ",
+          sizes[dim],
+          " as padded dim size of input ",
+          i,
+          ", but got ",
+          padded_dim_size);
+      chunk_rows = padded_dim_size / num_chunks;
+    }
+    // With a padded dim size, an empty chunked dim is all padding
     if (tensor.sym_numel() == 0) {
       TORCH_CHECK_VALUE(
-          dim > 0 && outer_size == 0,
+          (dim > 0 && outer_size == 0) || padded_dim_sizes.has_value(),
           "expected input ",
           i,
-          " to be non-empty unless a leading dimension is empty, but got "
-          "shape ",
+          " to be non-empty unless a leading dimension is empty or its "
+          "padded dim size is given, but got shape ",
           sizes);
     } else {
       has_input = true;
     }
-    chunk_numel += (sizes[dim] + num_chunks - 1) / num_chunks * outer_size *
-        c10::multiply_integers(sizes.slice(dim + 1));
+    chunk_numel +=
+        chunk_rows * outer_size * c10::multiply_integers(sizes.slice(dim + 1));
   }
-  TORCH_CHECK_VALUE(has_input, "expected at least one non-empty input");
+  TORCH_CHECK_VALUE(
+      has_input || padded_dim_sizes.has_value(),
+      "expected at least one non-empty input");
   TORCH_CHECK_VALUE(
       out.sym_numel() == chunk_numel * num_chunks,
       "expected an output with ",
@@ -191,11 +236,19 @@ void chunk_cat_mixed_dtype(
     int64_t dim,
     int64_t num_chunks,
     at::Tensor& out,
-    at::OptionalIntArrayRef num_leading_dims) {
-  if (has_leading_dims(num_leading_dims)) {
+    at::OptionalIntArrayRef num_leading_dims,
+    at::OptionalIntArrayRef padded_dim_sizes) {
+  if (has_leading_dims(num_leading_dims) || padded_dim_sizes.has_value()) {
     TORCH_CHECK_VALUE(
-        dim == 0, "expected dim 0 with num_leading_dims, but got dim ", dim);
-    chunk_cat_with_leading_dims(tensors, *num_leading_dims, num_chunks, out);
+        dim == 0,
+        "expected dim 0 with num_leading_dims or padded_dim_sizes, but got dim ",
+        dim);
+    chunk_cat_with_leading_dims(
+        tensors,
+        leading_dims_or_zeros(num_leading_dims, tensors.size()),
+        num_chunks,
+        out,
+        padded_dim_sizes);
     return;
   }
   // _chunk_cat takes same-dtype inputs as is and casts during its copy-in
@@ -232,8 +285,11 @@ TORCH_LIBRARY_FRAGMENT(fsdp, m) {
   // keeping its leading dims in each chunk, as Shard(i) needs for i > 0. As
   // with dim 0, a dim that num_chunks does not divide is chunked like
   // torch.chunk and each rank's chunk is zero-padded to the same size.
+  // padded_dim_sizes[i], a multiple of num_chunks, sets the size the chunked
+  // dim of tensors[i] is zero-padded to, e.g. to pad a rank's own shard to the
+  // padded sharded size with num_chunks=1.
   m.def(
-      "chunk_cat_mixed_dtype(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out, int[]? num_leading_dims=None) -> ()");
+      "chunk_cat_mixed_dtype(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out, int[]? num_leading_dims=None, int[]? padded_dim_sizes=None) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(fsdp, CompositeExplicitAutograd, m) {

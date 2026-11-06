@@ -1685,11 +1685,13 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         self, mesh: DeviceMesh, reshard_after_forward: bool | int, native_copy: bool
     ):
         class FeedForward(nn.Module):
-            # Stacked gate and up projections, sharded on F like w2
+            # Stacked gate and up projections, sharded on F like w2. Scaled like
+            # nn.Linear, so activations stay O(1) and fp32 reduction-order
+            # differences stay within tolerance.
             def __init__(self, dim: int, hidden_dim: int):
                 super().__init__()
-                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim))
-                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim))
+                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim) / dim**0.5)
+                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim) / hidden_dim**0.5)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 gate, up = torch.einsum("bd,nfd->nbf", x, self.w13)
@@ -3427,6 +3429,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            **kwargs,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3438,6 +3441,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                **kwargs,
             )
 
         orig_foreach_reduce = foreach_reduce

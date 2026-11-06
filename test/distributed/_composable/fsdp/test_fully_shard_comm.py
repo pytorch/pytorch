@@ -436,6 +436,19 @@ def _padded_rank_major(tensor: torch.Tensor, dim: int, num_chunks: int):
     return torch.stack(rows)
 
 
+def _padded_rank_major_to(
+    tensor: torch.Tensor, dim: int, padded_dim_size: int, num_chunks: int
+):
+    """Like _padded_rank_major, but zero-pads dim to padded_dim_size first."""
+    padded_size = list(tensor.shape)
+    padded_size[dim] = padded_dim_size
+    padded = tensor.new_zeros(padded_size)
+    padded.narrow(dim, 0, tensor.size(dim)).copy_(tensor)
+    return torch.stack(
+        [chunk.flatten() for chunk in torch.chunk(padded, num_chunks, dim=dim)]
+    )
+
+
 class TestFullyShardChunkCatMixedDtype(TestCase):
     def test_numerics(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
@@ -619,6 +632,113 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
                 num_leading_dims=[1, 1],
             )
 
+    def test_padded_dim_sizes(self, device):
+        bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
+        # As in an all-gather copy-in (num_chunks=1): a short Shard(1) shard, an
+        # empty one, a dim-0 shard that is already padded and a short Shard(2)
+        # shard; then padding past ceil(size / num_chunks) with two chunks
+        sizes = [(2, 3, 4), (2, 0, 4), (12,), (3, 2, 1)]
+        num_leading_dims = [1, 1, 0, 2]
+        for num_chunks, padded_dim_sizes in ((1, [5, 5, 12, 3]), (2, [6, 2, 12, 4])):
+            # On CUDA: the fused kernel casting fp32 into bf16, copying, casting
+            # bf16 into fp32, then the composite fallback for two cast dtypes
+            for input_dtypes, out_dtype in (
+                ((fp32,) * 4, bf16),
+                ((fp32,) * 4, fp32),
+                ((bf16, fp32, bf16, fp32), fp32),
+                ((bf16, fp16, fp32, bf16), fp32),
+            ):
+                tensors = [
+                    torch.randn(size, device=device, dtype=dtype)
+                    for size, dtype in zip(sizes, input_dtypes)
+                ]
+                expected = torch.cat(
+                    [
+                        _padded_rank_major_to(t.to(out_dtype), dim, size, num_chunks)
+                        for t, dim, size in zip(
+                            tensors, num_leading_dims, padded_dim_sizes
+                        )
+                    ],
+                    dim=1,
+                )
+                # Padding must be written, not left from the buffer's old contents
+                out = torch.full_like(expected, float("nan"))
+                version = out._version
+                torch.ops.fsdp.chunk_cat_mixed_dtype(
+                    tensors,
+                    0,
+                    num_chunks,
+                    out=out,
+                    num_leading_dims=num_leading_dims,
+                    padded_dim_sizes=padded_dim_sizes,
+                )
+                self.assertEqual(out, expected, atol=0, rtol=0)
+                self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_kernels_with_padded_dim_sizes(self, device):
+        bf16, fp32 = torch.bfloat16, torch.float32
+        sizes = [(2, 3, 40), (2, 0, 40), (64,)]
+        num_leading_dims, padded_dim_sizes = [1, 1, 0], [5, 5, 64]
+        # One launch casts fp32 inputs into a bf16 out; inputs already in bf16
+        # take a second, copying launch
+        for input_dtypes, num_launches in (((fp32,) * 3, 1), ((bf16, fp32, bf16), 2)):
+            tensors = [
+                torch.randn(size, device=device, dtype=dtype)
+                for size, dtype in zip(sizes, input_dtypes)
+            ]
+            expected = torch.cat(
+                [
+                    _padded_rank_major_to(t.bfloat16(), dim, size, 1)
+                    for t, dim, size in zip(tensors, num_leading_dims, padded_dim_sizes)
+                ],
+                dim=1,
+            )
+            out = torch.full_like(expected, float("nan"))
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                torch.ops.fsdp.chunk_cat_mixed_dtype(
+                    tensors,
+                    0,
+                    1,
+                    out=out,
+                    num_leading_dims=num_leading_dims,
+                    padded_dim_sizes=padded_dim_sizes,
+                )
+                torch.cuda.synchronize()
+            chunk_cat_kernels = [
+                event.name
+                for event in prof.events()
+                if event.device_type == DeviceType.CUDA
+                and "chunk_cat_cuda_kernel" in event.name
+            ]
+            self.assertEqual(
+                len(chunk_cat_kernels), num_launches, str(chunk_cat_kernels)
+            )
+            self.assertEqual(out, expected, atol=0, rtol=0)
+
+    def test_padded_dim_sizes_invalid_inputs(self, device):
+        tensor = torch.randn((2, 3, 4), device=device)
+        # Padded sizes must hold the dim and divide into num_chunks
+        for num_chunks, padded_dim_size in ((1, 2), (2, 5)):
+            with self.assertRaisesRegex(ValueError, "as padded dim size of input 0"):
+                torch.ops.fsdp.chunk_cat_mixed_dtype(
+                    [tensor],
+                    0,
+                    num_chunks,
+                    out=torch.empty(2 * padded_dim_size * 4, device=device),
+                    num_leading_dims=[1],
+                    padded_dim_sizes=[padded_dim_size],
+                )
+        with self.assertRaisesRegex(ValueError, "one padded dim size per input"):
+            torch.ops.fsdp.chunk_cat_mixed_dtype(
+                [tensor],
+                0,
+                1,
+                out=torch.empty(2 * 4 * 4, device=device),
+                num_leading_dims=[1],
+                padded_dim_sizes=[4, 4],
+            )
+
 
 instantiate_device_type_tests(
     TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
@@ -691,6 +811,16 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
             torch.ops.fsdp.chunk_cat_mixed_dtype.default,
             (tensors, 0, num_chunks),
             {"out": packed.repeat(1, 2), "num_leading_dims": [1, 1]},
+        )
+        # A shard padded to 9 rows, as in an all-gather copy-in
+        torch.library.opcheck(
+            torch.ops.fsdp.chunk_cat_mixed_dtype.default,
+            ([tensor], 0, 1),
+            {
+                "out": tensor.new_empty((1, outer_size * 9 * 3)),
+                "num_leading_dims": [1],
+                "padded_dim_sizes": [9],
+            },
         )
 
     @dtypes(torch.float32, torch.bfloat16)
@@ -1213,6 +1343,50 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
         with self.assertRaisesRegex(NotImplementedError, "not supported for DTensor"):
             fsdp_param.to_sharded_post_forward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_copy_in_pads_uneven_shards(self):
+        # Over 4 ranks, ranks 0-2 hold full shards of every parameter. Rank 3
+        # holds 1 of 2 columns of the first weight, no bias row and no column
+        # of the second weight, so only it pads, in one native copy-in that
+        # also casts to bf16.
+        padded_dim_sizes: list[list[int]] = []
+
+        class RecordPaddedCopyIns(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default and (
+                    sizes := kwargs.get("padded_dim_sizes")
+                ):
+                    padded_dim_sizes.append(sizes)
+                return func(*args, **kwargs)
+
+        ref_model = nn.Sequential(
+            nn.Linear(7, 3, device=device), nn.Linear(3, 2, bias=False, device=device)
+        )
+        with torch.no_grad():
+            for i, param in enumerate(ref_model.parameters()):
+                param.copy_(torch.arange(param.numel(), device=device).view_as(param))
+                param.div_(10 * (i + 1))
+        model = copy.deepcopy(ref_model)
+        fully_shard(
+            model,
+            shard_placement_fn=lambda param: Shard(1) if param.ndim == 2 else None,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        inp = torch.arange(14.0, device=device).view(2, 7)
+        with RecordPaddedCopyIns():
+            output = model(inp)
+        expected = inp.bfloat16()
+        for module in ref_model:
+            expected = F.linear(
+                expected,
+                module.weight.bfloat16(),
+                None if module.bias is None else module.bias.bfloat16(),
+            )
+        self.assertEqual(output, expected, atol=0, rtol=0)
+        # Each padded weight pads its sharded dim, the bias is copied as stored
+        self.assertEqual(padded_dim_sizes, [[2, 1, 1]] if self.rank == 3 else [])
 
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_input_fn_setter(self):
