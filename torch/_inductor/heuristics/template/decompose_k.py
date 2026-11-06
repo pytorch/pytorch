@@ -16,7 +16,11 @@ from ...kernel.decompose_k import (
     effective_two_ctas,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import get_k_splits, use_triton_blackwell_tma_template
+from ...utils import (
+    dynamic_k_decompose_k_splits,
+    get_k_splits,
+    use_triton_blackwell_tma_template,
+)
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -92,12 +96,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         if "ATEN" in bmm_backends:
-            aten_k_splits = exact_k_splits
-            if dynamic_k:
-                # decomposeK runs the K rows a split leaves over as a separate
-                # MM. Like get_k_splits for a static K, keep K / k_split >= 128.
-                k_hint = V.graph.sizevars.optimization_hint(k)
-                aten_k_splits = [s for s in k_splits if k_hint // s >= 128]
+            # decomposeK runs the K rows a split leaves over as a separate MM.
+            aten_k_splits = (
+                dynamic_k_decompose_k_splits(m, n, k) if dynamic_k else exact_k_splits
+            )
             for k_split in aten_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 

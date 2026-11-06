@@ -2272,7 +2272,7 @@ class TestMaxAutotune(TestCase):
                     }
                 ),
             ):
-                for i, k in enumerate((16384, 16391, 16385, 20011)):
+                for i, k in enumerate((16384, 16391, 16385, 20011, 3001)):
                     x = torch.randn(k, M, device=GPU_TYPE, dtype=torch.float32)
                     y = torch.randn(k, N, device=GPU_TYPE, dtype=torch.float32)
                     if i == 0:
