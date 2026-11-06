@@ -6950,6 +6950,75 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps
+    def test_forward_refine_hook_receives_lowering_context(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.contexts = []
+
+            def refine_flex_attention_fwd_configs(self, configs, context):
+                self.contexts.append(context)
+                return configs
+
+        def lowering_context(query, key, value, **kwargs):
+            choices = RecordingChoices()
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+            ):
+                torch.compile(flex_attention, fullgraph=True)(
+                    query, key, value, **kwargs
+                )
+            self.assertEqual(len(choices.contexts), 1)
+            return choices.contexts[0]
+
+        shape = (1, 2, 256, 64)
+        query, key, value = (
+            torch.randn(shape, device=device, dtype=torch.float16) for _ in range(3)
+        )
+        dense = lowering_context(query, key, value)
+        self.assertTrue(dense.is_noop_block_mask)
+        self.assertTrue(dense.inputs_contiguous)
+        self.assertFalse(dense.score_mod_reads_buffers)
+        self.assertEqual(
+            (dense.dtype, dense.key_dtype, dense.value_dtype), (torch.float16,) * 3
+        )
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal, 1, 1, 256, 256, device=device)
+        self.assertFalse(
+            lowering_context(
+                query, key, value, block_mask=block_mask
+            ).is_noop_block_mask
+        )
+
+        bias = torch.randn(256, device=device, dtype=torch.float16)
+
+        def add_bias(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        self.assertTrue(
+            lowering_context(
+                query, key, value, score_mod=add_bias
+            ).score_mod_reads_buffers
+        )
+
+        transposed = (
+            torch.randn(1, 256, 2, 64, device=device, dtype=torch.float16).transpose(
+                1, 2
+            )
+            for _ in range(3)
+        )
+        self.assertFalse(lowering_context(*transposed).inputs_contiguous)
+
+    @supported_platform
+    @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_backward_calls_flex_attention_backward_choices_hook(self, device):
         from torch._inductor.choices import InductorChoices
