@@ -777,7 +777,9 @@ class CppFakeTensorMode:
     # torch/csrc/FakeTensorMode.cpp.
     __slots__ = ("_cpp_mode", "enter_stack", "old_dispatch_mode_flags", "__weakref__")
 
-    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
+    def __init__(
+        self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
+    ) -> None:
         import torch._functorch.config
 
         self.enter_stack: list[_FakeModeEnterRecord] = []
@@ -787,6 +789,7 @@ class CppFakeTensorMode:
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         converter = FakeTensorConverter(copy_data=copy_data)
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
+        self.allow_non_fake_inputs = allow_non_fake_inputs
 
     @classmethod
     def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
@@ -813,6 +816,14 @@ class CppFakeTensorMode:
     @epoch.setter
     def epoch(self, value: int) -> None:
         self._cpp_mode.epoch = value
+
+    @property
+    def allow_non_fake_inputs(self) -> bool:
+        return self._cpp_mode.allow_non_fake_inputs
+
+    @allow_non_fake_inputs.setter
+    def allow_non_fake_inputs(self, value: bool) -> None:
+        self._cpp_mode.allow_non_fake_inputs = value
 
     # Same as FakeTensorMode.avoid_device_init
     @property
@@ -1259,7 +1270,7 @@ def init_gpu_context(device: torch.device) -> None:
 # property (it has no deleter). Save and restore the value instead.
 @contextlib.contextmanager
 def allow_non_fake_inputs_temporarily(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
 ) -> Generator[None, None, None]:
     if fake_mode is None:
         yield

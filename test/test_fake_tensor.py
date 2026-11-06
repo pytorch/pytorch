@@ -6090,13 +6090,35 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode._cpp_mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
 
+    def test_cpp_fake_tensor_mode_settings(self):
+        from torch._subclasses.fake_tensor import (
+            allow_non_fake_inputs_temporarily,
+            CppFakeTensorMode,
+        )
+
+        # Defaults to False, like FakeTensorMode, and is stored on the C++ mode
+        self.assertFalse(self._make_mode()[0].allow_non_fake_inputs)
+        self.assertFalse(CppFakeTensorMode().allow_non_fake_inputs)
+        mode = CppFakeTensorMode(allow_non_fake_inputs=True)
+        self.assertTrue(mode._cpp_mode.allow_non_fake_inputs)
+        mode.allow_non_fake_inputs = False
+        self.assertFalse(mode._cpp_mode.allow_non_fake_inputs)
+        with allow_non_fake_inputs_temporarily(mode):
+            self.assertTrue(mode.allow_non_fake_inputs)
+        self.assertFalse(mode.allow_non_fake_inputs)
+        # Restored when the body raises too
+        with self.assertRaises(ValueError):
+            with allow_non_fake_inputs_temporarily(mode):
+                raise ValueError
+        self.assertFalse(mode.allow_non_fake_inputs)
+
     @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
         self.addCleanup(self._restore_fake_mode_state)
         shape_env = ShapeEnv()
-        mode = CppFakeTensorMode(shape_env=shape_env)
+        mode = CppFakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
         cpp_mode, converter = mode._cpp_mode, mode.fake_tensor_converter
         mode.epoch += 2
         epoch = mode.epoch
@@ -6114,6 +6136,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(rebuilt.fake_tensor_converter, converter)
         self.assertIs(rebuilt.shape_env, shape_env)
         self.assertEqual(rebuilt.epoch, epoch)
+        self.assertTrue(rebuilt.allow_non_fake_inputs)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
         with rebuilt:
             self.assertEqual(self._installed(), (rebuilt, True))
