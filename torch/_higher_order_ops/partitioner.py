@@ -1,4 +1,5 @@
 import logging
+import operator
 from collections.abc import Callable
 from typing import Any
 
@@ -287,6 +288,31 @@ class HopJointGraph:
         self.joint_gm.graph.lint()
         self.joint_gm.recompile()
 
+    def _mark_rng_ops_as_must_save(self) -> None:
+        """
+        Save the output of random ops that checkpoint marked for recompute.
+
+        Recomputing one needs the forward's RNG state in the backward body, and
+        the HOP has no way to pass it per step. Saving the output keeps the
+        backward on the forward's sample, e.g. the same dropout mask.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            is_rng_op,
+            must_recompute,
+        )
+
+        def mark(n: torch.fx.Node) -> None:
+            n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            # A multi-output op (e.g. native_dropout) is saved through its getitems.
+            for user in n.users:
+                if user.target is operator.getitem:
+                    mark(user)
+
+        for n in self.joint_gm.graph.nodes:
+            if n.op == "call_function" and must_recompute(n) and is_rng_op(n):
+                mark(n)
+
     def partition(
         self, partition_fn: Callable, always_recompute_complex_exprs: bool
     ) -> HopPartitionedGraph:
@@ -298,6 +324,7 @@ class HopJointGraph:
 
         if always_recompute_complex_exprs:
             self._mark_complex_exprs_as_must_recompute()
+        self._mark_rng_ops_as_must_save()
 
         fw_gm, bw_gm = partition_fn(
             self.joint_gm, None, num_fwd_outputs=self.n_fw_outputs
