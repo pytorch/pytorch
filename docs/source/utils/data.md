@@ -21,7 +21,7 @@ DataLoader(dataset, batch_size=1, shuffle=False, sampler=None,
            batch_sampler=None, num_workers=0, collate_fn=None,
            pin_memory=False, drop_last=False, timeout=0,
            worker_init_fn=None, *, prefetch_factor=2,
-           persistent_workers=False)
+           persistent_workers=False, worker_startup_threads=1)
 ```
 
 The sections below describe in details the effects and usages of these options.
@@ -361,6 +361,46 @@ are compatible with Windows while using multi-process data loading:
   or {attr}`dataset` code is declared as top level definitions, outside of the
   `__main__` check. This ensures that they are available in worker processes.
   (this is needed since functions are pickled as references only, not `bytecode`.)
+
+#### Concurrent worker startup
+
+By default, {class}`~torch.utils.data.DataLoader` starts workers sequentially
+in the thread that creates the iterator. With the `spawn` start method on any
+platform, you can opt into concurrent startup:
+
+```python
+if __name__ == "__main__":
+    loader = DataLoader(dataset, num_workers=8, multiprocessing_context="spawn",
+                        worker_startup_threads=4, persistent_workers=True)
+    for batch in loader:
+        ...
+```
+
+{attr}`worker_startup_threads` must be a positive integer. Values greater than
+`1` require `num_workers > 0` and use at most
+`min(worker_startup_threads, num_workers)` background threads to call
+`Process.start()`. The effective start method is checked when the iterator is
+created, including when {attr}`multiprocessing_context` is `None`. `fork` and
+`forkserver` are not supported with this option; they are not silently replaced
+with `spawn`.
+
+Concurrent startup can help when sending large serialized worker arguments
+blocks until newly spawned workers finish importing modules. It may not help
+with small arguments, and starting more workers at once can increase peak
+memory use and CPU contention. It does not change batch ordering, worker IDs,
+or worker seeding. {attr}`persistent_workers` still avoids restarting workers
+for later iterations of the same loader.
+
+:::{warning}
+With `worker_startup_threads > 1`, the {attr}`dataset`, {attr}`collate_fn`,
+{attr}`worker_init_fn`, and objects they reference can be serialized concurrently
+on multiple background threads in the parent process. Custom serialization
+hooks, such as `__getstate__` and `__reduce__`, must be thread-safe even when
+called concurrently on the same object, and must not require main-thread
+affinity. Worker initialization, collation, and data fetching still execute in
+the worker processes. Leave `worker_startup_threads=1` if serialization requires
+sequential execution or the calling thread.
+:::
 
 
 (data-loading-randomness)=

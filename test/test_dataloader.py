@@ -13,9 +13,11 @@ import os
 import signal
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import warnings
+from pickle import PicklingError
 from unittest import mock
 
 import torch
@@ -28,6 +30,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -781,6 +784,53 @@ class SeedDataset(Dataset):
 
     def __len__(self):
         return self.size
+
+
+class StartupSerializationDataset(Dataset):
+    def __init__(self, on_serialize):
+        self.on_serialize = on_serialize
+
+    def __getstate__(self):
+        self.on_serialize()
+        return {"on_serialize": None}
+
+    def __len__(self):
+        return 8
+
+    def __getitem__(self, index):
+        return index
+
+
+class StartupSharedDataset(Dataset):
+    def __init__(self):
+        self.data = torch.arange(8)
+        self.alias = self.data.view_as(self.data)
+        self.initializations = mp.Value("i", 0)
+        self.ready = mp.Barrier(2)
+        self.initialized_worker_id = -1
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        info = torch.utils.data.get_worker_info()
+        return (
+            self.data[index],
+            self.alias[index],
+            info.id,
+            info.seed,
+            os.getpid(),
+            self.initialized_worker_id,
+        )
+
+
+def startup_worker_init(worker_id):
+    dataset = torch.utils.data.get_worker_info().dataset
+    dataset.initialized_worker_id = worker_id
+    with dataset.initializations.get_lock():
+        dataset.initializations.value += 1
+        dataset.data[worker_id] += 100
+    dataset.ready.wait(timeout=JOIN_TIMEOUT)
 
 
 class WorkerSpecificIterableDataset(IterableDataset):
@@ -2960,6 +3010,573 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+@instantiate_parametrized_tests
+@unittest.skipIf(TEST_WITH_TSAN, "Threaded multiprocessing is not supported with TSAN")
+@unittest.skipIf(TEST_WITH_ASAN, "DataLoader tests hang with ASAN")
+class TestDataLoaderWorkerStartup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _assert_shutdown(self, iterator):
+        self.assertTrue(iterator._shutdown)
+        self.assertFalse(iterator._worker_pids_set)
+        self.assertTrue(iterator._workers_done_event.is_set())
+        self.assertTrue(iterator._worker_result_queue._closed)
+        self.assertTrue(all(q._closed for q in iterator._index_queues))
+        for worker in iterator._workers:
+            self.assertFalse(worker.is_alive())
+            if worker.pid is not None:
+                self.assertIsNotNone(worker.exitcode)
+
+    @parametrize("value", [None, True, False, 1.5, "2"])
+    def test_argument_type(self, value):
+        with self.assertRaisesRegex(TypeError, "must be a positive integer"):
+            DataLoader(range(8), worker_startup_threads=value)
+
+    @parametrize("value", [0, -1])
+    def test_argument_range(self, value):
+        with self.assertRaisesRegex(ValueError, "must be a positive integer"):
+            DataLoader(range(8), worker_startup_threads=value)
+
+    def test_no_workers(self):
+        loader = DataLoader(range(8), batch_size=None)
+        self.assertEqual(loader.worker_startup_threads, 1)
+        self.assertEqual(list(loader), list(range(8)))
+        self.assertEqual(
+            list(DataLoader(range(8), batch_size=None, worker_startup_threads=1)),
+            list(range(8)),
+        )
+        with self.assertRaisesRegex(ValueError, "requires num_workers > 0"):
+            DataLoader(range(8), worker_startup_threads=2)
+
+    @parametrize("method", torch.multiprocessing.get_all_start_methods())
+    @parametrize("as_context", [False, True])
+    @parametrize("worker_startup_threads", [1, 2])
+    def test_explicit_context(self, method, as_context, worker_startup_threads):
+        context = torch.multiprocessing.get_context(method) if as_context else method
+        loader = DataLoader(
+            range(8),
+            num_workers=1,
+            multiprocessing_context=context,
+            worker_startup_threads=worker_startup_threads,
+        )
+        with mock.patch.object(
+            dataloader, "_MultiProcessingDataLoaderIter", return_value=iter(())
+        ) as iterator:
+            if worker_startup_threads > 1 and method != "spawn":
+                with self.assertRaisesRegex(ValueError, "requires the 'spawn'"):
+                    iter(loader)
+                iterator.assert_not_called()
+            else:
+                self.assertEqual(list(loader), [])
+                iterator.assert_called_once_with(loader)
+
+    @parametrize("method", ["spawn", "fork", "forkserver"])
+    def test_runtime_default_context(self, method):
+        loader = DataLoader(range(8), num_workers=1, worker_startup_threads=2)
+        with (
+            mock.patch.object(
+                torch.multiprocessing, "get_start_method", return_value=method
+            ),
+            mock.patch.object(
+                dataloader, "_MultiProcessingDataLoaderIter", return_value=iter(())
+            ) as iterator,
+        ):
+            if method == "spawn":
+                self.assertEqual(list(loader), [])
+                iterator.assert_called_once_with(loader)
+            else:
+                with self.assertRaisesRegex(ValueError, "requires the 'spawn'"):
+                    iter(loader)
+                iterator.assert_not_called()
+
+    @parametrize(
+        "num_workers,worker_startup_threads",
+        [(4, None), (4, 1), (4, 2), (4, 8), (1, 8)],
+    )
+    def test_overlapping_starts(self, num_workers, worker_startup_threads):
+        concurrency = min(worker_startup_threads or 1, num_workers)
+        barrier = threading.Barrier(concurrency, timeout=JOIN_TIMEOUT)
+        second_started = threading.Event()
+        current_worker = threading.local()
+        lock = threading.Lock()
+        workers = {}
+        starter_threads = set()
+        completed = []
+        active = 0
+        peak = 0
+        original_start = mp.Process.start
+
+        def on_serialize():
+            # Synchronize inside the real Process.start(), not a timing estimate.
+            barrier.wait()
+            if concurrency > 1 and current_worker.id == 0:
+                if not second_started.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("Worker 1 did not finish starting")
+
+        def start(worker):
+            nonlocal active, peak
+            worker_id = worker._args[10]
+            current_worker.id = worker_id
+            with lock:
+                workers[worker_id] = worker
+                starter_threads.add(threading.current_thread())
+                active += 1
+                peak = max(peak, active)
+            try:
+                original_start(worker)
+                with lock:
+                    completed.append(worker_id)
+                if worker_id == 1:
+                    second_started.set()
+            finally:
+                with lock:
+                    active -= 1
+
+        kwargs = {}
+        if worker_startup_threads is not None:
+            kwargs["worker_startup_threads"] = worker_startup_threads
+        loader = DataLoader(
+            StartupSerializationDataset(on_serialize),
+            num_workers=num_workers,
+            multiprocessing_context=mp,
+            timeout=JOIN_TIMEOUT,
+            **kwargs,
+        )
+        with mock.patch.object(mp.Process, "start", start):
+            iterator = iter(loader)
+        try:
+            self.assertEqual(peak, concurrency)
+            self.assertEqual(
+                iterator._workers, [workers[i] for i in range(num_workers)]
+            )
+            if worker_startup_threads in (None, 1):
+                self.assertEqual(starter_threads, {threading.current_thread()})
+            else:
+                self.assertNotIn(threading.current_thread(), starter_threads)
+                self.assertTrue(all(not thread.is_alive() for thread in starter_threads))
+            if concurrency > 1:
+                self.assertNotEqual(completed[0], 0)
+            self.assertEqual(torch.cat(list(iterator)), torch.arange(8))
+        finally:
+            iterator._shutdown_workers()
+
+    @parametrize("worker_startup_threads", [1, 2])
+    def test_shared_state_and_persistent_workers(self, worker_startup_threads):
+        dataset = StartupSharedDataset()
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=worker_startup_threads,
+            worker_init_fn=startup_worker_init,
+            generator=torch.Generator().manual_seed(42),
+            persistent_workers=True,
+            timeout=JOIN_TIMEOUT,
+        )
+        iterator = iter(loader)
+        pids = [worker.pid for worker in iterator._workers]
+        expected = torch.arange(8)
+        expected[:2] += 100
+        worker_ids = [0, 0, 1, 1, 0, 0, 1, 1]
+        try:
+            expected_seed = (
+                torch.empty((), dtype=torch.int64)
+                .random_(generator=torch.Generator().manual_seed(42))
+                .item()
+            )
+            self.assertEqual(iterator._base_seed, expected_seed)
+            for epoch in range(2):
+                if epoch > 0:
+                    self.assertIs(iter(loader), iterator)
+                batches = list(iterator)
+                data, aliases, ids, seeds, worker_pids, initialized_ids = (
+                    torch.cat(field) for field in zip(*batches)
+                )
+                self.assertEqual(data, expected)
+                self.assertEqual(aliases, expected)
+                self.assertEqual(ids.tolist(), worker_ids)
+                self.assertEqual(
+                    seeds.tolist(),
+                    [iterator._base_seed + worker_id for worker_id in worker_ids],
+                )
+                self.assertEqual(
+                    worker_pids.tolist(),
+                    [pids[worker_id] for worker_id in worker_ids],
+                )
+                self.assertEqual(initialized_ids.tolist(), worker_ids)
+                self.assertEqual(dataset.initializations.value, 2)
+                self.assertEqual(dataset.data, expected)
+                self.assertEqual(dataset.alias, expected)
+        finally:
+            iterator._shutdown_workers()
+        self.assertTrue(all(not worker.is_alive() for worker in iterator._workers))
+
+    def test_persistent_iterable_workers(self):
+        loader = DataLoader(
+            WorkerSpecificIterableDataset([0, 4]),
+            batch_size=None,
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=2,
+            persistent_workers=True,
+            timeout=JOIN_TIMEOUT,
+        )
+        iterator = iter(loader)
+        try:
+            self.assertEqual(list(iterator), list(range(4)))
+            self.assertIs(iter(loader), iterator)
+            self.assertEqual(list(iterator), list(range(4)))
+        finally:
+            iterator._shutdown_workers()
+
+    @parametrize("kind", ["iter", "map"])
+    def test_datapipe(self, kind):
+        if kind == "iter":
+            dataset = dp.iter.IterableWrapper(range(8)).sharding_filter()
+        else:
+            dataset = dp.map.SequenceWrapper(range(8))
+        loader = DataLoader(
+            dataset,
+            batch_size=None,
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=2,
+            timeout=JOIN_TIMEOUT,
+        )
+        self.assertEqual(list(loader), list(range(8)))
+
+    @parametrize("worker_startup_threads", [1, 2])
+    @parametrize("after_start", [False, True])
+    @parametrize("persistent_workers", [False, True])
+    def test_partial_start_failure(
+        self, worker_startup_threads, after_start, persistent_workers
+    ):
+        original_start = mp.Process.start
+        other_started = threading.Event()
+        starter_threads = set()
+        error = RuntimeError("worker startup failure")
+        failed_worker = 1 if worker_startup_threads == 1 else 0
+
+        def start(worker):
+            worker_id = worker._args[10]
+            starter_threads.add(threading.current_thread())
+            if worker_id == failed_worker:
+                if not other_started.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("Other worker did not start")
+                if after_start:
+                    original_start(worker)
+                raise error
+            original_start(worker)
+            other_started.set()
+
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context=mp,
+            worker_startup_threads=worker_startup_threads,
+            persistent_workers=persistent_workers,
+        )
+        iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+            dataloader._MultiProcessingDataLoaderIter
+        )
+        try:
+            with (
+                mock.patch.object(mp.Process, "start", start),
+                self.assertRaisesRegex(RuntimeError, "worker startup failure") as caught,
+            ):
+                iterator.__init__(loader)
+            self.assertIs(caught.exception, error)
+            self._assert_shutdown(iterator)
+            for thread in starter_threads:
+                if thread is not threading.current_thread():
+                    self.assertFalse(thread.is_alive())
+        finally:
+            iterator._shutdown_workers()
+
+    @parametrize("worker_startup_threads", [1, 2])
+    @parametrize("failure", ["queue_feeder", "worker_join"])
+    def test_startup_error_with_cleanup_failure(self, worker_startup_threads, failure):
+        original_start = mp.Process.start
+        original_join = mp.Process.join
+        original_thread_start = threading.Thread.start
+        other_started = threading.Event()
+        cleanup_failed = threading.Event()
+        startup_error = ValueError("worker startup failure")
+        cleanup_error = RuntimeError("worker cleanup failure")
+
+        def start(worker):
+            if worker._args[10] == 1:
+                if not other_started.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("Other worker did not start")
+                raise startup_error
+            original_start(worker)
+            other_started.set()
+
+        def start_thread(thread):
+            if failure == "queue_feeder" and thread.name == "QueueFeederThread":
+                cleanup_failed.set()
+                raise cleanup_error
+            return original_thread_start(thread)
+
+        def join(worker, *args, **kwargs):
+            if failure == "worker_join" and not cleanup_failed.is_set():
+                cleanup_failed.set()
+                raise cleanup_error
+            return original_join(worker, *args, **kwargs)
+
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context=mp,
+            worker_startup_threads=worker_startup_threads,
+        )
+        iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+            dataloader._MultiProcessingDataLoaderIter
+        )
+        try:
+            with (
+                mock.patch.object(mp.Process, "start", start),
+                mock.patch.object(mp.Process, "join", join),
+                mock.patch.object(threading.Thread, "start", start_thread),
+                self.assertRaisesRegex(ValueError, "worker startup failure") as caught,
+            ):
+                iterator.__init__(loader)
+            self.assertTrue(cleanup_failed.is_set())
+            self.assertIs(caught.exception, startup_error)
+            self.assertIs(caught.exception.__cause__, cleanup_error)
+            self.assertIsNotNone(iterator._workers[0].pid)
+            self.assertIsNone(iterator._workers[1].pid)
+            self._assert_shutdown(iterator)
+        finally:
+            iterator._shutdown_workers()
+            for q in (iterator._worker_result_queue, *iterator._index_queues):
+                q.close()
+
+    def test_executor_thread_creation_failure_cancels_pending_start(self):
+        original_start = mp.Process.start
+        original_thread_start = threading.Thread.start
+        original_shutdown = dataloader.ThreadPoolExecutor.shutdown
+        original_shutdown_workers = (
+            dataloader._MultiProcessingDataLoaderIter._shutdown_workers
+        )
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        recovery_started = threading.Event()
+        starter_threads = []
+        started_workers = []
+        late_starts = []
+        pending_at_shutdown = []
+        joined_before_cleanup = []
+        error = RuntimeError("startup thread creation failure")
+
+        def start(worker):
+            worker_id = worker._args[10]
+            started_workers.append(worker_id)
+            if recovery_started.is_set():
+                late_starts.append(worker_id)
+            if worker_id == 0:
+                first_entered.set()
+                if not release_first.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("First starter was not released")
+            original_start(worker)
+
+        def start_thread(thread):
+            if thread.name.startswith("ThreadPoolExecutor-"):
+                starter_threads.append(thread)
+                if len(starter_threads) == 2:
+                    if not first_entered.wait(JOIN_TIMEOUT):
+                        raise RuntimeError("First starter did not enter")
+                    raise error
+            return original_thread_start(thread)
+
+        def shutdown(executor, wait=True, *, cancel_futures=False):
+            recovery_started.set()
+            pending_at_shutdown.append(executor._work_queue.qsize())
+            # Keep the first task blocked until the real shutdown has handled
+            # queued work, including the submission whose future never returned.
+            try:
+                original_shutdown(executor, wait=False, cancel_futures=cancel_futures)
+            finally:
+                release_first.set()
+            original_shutdown(executor, wait=wait)
+
+        def shutdown_workers(current):
+            if current is iterator:
+                joined_before_cleanup.append(
+                    all(not thread.is_alive() for thread in starter_threads)
+                )
+            original_shutdown_workers(current)
+
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context=mp,
+            worker_startup_threads=2,
+        )
+        iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+            dataloader._MultiProcessingDataLoaderIter
+        )
+        try:
+            with (
+                mock.patch.object(mp.Process, "start", start),
+                mock.patch.object(threading.Thread, "start", start_thread),
+                mock.patch.object(dataloader.ThreadPoolExecutor, "shutdown", shutdown),
+                mock.patch.object(
+                    dataloader._MultiProcessingDataLoaderIter,
+                    "_shutdown_workers",
+                    shutdown_workers,
+                ),
+                self.assertRaisesRegex(
+                    RuntimeError, "startup thread creation failure"
+                ) as caught,
+            ):
+                iterator.__init__(loader)
+            self.assertIs(caught.exception, error)
+            self.assertEqual(len(starter_threads), 2)
+            self.assertEqual(pending_at_shutdown[0], 1)
+            self.assertEqual(joined_before_cleanup, [True])
+            self.assertEqual(late_starts, [])
+            self.assertEqual(started_workers, [0])
+            self.assertIsNotNone(iterator._workers[0].pid)
+            self.assertIsNone(iterator._workers[1].pid)
+            self._assert_shutdown(iterator)
+        finally:
+            release_first.set()
+            iterator._shutdown_workers()
+
+    @parametrize("resource", ["Queue", "Process"])
+    def test_resource_creation_failure(self, resource):
+        process_type = mp.Process
+        original_start = process_type.start
+        original_factory = getattr(mp, resource)
+        entered_start = threading.Event()
+        creation_failed = threading.Event()
+        calls = 0
+
+        def start(worker):
+            entered_start.set()
+            if not creation_failed.wait(JOIN_TIMEOUT):
+                raise RuntimeError("Resource creation did not fail")
+            original_start(worker)
+
+        def create_resource(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            # Queue creation includes the shared result queue.
+            if calls == (3 if resource == "Queue" else 2):
+                if not entered_start.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("Worker did not start")
+                creation_failed.set()
+                raise RuntimeError("resource creation failure")
+            return original_factory(*args, **kwargs)
+
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context=mp,
+            worker_startup_threads=2,
+        )
+        iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+            dataloader._MultiProcessingDataLoaderIter
+        )
+        try:
+            with (
+                mock.patch.object(process_type, "start", start),
+                mock.patch.object(mp, resource, create_resource),
+                self.assertRaisesRegex(RuntimeError, "resource creation failure"),
+            ):
+                iterator.__init__(loader)
+            self.assertIsNotNone(iterator._workers[0].pid)
+            self._assert_shutdown(iterator)
+        finally:
+            creation_failed.set()
+            iterator._shutdown_workers()
+
+    @parametrize("worker_startup_threads", [1, 2])
+    @parametrize("error_type", [TypeError, AttributeError, PicklingError])
+    def test_pickle_error_warning(self, worker_startup_threads, error_type):
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context=mp,
+            worker_startup_threads=worker_startup_threads,
+        )
+        with (
+            mock.patch.object(
+                mp.Process, "start", side_effect=error_type("cannot pickle")
+            ),
+            self.assertWarnsRegex(UserWarning, "Got pickle error when"),
+            self.assertRaisesRegex(error_type, "cannot pickle"),
+        ):
+            iter(loader)
+
+    @parametrize("worker_startup_threads", [1, 2])
+    def test_non_reentrant_serialization(self, worker_startup_threads):
+        serializing = threading.Lock()
+        reentered = threading.Event()
+
+        def on_serialize():
+            if not serializing.acquire(blocking=False):
+                reentered.set()
+                raise PicklingError("concurrent serialization")
+            try:
+                if worker_startup_threads > 1 and not reentered.wait(JOIN_TIMEOUT):
+                    raise RuntimeError("Serialization did not overlap")
+            finally:
+                serializing.release()
+
+        loader = DataLoader(
+            StartupSerializationDataset(on_serialize),
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=worker_startup_threads,
+            timeout=JOIN_TIMEOUT,
+        )
+        if worker_startup_threads == 1:
+            self.assertEqual(torch.cat(list(loader)), torch.arange(8))
+        else:
+            iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+                dataloader._MultiProcessingDataLoaderIter
+            )
+            try:
+                with (
+                    self.assertWarnsRegex(UserWarning, "Got pickle error when"),
+                    self.assertRaisesRegex(PicklingError, "concurrent serialization"),
+                ):
+                    iterator.__init__(loader)
+                self._assert_shutdown(iterator)
+            finally:
+                iterator._shutdown_workers()
+
+    @parametrize("failure", ["reset", "signal_handler"])
+    def test_failure_before_reset(self, failure):
+        loader = DataLoader(
+            range(8),
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=2,
+        )
+        iterator = dataloader._MultiProcessingDataLoaderIter.__new__(
+            dataloader._MultiProcessingDataLoaderIter
+        )
+        if failure == "reset":
+            target, attribute = dataloader._MultiProcessingDataLoaderIter, "_reset"
+        else:
+            target, attribute = _utils.signal_handling, "_set_SIGCHLD_handler"
+        try:
+            with (
+                mock.patch.object(
+                    target, attribute, side_effect=RuntimeError("initialization failure")
+                ),
+                self.assertRaisesRegex(RuntimeError, "initialization failure"),
+            ):
+                iterator.__init__(loader)
+            self._assert_shutdown(iterator)
+        finally:
+            iterator._shutdown_workers()
+
+
 class TestDataLoaderDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3051,6 +3668,33 @@ class TestDataLoaderDevice(TestCase):
         loader = DataLoader(dataset, batch_size=2, pin_memory=True)
         for batch in loader:
             self.assertTrue(batch[0].is_pinned())
+
+    @onlyAccelerator
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
+    def test_worker_startup_threads_pin_memory(self, device):
+        data = torch.arange(8)
+        loader = DataLoader(
+            data,
+            batch_size=2,
+            num_workers=2,
+            multiprocessing_context="spawn",
+            worker_startup_threads=2,
+            pin_memory=True,
+            persistent_workers=True,
+            timeout=JOIN_TIMEOUT,
+        )
+        iterator = iter(loader)
+        try:
+            for epoch in range(2):
+                if epoch > 0:
+                    self.assertIs(iter(loader), iterator)
+                batches = list(iterator)
+                self.assertTrue(all(batch.is_pinned() for batch in batches))
+                self.assertEqual(torch.cat(batches), data)
+        finally:
+            iterator._shutdown_workers()
+        self.assertFalse(iterator._pin_memory_thread.is_alive())
+        self.assertTrue(all(not worker.is_alive() for worker in iterator._workers))
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
