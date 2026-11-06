@@ -19,6 +19,10 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
+from tools.testing.target_determination.gen_artifact import (
+    LLM_SELECTION_SOURCE,
+    TD_SOURCE,
+)
 
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
@@ -59,7 +63,12 @@ def get_test_config(job_name: str) -> str:
 
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
+    """The test files TD's split excluded (TD_SOURCE) and, for every config
+    with a call where the LLM selection made the split, the files that some
+    call of that config excluded and no call of it ran whole
+    (LLM_SELECTION_SOURCE), per build and test config. Such a config is listed
+    even if it excluded no file."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -71,20 +80,54 @@ def get_td_exclusions(
         for path in s3_paths:
             unzip(path)
 
-        grouped_tests: dict[str, Any] = defaultdict(lambda: defaultdict(set))
+        grouped_tests: dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(set))
+        )
+        excluded_by_config: dict[tuple[str, str], set[str]] = defaultdict(set)
+        ran: dict[tuple[str, str], set[str]] = defaultdict(set)
+        enforced: set[tuple[str, str]] = set()
+        # Calls that excluded nothing matter only for what they ran, so their
+        # jobs are looked up only if they ran a file an enforced config excluded.
+        ran_only: list[tuple[Path, list[str]]] = []
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
-                for exclusion in exclusions["excluded"]:
-                    job_id = get_job_id(td_exclusions)
-                    job_name = get_job_name(job_id)
-                    build_name = get_build_name(job_name)
-                    test_config = get_test_config(job_name)
-                    grouped_tests[build_name][test_config].add(exclusion["test_file"])
+            excluded = exclusions["excluded"]
+            included = [x["test_file"] for x in exclusions["included"]]
+            # Older artifacts hold only TD's split.
+            td_excluded = exclusions.get("td_excluded", excluded)
+            is_llm = exclusions.get("source") == LLM_SELECTION_SOURCE
+            if not (excluded or td_excluded or is_llm):
+                ran_only.append((td_exclusions, included))
+                continue
+            job_name = get_job_name(get_job_id(td_exclusions))
+            build_name = get_build_name(job_name)
+            test_config = get_test_config(job_name)
+            if td_excluded:
+                tests = grouped_tests[TD_SOURCE][build_name][test_config]
+                tests.update(x["test_file"] for x in td_excluded)
+            config = build_name, test_config
+            excluded_files = {x["test_file"] for x in excluded}
+            excluded_by_config[config].update(excluded_files)
+            # A file TD split by class ran only if none of its runs were excluded.
+            ran[config].update(f for f in included if f not in excluded_files)
+            if is_llm:
+                enforced.add(config)
+        watched = set().union(*(excluded_by_config[c] for c in enforced))
+        for path, included in ran_only:
+            if watched.isdisjoint(included):
+                continue
+            job_name = get_job_name(get_job_id(path))
+            ran[get_build_name(job_name), get_test_config(job_name)].update(included)
 
-        for build_name, build in grouped_tests.items():
-            for test_config, test_files in build.items():
-                grouped_tests[build_name][test_config] = sorted(test_files)
+        for build_name, test_config in enforced:
+            llm = grouped_tests[LLM_SELECTION_SOURCE][build_name]
+            config = build_name, test_config
+            llm[test_config] = excluded_by_config[config] - ran[config]
+        for by_build in grouped_tests.values():
+            for build in by_build.values():
+                for test_config, test_files in build.items():
+                    build[test_config] = sorted(test_files)
         return grouped_tests
 
 
@@ -112,5 +155,12 @@ def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> N
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/td_exclusions",
-        [exclusions],
+        [exclusions.get(TD_SOURCE, {})],
     )
+    if LLM_SELECTION_SOURCE in exclusions:
+        upload_workflow_stats_to_s3(
+            workflow_run_id,
+            workflow_run_attempt,
+            "additional_info/llm_selection_exclusions",
+            [exclusions[LLM_SELECTION_SOURCE]],
+        )
