@@ -2164,12 +2164,20 @@ class TestMaxAutotune(TestCase):
                         lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                     )
 
+        def check_decompose_k(code):
+            fc = FileCheck()
+            (fc.check if M * N * K >= 2**30 else fc.check_not)("decompose_k").run(
+                code[0]
+            )
+
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            FileCheck().check("decompose_k").run(code[0])
+            # A dynamic K is not known to divide any split, which is only
+            # offered for M * N * K >= 2**30.
+            check_decompose_k(code)
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
@@ -2181,7 +2189,7 @@ class TestMaxAutotune(TestCase):
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
         if dynamic:
-            FileCheck().check("decompose_k").run(code[0])
+            check_decompose_k(code)
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
@@ -2199,7 +2207,7 @@ class TestMaxAutotune(TestCase):
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            FileCheck().check("decompose_k").run(code[0])
+            check_decompose_k(code)
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*_0.run"
@@ -2313,10 +2321,27 @@ class TestMaxAutotune(TestCase):
         One compile serves K with 0 and 1 leftover rows and K between one and
         two times the threshold."""
         frames, names = self._compile_dynamic_k_mm(
-            (16384, 16391, 16385, 20011, 3001), only_decompose_k=True, k_multiple=1
+            (131072, 131079, 131073, 150011, 20011),
+            mn=(512, 512),
+            only_decompose_k=True,
+            k_multiple=1,
         )
         self.assertEqual(frames, 1)
         self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    def test_decompose_k_dynamic_k_remainder_skips_small_mm(self):
+        """A small MM (M * N * K < 2**30) whose dynamic K no split divides gets
+        no decompose_k and no guard."""
+        frames, names = self._compile_dynamic_k_mm((16391, 20011), k_multiple=1)
+        self.assertEqual(frames, 1)
+        self.assertFalse(any(n.startswith("decompose_k") for n in names), names)
 
     def test_decompose_k_remainder(self):
         from torch._inductor.kernel.decompose_k import decomposeK

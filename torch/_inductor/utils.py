@@ -3363,12 +3363,24 @@ def use_decompose_k_choice(
 
 def dynamic_k_decompose_k_splits(m: _IntLike, n: _IntLike, k: sympy.Expr) -> list[int]:
     """Splits offered for a dynamic K, keeping K / k_split >= 128 for the K hint
-    as get_k_splits does for a static K. A split need not divide K: decomposeK
-    runs the leftover K rows as a separate MM."""
+    as get_k_splits does for a static K.
+
+    A split that does not divide K runs the leftover K rows as a separate MM. It
+    is only offered when M * N * K reaches 2**30 for the hints: below that the MM
+    takes microseconds, decompose_k does not win, and the extra autotune choices
+    only cost compile time. The size is read from hints without a guard.
+    """
     from torch._inductor.virtualized import V
 
-    k_hint = V.graph.sizevars.optimization_hint(k)
-    return [s for s in get_k_splits(m, n, k) if k_hint // s >= 128]
+    sizevars = V.graph.sizevars
+    m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
+    large = m_hint * n_hint * k_hint >= 2**30
+    return [
+        s
+        for s in get_k_splits(m, n, k)
+        if k_hint // s >= 128
+        and (large or sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0)))
+    ]
 
 
 def use_dynamic_k_decompose_k_choice(
