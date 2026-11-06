@@ -50,7 +50,8 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
+from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -9524,6 +9525,61 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
+    @onlyCUDA
+    @dtypes(torch.double, torch.float, torch.half, torch.bfloat16)
+    # Below double, the device computes source coordinates in float and the
+    # reference in double. The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
+    # times the step between neighbouring inputs, so inputs stay in [-1, 1].
+    @toleranceOverride({torch.double: tol(atol=1e-7, rtol=1e-7),
+                        torch.float: tol(atol=1e-4, rtol=1e-5),
+                        torch.half: tol(atol=1e-2, rtol=1e-2),
+                        torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
+    @parametrize_test("align_corners", [False, True])
+    @parametrize_test("layout", [
+        "contiguous", "noncontig_input", "noncontig_output", "misaligned_output", "channels_last_c3",
+    ])
+    @parametrize_test("isize, osize, scale", [
+        subtest(((8, 8), (16, 16), None), name="up_2x"),
+        subtest(((7, 5), (13, 11), None), name="up_odd_width"),
+        subtest(((16, 16), (8, 8), None), name="down_2x"),
+        subtest(((9, 10), (9, 32), None), name="aniso"),
+        subtest(((10, 12), None, 1.7), name="scale_factor"),
+        subtest(((256, 320), (512, 640), None), name="large_plane"),
+    ])
+    def test_upsamplingBilinear2d_nchw_kernel_paths(self, device, dtype, align_corners, layout, isize, osize, scale):
+        # On ROCm, the NCHW forward loops over planes per output pixel when the
+        # output plane is large enough to fill the device (large_plane).
+        # Otherwise it writes 4 outputs per thread when the output is
+        # contiguous, vector-aligned, width % 4 == 0, and the op upsamples, and
+        # one output per thread in every other case. CUDA always loops over
+        # planes. The NaN prefill catches outputs no kernel writes.
+        n, c = 2, 3
+        ih, iw = isize
+        if layout == "noncontig_input":
+            x = make_tensor((n, c, ih, 2 * iw), device=device, dtype=dtype, low=-1, high=1)[..., ::2]
+        else:
+            x = make_tensor((n, c, ih, iw), device=device, dtype=dtype, low=-1, high=1)
+        if layout == "channels_last_c3":
+            x = x.contiguous(memory_format=torch.channels_last)
+        if scale is None:
+            oh, ow = osize
+        else:
+            oh, ow = int(ih * scale), int(iw * scale)
+
+        if layout == "noncontig_output":
+            out = torch.empty(n, c, ow, oh, device=device, dtype=dtype).transpose(2, 3)
+        elif layout == "misaligned_output":
+            out = torch.empty(n * c * oh * ow + 1, device=device, dtype=dtype)[1:].view(n, c, oh, ow)
+        elif layout == "channels_last_c3":
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype).contiguous(memory_format=torch.channels_last)
+        else:
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype)
+        out.fill_(float("nan"))
+
+        torch._C._nn.upsample_bilinear2d(x, [oh, ow], align_corners, scale, scale, out=out)
+        expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
+        self.assertEqual(out.cpu(), expected.to(dtype))
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
@@ -16809,12 +16865,13 @@ class TestNNCPU(NNTestCase):
             outf.sum().backward()
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+    def test_LSTM_differentiable_backward_using_oneDNN(self, device):
         batch = 10
         seq_len = 12
         input = 3
-        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        # Two layers exercise the inter-layer gradient path; under Dynamo the
+        # double-backward graph grows superlinearly with depth.
+        Net = nn.LSTM(input, 3, 2, batch_first=True)
         import copy
         Net_clone = copy.deepcopy(Net)
         x = torch.rand(batch, seq_len, input)
@@ -16838,10 +16895,10 @@ class TestNNCPU(NNTestCase):
                                        create_graph=True)[0]
         loss2 = der_out2.sum()
         loss2.backward(retain_graph=True)
-        if not torch.allclose(der_out1, der_out2):
-            raise AssertionError("der_out1 and der_out2 should be close")
-        if not torch.allclose(x1.grad, x2.grad):
-            raise AssertionError("x1.grad and x2.grad should be close")
+        # oneDNN and the native kernels differ by ~1e-7 relative in float32;
+        # some elements are near zero, so allclose's atol=1e-8 is too tight.
+        self.assertEqual(der_out1, der_out2, atol=1e-6, rtol=1e-5)
+        self.assertEqual(x1.grad, x2.grad, atol=1e-6, rtol=1e-5)
 
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):
