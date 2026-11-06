@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
@@ -432,31 +433,6 @@ def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule
         yield from _with_fx_subgraphs(operator.attrgetter(node.target)(module))
 
 
-# Host syncs, which JIT cudagraphs don't reject yet; AOT also rejects
-# FORBIDDEN_CUDAGRAPH_OPS.
-AOT_FORBIDDEN_CUDAGRAPH_OPS = frozenset(
-    [
-        "streams.synchronize_event.default",
-        "streams.synchronize_stream.default",
-        "streams.synchronize_device.default",
-    ]
-)
-
-
-def _draws_random_numbers(node: torch.fx.Node) -> bool:
-    if torch.Tag.nondeterministic_seeded not in getattr(node.target, "tags", ()):
-        return False
-    # Attention ops are tagged for their optional dropout.
-    schema = node.target._schema  # type: ignore[union-attr]
-    names = [arg.name for arg in schema.arguments]
-    if "dropout_p" not in names:
-        return True
-    i = names.index("dropout_p")
-    default = schema.arguments[i].default_value
-    p = node.kwargs.get("dropout_p", node.args[i] if i < len(node.args) else default)
-    return not (isinstance(p, (int, float)) and p == 0)
-
-
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
     """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
     the graph and the subgraphs of its higher-order ops can be captured into a
@@ -477,8 +453,7 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
         return next((n for n in gm.graph.nodes if pred(n)), None)
 
     def incompatible_op(gm: torch.fx.GraphModule) -> str | None:
-        host_sync = first(gm, lambda n: str(n.target) in AOT_FORBIDDEN_CUDAGRAPH_OPS)
-        if node := host_sync or get_first_incompatible_cudagraph_node(gm):
+        if node := get_first_incompatible_cudagraph_node(gm):
             return reason_at(f"incompatible op {node.target}", node)
         return None
 
@@ -488,25 +463,31 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
             return reason_at(f"op {node.args[1]} has side effects", node)
         return None
 
-    def side_stream(gm: torch.fx.GraphModule) -> str | None:
-        # The generated code can't use side streams during a capture.
-        def uses_stream(n: torch.fx.Node) -> bool:
-            if graph._get_node_stream(n) is not None:
-                return True
+    # The generated code can't use side streams, or sync on the host (e.g.
+    # torch.cuda.synchronize), during a capture.
+    def stream_op(gm: torch.fx.GraphModule) -> str | None:
+        def is_stream_op(n: torch.fx.Node) -> bool:
             target = n.target
             return (
                 isinstance(target, torch._ops.OpOverload)
                 and target.namespace == "streams"
             )
 
-        if node := first(gm, uses_stream):
+        if node := first(gm, is_stream_op):
+            return reason_at(f"it uses stream op {node.target}", node)
+        return None
+
+    def side_stream(gm: torch.fx.GraphModule) -> str | None:
+        if node := first(gm, lambda n: graph._get_node_stream(n) is not None):
             return reason_at("it uses a side stream", node)
         return None
 
     def random_numbers(gm: torch.fx.GraphModule) -> str | None:
+        from torch._functorch.partitioners import is_rng_op
+
         # Random numbers aren't supported yet: concurrent replays race on the
         # generator's offset.
-        if node := first(gm, _draws_random_numbers):
+        if node := first(gm, is_rng_op):
             return reason_at(f"it uses random numbers ({node.target})", node)
         return None
 
@@ -520,7 +501,8 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
             if g.disable_cudagraphs_reason:
                 return g.disable_cudagraphs_reason
         gms = list(_with_fx_subgraphs(graph.module))
-        for check in (incompatible_op, side_effect, side_stream, random_numbers):
+        checks = (incompatible_op, side_effect, stream_op, side_stream, random_numbers)
+        for check in checks:
             for gm in gms:
                 if reason := check(gm):
                     return reason
@@ -546,6 +528,12 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
             val = node.meta.get("val")
             if isinstance(val, torch.Tensor) and val.device != device:
                 return f"input {i} is on {val.device}"
+        # e.g. a returned CPU constant, which no node above puts on a device.
+        (output,) = graph.graph.find_nodes(op="output")
+        for i, out in enumerate(pytree.tree_leaves(output.args[0])):
+            val = out.meta.get("val") if isinstance(out, torch.fx.Node) else None
+            if isinstance(val, torch.Tensor) and val.device != device:
+                return f"output {i} is on {val.device}"
         placeholders = get_placeholder_info(graph.graph)
         mutated = [
             i for i, p in enumerate(placeholders) if p.name in graph.mutated_buffers
