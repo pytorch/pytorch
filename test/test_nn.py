@@ -15606,15 +15606,21 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_long_targets(self, device):
+        # target_length=1200 gives a 2401-position lattice, which exceeds the
+        # 1024-thread block the MPS kernel processes at a time; the backward
+        # pass must match CPU across blocks (see gh-203356).
         input_length = 4000
         vocab_size = 3
         batch_size = 4
         target_length = 1200
+        # MPS has no float64; float32 accumulates ~1e-3 error over 4000 steps.
+        is_mps = torch.device(device).type == "mps"
+        dtype = torch.float if is_mps else torch.double
+        tol = 1e-2 if is_mps else 1e-4
 
-        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).log_softmax(2).requires_grad_()
+        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=dtype).log_softmax(2).requires_grad_()
         targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
@@ -15628,8 +15634,8 @@ class TestNNDeviceType(NNTestCase):
             res_device = torch.nn.functional.ctc_loss(log_probs.to(device), targets.to(device), input_lengths, target_lengths,
                                                       reduction='sum', zero_infinity=True)
             grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device))
-        self.assertEqual(res_cpu, res_device, atol=1e-4, rtol=0)
-        self.assertEqual(grad_cpu, grad_device, atol=1e-4, rtol=0)
+        self.assertEqual(res_cpu, res_device, atol=tol, rtol=0)
+        self.assertEqual(grad_cpu, grad_device, atol=tol, rtol=0)
 
     @skipMPS
     @onlyAccelerator

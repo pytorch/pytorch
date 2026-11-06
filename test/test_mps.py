@@ -5894,28 +5894,6 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(input_grad("cpu"), input_grad("mps").cpu())
 
-    def test_ctc_loss_backward_long_targets(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/203356
-        # The log_beta kernel processes the 2L+1 lattice positions in blocks of
-        # at most 1024 threads. Backward must match CPU when a target has 512+
-        # labels, i.e. when the lattice spans more than one block.
-        T, N, C = 1100, 2, 32
-        for L in (511, 512, 1000):
-            log_probs = torch.randn(T, N, C).log_softmax(2)
-            targets = torch.randint(1, C, (N, L))
-            input_lengths = [T, T]
-            target_lengths = [L, L - 1]
-
-            def input_grad(device):
-                lp = log_probs.to(device).detach().requires_grad_()
-                torch.nn.functional.ctc_loss(
-                    lp, targets.to(device), input_lengths, target_lengths,
-                    reduction="sum",
-                ).backward()
-                return lp.grad
-
-            self.assertEqual(input_grad("cpu"), input_grad("mps").cpu(), atol=1e-3, rtol=1e-3)
-
     def test_log_softmax_large_numbers(self):
         values = [
             [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0],

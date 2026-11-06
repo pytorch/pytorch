@@ -246,8 +246,8 @@ static void calc_log_alpha_beta(
   // cross-block dependencies: alpha[s] reads s-1 and s-2 (an earlier block),
   // beta[s] reads s+1 and s+2 (a later block). Blocks therefore have to be
   // visited in dependency order: ascending for alpha, descending for beta.
-  const T_index tptg_i = static_cast<T_index>(tptg);
-  const T_index num_blocks = (S_max + tptg_i - 1) / tptg_i;
+  const auto tptg_i = static_cast<T_index>(tptg);
+  const auto num_blocks = ceil_div(S_max, tptg_i);
   for (T_index block_idx = 0; block_idx < num_blocks; block_idx++) {
     T_index block_s =
         (beta ? (num_blocks - 1 - block_idx) : block_idx) * tptg_i;
