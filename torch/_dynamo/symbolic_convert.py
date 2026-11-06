@@ -58,7 +58,7 @@ from torch._dynamo.exc import (
     ObservedException,
     TensorifyScalarRestartAnalysis,
 )
-from torch._guards import InlinedCodeCache, tracing, TracingContext
+from torch._guards import Guard, InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -340,6 +340,7 @@ class SpeculationEntry:
                     "expected self.error_on_graph_break is not None to be true"
                 )
             tx.error_on_graph_break = self.error_on_graph_break
+            install_guard(*tx.speculation_log.retry_guards)
             return True
         return False
 
@@ -355,6 +356,8 @@ class SpeculationLog:
     """
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
+    # Keep dependencies that let a cached graph break retry after eager execution.
+    retry_guards: set[Guard] = dataclasses.field(default_factory=set)
     index: int = 0
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
@@ -371,6 +374,7 @@ class SpeculationLog:
 
     def clear(self) -> None:
         self.entries.clear()
+        self.retry_guards.clear()
         self.index = 0
 
     def next(

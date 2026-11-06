@@ -1,12 +1,15 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import contextlib
 import copy
 import functools
 import math
 import re
 import unittest
+import weakref
 from importlib import import_module
 from types import SimpleNamespace
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -28,6 +31,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     normalize_gm,
 )
+from torch._dynamo.variables import invoke_subgraph as invoke
 from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.fx.experimental.sym_node import SymNode
@@ -3751,6 +3755,1630 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+class _CachedPropertyConfigBase:
+    pass
+
+
+class _CachedPropertyConfig(_CachedPropertyConfigBase):
+    def __init__(self, weight):
+        self.weight = weight
+
+    @functools.cached_property
+    def cached_weight(self):
+        return self.weight
+
+
+def _cached_property_tensor_fn(x, config):
+    return x + config.cached_weight
+
+
+class ActivationCheckpointingCachedPropertyTests(torch._dynamo.test_case.TestCase):
+    @parametrize("dynamic", [None, True])
+    @parametrize("module_owned", [False, True])
+    @parametrize("jagged", [False, True])
+    def test_cached_property_retry(self, device, dynamic, module_owned, jagged):
+        class Config:
+            def __init__(self):
+                self.jagged = jagged
+
+            @functools.cached_property
+            def is_jagged(self):
+                return self.jagged
+
+        def fn(x, config):
+            def block(y):
+                return y.sin().cos() if config.is_jagged else y.cos().sin()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        class Module(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.config = config
+
+            def forward(self, x):
+                return fn(x, self.config)
+
+        config = Config()
+        reference_config = Config()
+        target = Module(config) if module_owned else fn
+        reference = Module(reference_config) if module_owned else fn
+        args = () if module_owned else (config,)
+        reference_args = () if module_owned else (reference_config,)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(target, backend=counter, dynamic=dynamic)
+
+        for iteration, size in enumerate((3, 3, 4, 5, 3, 6, 7)):
+            x = torch.randn(size, 2, requires_grad=True, device=device)
+            reference_x = x.detach().clone().requires_grad_()
+            expected = reference(reference_x, *reference_args)
+            actual = compiled(x, *args)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), reference_x),
+            )
+            self.assertEqual(config.__dict__["is_jagged"], jagged)
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            if iteration == 0:
+                cold_frames = counter.frame_count
+                self.assertEqual(cold_frames, 2)
+                self.assertNotIn(tag_activation_checkpoint, targets)
+            elif iteration == 1:
+                self.assertEqual(counter.frame_count, cold_frames + 1)
+                self.assertIn(tag_activation_checkpoint, targets)
+                retry_frames = counter.frame_count
+            elif iteration == 2:
+                self.assertEqual(counter.frame_count, retry_frames + (dynamic is None))
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            else:
+                self.assertEqual(counter.frame_count, steady_frames)
+
+    def test_cached_property_retry_preserves_mutations(self, device):
+        class Config:
+            def __init__(self, state):
+                self.state = state
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def scale(self):
+                self.getter_calls += 1
+                return self.state.scale
+
+        def fn(x, holder, config, state):
+            state.scale = 2
+            config.state = state
+            holder.config = config
+
+            def block(y):
+                return y * holder.config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        state = SimpleNamespace(scale=1)
+        config = Config(SimpleNamespace(scale=3))
+        holder = SimpleNamespace(config=Config(SimpleNamespace(scale=4)))
+        ref_state = SimpleNamespace(scale=1)
+        ref_config = Config(SimpleNamespace(scale=3))
+        ref_holder = SimpleNamespace(config=Config(SimpleNamespace(scale=4)))
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+
+        for iteration, size in enumerate((3, 3, 4, 5, 6)):
+            x = torch.randn(size, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x, ref_holder, ref_config, ref_state)
+            actual = compiled(x, holder, config, state)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(config.__dict__["scale"], 2)
+            self.assertEqual(config.getter_calls, 1)
+            self.assertIs(holder.config, config)
+            self.assertIs(config.state, state)
+            self.assertEqual(state.scale, 2)
+            if iteration == 1:
+                targets = [node.target for node in counter.graphs[-1].graph.nodes]
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            elif iteration > 1:
+                self.assertEqual(counter.frame_count, steady_frames)
+
+    @parametrize("reset_mode", ["delete", "replace"])
+    def test_cached_property_cache_invalidation(self, device, reset_mode):
+        class Config:
+            def __init__(self, state):
+                self.state = state
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def factor(self):
+                self.getter_calls += 1
+                return self.state.factor
+
+        def fn(x, holder, state):
+            state.factor = 3
+
+            def block(y):
+                return y * holder.config.factor
+
+            return checkpoint(block, x.sin() + 2, use_reentrant=False) + 1
+
+        state = SimpleNamespace(factor=1)
+        ref_state = SimpleNamespace(factor=1)
+        holder = SimpleNamespace(config=Config(state))
+        ref_holder = SimpleNamespace(config=Config(ref_state))
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+
+        for iteration, size in enumerate((3, 3, 4, 5, 3, 6, 7)):
+            if iteration in (2, 4):
+                state.factor = ref_state.factor = 1
+                if reset_mode == "delete":
+                    del holder.config.factor
+                    del ref_holder.config.factor
+                else:
+                    holder.config = Config(state)
+                    ref_holder.config = Config(ref_state)
+            x = torch.zeros(size, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x, ref_holder, ref_state)
+            actual = compiled(x, holder, state)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(holder.config.__dict__["factor"], 3)
+            self.assertEqual(holder.config.getter_calls, ref_holder.config.getter_calls)
+            self.assertEqual(state.factor, 3)
+            self.assertIs(holder.config.state, state)
+            if iteration == 1:
+                targets = [node.target for node in counter.graphs[-1].graph.nodes]
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            elif iteration > 1:
+                self.assertEqual(counter.frame_count, steady_frames)
+
+    def test_cached_property_inherited_dict_retry(self, device):
+        class Config:
+            def __init__(self, state):
+                self.state = state
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def scale(self):
+                self.getter_calls += 1
+                return self.state.scale
+
+        class Derived(Config):
+            pass
+
+        def fn(x, config, state):
+            state.scale = 2
+
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        state = SimpleNamespace(scale=1)
+        config = Derived(state)
+        self.assertIs(Config.__dict__["__dict__"].__objclass__, Config)
+        self.assertNotIn("__dict__", Derived.__dict__)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        for iteration, size in enumerate((3, 3, 4, 5)):
+            if iteration == 2:
+                state.scale = 1
+                del config.scale
+            x = torch.ones(size, requires_grad=True, device=device)
+            actual = compiled(x, config, state)
+            self.assertEqual(actual, (x + 1) * 4)
+            grad = torch.autograd.grad(actual.sum(), x)[0]
+            self.assertEqual(grad, torch.full_like(x, 4))
+            self.assertEqual(config.getter_calls, 1 + (iteration >= 2))
+            self.assertEqual(config.__dict__["scale"], 2)
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            if iteration == 0:
+                self.assertEqual(counter.frame_count, 2)
+                self.assertNotIn(tag_activation_checkpoint, targets)
+            else:
+                self.assertEqual(counter.frame_count, 3)
+                self.assertIn(tag_activation_checkpoint, targets)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_cached_property_temporary_global(self, device):
+        class Config:
+            def __init__(self):
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def cached(self):
+                torch._dynamo.graph_break()
+                self.getter_calls += 1
+                return 3
+
+        config = Config()
+        namespace = {"cfg": config}
+        exec("def helper(x):\n    return x + cfg.cached\n", namespace)
+        helper = namespace["helper"]
+
+        def fn(x):
+            return helper(x.sin().cos())
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter)
+        for size in (3, 3, 4, 5):
+            x = torch.randn(size, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            actual = compiled(x)
+            expected = ref_x.sin().cos() + 3
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(config.__dict__["cached"], 3)
+            self.assertEqual(config.getter_calls, 1)
+
+    def test_cached_property_global_retry(self, device):
+        class Config:
+            def __init__(self):
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def scale(self):
+                self.getter_calls += 1
+                return 2
+
+        config = Config()
+        namespace = {"cfg": config, "checkpoint": checkpoint}
+        exec(
+            "def fn(x):\n"
+            "    def block(y):\n"
+            "        return y * cfg.scale\n"
+            "    return checkpoint(block, x + 1, use_reentrant=False) * 2\n",
+            namespace,
+        )
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(namespace["fn"], backend=counter, dynamic=True)
+        for iteration, size in enumerate((3, 3, 4, 5)):
+            x = torch.ones(size, requires_grad=True, device=device)
+            actual = compiled(x)
+            self.assertEqual(actual, torch.full_like(x, 8))
+            grad = torch.autograd.grad(actual.sum(), x)[0]
+            self.assertEqual(grad, torch.full_like(x, 4))
+            self.assertEqual(config.getter_calls, 1)
+            if iteration == 1:
+                targets = [node.target for node in counter.graphs[-1].graph.nodes]
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            elif iteration > 1:
+                self.assertEqual(counter.frame_count, steady_frames)
+
+    @parametrize("owner", ["base", "intermediate", "derived"])
+    def test_cached_property_descriptor_replacement(self, device, owner):
+        class Config:
+            __slots__ = ()
+
+            @functools.cached_property
+            def scale(self):
+                return 2
+
+        class Intermediate(Config):
+            __slots__ = ()
+
+        class Derived(Intermediate):
+            pass
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        config = Derived()
+        owners = {"base": Config, "intermediate": Intermediate, "derived": Derived}
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        self.assertEqual(compiled(x, config), torch.full_like(x, 8))
+        self.assertEqual(compiled(x, config), torch.full_like(x, 8))
+        targets = [node.target for node in counter.graphs[-1].graph.nodes]
+        self.assertIn(tag_activation_checkpoint, targets)
+        owners[owner].scale = property(lambda self: 3)
+        ref_x = x.detach().clone().requires_grad_()
+        expected = fn(ref_x, config)
+        actual = compiled(x, config)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x),
+            torch.autograd.grad(expected.sum(), ref_x),
+        )
+        self.assertEqual(config.__dict__["scale"], 2)
+
+    @parametrize("inherited_dict", [False, True])
+    @parametrize("scale", [2, 2.0])
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_cached_property_dict_after_bases_change(
+        self, device, inherited_dict, scale
+    ):
+        dict_reads = []
+
+        class Base:
+            if not inherited_dict:
+                __slots__ = ()
+
+        class VirtualDictBase:
+            if not inherited_dict:
+                __slots__ = ()
+
+            @property
+            def __dict__(self):
+                dict_reads.append("__dict__")
+                return {"scale": 3}
+
+        class Config(Base):
+            @functools.cached_property
+            def scale(self):
+                return scale
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale if config.scale > 0 else y * 0
+
+            return checkpoint(block, x + 1, use_reentrant=False)
+
+        config = Config()
+        self.assertEqual(config.scale, 2)
+        dict_owner = Base if inherited_dict else Config
+        self.assertIs(dict_owner.__dict__["__dict__"].__objclass__, dict_owner)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        self.assertEqual(compiled(x, config), (x + 1) * 2)
+        del config.scale
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsafe side effect"
+        ):
+            compiled(x, config)
+        self.assertEqual(config.scale, 2)
+        Config.__bases__ = (VirtualDictBase,)
+        dict_reads.clear()
+        actual = compiled(x, config)
+        self.assertEqual(actual, (x + 1) * 2)
+        grad = torch.autograd.grad(actual.sum(), x)[0]
+        self.assertEqual(grad, torch.full_like(x, 2))
+        self.assertEqual(dict_reads, [])
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['config'].limit")
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_cached_property_dynamic_source(self, device):
+        calls = []
+
+        class Config:
+            @functools.cached_property
+            def limit(self):
+                calls.append("limit")
+                return 3
+
+        def fn(x, config):
+            return x[: config.limit] * 2
+
+        config = Config()
+        self.assertEqual(config.limit, 3)
+        counter = CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
+        for limit in (3, 5, 3):
+            config.limit = limit
+            x = torch.arange(8, dtype=torch.float32, device=device, requires_grad=True)
+            actual = compiled(x, config)
+            self.assertEqual(actual, x[:limit] * 2)
+            expected_grad = torch.zeros_like(x)
+            expected_grad[:limit] = 2
+            self.assertEqual(torch.autograd.grad(actual.sum(), x)[0], expected_grad)
+            placeholders = [
+                node
+                for node in counter.graphs[-1].graph.nodes
+                if node.op == "placeholder"
+            ]
+            self.assertEqual(len(placeholders), 2)
+            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(calls, ["limit"])
+
+    @parametrize("added_after_capture", [False, True])
+    def test_cached_property_custom_getattribute(self, device, added_after_capture):
+        dict_reads = []
+
+        class Config:
+            @functools.cached_property
+            def scale(self):
+                return 2
+
+        def getattribute(self, name):
+            value = object.__getattribute__(self, name)
+            if name == "__dict__":
+                dict_reads.append(name)
+            if name == "scale":
+                return value * 2
+            return value
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        config = Config()
+        if not added_after_capture:
+            Config.__getattribute__ = getattribute
+            self.assertEqual(config.scale, 4)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        factor = 8 if added_after_capture else 16
+        self.assertEqual(compiled(x, config), torch.full_like(x, factor))
+        self.assertEqual(compiled(x, config), torch.full_like(x, factor))
+        if added_after_capture:
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            self.assertIn(tag_activation_checkpoint, targets)
+            Config.__getattribute__ = getattribute
+        dict_reads.clear()
+        ref_x = x.detach().clone().requires_grad_()
+        expected = fn(ref_x, config)
+        self.assertEqual(dict_reads, [])
+        actual = compiled(x, config)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x),
+            torch.autograd.grad(expected.sum(), ref_x),
+        )
+        self.assertEqual(dict_reads, [])
+
+    @parametrize("changed_attr", ["scale", "__getattribute__"])
+    def test_cached_property_shared_descriptor_owners(self, device, changed_attr):
+        shared = functools.cached_property(lambda self: 2)
+
+        class ConfigA:
+            scale = shared
+            __getattribute__ = object.__getattribute__
+
+        class ConfigB:
+            scale = shared
+            __getattribute__ = object.__getattribute__
+
+        def fn(x, a, b):
+            def block(y):
+                return y * a.scale + y * b.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False)
+
+        a, b = ConfigA(), ConfigB()
+        self.assertEqual(a.scale, 2)
+        self.assertEqual(b.scale, 2)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        self.assertEqual(compiled(x, a, b), (x + 1) * 4)
+        if changed_attr == "scale":
+            ConfigB.scale = property(lambda self: 3)
+        else:
+
+            def getattribute(self, name):
+                if name == "scale":
+                    return 3
+                return object.__getattribute__(self, name)
+
+            ConfigB.__getattribute__ = getattribute
+        ref_x = x.detach().clone().requires_grad_()
+        expected = fn(ref_x, a, b)
+        actual = compiled(x, a, b)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x),
+            torch.autograd.grad(expected.sum(), ref_x),
+        )
+        self.assertEqual(a.__dict__["scale"], 2)
+        self.assertEqual(b.__dict__["scale"], 2)
+
+    @parametrize("mutation", ["set", "delete", "type"])
+    def test_cached_property_becomes_data_descriptor(self, device, mutation):
+        class Config:
+            @functools.cached_property
+            def scale(self):
+                return 2
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False)
+
+        config = Config()
+        self.assertEqual(config.scale, 2)
+        descriptor = Config.__dict__["scale"]
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        self.assertEqual(compiled(x, config), (x + 1) * 2)
+        original_get = functools.cached_property.__get__
+
+        def get(self, instance, owner=None):
+            if self is descriptor and instance is not None:
+                return 3
+            return original_get(self, instance, owner)
+
+        def store(self, instance, value):
+            instance.__dict__[self.attrname] = value
+
+        def delete(self, instance):
+            del instance.__dict__[self.attrname]
+
+        class DataMixin:
+            __slots__ = ()
+            __set__ = store
+
+        class Changed(functools.cached_property, DataMixin):
+            __slots__ = ()
+            __get__ = get
+
+        with contextlib.ExitStack() as stack:
+            if mutation == "type":
+                descriptor.__class__ = Changed
+                stack.callback(
+                    setattr, descriptor, "__class__", functools.cached_property
+                )
+            else:
+                stack.enter_context(
+                    mock.patch.object(functools.cached_property, "__get__", get)
+                )
+                slot = "__set__" if mutation == "set" else "__delete__"
+                setter = store if mutation == "set" else delete
+                stack.enter_context(
+                    mock.patch.object(
+                        functools.cached_property, slot, setter, create=True
+                    )
+                )
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x, config)
+            actual = compiled(x, config)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(config.__dict__["scale"], 2)
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            self.assertIn(tag_activation_checkpoint, targets)
+
+    @parametrize("protocol", ["getattribute", "dict", "mro", "ordinary"])
+    def test_cached_property_metaclass(self, device, protocol):
+        shadow = functools.cached_property(lambda self: 2)
+
+        class AttributeMeta(type):
+            def __getattribute__(cls, name):
+                value = super().__getattribute__(name)
+                if name == "__dict__":
+                    value = dict(value)
+                    if "scale" in value:
+                        value["scale"] = shadow
+                return value
+
+        class DictMeta(type):
+            @property
+            def __dict__(cls):
+                value = dict(type.__dict__["__dict__"].__get__(cls))
+                if "scale" in value:
+                    value["scale"] = shadow
+                return value
+
+        class MROMeta(type):
+            @property
+            def __mro__(cls):
+                return (object, cls)
+
+        metas = {
+            "getattribute": AttributeMeta,
+            "dict": DictMeta,
+            "mro": MROMeta,
+            "ordinary": abc.ABCMeta,
+        }
+
+        class Config(metaclass=metas[protocol]):
+            @functools.cached_property
+            def scale(self):
+                return 2
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False)
+
+        config = Config()
+        ordinary = protocol == "ordinary"
+        if not ordinary:
+            self.assertEqual(config.scale, 2)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(
+            fn, backend=counter, dynamic=True, fullgraph=not ordinary
+        )
+        for iteration in range(3):
+            x = torch.ones(3, requires_grad=True, device=device)
+            actual = compiled(x, config)
+            self.assertEqual(actual, (x + 1) * 2)
+            grad = torch.autograd.grad(actual.sum(), x)[0]
+            self.assertEqual(grad, torch.full_like(x, 2))
+            if ordinary and iteration == 1:
+                targets = [node.target for node in counter.graphs[-1].graph.nodes]
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            elif ordinary and iteration > 1:
+                self.assertEqual(counter.frame_count, steady_frames)
+            elif not ordinary:
+                self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("initial_subclass", [False, True])
+    def test_cached_property_dict_subclass(self, device, initial_subclass):
+        replacement = torch.full((3,), 3.0, device=device)
+        reads = []
+
+        class ChangedDict(dict):
+            def __getitem__(self, key):
+                reads.append(key)
+                if key == "cached_weight":
+                    return replacement
+                return super().__getitem__(key)
+
+        weight = torch.full((3,), 2.0, device=device)
+        config = _CachedPropertyConfig(weight)
+        self.assertIs(config.cached_weight, weight)
+        if initial_subclass:
+            config.__dict__ = ChangedDict(config.__dict__)
+
+        def fn(x, config):
+            def block(y):
+                return y * config.cached_weight
+
+            return checkpoint(block, x, use_reentrant=False), config.cached_weight
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        actual, alias = compiled(x, config)
+        self.assertEqual(actual, x * weight)
+        self.assertIs(alias, weight)
+        if not initial_subclass:
+            config.__dict__ = ChangedDict(config.__dict__)
+        reads.clear()
+        for _ in range(3):
+            actual, alias = compiled(x, config)
+            self.assertEqual(actual, x * weight)
+            self.assertEqual(torch.autograd.grad(actual.sum(), x)[0], weight)
+            self.assertIs(alias, weight)
+            self.assertEqual(reads, [])
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("mode", ["jit", "capture", "nested_capture", "aot"])
+    @torch._dynamo.config.patch(generate_pycode=True)
+    def test_cached_property_codegen(self, device, mode):
+        from torch._dynamo.aot_compile_types import GraphModuleSerializableCallable
+        from torch._dynamo.convert_frame import fullgraph_capture
+        from torch._dynamo.utils import get_metrics_context
+
+        def backend(graph, inputs):
+            return GraphModuleSerializableCallable(graph)
+
+        x = torch.ones(3, requires_grad=True, device=device)
+        weight = torch.full_like(x, 2)
+        config = _CachedPropertyConfig(weight)
+        self.assertIs(config.cached_weight, weight)
+        if mode == "jit":
+            compiled = torch.compile(
+                _cached_property_tensor_fn, backend="eager", fullgraph=True
+            )
+        elif mode == "aot":
+            target = torch.compile(
+                _cached_property_tensor_fn, backend=backend, fullgraph=True
+            )
+            compiled = target.aot_compile(((x, config), {}))
+        else:
+            with get_metrics_context():
+                if mode == "nested_capture":
+                    with torch.compiler._compile_session_context():
+                        captured = fullgraph_capture(
+                            _cached_property_tensor_fn, (x, config)
+                        )
+                else:
+                    captured = fullgraph_capture(
+                        _cached_property_tensor_fn, (x, config)
+                    )
+            compiled = captured.forward_callable(use_python_codegen=True)
+        for _ in range(3):
+            actual = compiled(x, config)
+            self.assertEqual(actual, x + weight)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0], torch.ones_like(x)
+            )
+
+    @parametrize("caching", [False, True])
+    @torch._dynamo.config.patch(strict_precompile=True)
+    def test_cached_property_package(self, device, caching):
+        from torch._dynamo.package import CompilePackage
+
+        x = torch.ones(3, requires_grad=True, device=device)
+        weight = torch.full_like(x, 2)
+        config = _CachedPropertyConfig(weight)
+        self.assertIs(config.cached_weight, weight)
+        with torch._dynamo.config.patch(caching_precompile=caching):
+            package = CompilePackage(_cached_property_tensor_fn)
+            compiled = torch._dynamo.optimize("eager", package=package)(
+                _cached_property_tensor_fn
+            )
+            actual = compiled(x, config)
+        self.assertEqual(actual, x + weight)
+        self.assertEqual(torch.autograd.grad(actual.sum(), x)[0], torch.ones_like(x))
+        saved = package._codes[_cached_property_tensor_fn.__code__].guarded_codes
+        self.assertEqual(len(saved), 1)
+        self.assertIsNotNone(saved[0].guards_state)
+
+    def test_cached_property_precompile_filter(self, device):
+        class Config(_CachedPropertyConfig):
+            __getattribute__ = object.__getattribute__
+
+        config = Config(True)
+        self.assertIs(config.cached_weight, True)
+
+        def fn(x, config):
+            return x + 1 if config.cached_weight else x - 1
+
+        counter = CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+
+        def getattribute(self, name):
+            if name == "cached_weight":
+                return False
+            return object.__getattribute__(self, name)
+
+        with torch._dynamo.config.patch(caching_precompile=True):
+            self.assertEqual(compiled(x, config), x + 1)
+            with mock.patch.object(Config, "__getattribute__", getattribute):
+                actual = compiled(x, config)
+                self.assertEqual(actual, x - 1)
+                self.assertEqual(
+                    torch.autograd.grad(actual.sum(), x)[0], torch.ones_like(x)
+                )
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_cached_property_float_invalidation(self, device):
+        calls = []
+
+        class Base:
+            pass
+
+        class Config(Base):
+            def __init__(self, state):
+                self.state = state
+
+            @functools.cached_property
+            def factor(self):
+                calls.append(self.state.factor)
+                return self.state.factor
+
+        def fn(x, config, state):
+            state.factor = 2.0
+
+            def block(y):
+                return y * config.factor if config.factor > 0 else y * 0
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        state = SimpleNamespace(factor=1.0)
+        config = Config(state)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        for iteration, size in enumerate((3, 3, 4, 5, 3, 6)):
+            if iteration in (2, 4):
+                del config.factor
+                state.factor = 1.0
+            x = torch.ones(size, requires_grad=True, device=device)
+            actual = compiled(x, config, state)
+            self.assertEqual(actual, (x + 1) * 4)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0], torch.full_like(x, 4)
+            )
+            self.assertEqual(config.__dict__["factor"], 2.0)
+            self.assertEqual(calls, [2.0] * (1 + (iteration >= 2) + (iteration >= 4)))
+            if iteration > 0:
+                self.assertEqual(counter.frame_count, 3)
+            if iteration in (1, 3, 5):
+                targets = [node.target for node in counter.graphs[-1].graph.nodes]
+                self.assertIn(tag_activation_checkpoint, targets)
+
+    @parametrize("nested", [False, True])
+    def test_cached_property_reuse_mutation(self, device, nested):
+        class Child:
+            def __init__(self, value):
+                self.value = value
+
+            @functools.cached_property
+            def scale(self):
+                return self.value
+
+        class Config:
+            def __init__(self, child):
+                self._child = child
+
+            @functools.cached_property
+            def child(self):
+                return self._child
+
+        @torch.compiler.nested_compile_region
+        def block(x, config):
+            return x * (config.child.scale if nested else config.scale)
+
+        def fn(x, config, replacement):
+            first = block(x, config)
+            if nested:
+                config.child.scale = replacement
+            else:
+                config.scale = replacement
+            return first + block(x, config)
+
+        initial = torch.full((3,), 2.0, device=device)
+        replacement = torch.full((3,), 3.0, device=device)
+        child = Child(initial)
+        self.assertIs(child.scale, initial)
+        config = Config(child) if nested else child
+        if nested:
+            self.assertIs(config.child, child)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        actual = compiled(x, config, replacement)
+        self.assertEqual(actual, x * (initial + replacement))
+        self.assertEqual(torch.autograd.grad(actual.sum(), x)[0], initial + replacement)
+        self.assertIs(config.child.scale if nested else config.scale, replacement)
+
+    @parametrize("discard", [False, True])
+    def test_cached_property_explicit_hash_descriptor(self, device, discard):
+        calls = []
+
+        class Config:
+            @functools.cached_property
+            def marker(self):
+                calls.append("marker")
+                return Config.marker
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, config: 0)
+        def block(x, config):
+            value = config.marker
+            if discard:
+                return x * 2
+            return x * (2 if value.attrname == "marker" else 3)
+
+        def fn(x, config):
+            return block(x, config) + block(x + 1, config)
+
+        config = Config()
+        self.assertIs(config.marker, Config.marker)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for _ in range(3):
+            x = torch.ones(3, requires_grad=True, device=device)
+            actual = compiled(x, config)
+            self.assertEqual(actual, x * 2 + (x + 1) * 2)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0], torch.full_like(x, 4)
+            )
+            self.assertIs(config.marker, Config.marker)
+            self.assertEqual(calls, ["marker"])
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("protocol", ["dict", "weakref", "foreign", "property", "getattribute"])
+    def test_cached_property_rebased_protocol(self, device, protocol):
+        calls = []
+        dict_reads = []
+
+        class Config:
+            def __init__(self, weight):
+                self.weight = weight
+
+            @functools.cached_property
+            def cached(self):
+                calls.append("cached")
+                return self.weight
+
+        class Foreign:
+            pass
+
+        class Changed(Config):
+            if protocol == "dict":
+
+                @property
+                def __dict__(self):
+                    dict_reads.append("__dict__")
+                    return {}
+
+            elif protocol == "weakref":
+                __dict__ = Config.__dict__["__weakref__"]
+
+            elif protocol == "foreign":
+                __dict__ = Foreign.__dict__["__dict__"]
+
+            elif protocol == "property":
+
+                @property
+                def cached(self):
+                    return self.weight
+
+            else:
+
+                def __getattribute__(self, name):
+                    if name == "cached":
+                        return object.__getattribute__(self, "weight")
+                    return object.__getattribute__(self, name)
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, config: 29)
+        def block(x, config):
+            return x.sin() + config.cached
+
+        def fn(x, first, second):
+            return block(x, first) + block(x + 1, second)
+
+        first_weight = torch.full((3,), 2.0, device=device)
+        second_weight = torch.full((3,), 4.0, device=device)
+        first, second = Config(first_weight), Changed(second_weight)
+        second_ref = weakref.ref(second)
+        self.assertIs(first.cached, first_weight)
+        physical_dict = Config.__dict__["__dict__"].__get__(second, type(second))
+        physical_dict["cached"] = second_weight
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for iteration in range(3):
+            if iteration:
+                if protocol in ("dict", "weakref", "foreign"):
+                    physical_dict["cached"] = torch.full((3,), 5.0, device=device)
+                else:
+                    physical_dict["cached"] = torch.full(
+                        (4,), 99.0, dtype=torch.float64, device=device
+                    )
+            dict_reads.clear()
+            x = torch.arange(3, dtype=torch.float32, device=device, requires_grad=True)
+            actual = compiled(x, first, second)
+            self.assertEqual(actual, fn(x, first, second))
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0], x.cos() + (x + 1).cos()
+            )
+            self.assertIs(first.cached, first_weight)
+            self.assertIs(
+                second.cached,
+                physical_dict["cached"]
+                if protocol in ("dict", "weakref", "foreign")
+                else second_weight,
+            )
+            self.assertIs(second_ref(), second)
+            self.assertEqual(calls, ["cached"])
+            self.assertEqual(dict_reads, [])
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("initial_alias", [False, True])
+    def test_cached_property_rebased_alias(self, device, initial_alias):
+        calls = []
+
+        class Config:
+            def __init__(self, weight):
+                self.weight = weight
+
+            @functools.cached_property
+            def cached(self):
+                calls.append("cached")
+                return self.weight
+
+        Config.alias = Config.cached
+
+        class Changed(Config):
+            @functools.cached_property
+            def other(self):
+                calls.append("other")
+                return self.weight
+
+        Changed.cached = Changed.other
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, config: 29)
+        def block(x, config):
+            return x.sin() + (config.alias if initial_alias else config.cached)
+
+        def fn(x, first, second):
+            return block(x, first) + block(x + 1, second)
+
+        first_weight = torch.full((3,), 2.0, device=device)
+        second_weight = torch.full((3,), 4.0, device=device)
+        first = Config(first_weight)
+        if initial_alias:
+            first.__dict__["alias"] = first_weight
+            second = Config(second_weight)
+            self.assertIs(second.cached, second_weight)
+        else:
+            self.assertIs(first.cached, first_weight)
+            second = Changed(second_weight)
+            self.assertIs(second.other, second_weight)
+        calls.clear()
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for _ in range(3):
+            x = torch.arange(3, dtype=torch.float32, device=device, requires_grad=True)
+            actual = compiled(x, first, second)
+            self.assertEqual(actual, fn(x, first, second))
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0], x.cos() + (x + 1).cos()
+            )
+            self.assertIs(first.alias if initial_alias else first.cached, first_weight)
+            self.assertIs(
+                second.alias if initial_alias else second.cached, second_weight
+            )
+            self.assertNotIn("alias" if initial_alias else "cached", second.__dict__)
+            self.assertEqual(calls, [])
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("protocol", ["getattribute", "data_descriptor"])
+    def test_cached_property_rebased_protocol_invalidation(self, device, protocol):
+        class Config:
+            def __init__(self, weight):
+                self.weight = weight
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def cached(self):
+                self.getter_calls += 1
+                return self.weight
+
+        class First(Config):
+            pass
+
+        class Second(Config):
+            pass
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, config: 47)
+        def block(x, config):
+            return x.sin() + config.cached
+
+        def fn(x, first, second):
+            return block(x, first) + block(x + 1, second)
+
+        shared = torch.full((3,), 2.0, device=device)
+        replacement = torch.full_like(shared, 4)
+        first, second = First(shared), Second(shared)
+        self.assertIs(first.cached, shared)
+        self.assertIs(second.cached, shared)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+
+        def check(frames):
+            x = torch.arange(3, dtype=torch.float32, device=device, requires_grad=True)
+            actual = compiled(x, first, second)
+            expected = fn(x, first, second)
+            ref_x = x.detach().double().requires_grad_()
+            reference = fn(ref_x, first, second)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual, reference.to(actual.dtype))
+            grad = torch.autograd.grad(actual.sum(), x)[0]
+            self.assertEqual(grad, torch.autograd.grad(expected.sum(), x)[0])
+            self.assertEqual(
+                grad, torch.autograd.grad(reference.sum(), ref_x)[0].to(grad.dtype)
+            )
+            self.assertIs(first.__dict__["cached"], shared)
+            self.assertIs(second.__dict__["cached"], shared)
+            self.assertEqual(first.getter_calls, 1)
+            self.assertEqual(second.getter_calls, 1)
+            self.assertEqual(counter.frame_count, frames)
+
+        check(1)
+        targets = [node.target for node in counter.graphs[0].graph.nodes]
+        self.assertEqual(targets.count(torch._higher_order_ops.invoke_subgraph), 2)
+
+        def override(self, name):
+            if name == "cached":
+                return replacement
+            return object.__getattribute__(self, name)
+
+        name = "__getattribute__" if protocol == "getattribute" else "cached"
+        changed = (
+            override if protocol == "getattribute" else property(lambda _: replacement)
+        )
+        with mock.patch.object(Second, name, changed, create=True):
+            self.assertIs(first.cached, shared)
+            self.assertIs(second.cached, replacement)
+            for _ in range(3):
+                check(2)
+        self.assertIs(second.cached, shared)
+        check(2)
+
+    def test_cached_property_explicit_hash_cold_tensor(self, device):
+        class Config:
+            def __init__(self, weight):
+                self.weight = weight
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def cached(self):
+                self.getter_calls += 1
+                return self.weight
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, config: 29)
+        def block(x, config):
+            return x.sin() + config.cached
+
+        def fn(x, first, second):
+            return block(x, first) + block(x + 1, second) + block(x + 2, first)
+
+        first_weight = torch.full((3,), 2.0, device=device)
+        second_weight = torch.full((3,), 4.0, device=device)
+        first, second = Config(first_weight), Config(second_weight)
+        self.assertIs(first.cached, first_weight)
+        first.weight = torch.full_like(first_weight, 99)
+        counter = CompileCounterWithBackend("aot_eager")
+        compile_states = []
+
+        def backend(graph, inputs):
+            compile_states.append(("cached" in second.__dict__, second.getter_calls))
+            return counter(graph, inputs)
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for iteration in range(3):
+            if iteration:
+                second.weight = torch.full_like(second_weight, 99)
+            x = torch.arange(3, dtype=torch.float32, device=device, requires_grad=True)
+            actual = compiled(x, first, second)
+            self.assertEqual(
+                actual,
+                x.sin()
+                + (x + 1).sin()
+                + (x + 2).sin()
+                + first_weight * 2
+                + second_weight,
+            )
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x)[0],
+                x.cos() + (x + 1).cos() + (x + 2).cos(),
+            )
+            self.assertIs(first.cached, first_weight)
+            self.assertIs(second.cached, second_weight)
+            self.assertEqual(first.getter_calls, 1)
+            self.assertEqual(second.getter_calls, 1)
+            if iteration == 0:
+                self.assertEqual(compile_states, [(False, 0)])
+                self.assertEqual(counter.frame_count, 1)
+            else:
+                self.assertEqual(compile_states, [(False, 0), (True, 1)])
+                self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("value_kind", ["tensor", "descriptor"])
+    @parametrize("discard", [False, True])
+    def test_cached_property_reuse_cold_source(self, device, value_kind, discard):
+        calls = []
+
+        class Config:
+            @functools.cached_property
+            def scale(self):
+                calls.append("scale")
+                if value_kind == "descriptor":
+                    return Config.scale
+                return torch.full((3,), 2.0, device=device)
+
+        @torch.compiler.nested_compile_region
+        def block(x, config):
+            value = config.scale
+            if discard:
+                return x * 2
+            if value_kind == "descriptor":
+                return x * (2 if value.attrname == "scale" else 3)
+            return x * value
+
+        def fn(x, configs):
+            return block(x, configs[0]) + block(x, configs[1])
+
+        hot, cold = Config(), Config()
+        hot.scale
+        calls.clear()
+        compile_states = []
+
+        def backend(graph, inputs):
+            compile_states.append((list(calls), "scale" in cold.__dict__))
+            return graph.forward
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.ones(3, requires_grad=True, device=device)
+        actual = compiled(x, [hot, cold])
+        self.assertEqual(actual, x * 4)
+        self.assertEqual(torch.autograd.grad(actual.sum(), x)[0], torch.full_like(x, 4))
+        self.assertEqual(compile_states, [([], False)])
+        self.assertEqual(calls, ["scale"])
+        self.assertIn("scale", cold.__dict__)
+
+    @parametrize("second_prewarmed", [False, True])
+    @parametrize("discard", [False, True])
+    def test_cached_property_automatic_reuse_cache_state(
+        self, device, second_prewarmed, discard
+    ):
+        class Config:
+            def __init__(self):
+                self.stage = 0
+                self.observed_stage = -1
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def marker(self):
+                self.getter_calls += 1
+                self.observed_stage = self.stage
+                return Config.marker
+
+        @torch.compiler.nested_compile_region
+        def block(x, config):
+            marker = config.marker
+            factor = 1 if discard or marker.attrname == "marker" else 2
+            return x.sin() + factor
+
+        def fn(x, first, second):
+            first_result = block(x, first)
+            second.stage = 4
+            return first_result + block(x + 1, second) + block(x + 2, first)
+
+        first, second = Config(), Config()
+        self.assertIs(first.marker, Config.marker)
+        if second_prewarmed:
+            self.assertIs(second.marker, Config.marker)
+        counter = CompileCounterWithBackend("aot_eager")
+        compile_states = []
+
+        def backend(graph, inputs):
+            compile_states.append(
+                (
+                    "marker" in second.__dict__,
+                    second.getter_calls,
+                    second.observed_stage,
+                )
+            )
+            return counter(graph, inputs)
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with (
+            mock.patch.object(
+                invoke.InvokeSubgraphHigherOrderVariable,
+                "create_wrapped_node",
+                autospec=True,
+                side_effect=invoke.InvokeSubgraphHigherOrderVariable.create_wrapped_node,
+            ) as trace,
+            mock.patch.object(
+                invoke, "save_reuse_entry", wraps=invoke.save_reuse_entry
+            ) as save,
+            mock.patch.object(
+                invoke, "stamp_out_subgraph", wraps=invoke.stamp_out_subgraph
+            ) as stamp,
+        ):
+            for iteration in range(3):
+                if second_prewarmed and iteration == 1:
+                    del second.marker
+                x = torch.arange(
+                    3, dtype=torch.float32, device=device, requires_grad=True
+                )
+                actual = compiled(x, first, second)
+                self.assertIs(first.__dict__["marker"], Config.marker)
+                self.assertIs(second.__dict__["marker"], Config.marker)
+                self.assertEqual(first.getter_calls, 1)
+                self.assertEqual(
+                    second.getter_calls, 2 if second_prewarmed and iteration else 1
+                )
+                self.assertEqual(
+                    second.observed_stage,
+                    0 if second_prewarmed and not iteration else 4,
+                )
+                eager_x = x.detach().clone().requires_grad_()
+                expected = fn(eager_x, first, second)
+                reference = x.detach().double()
+                reference_value = (
+                    reference.sin() + (reference + 1).sin() + (reference + 2).sin() + 3
+                )
+                reference_grad = (
+                    reference.cos() + (reference + 1).cos() + (reference + 2).cos()
+                )
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual, reference_value.to(actual.dtype))
+                actual_grad = torch.autograd.grad(actual.sum(), x)[0]
+                self.assertEqual(
+                    actual_grad, torch.autograd.grad(expected.sum(), eager_x)[0]
+                )
+                self.assertEqual(actual_grad, reference_grad.to(actual_grad.dtype))
+                if iteration == 0:
+                    self.assertEqual(
+                        (trace.call_count, save.call_count, stamp.call_count),
+                        (1, 1, 2) if second_prewarmed else (2, 1, 1),
+                    )
+                    self.assertEqual(counter.frame_count, 1)
+                    self.assertEqual(
+                        compile_states,
+                        [(True, 1, 0)] if second_prewarmed else [(False, 0, -1)],
+                    )
+                else:
+                    self.assertEqual(
+                        (trace.call_count, save.call_count, stamp.call_count), (3, 2, 3)
+                    )
+                    self.assertEqual(counter.frame_count, 2)
+                    self.assertEqual(
+                        compile_states,
+                        [(True, 1, 0), (False, 1, 0)]
+                        if second_prewarmed
+                        else [(False, 0, -1), (True, 1, 4)],
+                    )
+
+    @parametrize("cold_prefix", ["child", "marker"])
+    def test_cached_property_automatic_reuse_cold_prefix(self, device, cold_prefix):
+        class Child:
+            def __init__(self):
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def marker(self):
+                self.getter_calls += 1
+                return Child.marker
+
+        class Holder:
+            def __init__(self, child):
+                self._child = child
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def child(self):
+                self.getter_calls += 1
+                return self._child
+
+        @torch.compiler.nested_compile_region
+        def block(x, holder):
+            holder.child.marker
+            return x.sin() + 1
+
+        def fn(x, first, second):
+            return block(x, first) + block(x + 1, second) + block(x + 2, first)
+
+        first_child, second_child = Child(), Child()
+        first, second = Holder(first_child), Holder(second_child)
+        self.assertIs(first.child.marker, Child.marker)
+        if cold_prefix == "child":
+            self.assertIs(second_child.marker, Child.marker)
+        else:
+            self.assertIs(second.child, second_child)
+        counter = CompileCounterWithBackend("aot_eager")
+        compile_states = []
+
+        def backend(graph, inputs):
+            compile_states.append(
+                (
+                    "child" in second.__dict__,
+                    "marker" in second_child.__dict__,
+                    second.getter_calls,
+                    second_child.getter_calls,
+                )
+            )
+            return counter(graph, inputs)
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with (
+            mock.patch.object(
+                invoke.InvokeSubgraphHigherOrderVariable,
+                "create_wrapped_node",
+                autospec=True,
+                side_effect=invoke.InvokeSubgraphHigherOrderVariable.create_wrapped_node,
+            ) as trace,
+            mock.patch.object(
+                invoke, "save_reuse_entry", wraps=invoke.save_reuse_entry
+            ) as save,
+            mock.patch.object(
+                invoke, "stamp_out_subgraph", wraps=invoke.stamp_out_subgraph
+            ) as stamp,
+        ):
+            for iteration in range(3):
+                x = torch.arange(
+                    3, dtype=torch.float32, device=device, requires_grad=True
+                )
+                actual = compiled(x, first, second)
+                self.assertIs(first.__dict__["child"], first_child)
+                self.assertIs(second.__dict__["child"], second_child)
+                self.assertIs(first_child.__dict__["marker"], Child.marker)
+                self.assertIs(second_child.__dict__["marker"], Child.marker)
+                self.assertEqual(
+                    [
+                        first.getter_calls,
+                        second.getter_calls,
+                        first_child.getter_calls,
+                        second_child.getter_calls,
+                    ],
+                    [1, 1, 1, 1],
+                )
+                eager_x = x.detach().clone().requires_grad_()
+                expected = fn(eager_x, first, second)
+                reference = x.detach().double()
+                reference_value = (
+                    reference.sin() + (reference + 1).sin() + (reference + 2).sin() + 3
+                )
+                reference_grad = (
+                    reference.cos() + (reference + 1).cos() + (reference + 2).cos()
+                )
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual, reference_value.to(actual.dtype))
+                actual_grad = torch.autograd.grad(actual.sum(), x)[0]
+                self.assertEqual(
+                    actual_grad, torch.autograd.grad(expected.sum(), eager_x)[0]
+                )
+                self.assertEqual(actual_grad, reference_grad.to(actual_grad.dtype))
+                if iteration == 0:
+                    self.assertEqual(
+                        (trace.call_count, save.call_count, stamp.call_count), (2, 1, 1)
+                    )
+                    self.assertEqual(counter.frame_count, 1)
+                    self.assertEqual(
+                        compile_states,
+                        [(False, True, 0, 1)]
+                        if cold_prefix == "child"
+                        else [(True, False, 1, 0)],
+                    )
+                else:
+                    self.assertEqual(
+                        (trace.call_count, save.call_count, stamp.call_count), (3, 2, 3)
+                    )
+                    self.assertEqual(counter.frame_count, 2)
+                    self.assertEqual(
+                        compile_states,
+                        [(False, True, 0, 1), (True, True, 1, 1)]
+                        if cold_prefix == "child"
+                        else [(True, False, 1, 0), (True, True, 1, 1)],
+                    )
+
+    @parametrize("prewarmed", [False, True])
+    def test_cached_property_fullgraph(self, device, prewarmed):
+        class Config:
+            def __init__(self):
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def scale(self):
+                self.getter_calls += 1
+                return 2
+
+        def fn(x, config):
+            def block(y):
+                return y * config.scale
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        config = Config()
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        x = torch.randn(3, requires_grad=True, device=device)
+        if prewarmed:
+            self.assertEqual(config.scale, 2)
+            for _ in range(3):
+                actual = compiled(x, config)
+                self.assertEqual(actual, (x + 1) * 4)
+                grad = torch.autograd.grad(actual.sum(), x)[0]
+                self.assertEqual(grad, torch.full_like(x, 4))
+                self.assertEqual(config.getter_calls, 1)
+            self.assertEqual(counter.frame_count, 1)
+            targets = [node.target for node in counter.graphs[0].graph.nodes]
+            self.assertIn(tag_activation_checkpoint, targets)
+        else:
+            error = torch._dynamo.exc.Unsupported
+            with self.assertRaisesRegex(error, "Unsafe side effect"):
+                compiled(x, config)
+            self.assertEqual(counter.frame_count, 0)
+            self.assertEqual(config.getter_calls, 0)
+            self.assertNotIn("scale", config.__dict__)
+
+    @parametrize(
+        "failure,observer_raises",
+        [
+            ("base", False),
+            ("base", True),
+            ("fallback", False),
+            ("fallback", True),
+            ("missing", False),
+            ("missing", True),
+            ("raw", False),
+        ],
+    )
+    def test_cached_property_source_callback(self, device, failure, observer_raises):
+        from torch._dynamo.source import AttrSource, CachedPropertySource, LocalSource
+
+        class Config:
+            @functools.cached_property
+            def cached(self):
+                return torch.ones(3, device=device)
+
+        config = Config()
+        cached = config.cached
+        sources = []
+
+        def backend(graph, inputs):
+            for node in graph.graph.nodes:
+                arg = node.meta.get("grapharg")
+                if arg is not None and isinstance(arg.source, CachedPropertySource):
+                    sources.append(arg.source)
+            return graph.forward
+
+        def fn(x, config):
+            return x + config.cached
+
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.zeros(3, device=device), config
+        )
+        self.assertEqual(len(sources), 1)
+        source = sources[0]
+        self.assertIsInstance(source.base, LocalSource)
+        calls = []
+
+        class ObserverError(Exception):
+            pass
+
+        def on_error(operation, base, error):
+            calls.append((operation, base, error))
+            if observer_raises:
+                raise ObserverError("observer failure")
+
+        if failure == "raw":
+            cache = {}
+            self.assertIs(
+                source.get_value(
+                    {"L": {"config": config}}, {}, cache, on_error=on_error
+                ),
+                cached,
+            )
+            self.assertIs(source.get_value({}, {}, cache, on_error=on_error), cached)
+            self.assertEqual(calls, [])
+        elif failure == "base":
+            with self.assertRaises(ObserverError if observer_raises else KeyError):
+                source.get_value({"L": {}}, {}, {}, on_error=on_error)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], source.base)
+            self.assertIsNone(calls[0][1])
+            self.assertIsInstance(calls[0][2], KeyError)
+        else:
+            if failure == "fallback":
+
+                class BrokenConfig(Config):
+                    reads = 0
+
+                    def __getattribute__(self, name):
+                        if name == "cached":
+                            type(self).reads += 1
+                            raise RuntimeError("fallback failure")
+                        return object.__getattribute__(self, name)
+
+                value = BrokenConfig()
+                expected_error = RuntimeError
+            else:
+                value = object()
+                expected_error = AttributeError
+            with self.assertRaises(
+                ObserverError if observer_raises else expected_error
+            ):
+                source.get_value({"L": {"config": value}}, {}, {}, on_error=on_error)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], AttrSource(source.base, source.member))
+            self.assertIs(calls[0][1], value)
+            self.assertIsInstance(calls[0][2], expected_error)
+            if failure == "fallback":
+                self.assertEqual(BrokenConfig.reads, 1)
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingCachedPropertyTests, globals(), allow_xpu=True
 )
 
 

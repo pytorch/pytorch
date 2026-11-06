@@ -145,6 +145,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    CachedPropertySource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
     CellContentsSource,
@@ -1600,7 +1601,7 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: dict[str, GuardManager] = {}
+        self._cached_guard_managers: dict[str | Source, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
@@ -1906,8 +1907,15 @@ class GuardBuilder(GuardBuilderBase):
         example_value = None
         source_name = source.name
 
-        if source_name != "" and source_name in self._cached_guard_managers:
-            return self._cached_guard_managers[source_name]
+        cache_key: str | Source = source_name
+        cursor = source
+        while isinstance(cursor, ChainedSource):
+            if isinstance(cursor, CachedPropertySource):
+                cache_key = source
+                break
+            cursor = cursor.base
+        if source_name != "" and cache_key in self._cached_guard_managers:
+            return self._cached_guard_managers[cache_key]
 
         if source_name != "":
             example_value = self.get(source)
@@ -2044,6 +2052,28 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CachedPropertySource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            instance_dict = source.get_dict(base_example_value)
+            if instance_dict is None:
+                out = self.get_guard_manager_from_source(
+                    AttrSource(source.base, source.member)
+                )
+            else:
+                cache_manager = base_guard_manager.get_generic_dict_manager(
+                    source=f"{base_source_name}.__dict__",
+                    example_value=self._get_generic_dict_manager_example_value(
+                        instance_dict
+                    ),
+                    guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+                )
+                out = cache_manager.dict_getitem_manager(
+                    key=source.member,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GenericAttrSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2412,7 +2442,7 @@ class GuardBuilder(GuardBuilderBase):
                 f"missing guard manager builder {source} - {source.name}"
             )
 
-        self._cached_guard_managers[source.name] = out
+        self._cached_guard_managers[cache_key] = out
         return out
 
     def get_guard_manager(self, guard: Guard) -> GuardManager:

@@ -23,7 +23,7 @@ from torch._dynamo.guards import (
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.source import AttrSource, CachedPropertySource, SyntheticLocalSource
 from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
@@ -32,8 +32,12 @@ from torch._dynamo.variables.higher_order_ops import WrapHigherOrderVariable
 from torch._dynamo.variables.lists import ListVariable, TupleVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
-from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+from torch._dynamo.variables.user_defined import (
+    install_cached_property_guards,
+    UserDefinedObjectVariable,
+)
 from torch._guards import (
+    ChainedSource,
     Guard,
     InvokeSubgraphReuseCondition,
     InvokeSubgraphReuseEntry,
@@ -434,11 +438,21 @@ def has_mutated_vars(
 ) -> bool:
     """Check if any source accessed by the subgraph has been mutated.
 
-    SideEffects.mutated_sources records the exact AttrSource for every
-    store_attr call. A simple set intersection with traced_sources tells
-    us whether any source the subgraph read was later written to.
+    Cached-property Sources alias the AttrSources recorded by attribute stores.
     """
-    overlap = tx.output.side_effects.mutated_sources & traced_sources
+    if not tx.output.side_effects.mutated_sources:
+        return False
+
+    def attr_alias(source: Source) -> Source:
+        if isinstance(source, CachedPropertySource):
+            return AttrSource(source.base, source.member)
+        return source
+
+    mutated = OrderedSet(
+        source.clone(attr_alias) for source in tx.output.side_effects.mutated_sources
+    )
+    traced = OrderedSet(source.clone(attr_alias) for source in traced_sources)
+    overlap = mutated & traced
     if overlap:
         hc_log.debug(
             "subgraph_reuse: mutated sources detected -- %s",
@@ -446,6 +460,45 @@ def has_mutated_vars(
         )
         return True
     return False
+
+
+def check_cached_property_sources(
+    tx: "InstructionTranslatorBase",
+    sources: OrderedSet[Source],
+    *,
+    install_guards: bool = False,
+) -> bool:
+    # A descriptor-valued cache and a missing key can pass the same value guard.
+    resolve_globals = {
+        "G": tx.output.root_tx.f_globals,
+        "L": tx.output.root_tx.f_locals,
+    }
+    resolve_cache: dict[Source, Any] = {}
+    checked: OrderedSet[CachedPropertySource] = OrderedSet()
+    for source in sources:
+        cache_sources: list[CachedPropertySource] = []
+        while isinstance(source, ChainedSource):
+            if isinstance(source, CachedPropertySource):
+                cache_sources.append(source)
+            source = source.base
+        for cache_source in reversed(cache_sources):
+            if cache_source in checked:
+                continue
+            try:
+                value = cache_source.base.get_value(resolve_globals, {}, resolve_cache)
+                instance_dict = cache_source.get_dict(value)
+            except Exception:
+                return False
+            if instance_dict is None or not dict.__contains__(
+                instance_dict, cache_source.member
+            ):
+                return False
+            if install_guards and not install_cached_property_guards(
+                tx, cache_source, value
+            ):
+                return False
+            checked.add(cache_source)
+    return True
 
 
 def is_reuse_eligible(
@@ -477,6 +530,9 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
+        if not check_cached_property_sources(tx, traced_sources or OrderedSet()):
+            return False
+
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
                 traceback.format_list(tracing_info.side_effect_stack)
@@ -803,10 +859,13 @@ def is_reusable(
     if has_mutated_vars(tx, remapped):
         return False
 
+    if not check_cached_property_sources(tx, remapped):
+        return False
+
     # If no sources changed, all guards were already checked during the
     # original trace and will trivially pass again.
     if not source_replacement:
-        return True
+        return check_cached_property_sources(tx, remapped, install_guards=True)
 
     # Shared resolution context so source.get_value memoizes intermediate
     # results (e.g. common base sources) across all guards in this check.
@@ -862,7 +921,7 @@ def is_reusable(
             )
             return False
 
-    return True
+    return check_cached_property_sources(tx, remapped, install_guards=True)
 
 
 def has_reuse_entries(
@@ -1053,7 +1112,7 @@ def stamp_out_subgraph(
     tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     cached: InvokeSubgraphReuseEntry,
-) -> VariableTracker:
+) -> VariableTracker | None:
     """Emit a new invoke_subgraph call by stamping out a cached subgraph.
 
     Sources in the cached entry are parameterized: they refer to the original
@@ -1078,6 +1137,35 @@ def stamp_out_subgraph(
     }
     resolve_locals: dict[str, Any] = {}
     resolve_cache: dict[Source, Any] = {}
+
+    # Guard each current receiver before captured values can be deduplicated.
+    # A cold cache needs its getter traced before it can be lifted.
+    for subgraph_input in cached.subgraph_input_mapping:
+        if isinstance(subgraph_input, LiftedCapturedSource):
+            sources = (subgraph_input.source,)
+        elif isinstance(subgraph_input, LiftedSyntheticObject):
+            sources = tuple(
+                s for s in subgraph_input.ctor_arg_sources or () if s is not None
+            )
+        else:
+            continue
+        for source in sources:
+            source = source.clone(lambda s: source_replacement.get(s, s))
+            cache_sources: list[CachedPropertySource] = []
+            while isinstance(source, ChainedSource):
+                if isinstance(source, CachedPropertySource):
+                    cache_sources.append(source)
+                source = source.base
+            for cache_source in reversed(cache_sources):
+                value = cache_source.base.get_value(
+                    resolve_globals, resolve_locals, resolve_cache
+                )
+                instance_dict = cache_source.get_dict(value)
+                if instance_dict is not None:
+                    if not dict.__contains__(instance_dict, cache_source.member):
+                        return None
+                    if not install_cached_property_guards(tx, cache_source, value):
+                        return None
 
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:
@@ -1384,7 +1472,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
-                    return stamp_out_subgraph(tx, fingerprint, cached)
+                    reused = stamp_out_subgraph(tx, fingerprint, cached)
+                if reused is not None:
+                    return reused
+                reuse = False
 
         # Automatic reuse lookup (guard-based): check fn_code first (cheap) to
         # avoid the expensive pytree flatten in build_input_fingerprint on
@@ -1404,7 +1495,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     match.body_name,
                 )
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
-                    return stamp_out_subgraph(tx, fingerprint, match)
+                    reused = stamp_out_subgraph(tx, fingerprint, match)
+                if reused is not None:
+                    return reused
+                reuse = False
 
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must not be None")
