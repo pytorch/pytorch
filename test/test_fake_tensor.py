@@ -5478,6 +5478,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
             torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
 
+    def test_allow_unsafe_data_ptr_access(self):
+        mode, _ = self._make_mode()
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        mode._allow_unsafe_data_ptr_access = False
+        self.assertFalse(mode._allow_unsafe_data_ptr_access)
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, _ = self._make_mode()
+        self.assertFalse(mode._allow_unsafe_data_ptr_access)
+
     def test_wrapper_weakref(self):
         mode, wrapper = self._make_mode()
         ref = weakref.ref(wrapper)
