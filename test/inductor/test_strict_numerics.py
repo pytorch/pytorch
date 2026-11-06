@@ -678,6 +678,23 @@ class StrictNumericsCompileTest(TestCase):
                 tuple(t.view(torch.int64) for t in fn(scalar, nans)),
             )
 
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_fused_sub_nan_payload(self, device, dtype, numerics):
+        values = _min_max_specials(dtype, device)
+        nans = values[-4:]
+        a = nans.repeat_interleave(values.numel())
+        b = values.repeat(nans.numel())
+
+        def fn(a, b):
+            computed = -b.rsqrt()
+            return a - computed, computed - a
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        result, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertTrue(_outputs_equal(result, fn(a, b)))
+
     @dtypes(torch.float32, torch.float64)
     @parametrize("axis", (None, 1))
     def test_sum_fallback_preserves_eager_input_layout(self, device, dtype, axis):
