@@ -914,11 +914,23 @@ static void upsample_bilinear2d_out_cuda_template(
 }
 
 #ifdef USE_ROCM
-// Prefer gather on channels_last when 4*o_numel/i_numel is high (contended
-// atomics). One cutoff is shared by all ROCm architectures: gather wins above
-// ~6 atomics/addr and loses below ~5 on the parts measured so far. It can be
-// tuned for individual architectures later.
-constexpr int64_t kNhwcGatherMinContributions = 6;
+// The NHWC gather writes every grad_input element and beats zero-fill plus
+// atomic scatter once enough grad_output values land on each grad_input
+// address (4 * o_numel / i_numel). Architectures without a perf sweep keep
+// the scatter. A return of 0 means no gather.
+int64_t nhwc_gather_min_contributions() {
+  const auto& hooks = at::detail::getCUDAHooks();
+  if (hooks.isGPUArch({"gfx950"})) {
+    return 7;
+  }
+  if (hooks.isGPUArch({"gfx942"})) {
+    return 6;
+  }
+  if (hooks.isGPUArch({"gfx1250"})) {
+    return 6;
+  }
+  return 0;
+}
 
 // Writes every grad_input element, so the caller skips zero-fill.
 template <typename scalar_t>
@@ -1021,13 +1033,16 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   const auto memory_format = grad_output_.suggest_memory_format();
 
 #ifdef USE_ROCM
-  // Contended atomics: above ~6 contributions per grad_input address the
-  // gather, which writes every element, beats zero-fill plus atomic scatter.
-  if (grad_output_.sizes() != grad_input.sizes() &&
+  // Contended atomics: once enough contributions land on each grad_input
+  // address, the gather, which writes every element, beats zero-fill plus
+  // atomic scatter. A cut of 0 keeps the scatter.
+  const int64_t min_contributions = nhwc_gather_min_contributions();
+  if (min_contributions > 0 &&
+      grad_output_.sizes() != grad_input.sizes() &&
       memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 &&
       grad_input.is_contiguous(memory_format) &&
       4 * grad_output_.numel() >=
-          kNhwcGatherMinContributions * grad_input.numel()) {
+          min_contributions * grad_input.numel()) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16,
         grad_output_.scalar_type(), "upsample_bilinear2d_backward_gather_nhwc",
