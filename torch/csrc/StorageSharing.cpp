@@ -4,9 +4,10 @@
 #endif
 #include <structmember.h>
 
+#include <c10/core/CachingDeviceAllocator.h>
 #include <libshm.h>
-#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/IPCTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
 
@@ -288,7 +289,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
       "_share_cuda_: only available on CUDA");
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  if (storage_impl->received_cuda()) {
+  if (storage_impl->received_ipc()) {
     TORCH_CHECK(
         false,
         "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
@@ -305,8 +306,8 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
   THPObjectPtr _event_handle(Py_NewRef(Py_None));
   THPObjectPtr _event_sync_required(Py_NewRef(Py_None));
   if (storage.data()) {
-    auto shandle =
-        c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
+    auto shandle = c10::getDeviceAllocator(storage.device_type())
+                       ->shareIpcHandle(storage.mutable_data());
     _handle = PyBytes_FromStringAndSize(
         shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
     _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
@@ -317,20 +318,20 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
         storage.mutable_data(), storage.device());
     auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
     auto sent_data =
-        static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
+        static_cast<torch::IPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
 
-    cudaIpcEventHandle_t ipc_event_handle{};
+    std::string ipc_event_handle_str;
 
     if (sent_data->event_sync_required_) {
-      C10_CUDA_CHECK(
-          cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+      ipc_event_handle_str = sent_data->event_->ipcHandle();
     }
 
     _event_handle = PyBytes_FromStringAndSize(
-        reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
+        ipc_event_handle_str.c_str(),
+        static_cast<Py_ssize_t>(ipc_event_handle_str.size()));
     _event_sync_required = PyBool_FromLong(sent_data->event_sync_required_);
   }
 
@@ -390,7 +391,7 @@ static PyObject* THPStorage_releaseIPCCounter(
     auto sptr = at::RefcountedMapAllocator::makeDataPtr(
         ref_counter_handle.c_str(),
         flags,
-        sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+        sizeof(int64_t) * torch::IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
   } catch (c10::Error&) {
@@ -450,6 +451,7 @@ static PyObject* THPStorage_newSharedCuda(
 
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
+  const auto acc_type = at::accelerator::getAccelerator(true).value();
   at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {
@@ -470,7 +472,7 @@ static PyObject* THPStorage_newSharedCuda(
     return nullptr;
   }
   std::shared_ptr<void> basePtr =
-      c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);
+      c10::getDeviceAllocator(acc_type)->getIpcDevPtr(s_handle);
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
@@ -485,7 +487,7 @@ static PyObject* THPStorage_newSharedCuda(
     std::string ref_counter_handle;
     ptrdiff_t ref_counter_offset{};
     c10::DeviceIndex device{-1};
-    torch::CudaIPCReceivedData received_data;
+    torch::IPCReceivedData received_data;
   };
 
   auto ctx = std::make_unique<IpcDeleterContext>();
@@ -531,7 +533,7 @@ static PyObject* THPStorage_newSharedCuda(
           auto sptr = at::RefcountedMapAllocator::makeDataPtr(
               ctx->ref_counter_handle.c_str(),
               flags,
-              sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+              sizeof(int64_t) * torch::IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
         } catch (c10::Error&) {
@@ -548,7 +550,7 @@ static PyObject* THPStorage_newSharedCuda(
       /*resizable=*/false);
 
   base->set_resizable(false);
-  base->set_received_cuda(true);
+  base->set_received_ipc(true);
 
   return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
 #else
