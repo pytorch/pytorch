@@ -5,8 +5,8 @@
 #include <structmember.h>
 
 #include <libshm.h>
-#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/IPCTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
 
@@ -18,6 +18,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -317,7 +318,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
         storage.mutable_data(), storage.device());
     auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
     auto sent_data =
-        static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
+        static_cast<torch::IPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
@@ -390,7 +391,7 @@ static PyObject* THPStorage_releaseIPCCounter(
     auto sptr = at::RefcountedMapAllocator::makeDataPtr(
         ref_counter_handle.c_str(),
         flags,
-        sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+        sizeof(int64_t) * torch::IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
   } catch (c10::Error&) {
@@ -485,7 +486,7 @@ static PyObject* THPStorage_newSharedCuda(
     std::string ref_counter_handle;
     ptrdiff_t ref_counter_offset{};
     c10::DeviceIndex device{-1};
-    torch::CudaIPCReceivedData received_data;
+    torch::IPCReceivedData received_data;
   };
 
   auto ctx = std::make_unique<IpcDeleterContext>();
@@ -531,7 +532,7 @@ static PyObject* THPStorage_newSharedCuda(
           auto sptr = at::RefcountedMapAllocator::makeDataPtr(
               ctx->ref_counter_handle.c_str(),
               flags,
-              sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+              sizeof(int64_t) * torch::IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
         } catch (c10::Error&) {
