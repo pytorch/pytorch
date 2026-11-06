@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import contextlib
 import dataclasses
 import doctest
 import functools
@@ -29,13 +30,14 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd, HardwareClassification,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd, add_skip_condition, check_if_enable, lazy_skip_if, skip_reason_at_collection,
+    HardwareClassification,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -724,7 +726,7 @@ _FIXTURE_CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
-    and not k.startswith("PYTORCH_TEST_")
+    and not k.startswith(("PYTORCH_TEST_", "PYTORCH_TESTING_DEVICE_"))
 } | {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
@@ -808,10 +810,12 @@ class TestJunitXml(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             xml_path = Path(tmp) / "report.xml"
             # Run in place under test/ so test/conftest.py and pytest.ini apply, as in CI.
+            # The goldens pin how skipped tests are reported, so keep the collection
+            # pruner from deselecting the mark-skipped fixtures.
             proc = subprocess.run(
                 [
                     sys.executable, "-m", "pytest", "junit_xml_testdata/pytest_suite.py",
-                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-q",
+                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-p", "no:prune_skips_plugin", "-q",
                 ],
                 cwd=_JUNIT_TESTDATA.parent,
                 env=_FIXTURE_CHILD_ENV,
@@ -2613,6 +2617,454 @@ class TestOmitSkippedTests(TestCase):
                     pass
 
         self.assertEqual(_get_test_names_for_test_class(TestKept), ['TestKept.test_skipped'])
+
+
+class TestSkipReasonAtCollection(TestCase):
+    """skip_reason_at_collection is the decision behind the collection pruner in
+    test/conftest.py: which skips can be made before a test runs."""
+
+    _CU = "torch.testing._internal.common_utils"
+    _CDT = "torch.testing._internal.common_device_type"
+
+    def _lists(self, slow=None, with_slow=True, skip_fast=False, disabled=None):
+        # Pin the slow/disabled lists and mode flags so the expectations hold in
+        # the slow, rerun-disabled and fbcode CI configs too.
+        stack = contextlib.ExitStack()
+        for name, value in (("slow_tests_dict", slow or {}), ("TEST_WITH_SLOW", with_slow), ("TEST_SKIP_FAST", skip_fast),
+                            ("disabled_tests_dict", disabled or {}), ("IS_SANDCASTLE", False), ("RERUN_DISABLED_TESTS", False)):
+            stack.enter_context(unittest.mock.patch(f"{self._CU}.{name}", value))
+        for name in ("IS_SANDCASTLE", "IS_FBCODE"):
+            stack.enter_context(unittest.mock.patch(f"{self._CDT}.{name}", False))
+        return stack
+
+    def _reason(self, cls, name):
+        return skip_reason_at_collection(cls, getattr(cls, name), name)
+
+    def test_static_marks(self):
+        class Static(TestCase):
+            @unittest.skip("static method mark")
+            def test_marked(self):
+                pass
+
+            def test_plain(self):
+                pass
+
+        @unittest.skip("static class mark")
+        class StaticClass(TestCase):
+            def test_in_skipped_class(self):
+                pass
+
+        with self._lists():
+            self.assertEqual(self._reason(Static, "test_marked"), "static method mark")
+            self.assertIsNone(self._reason(Static, "test_plain"))
+            self.assertEqual(self._reason(StaticClass, "test_in_skipped_class"), "static class mark")
+
+    def test_recorded_conditions(self):
+        flag = [True]
+
+        class Recorded(TestCase):
+            def test_recorded(self):
+                pass
+
+            def test_raises(self):
+                pass
+
+        add_skip_condition(Recorded.test_recorded, lambda cls: flag[0], "recorded condition")
+        add_skip_condition(Recorded.test_raises, lambda cls: 1 / 0, "raising condition")
+        with self._lists():
+            self.assertEqual(self._reason(Recorded, "test_recorded"), "recorded condition")
+            flag[0] = False
+            self.assertIsNone(self._reason(Recorded, "test_recorded"))
+            # A predicate that raises keeps the test.
+            self.assertIsNone(self._reason(Recorded, "test_raises"))
+
+    @parametrize("own_constructor", [False, True])
+    @parametrize("mutation", [None, "parent_constructor", "parent_binder", "binder", "copied_owner", "cooperative_constructor", "audited_cooperative_constructor", "changed_bases", "standard_constructor", "standard_runner"])
+    def test_class_owned_skip_mark_contract(self, own_constructor, mutation):
+        from torch.testing._internal.common_utils import preserves_unittest_skip_marks
+
+        @preserves_unittest_skip_marks("bind")
+        class Parent(TestCase):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                setattr(self, methodName, self.bind(getattr(self, methodName)))
+
+            def bind(self, fn):
+                return fn
+
+            @unittest.skip("existing skip")
+            def test_marked(self):
+                self.fail("the original mark must skip")
+
+            def test_runtime(self):
+                pass
+
+        original_parent = Parent.__dict__["_unittest_skip_mark_contract"]
+
+        @preserves_unittest_skip_marks()
+        class Child(Parent):
+            if own_constructor:
+                def __init__(self, methodName="runTest"):
+                    unittest.TestCase.__init__(self, methodName)
+
+            def bind(self, fn):
+                @functools.wraps(fn)
+                def wrapper():
+                    return fn()
+                return wrapper
+
+        cls = Child
+        if mutation in ("standard_constructor", "standard_runner"):
+            hook = "__init__" if mutation == "standard_constructor" else "run"
+            with unittest.mock.patch.object(TestCase, hook, lambda *args: None), self._lists():
+                self.assertIsNone(self._reason(cls, "test_marked"))
+            return
+        if mutation == "parent_constructor":
+            Parent.__init__ = lambda self, name: unittest.TestCase.__init__(self, name)
+        elif mutation == "parent_binder":
+            Parent.bind = lambda self, fn: lambda: None
+        elif mutation == "binder":
+            Child.bind = functools.wraps(Child.bind)(lambda self, fn: lambda: None)
+        elif mutation == "copied_owner":
+            class Copy(Parent):
+                _unittest_skip_mark_contract = Child.__dict__["_unittest_skip_mark_contract"]
+            cls = Copy
+        elif mutation == "cooperative_constructor":
+            class Other(TestCase):
+                def __init__(self, methodName="runTest"):
+                    super().__init__(methodName)
+                    self.test_marked = lambda: None
+
+            class Cooperative(Child, Other):
+                pass
+            cls = Cooperative
+        elif mutation in ("audited_cooperative_constructor", "changed_bases"):
+            @preserves_unittest_skip_marks("bind_other")
+            class Other(TestCase):
+                def __init__(self, methodName="runTest"):
+                    super().__init__(methodName)
+                    setattr(self, methodName, self.bind_other(getattr(self, methodName)))
+
+                def bind_other(self, fn):
+                    return fn
+
+            class Cooperative(Child, Other):
+                def bind_other(self, fn):
+                    return lambda: None
+
+            if mutation == "changed_bases":
+                Child.__bases__ = (Parent, Other)
+                Child.bind_other = Cooperative.bind_other
+            else:
+                cls = Cooperative
+
+        with self._lists():
+            self.assertEqual(self._reason(cls, "test_marked"), None if mutation else "existing skip")
+            self.assertIs(Parent.__dict__["_unittest_skip_mark_contract"], original_parent)
+            if mutation is None:
+                result = unittest.TestResult()
+                unittest.TestCase.run(cls("test_marked"), result)
+                self.assertEqual([reason for _, reason in result.skipped], ["existing skip"])
+                self.assertEqual(result.errors, [])
+                predicate = unittest.mock.Mock(return_value=True)
+                add_skip_condition(cls.test_runtime, predicate, "runtime condition")
+                self.assertIsNone(self._reason(cls, "test_runtime"))
+                predicate.assert_not_called()
+
+    @parametrize("shadow_contract", [False, True])
+    def test_audited_constructor_aliasing_live_default(self, shadow_contract):
+        from torch.testing._internal.common_utils import preserves_unittest_skip_marks
+
+        @preserves_unittest_skip_marks()
+        class Audited(TestCase):
+            def __init__(self, methodName="runTest"):
+                unittest.TestCase.__init__(self, methodName)
+                fn = getattr(self, methodName)
+
+                @functools.wraps(fn)
+                def wrapper():
+                    try:
+                        fn()
+                    except unittest.SkipTest:
+                        pass
+
+                setattr(self, methodName, wrapper)
+
+            def test_runtime(self):
+                self.skipTest("existing runtime skip")
+
+        add_skip_condition(Audited.test_runtime, lambda cls: True, "existing runtime skip")
+        cls = Audited
+        if shadow_contract:
+            class Child(Audited):
+                _unittest_skip_mark_contract = None
+            cls = Child
+        case = cls("test_runtime")
+        with unittest.mock.patch.object(TestCase, "__init__", Audited.__init__), self._lists():
+            self.assertIsNone(self._reason(cls, "test_runtime"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(case, result)
+            self.assertEqual(result.testsRun, 1)
+            self.assertEqual((result.skipped, result.errors, result.failures), ([], [], []))
+
+    def test_lazy_condition_is_not_evaluated_at_collection(self):
+        condition = unittest.mock.Mock(return_value=True)
+
+        class Lazy(TestCase):
+            @lazy_skip_if(condition, "runtime condition")
+            def test_lazy(self):
+                pass
+
+        with self._lists():
+            self.assertIsNone(self._reason(Lazy, "test_lazy"))
+            condition.assert_not_called()
+            with self.assertRaisesRegex(unittest.SkipTest, "runtime condition"):
+                Lazy("test_lazy").test_lazy()
+            condition.assert_called_once_with()
+
+    def test_python_version_predicate_stays_lazy(self):
+        from torch.testing._internal.common_utils import skipIfPythonVersionMismatch
+
+        predicate = unittest.mock.Mock(return_value=False)
+
+        @skipIfPythonVersionMismatch(predicate)
+        def test_runs():
+            return "ran"
+
+        predicate.assert_not_called()
+        self.assertIsNone(skip_reason_at_collection(TestCase, test_runs, "test_runs"))
+        predicate.return_value = True
+        self.assertEqual(test_runs(), "ran")
+        predicate.assert_called_once_with(*sys.version_info[:3])
+
+    @parametrize("entrypoint", ["init", "run"])
+    @parametrize("static", [False, True])
+    def test_custom_execution_can_override_a_runtime_skip(self, entrypoint, static):
+        class Original(TestCase):
+            @(unittest.skip("inner skip") if static else skipIf(True, "inner skip"))
+            def test_runs(self):
+                self.fail("must raise SkipTest first")
+
+        class CustomInit(Original):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                self.test_runs = lambda: None
+
+        class CustomRun(Original):
+            def run(self, result):
+                result.startTest(self)
+                with contextlib.suppress(unittest.SkipTest):
+                    self.test_runs()
+                result.addSuccess(self)
+                result.stopTest(self)
+
+        cls = CustomInit if entrypoint == "init" else CustomRun
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs"))
+            result = unittest.TestResult()
+            case = cls("test_runs")
+            if entrypoint == "init":
+                unittest.TestCase.run(case, result)
+            else:
+                case.run(result)
+            self.assertEqual(result.testsRun, 1)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    def test_slow_list_and_skip_fast(self):
+        class TestLists(TestCase):
+            def test_listed_slow(self):
+                pass
+
+            def test_fast(self):
+                pass
+
+            @slowTest
+            def test_decorated_slow(self):
+                pass
+
+        slow = {"test_listed_slow (__main__.TestLists)": 10.0}
+        slow_reason = "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test"
+        with self._lists(slow=slow, with_slow=False):
+            self.assertEqual(self._reason(TestLists, "test_listed_slow"), slow_reason)
+            self.assertIsNone(self._reason(TestLists, "test_decorated_slow"))
+            self.assertIsNone(self._reason(TestLists, "test_fast"))
+        with self._lists(slow=slow, with_slow=True, skip_fast=True):
+            self.assertIsNone(self._reason(TestLists, "test_listed_slow"))
+            self.assertIsNone(self._reason(TestLists, "test_decorated_slow"))
+            self.assertEqual(self._reason(TestLists, "test_fast"), "test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+
+    @parametrize("listed_slow", [False, True])
+    @parametrize("chain_setup", [False, True])
+    def test_overridden_setup_defers_slow_and_fast_checks(self, listed_slow, chain_setup):
+        class Overridden(TestCase):
+            def setUp(self):
+                if chain_setup:
+                    super().setUp()
+
+            def test_runs(self):
+                pass
+
+        slow = {"test_runs (__main__.Overridden)": 10.0} if listed_slow else {}
+        with self._lists(slow=slow, with_slow=not listed_slow, skip_fast=not listed_slow):
+            self.assertIsNone(self._reason(Overridden, "test_runs"))
+            if chain_setup:
+                with self.assertRaises(unittest.SkipTest):
+                    Overridden("test_runs").setUp()
+            else:
+                Overridden("test_runs").setUp()
+
+    def test_setup_class_can_change_slow_metadata(self):
+        class Dynamic(TestCase):
+            @classmethod
+            def setUpClass(cls):
+                super().setUpClass()
+                cls.test_runs.slow_test = True
+
+            def test_runs(self):
+                pass
+
+        with self._lists(skip_fast=True):
+            self.assertIsNone(self._reason(Dynamic, "test_runs"))
+            Dynamic.setUpClass()
+            self.addCleanup(Dynamic.tearDownClass)
+            Dynamic("test_runs").setUp()
+
+    def test_disabled_tests_stay_at_run_time(self):
+        class TestDisabled(TestCase):
+            def test_disabled(self):
+                pass
+
+        disabled = {"test_disabled (__main__.TestDisabled)": ("https://github.com/pytorch/pytorch/issues/0", [])}  # @lint-ignore
+        with self._lists(disabled=disabled):
+            self.assertIsNone(self._reason(TestDisabled, "test_disabled"))
+            with self.assertRaisesRegex(unittest.SkipTest, "disabled"):
+                check_if_enable(TestDisabled("test_disabled"))
+
+
+instantiate_parametrized_tests(TestSkipReasonAtCollection)
+
+
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "onlyOn passes instead of skipping in fbcode, so the fixture counts differ")
+class TestPruneSkipsAtCollection(TestCase):
+    """The PruneSkipsPlugin hook in test/conftest.py, run in place under test/ as in CI."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if importlib.util.find_spec("pytest") is None:
+            raise unittest.SkipTest("the fixture suite needs pytest")
+        super().setUpClass()
+
+    def _run_fixture(self, *extra_args: str, env=None, expected_returncode=0) -> str:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "prune_skips_testdata/pytest_suite.py", "-p", "no:cacheprovider", "-q", *extra_args],
+            cwd=_JUNIT_TESTDATA.parent, env=_FIXTURE_CHILD_ENV | (env or {}), capture_output=True, text=True, timeout=300,
+        )
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, expected_returncode, output)
+        return output
+
+    def test_prunes_only_skips_decided_at_collection(self):
+        output = self._run_fixture()
+        self.assertIn("3 deselected", output)
+        self.assertIn("3 skipped", output)
+        self.assertIn("7 passed", output)
+        self.assertIn("2 xfailed", output)
+
+    def test_plugin_opt_out_reports_skips(self):
+        output = self._run_fixture("-p", "no:prune_skips_plugin")
+        self.assertIn("6 skipped", output)
+        self.assertIn("7 passed", output)
+        self.assertIn("2 xfailed", output)
+        self.assertNotIn("deselected", output)
+
+    def test_unresolvable_callable_is_kept(self):
+        from conftest import PruneSkipsPlugin
+
+        @unittest.skip("static class skip")
+        class Skipped(TestCase):
+            pass
+
+        class UnresolvedItem:
+            cls = Skipped
+            name = "test_unresolved"
+
+            @property
+            def obj(self):
+                raise RuntimeError("cannot resolve test callable")
+
+            def iter_markers(self, name):
+                return iter(())
+
+            def get_closest_marker(self, name):
+                return None
+
+        item = UnresolvedItem()
+        items = [item]
+        config = unittest.mock.Mock()
+        plugin = PruneSkipsPlugin()
+        plugin.pytest_collection_modifyitems(config, items)
+        self.assertEqual(items, [item])
+        self.assertFalse(plugin.reasons)
+        config.hook.pytest_deselected.assert_not_called()
+
+    def test_prunes_before_shard_assignment(self):
+        snapshots = []
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "shard.json"
+            for shard_id in (1, 2):
+                self._run_fixture(
+                    "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                    "--num-shards=2", f"--shard-id={shard_id}",
+                )
+                snapshots.append(json.loads(log.read_text()))
+
+        first, second = snapshots
+        self.assertEqual(first["before"], second["before"])
+        self.assertEqual(len(first["before"]), 11)
+        excluded = {
+            "TestPruneFixture::test_runs", "TestPruneFixture::test_static_mark",
+            "test_pytest_mark", "test_pytest_static_condition",
+        }
+        shard_inputs = {nodeid.split("::", 1)[1] for nodeid in first["before"]}
+        self.assertFalse(shard_inputs & excluded)
+        self.assertIn("TestPruneFixture::test_body_skip", shard_inputs)
+        self.assertIn("TestPruneFixture::test_lazy_skip", shard_inputs)
+        self.assertIn("TestPruneFixtureDeviceCPU::test_cuda_only_cpu", shard_inputs)
+        self.assertIn("test_pytest_xfail_before_unittest_skip", shard_inputs)
+        self.assertFalse(set(first["after"]) & set(second["after"]))
+        self.assertEqual(set(first["after"]) | set(second["after"]), set(first["before"]))
+        self.assertEqual(first["after"], first["final"])
+        self.assertEqual(second["after"], second["final"])
+
+        # A checkpoint from another shard must not select that shard's test here.
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "resume.json"
+            self._run_fixture(
+                "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                "--num-shards=2", "--shard-id=1", "-p", "cacheprovider", "--rs=probe",
+                "-o", f"cache_dir={directory}/cache", "--shard-probe-resume-from", second["after"][0],
+            )
+            self.assertEqual(json.loads(log.read_text())["final"], first["after"])
+
+    def test_collection_failure_does_not_shard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "shard.json"
+            self._run_fixture(
+                "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                "-k", "(", expected_returncode=4,
+            )
+            self.assertFalse(log.exists())
+
+    def test_overridden_setup_keeps_fast_tests_in_slow_config(self):
+        output = self._run_fixture(
+            "-k", "TestOverriddenSetup", env={"PYTORCH_TEST_WITH_SLOW": "1", "PYTORCH_TEST_SKIP_FAST": "1"},
+        )
+        self.assertIn("1 passed", output)
+        self.assertIn("14 deselected", output)
 
 
 class TestTestParametrizationDeviceType(TestCase):
