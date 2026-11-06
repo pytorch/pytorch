@@ -3,6 +3,7 @@ import contextlib
 import copy
 import inspect
 import itertools
+import math
 import os
 import re
 import unittest
@@ -475,8 +476,8 @@ class TestCommon(TestCase):
     @dtypes(torch.float32)
     @parametrize("sign", [-1, 1])
     def test_expm1_small(self, device, dtype, sign):
-        x = torch.logspace(-8, -1, 100, dtype=dtype)
-        cutoffs = torch.tensor([1e-5, 0.1], dtype=dtype)
+        x = torch.logspace(-8, 1.9, 1000, dtype=dtype)
+        cutoffs = torch.tensor([1e-5, 0.1, math.log(2) / 2], dtype=dtype)
         values = (
             x,
             torch.tensor([0.0, 0.0074433], dtype=dtype),
@@ -487,7 +488,16 @@ class TestCommon(TestCase):
         x = torch.cat(values) * sign
         expected = torch.expm1(x.double())
         actual = torch.expm1(x.to(device)).cpu().double()
-        self.assertEqual(actual, expected, atol=0, rtol=1e-6)
+        self.assertEqual(actual, expected, atol=0, rtol=3e-7)
+
+    @dtypes(torch.float32)
+    @parametrize("op", ["elu", "celu", "selu"])
+    def test_elu_small(self, device, dtype, op):
+        fn = getattr(torch.nn.functional, op)
+        x = -torch.logspace(-8, 1.3, 500, dtype=dtype)
+        expected = fn(x.double())
+        actual = fn(x.to(device)).cpu().double()
+        self.assertEqual(actual, expected, atol=0, rtol=3e-7)
 
     # Tests that the cpu and gpu results are consistent
     @onlyAccelerator
@@ -2923,7 +2933,6 @@ fake_backward_mps_xfails = {
         ("linalg.matrix_sqrth", ""),
         ("mode", ""),
         ("native_batch_norm", ""),
-        ("nn.functional.adaptive_avg_pool3d", ""),
         ("nn.functional.adaptive_max_pool3d", ""),
         ("nn.functional.batch_norm", ""),
         ("nn.functional.channel_shuffle", ""),
@@ -2931,7 +2940,6 @@ fake_backward_mps_xfails = {
         ("nn.functional.fractional_max_pool2d", ""),
         ("nn.functional.fractional_max_pool3d", ""),
         ("nn.functional.grid_sample", ""),
-        ("nn.functional.interpolate", "area"),
         ("nn.functional.linear", ""),
         ("nn.functional.linear_cross_entropy", ""),
         ("nn.functional.linear_cross_entropy", "chunked"),

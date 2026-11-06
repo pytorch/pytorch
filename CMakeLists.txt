@@ -434,7 +434,13 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-option(USE_NNPACK "Use NNPACK" ON)
+# On macOS, NNPACK's FFT-based convolutions are slower than im2col + Accelerate and spread NaN/Inf
+# across the whole tile, see https://github.com/pytorch/pytorch/issues/157237
+if(APPLE AND NOT IOS)
+  option(USE_NNPACK "Use NNPACK" OFF)
+else()
+  option(USE_NNPACK "Use NNPACK" ON)
+endif()
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
@@ -458,9 +464,6 @@ endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
-cmake_dependent_option(
-  USE_LITE_AOTI "Include AOTI sources" OFF
-  "BUILD_LITE_INTERPRETER" OFF)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
@@ -470,11 +473,15 @@ option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
                        ON "CPU_INTEL" OFF)
-# Ensure that an MKLDNN build is the default for x86 CPUs but optional for
-# AArch64 (dependent on -DUSE_MKLDNN).
+# Ensure that an MKLDNN build is the default for x86 and AArch64 CPUs
+if(CPU_INTEL OR CPU_AARCH64)
+  set(USE_MKLDNN_DEFAULT ON)
+else()
+  set(USE_MKLDNN_DEFAULT OFF)
+endif()
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
+  "${USE_MKLDNN_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)

@@ -16,6 +16,12 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
+# CPython's test_translate builds this table with item assignment, so build
+# it once at import time instead.
+_rosetta = bytearray(range(256))
+_rosetta[ord("o")] = ord("e")
+
+
 class Indexable:
     def __init__(self, value=0):
         self.value = value
@@ -301,6 +307,26 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+        with self.assertRaises(TypeError):
+            b.count("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.count(256)
+        # CPython 3.13 reformatted arity TypeErrors ("expected ... got ...");
+        # 3.11 and 3.12 say "() takes ... (N given)". make_dynamo_test runs the
+        # body eagerly before compiling, so accept either form, matching the
+        # pattern used in test/cpython/v3_13/test_call.py.
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at least 1 argument \(0 given\)"
+            r"|count expected at least 1 argument, got 0",
+        ):
+            b.count()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at most 3 arguments \(4 given\)"
+            r"|count expected at most 3 arguments, got 4",
+        ):
+            b.count(b"i", None, None, None)
 
     @make_dynamo_test
     def test_rindex(self):
@@ -497,6 +523,62 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    def test_find(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.find(b"i"), 1)
+        self.assertEqual(b.find(b"i", 5), 7)
+        self.assertEqual(b.find(b"i", 5, 8), 7)
+        self.assertEqual(b.find(b"is"), 1)
+        self.assertEqual(b.find(b"pi"), 9)
+        self.assertEqual(b.find(b"z"), -1)
+        self.assertEqual(b.find(self.type2test(b"ss")), 2)
+        self.assertEqual(b.find(b"i", -3), 10)
+        with self.assertRaises(TypeError):
+            b.find("i")
+        with self.assertRaises(TypeError):
+            b.find(b"i", "1")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(-1)
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at least 1 argument \(0 given\)"
+            r"|find expected at least 1 argument, got 0",
+        ):
+            b.find()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at most 3 arguments \(4 given\)"
+            r"|find expected at most 3 arguments, got 4",
+        ):
+            b.find(b"i", None, None, None)
+
+    def test_rfind(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.rfind(b"i"), 10)
+        self.assertEqual(b.rfind(b"i", 0, 6), 4)
+        self.assertEqual(b.rfind(b"i", 0, 4), 1)
+        self.assertEqual(b.rfind(b"is"), 4)
+        self.assertEqual(b.rfind(b"z"), -1)
+        self.assertEqual(b.rfind(b"i", 0, 9), 7)
+        with self.assertRaises(TypeError):
+            b.rfind("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.rfind(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at least 1 argument \(0 given\)"
+            r"|rfind expected at least 1 argument, got 0",
+        ):
+            b.rfind()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at most 3 arguments \(4 given\)"
+            r"|rfind expected at most 3 arguments, got 4",
+        ):
+            b.rfind(b"i", None, None, None)
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -510,6 +592,38 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"\xff\x00")),
             ("ff00", "\xff\x00"),
         )
+
+    def test_input_bytearray_find_rfind(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.find(b"b"), ba.find(b"z"), ba.rfind(b"b")
+
+        self.assertEqual(fn(bytearray(b"abcabc")), (1, -1, 4))
+        self.assertEqual(fn(bytearray(b"xyz")), (-1, 2, -1))
+
+    def test_input_bytearray_find_rfind_dynamic_start(self):
+        # Non-constant start (SymInt) must take the non-const fallback: Dynamo
+        # declines tracing bytearray.find/rfind and graph-breaks cleanly instead
+        # of inlining the C method descriptor (internal AttributeError).
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(ba, n):
+            return ba.find(b"i", n), ba.rfind(b"i", n)
+
+        self.assertEqual(fn(bytearray(b"mississippi"), 5), (7, 10))
+        self.assertEqual(fn(bytearray(b"mississippi"), -3), (10, 10))
+
+        # The values above would also hold if n were specialized to a constant,
+        # so pin the fallback down: under fullgraph the non-constant start must
+        # raise Unsupported instead of tracing. Check each method separately,
+        # since tracing stops at the first graph break.
+        for name in ("find", "rfind", "count"):
+
+            @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+            def fn_fullgraph(ba, n, name=name):
+                return getattr(ba, name)(b"i", n)
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                fn_fullgraph(bytearray(b"mississippi"), 5)
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
@@ -703,6 +817,102 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
             f(x, Items())[1],
+        )
+
+    @make_dynamo_test
+    def test_replace(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a"), b"massassappa")
+        self.assertEqual(b.replace(b"ss", b"x"), b"mixixippi")
+        self.assertEqual(b.replace(b"i", b"a", 2), b"massassippi")
+        self.assertEqual(b.replace(b"i", b"a", 0), b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a", -1), b"massassappa")
+        self.assertEqual(b.replace(b"", b"-"), b"-m-i-s-s-i-s-s-i-p-p-i-")
+        self.assertEqual(b.replace(b"x", b"y"), b"mississippi")
+        self.assertEqual(b.replace(bytearray(b"ss"), b"x"), b"mixixippi")
+        self.assertEqual(b, b"mississippi")
+        self.assertIsInstance(b.replace(b"i", b"a"), self.type2test)
+
+    @make_dynamo_test
+    def test_replace_errors(self):
+        b = self.type2test(b"a b")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(32, b"")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(b"a", 32)
+        with self.assertRaisesRegex(
+            TypeError, "'bytes' object cannot be interpreted as an integer"
+        ):
+            b.replace(b"a", b"b", b"0")
+
+    @make_dynamo_test
+    def test_translate(self):
+        b = self.type2test(b"hello")
+        self.assertEqual(b.translate(_rosetta), b"helle")
+        self.assertEqual(b.translate(_rosetta, b"l"), b"hee")
+        self.assertEqual(b.translate(_rosetta, delete=b"l"), b"hee")
+        self.assertEqual(b.translate(None, b"e"), b"hllo")
+        self.assertEqual(b, b"hello")
+        self.assertIsInstance(b.translate(_rosetta), self.type2test)
+        with self.assertRaisesRegex(
+            ValueError, "translation table must be 256 characters long"
+        ):
+            b.translate(bytes(range(255)))
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(_rosetta, 1)
+        with self.assertRaisesRegex(
+            TypeError, r"translate\(\) takes at least 1 positional argument \(0 given\)"
+        ):
+            b.translate()
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(None, None)
+
+    def test_replace_translate_returns_new_bytearrays(self):
+        def f(ba, table, x):
+            return ba.replace(b"a", b"z"), ba.translate(table), x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        table = bytearray(range(256))
+        ba = bytearray(b"ab")
+        result = compiled(ba, table, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"ab"), table, torch.ones(1)))
+        self.assertIsNot(result[0], ba)
+        self.assertIsNot(result[1], ba)
+        self.assertIsNot(result[0], result[1])
+        result[0][0] = ord("q")
+        self.assertEqual(ba, b"ab")
+        self.assertEqual(result[1], b"ab")
+
+    def test_replace_translate_nonconstant_buffer_graph_break(self):
+        class BytesSubclass(bytes):
+            pass
+
+        def replace(ba, arg):
+            return ba.replace(arg, b"z")
+
+        def translate(ba, arg):
+            return ba.translate(arg)
+
+        for fn, arg in ((replace, b"a"), (translate, _rosetta)):
+            name = fn.__name__
+            with self.subTest(method=name):
+                args = bytearray(b"ab"), BytesSubclass(arg)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    f"Dynamo does not know how to trace method `{name}` of class `bytearray`",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    def test_input_bytearray_replace_translate(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, table):
+            return ba.replace(b"a", b"z"), ba.translate(table, b"b")
+
+        self.assertEqual(
+            fn(bytearray(b"ab"), bytearray(range(256))),
+            (bytearray(b"zb"), bytearray(b"a")),
         )
 
     def test_append_extend_arg_mutation(self):
