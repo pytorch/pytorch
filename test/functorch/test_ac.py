@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import gc
 import random
 import unittest
 from math import prod
@@ -37,8 +38,10 @@ def compile_with_ac(f, memory_budget):
 def get_act_mem(f):
     out = f()
     out.backward()
+    gc.collect()
     start_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
     out = f()
+    gc.collect()
     cur_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
