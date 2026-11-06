@@ -4373,6 +4373,8 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
+    """Compiles and caches C++ code wrapped as Python extension modules."""
+
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
     _loaded_module_names: OrderedSet[str] = OrderedSet()
 
@@ -4523,6 +4525,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
         kernel_code: str | None = None,
+        private_module: bool = False,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -4540,6 +4543,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 kernel_code is provided.
             kernel_code: If present, C++ source code that will be built at -O3 and
                 linked to main_code.
+            private_module: If True, load a private instance of the cached binary
+                whose native static state starts fresh instead of sharing the
+                process-wide module. Each call maps a new copy of the binary that
+                stays loaded for the life of the process.
 
         Returns:
             A python version of ENTRY_FUNCTION()
@@ -4554,7 +4561,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             entry_func=cls.entry_function,
             extra_parse_arg=cls.extra_parse_arg.format(array_len=num_outputs),
         )
-        get_result = cls.load_async(
+        load = functools.partial(
+            cls.load_async,
             main_code + suffix,
             device_type,
             submit_fn=submit_fn,
@@ -4563,6 +4571,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             needs_vec_isa=needs_vec_isa,
             kernel_needs_vec_isa=kernel_needs_vec_isa,
         )
+        get_result = load()
         result = None
 
         def future() -> Any:
@@ -4571,9 +4580,37 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 result = get_result()
                 if not isinstance(result, ModuleType):
                     raise AssertionError(f"Expected ModuleType, got {type(result)}")
+                if private_module:
+                    path = result.__file__
+                    if path is None:
+                        raise AssertionError(f"Module {result.__name__} has no file")
+                    if not os.path.exists(path):
+                        # Rebuild a binary deleted since it was loaded.
+                        cls.cache.pop(result.key, None)
+                        load()()
+                        path = cls._binary_paths[result.key]
+                    result = cls._load_private_module(path)
             return getattr(result, cls.entry_function)
 
         return future
+
+    @classmethod
+    def _load_private_module(cls, path: str) -> ModuleType:
+        # Python caches extension modules by path and name, and dlopen() reuses
+        # a loaded library with the same path or inode, so the private instance
+        # needs its own copy of the file. The copy sits next to the original so
+        # $ORIGIN rpath entries still resolve.
+        suffix = os.path.splitext(path)[1]
+        fd, private_path = tempfile.mkstemp(suffix=suffix, dir=os.path.dirname(path))
+        os.close(fd)
+        try:
+            shutil.copyfile(path, private_path)
+            name = os.path.splitext(os.path.basename(private_path))[0]
+            return cls._load_library_inner(private_path, name)
+        finally:
+            # Windows cannot remove a loaded library, so the copy stays there.
+            if not _IS_WINDOWS:
+                os.remove(private_path)
 
     @classmethod
     def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
