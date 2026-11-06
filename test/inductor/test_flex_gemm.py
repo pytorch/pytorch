@@ -2470,7 +2470,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (y, out), (code,) = run_and_get_code(
             compiled, torch.randn(2048, 2048, device="cuda"), w
         )
-        FileCheck().check("gdc_launch_dependents").check("cutedsl_").run(code)
+        FileCheck().check("gdc_launch_dependents").run(code)
+        # A kernel launched between the producer and the GEMM would order y's
+        # stores before the GEMM, so check that the GEMM is the next launch.
+        call_body = code[code.index("def call(") :]
+        launches = re.findall(r"^\s*(\w+)\.run\(", call_body, flags=re.MULTILINE)
+        self.assertEqual(len(launches), 2, launches)
+        self.assertTrue(launches[0].startswith("triton_"), launches)
+        self.assertTrue(launches[1].startswith("cutedsl_"), launches)
+        self.assertNotIn("extern_kernels.", call_body)
         for _ in range(5):
             y, out = compiled(torch.randn(2048, 2048, device="cuda"), w)
             # bf16 rounding of out reaches 1.0 at |out| >= 256, which rtol
