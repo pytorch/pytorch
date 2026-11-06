@@ -61,6 +61,8 @@ class HelionPythonPrinter(PythonPrinter):
 class HelionValue:
     name: str
     depending_indices: tuple[str, ...]
+    # Known element dtype, if any; lets to_dtype elide no-op casts.
+    dtype: torch.dtype | None = None
 
 
 @dataclass(frozen=True)
@@ -148,13 +150,18 @@ class HelionKernel(DefaultHandler):
             return torch.float32
         return dtype
 
-    def emit(self, expression: str, depending_indices: tuple[str, ...]) -> HelionValue:
+    def emit(
+        self,
+        expression: str,
+        depending_indices: tuple[str, ...],
+        dtype: torch.dtype | None = None,
+    ) -> HelionValue:
         cache = self.cse[self.body]
         key = (expression, depending_indices)
         if key not in cache:
             name = f"tmp{next(self.counter)}"
             self.body.writeline(f"{name} = {expression}")
-            cache[key] = HelionValue(name, depending_indices)
+            cache[key] = HelionValue(name, depending_indices, dtype)
         return cache[key]
 
     def align(
@@ -464,9 +471,14 @@ class HelionKernel(DefaultHandler):
                     )
                     self.inputs.add(name)
                     coordinates = ", ".join(self.tiles[axis] for axis in axes)
-                    dtype = self.compute_dtype(operand.get_dtype())
+                    # Keep MMA operands in their storage dtype: the SIMD body
+                    # casts an upcast BF16/FP16 operand back before the dot, and
+                    # Helion only matches its tensor-core GEMM lowering on
+                    # operands loaded without that FP32 round trip.
                     return self.emit(
-                        f"{argument.name}[{coordinates}].to({dtype})", axes
+                        f"{argument.name}[{coordinates}]",
+                        axes,
+                        operand.get_dtype(),
                     )
             raise NotImplementedError("Helion preview does not support fused prologues")
         operand = V.graph.get_buffer(name)
@@ -480,8 +492,11 @@ class HelionKernel(DefaultHandler):
                 f"hl.load({argument.name}, [{', '.join(coordinates)}], "
                 f"extra_mask={mask}).to({dtype})",
                 axes,
+                dtype,
             )
-        return self.emit(f"{argument.name}[{', '.join(coordinates)}].to({dtype})", axes)
+        return self.emit(
+            f"{argument.name}[{', '.join(coordinates)}].to({dtype})", axes, dtype
+        )
 
     def constant(self, value: bool | float | int, dtype: torch.dtype) -> HelionValue:
         dtype = self.compute_dtype(dtype)
@@ -489,7 +504,7 @@ class HelionKernel(DefaultHandler):
             literal = f"float({str(value)!r})"
         else:
             literal = repr(value)
-        return self.emit(f"hl.full([], {literal}, dtype={dtype})", ())
+        return self.emit(f"hl.full([], {literal}, dtype={dtype})", (), dtype)
 
     def index_expr(self, index: sympy.Expr, dtype: torch.dtype) -> HelionValue:
         # Tile indices are tensors. A symbolic max(0, y - x) must become a
@@ -570,7 +585,9 @@ class HelionKernel(DefaultHandler):
     ) -> HelionValue:
         if use_compute_types:
             dtype = self.compute_dtype(dtype)
-        return self.emit(f"{value.name}.to({dtype})", value.depending_indices)
+        if value.dtype == dtype:
+            return value
+        return self.emit(f"{value.name}.to({dtype})", value.depending_indices, dtype)
 
     def dot(self, lhs: HelionValue, rhs: HelionValue) -> HelionValue:
         name = self.current_matmul
@@ -584,7 +601,7 @@ class HelionKernel(DefaultHandler):
         # Horizontal fusion needs one accumulator per MM, not one shared sum.
         op = "baddbmm" if batch else "addmm"
         self.body.writeline(f"{acc} = torch.{op}({acc}, {left}, {right})")
-        return HelionValue(acc, self.outer_axes)
+        return HelionValue(acc, self.outer_axes, torch.float32)
 
     def reduction(
         self,
@@ -680,6 +697,24 @@ class HelionKernel(DefaultHandler):
         ]
     )
 
+    predicates = OrderedSet(
+        ["eq", "ne", "lt", "le", "gt", "ge", "logical_not", "logical_and"]
+    )
+
+    def result_dtype(self, name: str, args: tuple[Any, ...]) -> torch.dtype | None:
+        # Only same-dtype operands: 0-d tensors take part in type promotion
+        # differently, e.g. a 0-d float64 times a float32 tile stays float32.
+        if name in self.predicates:
+            return torch.bool
+        values = args[1:] if name == "where" else args
+        dtypes = OrderedSet(value.dtype for value in values)
+        if len(dtypes) != 1 or name in ("bitwise_and", "and_"):
+            return None
+        dtype = next(iter(dtypes))
+        if name == "truediv" and dtype is not None and not dtype.is_floating_point:
+            return None
+        return dtype
+
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         binary = self.binary_ops
         if not kwargs and (name in binary or name in self.torch_ops):
@@ -696,7 +731,9 @@ class HelionKernel(DefaultHandler):
                 if name in binary
                 else f"torch.{name}({', '.join(values)})"
             )
-            return self.emit(expression, depending_indices)
+            return self.emit(
+                expression, depending_indices, self.result_dtype(name, args)
+            )
         raise NotImplementedError(f"Unsupported Helion preview op: {name}")
 
     def codegen_kernel(self, *, executable: bool = False) -> str:

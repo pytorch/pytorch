@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from typing import Protocol, TYPE_CHECKING
 
 import torch
@@ -37,4 +38,12 @@ class HelionKernelWrapper:
             self.kernel(*args)
             # Compilation can discover new specialization facts. Record the
             # final key only after real execution has initialized the launcher.
-            self.prepared.add((*self.kernel.specialization_key(args), alignment))
+            key = (*self.kernel.specialization_key(args), alignment)
+            if key not in self.prepared:
+                self.prepared.add(key)
+                # CuTeDSL's @cute.kernel keeps inspect.currentframe() in a
+                # reference cycle, which pins every caller frame of the first
+                # compile, including tensors of the running graph. Collect it
+                # now: inside a CUDA graph tree warmup those tensors would
+                # otherwise outlive their pool accounting.
+                gc.collect()

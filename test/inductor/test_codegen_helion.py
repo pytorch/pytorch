@@ -174,9 +174,10 @@ class TestHelionCodegen(TestCase):
         (source,) = self.codegen(
             lambda a, b: a @ b, [(40, 72), (72, 136)], dtypes=[dtype, dtype]
         )
-        self.assertIn("A[tile_y, tile_r]", source)
-        self.assertIn("B[tile_r, tile_x]", source)
-        self.assertIn("acc = torch.addmm(acc, tmp1, tmp3)", source)
+        # MMA operands stay in their storage dtype, with no FP32 round trip.
+        self.assertIn("tmp0 = A[tile_y, tile_r]\n", source)
+        self.assertIn("tmp1 = B[tile_r, tile_x]\n", source)
+        self.assertIn("acc = torch.addmm(acc, tmp0, tmp1)", source)
         self.assertIn("out0[tile_y, tile_x] = acc.to(", source)
         self.assertIn("helion_op0(a_1, b_1, buf0)", source)
         self.assertNotIn("reinterpret_tensor", source)
@@ -286,8 +287,8 @@ class TestHelionCodegen(TestCase):
         self.assertEqual(len(schedules), 1)
         self.assertGreater(len(tuple(schedules[0].scheduler_nodes())), 1)
         self.assertIn("in0[tile_x].to(torch.float32)", source)
-        self.assertIn("tmp5 = acc + tmp4", source)
-        self.assertIn("tmp6 = torch.relu(tmp5)", source)
+        self.assertIn("tmp3 = acc + tmp2", source)
+        self.assertIn("tmp4 = torch.relu(tmp3)", source)
         self.assertNotIn("hl.load(buf", source)
 
     @parametrize(

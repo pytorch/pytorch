@@ -983,13 +983,18 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             )
 
     if use_native_matmul(mat1, mat2):
+        # Skip unit scales so the fused epilogue is a plain bias add.
         if beta == 0:
             arg1 = 0
+        elif beta == 1:
+            arg1 = inp
         else:
             arg1 = lowerings[aten.mul](beta, inp)
 
         if alpha == 0:
             arg2 = 0
+        elif alpha == 1:
+            arg2 = lowerings[aten.mm](mat1, mat2)
         else:
             arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
 
