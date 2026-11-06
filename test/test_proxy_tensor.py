@@ -14,10 +14,11 @@ import unittest
 import warnings
 import operator
 from collections.abc import Iterable
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
 from torch.testing._internal.common_methods_invocations import op_db
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
@@ -35,6 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
+    snapshot_fake,
 )
 
 
@@ -908,6 +910,62 @@ class TestFakeProxyTensor(TestCase):
 
         x = A(torch.randn(3, 3))
         self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
+
+    def test_snapshot_fake_of_batched_tensor(self):
+        # A vmap wrapper is recorded as a view of the fake tensor it wraps, with
+        # no real tensor. A value whose real tensor is kept keeps its wrapper,
+        # which carries it.
+        from torch._functorch.vmap import vmap_increment_nesting
+
+        functorch = torch._C._functorch
+        real = torch.randn(4, 3, 5)[1:]
+        for propagate in (False, True):
+            with self.subTest(propagate=propagate), torch._functorch.config.patch(
+                fake_tensor_propagate_real_tensors=propagate
+            ):
+                mode = FakeTensorMode()
+                fake = mode.from_tensor(real)
+                with vmap_increment_nesting(3, "error") as level:
+                    with mode:
+                        batched = functorch._add_batch_dim(fake, 1, level)
+                    val = snapshot_fake(batched)
+                    kept = snapshot_fake(batched, include_real=True)
+                self.assertTrue(is_fake_tensor(val))
+                self.assertIsNone(val.real_tensor)
+                self.assertEqual(
+                    StorageWeakRef(val.untyped_storage()),
+                    StorageWeakRef(fake.untyped_storage()),
+                )
+                self.assertEqual(
+                    (val.shape, val.stride(), val.storage_offset()),
+                    ((3, 5), (15, 1), 15),
+                )
+                # With no real tensor to keep, include_real records the view too.
+                self.assertEqual(is_fake_tensor(kept), not propagate)
+                if propagate:
+                    self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
+
+    def test_snapshot_fake_of_grad_tracking_tensor(self):
+        # A grad tracking wrapper, as inside jvp, is recorded as a view of the
+        # fake tensor it wraps, with the same layout.
+        from torch._functorch.eager_transforms import grad_increment_nesting
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.randn(4, 3, 5)[1:].transpose(0, 2))
+        with grad_increment_nesting() as level:
+            with mode:
+                wrapped = functorch._wrap_for_grad(fake, level)
+            val = snapshot_fake(wrapped)
+        self.assertTrue(is_fake_tensor(val))
+        self.assertEqual(
+            StorageWeakRef(val.untyped_storage()),
+            StorageWeakRef(fake.untyped_storage()),
+        )
+        self.assertEqual(
+            (val.shape, val.stride(), val.storage_offset()),
+            (fake.shape, fake.stride(), fake.storage_offset()),
+        )
 
     def test_use_fake_and_tensor(self):
         def f(x, y):
