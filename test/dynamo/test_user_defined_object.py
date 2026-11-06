@@ -1950,9 +1950,9 @@ class TestConstantTypeProperty(TestCase):
         common_constant_types.add(Holder)
         try:
             x = torch.randn(3)
+            self.assertRaises(AttributeError, fn, x)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(AttributeError):
-                opt_fn(x)
+            self.assertRaisesRegex(Exception, "has no getter", opt_fn, x)
         finally:
             common_constant_types.discard(Holder)
 
