@@ -83,6 +83,9 @@ class _NcclWork(dist._Work):
             fut.set_result(value)
             return fut
         remaining = [len(events)]
+        # Not self: the closure would keep the Work and its events alive on
+        # the watchdog thread.
+        backend = self._backend if skip_if_aborted else None
 
         def on_complete():
             remaining[0] -= 1
@@ -90,7 +93,7 @@ class _NcclWork(dist._Work):
                 return
             # Kernels cut short by abort() also complete their events; the
             # result stays pending rather than claim success.
-            if skip_if_aborted and self._backend._aborted:
+            if backend is not None and backend._aborted:
                 return
             fut.set_result(value)
 
