@@ -2143,5 +2143,19 @@ class TestTypeInit(TestCase):
 instantiate_parametrized_tests(TestTypeInit)
 
 
+class TestGetattributeName(TestCase):
+    def test_non_str_name_raises_type_error(self):
+        def fn(x, obj):
+            try:
+                obj.__getattribute__(1)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, Plain())[1], fn(x, Plain())[1])
+
+
 if __name__ == "__main__":
     run_tests()
