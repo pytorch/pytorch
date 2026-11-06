@@ -3086,6 +3086,23 @@ Call this whenever a new thread is created in order to propagate values from
           [](const c10::FakeTensorMode& mode) { return mode.epoch_; },
           [](c10::FakeTensorMode& mode, uint64_t value) {
             mode.epoch_ = value;
+          })
+      .def_property_readonly(
+          "fake_tensor_converter",
+          [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.fake_tensor_converter_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.fake_tensor_converter_->ptr(getPyInterpreter()));
+          })
+      .def_property_readonly(
+          "shape_env", [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.shape_env_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.shape_env_->ptr(getPyInterpreter()));
           });
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
@@ -3163,7 +3180,6 @@ Call this whenever a new thread is created in order to propagate values from
   // getCppFakeTensorModePyObj rebuilds it (see Note [C++ FakeTensorMode Python
   // wrapper lifetime] in torch/csrc/FakeTensorMode.cpp), propagating any error
   // raised while doing so.
-  // TODO: the rebuild always fails until CppFakeTensorMode is added.
   py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
     if (!t.defined() || !t.is_fake()) {
       return py::none();
