@@ -46,10 +46,14 @@ import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Callable
 
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+# The collector whose output keys stage A's system prompt must name.
+import fetch_pr_comments  # noqa: E402
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
@@ -672,7 +676,14 @@ def sole_outputs(case: unittest.TestCase, written: str) -> dict:
     return dict(pairs)
 
 
-def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
+def run_step(
+    text: str,
+    marker: str,
+    td: str,
+    env: dict,
+    stubs: dict,
+    rewrite: Callable[[str], str] | None = None,
+) -> tuple:
     """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
 
     Text assertions establish that a guard is written down. Only running it
@@ -694,6 +705,9 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     inherited from whoever ran the suite. It is NOT a model of a runner's
     environment — callers must pass what the step's own `env:` declares.
 
+    `rewrite`, if given, maps the extracted body to the one executed, e.g. to
+    point `/tmp/` at the temp directory.
+
     Returns `(CompletedProcess, Path to the step's $GITHUB_OUTPUT)`.
     """
     hits = list(re.finditer(rf"(?m)^      - name: {re.escape(marker)}[ \t]*$", text))
@@ -703,6 +717,8 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     body = textwrap.dedent(
         scalar_block(rest if nxt is None else rest[: nxt.start() + 1], "run")
     )
+    if rewrite is not None:
+        body = rewrite(body)
     bin_dir = Path(td) / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, script in stubs.items():
@@ -1131,9 +1147,10 @@ class TestPreparePermissions(unittest.TestCase):
 class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
     """Every host the review job actually talks to must be allowlisted.
 
-    The trace upload is this job's single write capability. It is best-effort
-    (`|| echo ::warning::`), so a blocked endpoint costs a silent, permanent
-    loss of every transcript plus a reasoning_uri pointing at nothing.
+    The job's S3 writes (the traces and the review inputs) are its only write
+    capability. They are best-effort (a failure is a `::warning::`), so a
+    blocked endpoint costs a silent, permanent loss of every transcript and
+    snapshot, plus a reasoning_uri pointing at nothing.
     """
 
     def setUp(self):
@@ -1231,6 +1248,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "Read(//tmp/pr-diff.txt),"
             "Read(//tmp/pr-files.txt),"
             "Read(//tmp/pr-comments.json),"
+            # Changes since the commit the latest automated review saw.
+            "Read(//tmp/pr-interdiff.txt),"
             # pr-review's sub-agents. They inherit this session's rules.
             "Agent"
         ),
@@ -1604,6 +1623,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
+            # Decides which changes a re-review treats as the author's.
+            "scripts/pr_review/interdiff.py",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
@@ -1859,8 +1880,9 @@ class TestCredentialDuration(unittest.TestCase):
 
     `prepare` and `publish` take the 900s STS minimum. The review job takes
     3600s, the role's ceiling, because its model step may run for 55 minutes; its
-    role is Bedrock-only. Omitting the line does not fail anything — it silently
-    defaults the credential to an hour — so every value is pinned.
+    role grants Bedrock and S3 writes under `pr_review_traces/`. Omitting the
+    line does not fail anything — it silently defaults the credential to an
+    hour — so every value is pinned.
     """
 
     EXPECTED = ("900", "3600", "900")
@@ -2855,10 +2877,13 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "HARNESS",
             "HARNESS_VERSION",
             "HEAD_SHA",
+            "HEAD_TREE_SHA",
             "IS_FORK",
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "PREVIOUS_MERGE_BASE_SHA",
+            "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
             "PR_COMMENTS",
@@ -3186,7 +3211,10 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         )
         self.assertEqual(
             sorted(set(runs)),
-            ["trusted/scripts/pr_review/extract_verdict.py"],
+            [
+                "trusted/scripts/pr_review/extract_verdict.py",
+                "trusted/scripts/pr_review/interdiff.py",
+            ],
             f"the review job runs {sorted(set(runs))}; every program it "
             "executes must come from the trusted checkout.",
         )
@@ -4998,6 +5026,13 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
         self.assertIn(f"Read(/{self.PATH})", stage_a)
         self.assertIn(self.PATH, stage_a_system_prompt())
 
+    def test_the_sanitizer_reads_the_pr_body_for_the_stack_policy(self):
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        sanitize = "Sanitize the verdict"
+        self.assertLess(names.index("Write the PR conversation"), names.index(sanitize))
+        step = self._step(self.review, sanitize)
+        self.assertIn(f"--pr-comments-file {self.PATH}", step)
+
     def test_the_fetch_fails_closed_before_the_started_row(self):
         fetch = self._step(self.prepare, "Fetch the PR conversation")
         self.assertEqual(
@@ -5013,6 +5048,209 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
             "the conversation is fetched after the `started` row, so a fetch "
             "failure leaves a started row with no review behind it.",
         )
+
+
+class TestTheReviewInputsAreKept(unittest.TestCase):
+    """The review job uploads the files the model is handed, best-effort.
+
+    The review role may write only `pr_review_traces/`, so another prefix loses
+    every snapshot silently; and a snapshot failure must never fail the review.
+    """
+
+    NAME = "Upload the review inputs to S3"
+    INPUTS = ("pr-diff.txt", "pr-files.txt", "pr-comments.json")
+
+    def setUp(self):
+        self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        (self.step,) = [
+            s
+            for s in re.split(r"(?m)^      -(?: |$)", self.review)
+            if s.startswith(f"name: {self.NAME}\n")
+        ]
+
+    def test_every_s3_bucket_url_in_the_review_job_is_under_the_traces_prefix(self):
+        # The four `s3://${S3_BUCKET}/` literals: the inputs' DEST and the
+        # three trace uploads. A new one must be added here deliberately.
+        targets = re.findall(r"s3://\$\{S3_BUCKET\}/(\S*)", self.review)
+        self.assertEqual(len(targets), 4, targets)
+        for t in targets:
+            self.assertTrue(t.startswith("pr_review_traces/"), t)
+
+    def test_it_runs_on_credentials_after_every_input_is_written_and_before_the_model(
+        self,
+    ):
+        self.assertEqual(
+            uncommented(re.search(r"(?m)^        if: (.*)$", self.step).group(1)),
+            "steps.aws.outcome == 'success'",
+        )
+        model_step(self.review, "aws")
+        self.assertNotIn("continue-on-error", self.step)
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        here = names.index(self.NAME)
+        self.assertLess(names.index("Configure AWS credentials via OIDC"), here)
+        self.assertLess(names.index("Build the diff and apply the size gate"), here)
+        self.assertLess(names.index("Write the PR conversation"), here)
+        self.assertLess(here, names.index('"Stage A: pr-review"'))
+
+    def _run(self, aws_exit: int, block_staging=False):
+        with tempfile.TemporaryDirectory() as td:
+            for f in self.INPUTS:
+                Path(td, f).write_text(f"content of {f}")
+            if block_staging:
+                Path(td, "pr-review-input").write_text("a file, not a directory")
+            log = Path(td) / "argv.log"
+            # `timeout` records its limit and runs the rest; `aws` records what
+            # it was ASKED to upload: the recursive source must be the staging
+            # directory, and each file is logged with its content.
+            stubs = {
+                "timeout": f'#!/bin/bash\necho "timeout $*" >> {log}\nshift\nexec "$@"\n',
+                "aws": (
+                    f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                    f'if [ "$3" = --recursive ]; then [ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                    f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
+                    f"fi\nexit {aws_exit}\n"
+                ),
+            }
+            proc, _ = run_step(
+                STAGE2.read_text(),
+                self.NAME,
+                td,
+                {
+                    "S3_BUCKET": "b",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "7",
+                    "HEAD_SHA": "h" * 40,
+                    "BASE_SHA": "b" * 40,
+                    "MERGE_BASE_SHA": "m" * 40,
+                    "HEAD_TREE_SHA": "t" * 40,
+                },
+                stubs,
+                rewrite=lambda body: re.sub(r"\$\{\{[^}]*\}\}", "CTX", body).replace(
+                    "/tmp/", f"{td}/"
+                ),
+            )
+            staged = Path(td, "pr-review-input")
+            staged_manifest = Path(td, "pr-review-manifest.json")
+            manifest, uploaded = None, []
+            if staged.is_dir():
+                uploaded = sorted(p.name for p in staged.iterdir())
+            if staged_manifest.exists():
+                manifest = json.loads(staged_manifest.read_text())
+            recorded = log.read_text().replace(td, "TD") if log.exists() else ""
+        return proc, manifest, uploaded, recorded
+
+    def test_it_uploads_the_inputs_and_a_manifest(self):
+        proc, manifest, uploaded, recorded = self._run(0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(uploaded, sorted(self.INPUTS))
+        # Each upload runs under a timeout, and the manifest goes last, alone.
+        dest = "s3://b/pr_review_traces/CTX/CTX_CTX_input/"
+        inputs = f"s3 cp --recursive TD/pr-review-input {dest}"
+        marker = f"s3 cp TD/pr-review-manifest.json {dest}manifest.json"
+        self.assertEqual(
+            recorded.splitlines(),
+            [
+                f"timeout 120 aws {inputs}",
+                inputs,
+                *(f"{f}=content of {f}" for f in sorted(self.INPUTS)),
+                f"timeout 30 aws {marker}",
+                marker,
+            ],
+        )
+        self.assertEqual(
+            manifest,
+            {
+                "repo": "o/r",
+                "pr_number": 7,
+                "head_sha": "h" * 40,
+                "base_sha": "b" * 40,
+                "merge_base_sha": "m" * 40,
+                "head_tree_sha": "t" * 40,
+            },
+        )
+        self.assertNotIn("::warning::", proc.stdout)
+
+    def test_a_failed_upload_only_warns_and_writes_no_manifest(self):
+        proc, _, _, recorded = self._run(1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertEqual(recorded.count("aws s3 cp"), 1, recorded)
+        self.assertRegex(recorded, r"(?m)^s3 cp --recursive ")
+        self.assertNotIn("manifest.json", recorded)
+
+    def test_a_staging_failure_only_warns_and_uploads_nothing(self):
+        proc, _, _, recorded = self._run(0, block_staging=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertNotIn("s3 cp", recorded)
+
+    def test_the_manifest_sources_and_key_are_the_runs_own(self):
+        """`_run` binds the env itself, so the bindings and key are pinned here."""
+        for name, value in {
+            "REPO": "github.repository",
+            "PR_NUMBER": "needs.prepare.outputs.pr_number",
+            "HEAD_SHA": "needs.prepare.outputs.head_sha",
+            "BASE_SHA": "needs.prepare.outputs.base_sha",
+            "MERGE_BASE_SHA": "needs.prepare.outputs.merge_base_sha",
+            "HEAD_TREE_SHA": "steps.diff.outputs.head_tree_sha",
+        }.items():
+            self.assertEqual(env_values(self.step, name), [f"${{{{ {value} }}}}"])
+        stem = (
+            "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/"
+            "${{ github.run_id }}_${{ github.run_attempt }}"
+        )
+        self.assertIn(f'"{stem}.json"', self.review)
+        self.assertIn(f'DEST="{stem}_input/"', self.step)
+
+    def test_merge_base_plus_the_diff_rebuilds_the_recorded_tree(self):
+        """The replay recipe, on a real repo: merge base + pr-diff.txt from the
+        real diff step gives head_tree_sha (an edit, add, delete, rename, chmod)."""
+        with tempfile.TemporaryDirectory() as td:
+            # No developer or system git config reaches the fixture or the step.
+            sealed = {"HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
+            sealed["GIT_CONFIG_GLOBAL"] = os.devnull
+            env = {"PATH": "/usr/bin:/bin", **sealed}
+
+            def sh(script):
+                return subprocess.run(
+                    ["bash", "-ec", script],
+                    cwd=td,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            base = sh(
+                "git init -q pr; cd pr; git config user.email t@t; git config user.name t\n"
+                "seq 20 > a.py; seq 30 > old.py; echo bye > gone.py; echo hi > run.sh\n"
+                "git add -A; git commit -qm base; git rev-parse HEAD"
+            )
+            sh(
+                "cd pr; echo 21 >> a.py; echo new > new.py; git rm -q gone.py\n"
+                "git mv old.py moved.py; chmod +x run.sh; git add -A; git commit -qm head"
+            )
+            proc, out = run_step(
+                STAGE2.read_text(),
+                "Build the diff and apply the size gate",
+                f"{td}/pr",
+                {
+                    "MERGE_BASE_SHA": base,
+                    "MAX_CHANGED_FILES": "100",
+                    "MAX_DIFF_BYTES": "9999",
+                    **sealed,
+                },
+                {},
+                rewrite=lambda body: body.replace("/tmp/", f"{td}/"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            tree = sole_outputs(self, out.read_text())["head_tree_sha"]
+            self.assertEqual(tree, sh("git -C pr rev-parse 'HEAD^{tree}'"))
+            replayed = sh(
+                f"git -C pr worktree add -q --detach ../replay {base}; cd replay\n"
+                "git apply --index ../pr-diff.txt; git write-tree"
+            )
+            self.assertEqual(replayed, tree)
 
 
 class TestPublishMovesNoLabels(unittest.TestCase):
@@ -5043,11 +5281,12 @@ class TestPublishMovesNoLabels(unittest.TestCase):
 
 
 class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
-    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+    """`announce` touches only automated reviews, with GITHUB_TOKEN and nothing else.
 
     It runs beside the review job, so it must not become a second publisher: no
     environment (the publisher role trusts the `bedrock` one), no AWS step, no
-    direct API call, and only post_review.py's `--mark-pending` mode.
+    direct API call, and only post_review.py's `--mark-pending` mode, or its
+    `--too-large` mode on a run `review` and `publish` sit out.
     """
 
     def setUp(self):
@@ -5058,10 +5297,14 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         self.assertNotIn("configure-aws-credentials", self.job)
         self.assertNotIn("id-token", self.job)
 
-    def test_it_only_marks_the_previous_review(self):
+    def test_it_only_marks_the_previous_review_or_says_too_large(self):
         runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
         self.assertEqual(
-            runs, ["python3 scripts/pr_review/post_review.py --mark-pending"]
+            runs,
+            [
+                "python3 scripts/pr_review/post_review.py --mark-pending",
+                "python3 scripts/pr_review/post_review.py --too-large",
+            ],
         )
         for needle in ("gh api", "gh pr", "/labels"):
             self.assertNotIn(needle, self.job)
@@ -5079,6 +5322,11 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
                 "PR_NUMBER": pr,
                 "REVIEWED_SHA": sha,
                 "RUN_ID": run_id,
+                "OPT_OUT_LABEL": label,
+            },
+            ("announce", "Say the PR is too large to review"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
                 "OPT_OUT_LABEL": label,
             },
             ("publish", "Post the automated review on the PR"): {
@@ -5499,6 +5747,15 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         for rec in recs:
             self.assertIn(rec, prompt)
 
+    def test_the_skill_labels_non_blocking_points_the_way_stage_b_reads_them(self):
+        # Stage B records a point the review labels non-blocking as `minor`;
+        # if the skill stops writing that label, every point posts as a blocker.
+        skill = " ".join(PR_REVIEW_SKILL.read_text().split())
+        self.assertIn('write "non-blocking" in it', skill)
+        self.assertIn('Write "non-blocking" in each non-blocking point', skill)
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn("A point the review labels non-blocking is `minor`", prompt)
+
     def test_the_schema_offers_exactly_what_the_sanitizer_accepts(self):
         m = re.search(r"--json-schema '([^']*)'", self.stage_b)
         self.assertIsNotNone(m, "stage B declares no --json-schema")
@@ -5543,13 +5800,28 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         )
         # The summary keeps the Recommendation and explains an override.
         self.assertIn("summary and its Recommendation", prompt)
-        self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
+        self.assertIn("under Approve or Needs Discussion, or only non-blocking", prompt)
+
+    def test_a_non_blocking_point_never_posts_as_a_blocker(self):
+        # blocking_findings posts every finding as a blocker under
+        # changes_requested with no major one, so a review whose points are all
+        # labelled non-blocking must not become changes_requested.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "A point the review labels non-blocking is `minor`, never `major`.",
+            prompt,
+        )
+        self.assertIn(
+            "If the review labels every point it raises non-blocking, the verdict is"
+            ' "ready_for_human_review", even under Request Changes.',
+            prompt,
+        )
 
     def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
         # parse_diff's KNOWN LIMITS: findings on these files are discarded,
         # and a change request left with none is refused.
         prompt = " ".join(prompt_scalar(self.stage_b).split())
-        for kind in ("deletion", "pure rename", "mode-only change", "binary file"):
+        for kind in ("pure rename", "mode-only change", "binary file"):
             self.assertIn(kind, prompt)
 
     def test_the_findings_file_comes_from_the_structured_output(self):
@@ -6074,10 +6346,34 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
             f"the workflow-level MAX_CHANGED_FILES is {caps[0]!r}, not a count",
         )
 
+    def test_announce_says_too_large_instead_of_marking(self):
+        """Marking would leave a review in progress that no run replaces; the
+        notice is the only thing the author sees on this path."""
+        block = strip_comments(job_block(self.text, "announce"))
+        self.assertEqual(job_if(block), "needs.prepare.outputs.fresh == 'true'")
+        gates = {}
+        for name in (
+            "Mark the previous automated review in progress",
+            "Say the PR is too large to review",
+        ):
+            step = block.split(f"- name: {name}", 1)[1]
+            step = re.split(r"\n      - ", step, maxsplit=1)[0]
+            gates[name] = re.findall(r"(?m)^\s*if:\s*(.*)$", step)
+        self.assertEqual(
+            gates,
+            {
+                "Mark the previous automated review in progress": [
+                    "needs.prepare.outputs.too_large != 'true'"
+                ],
+                "Say the PR is too large to review": [
+                    "needs.prepare.outputs.too_large == 'true'"
+                ],
+            },
+        )
+
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
-        """`publish` too: it is `always()`, so skipping `review` is not enough.
-        `announce` too: it would mark a review no run will replace."""
-        for job in ("announce", "review", "publish"):
+        """`publish` too: it is `always()`, so skipping `review` is not enough."""
+        for job in ("review", "publish"):
             # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
             # unordered, so moving an unchanged `runs-on:` above `if:` emptied
             # that region and red the test — the identical defect already found
@@ -6301,6 +6597,184 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
             proc.returncode, 0, "a merge base that never arrived was accepted"
         )
         self.assertIn("did not arrive", proc.stdout + proc.stderr)
+
+
+class TestTheInterdiffReachesTheReview(unittest.TestCase):
+    """A re-review is told what the author changed since the last automated review.
+
+    `prepare` reads the commit that review saw and its merge base from the API;
+    the review job fetches both and runs interdiff.py from the trusted checkout,
+    before any credential. The commit can be gone after a force-push, so that
+    path must still exit 0: the file then holds a note, and the review runs.
+    """
+
+    PATH = "/tmp/pr-interdiff.txt"
+    PREVIOUS, PREVIOUS_BASE, MERGE_BASE = "d" * 40, "e" * 40, "f" * 40
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.prepare = strip_comments(job_block(self.text, "prepare"))
+        self.review = strip_comments(job_block(self.text, "review"))
+
+    def _fetch_conversation(self, previous: str, compare: str | None, td: str):
+        """The conversation step, with fetch_pr_comments.py stubbed to report `previous`."""
+        argv = Path(td) / "gh_calls"
+        argv.write_text("")
+        python = f"""#!/bin/bash
+printf '%s' '{json.dumps({"items": [], "previous_review_sha": previous})}' > pr-comments.json
+"""
+        # None: the compare call fails, as on a transient API error.
+        gh = _GH_STUB if compare is not None else "#!/bin/bash\nexit 1\n"
+        return run_step(
+            self.text,
+            "Fetch the PR conversation",
+            td,
+            {
+                "GH_ARGV": str(argv),
+                "COMPARE_JSON": json.dumps({"merge_base_commit": {"sha": compare}}),
+                "GH_TOKEN": "stub-token",
+                "REPO": "o/r",
+                "PR_NUMBER": "1",
+                "HEAD_SHA": STUB_API_HEAD,
+                "BASE_SHA": STUB_API_BASE,
+            },
+            {"python3": python, "gh": gh},
+        ), argv
+
+    def test_the_previous_commit_and_its_merge_base_are_exported(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, out), argv = self._fetch_conversation(
+                self.PREVIOUS, self.PREVIOUS_BASE, td
+            )
+            written, calls = out.read_text(), argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        outputs = sole_outputs(self, written)
+        self.assertEqual(outputs.get("previous_review_sha"), self.PREVIOUS)
+        self.assertEqual(outputs.get("previous_merge_base_sha"), self.PREVIOUS_BASE)
+        # The earlier commit's fork point with the base, not this head's.
+        self.assertEqual(
+            [tuple(ln.split("\t")) for ln in calls.splitlines()],
+            [
+                (
+                    f"repos/o/r/compare/{STUB_API_BASE}...{self.PREVIOUS}?per_page=1",
+                    ".merge_base_commit.sha",
+                )
+            ],
+        )
+
+    def test_a_malformed_previous_commit_aborts_the_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), _argv = self._fetch_conversation(
+                "not-a-sha", self.PREVIOUS_BASE, td
+            )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("bad previous_review_sha", proc.stdout + proc.stderr)
+
+    def test_an_unusable_merge_base_is_empty_not_a_failure(self):
+        for compare in (None, "null", "not-a-sha"):
+            with tempfile.TemporaryDirectory() as td:
+                (proc, out), _argv = self._fetch_conversation(
+                    self.PREVIOUS, compare, td
+                )
+                written = out.read_text()
+            self.assertEqual(proc.returncode, 0, f"{compare!r}: {proc.stderr}")
+            self.assertEqual(
+                sole_outputs(self, written).get("previous_merge_base_sha"), "", compare
+            )
+
+    def test_no_earlier_review_makes_no_compare_call(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, out), argv = self._fetch_conversation("", self.PREVIOUS_BASE, td)
+            written, calls = out.read_text(), argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        outputs = sole_outputs(self, written)
+        self.assertEqual(
+            (
+                outputs.get("previous_review_sha"),
+                outputs.get("previous_merge_base_sha"),
+            ),
+            ("", ""),
+        )
+        self.assertEqual(calls, "")
+
+    def test_both_shas_reach_the_review_job_as_outputs(self):
+        outputs = mapping_items(indented_block(self.prepare, "outputs:"))
+        step = self._build_step()
+        for name in ("previous_review_sha", "previous_merge_base_sha"):
+            self.assertEqual(
+                norm_expr(outputs[name]),
+                f"${{{{ steps.conversation.outputs.{name} }}}}",
+            )
+            self.assertEqual(
+                env_values(step, name.upper()),
+                [f"${{{{ needs.prepare.outputs.{name} }}}}"],
+            )
+        self.assertEqual(
+            env_values(step, "MERGE_BASE_SHA"),
+            ["${{ needs.prepare.outputs.merge_base_sha }}"],
+        )
+
+    def _build_step(self) -> str:
+        hits = re.split(r"(?m)^      -(?: |$)", self.review)
+        (step,) = [
+            s
+            for s in hits
+            if s.startswith("name: Build the interdiff since the last review\n")
+        ]
+        return step
+
+    def _run_build(self, previous: str, td: str, fetch_status: int = 0):
+        calls = Path(td) / "calls"
+        calls.write_text("")
+        log = f'#!/bin/bash\necho "$(basename "$0") $*" >> {calls}\n'
+        return run_step(
+            self.text,
+            "Build the interdiff since the last review",
+            td,
+            {
+                "PREVIOUS_REVIEW_SHA": previous,
+                "PREVIOUS_MERGE_BASE_SHA": self.PREVIOUS_BASE,
+                "MERGE_BASE_SHA": self.MERGE_BASE,
+                "MAX_DIFF_BYTES": "1000",
+            },
+            {"git": log + f"exit {fetch_status}\n", "python3": log},
+        ), calls
+
+    def test_a_commit_gone_after_a_force_push_still_builds_the_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build(self.PREVIOUS, td, fetch_status=128)
+            ran = calls.read_text().splitlines()
+        self.assertEqual(
+            proc.returncode, 0, "a failed fetch failed the review: " + proc.stderr
+        )
+        self.assertEqual(
+            ran[0],
+            f"git -C pr fetch --no-tags --depth=1 origin {self.PREVIOUS} {self.PREVIOUS_BASE}",
+        )
+        self.assertEqual(
+            ran[1],
+            f"python3 trusted/scripts/pr_review/interdiff.py --repo pr --previous {self.PREVIOUS} "
+            f"--previous-base {self.PREVIOUS_BASE} --base {self.MERGE_BASE} --files /tmp/pr-files.z "
+            f"--out {self.PATH} --max-bytes 1000",
+        )
+
+    def test_a_malformed_sha_aborts_the_step(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build("not-a-sha", td)
+            ran = calls.read_text()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(ran, "", "the step ran git or the script on a malformed sha")
+
+    def test_it_runs_after_the_size_gate_and_before_any_credential(self):
+        self.assertIn("if: steps.diff.outputs.too_large == 'false'", self._build_step())
+        size = self.review.find("- name: Build the diff and apply the size gate")
+        build = self.review.find("- name: Build the interdiff since the last review")
+        creds = self.review.find("- name: Configure AWS credentials via OIDC")
+        self.assertTrue(-1 < size < build < creds, (size, build, creds))
+
+    def test_the_model_is_granted_and_told_the_path(self):
+        self.assertIn(f"Read(/{self.PATH})", model_step(self.review, "a"))
+        self.assertIn(self.PATH, stage_a_system_prompt())
 
 
 class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
@@ -6669,7 +7143,7 @@ COMMENTS = "/tmp/pr-comments.json"
 # names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
     # Local CLI mode.
-    "gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
+    "gh pr view <PR_NUMBER> --json title,body,author,labels,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
     "gh pr diff <PR_NUMBER>": "/tmp/pr-diff.txt",
     "gh pr view <PR_NUMBER> --json comments,reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments": COMMENTS,
@@ -6719,6 +7193,24 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAShowsTheLabels(unittest.TestCase):
+    """The review is offline, so it learns the PR's labels only from the file; the
+    prompt and the file's keys must stay in step, or it asks for labels already set."""
+
+    def test_the_prompt_names_the_label_keys_that_collect_emits(self):
+        def api(endpoint, body=None):
+            if endpoint.endswith("/pulls/1"):
+                return {"user": {"login": "author"}, "labels": []}
+            return []
+
+        out = fetch_pr_comments.collect(api, "pytorch/pytorch", 1)
+        offline = stage_a_system_prompt()
+        for key in ("labels", "labels_truncated"):
+            self.assertIn(key, out, f"collect() no longer emits {key!r}")
+            self.assertIn(f"`{key}`", offline, f"stage A no longer names {key!r}")
+        self.assertIn("already in `labels`", offline)
 
 
 class TestStageAFanOut(unittest.TestCase):

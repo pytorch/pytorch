@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/BlasBackend.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -225,4 +226,15 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& alpha = std::nullopt,
     float gemm_alpha = 1.0f,
     float beta = 0.0f);
+
+sycl::event scaled_grouped_matmul(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<Tensor> scale_a,
+    const std::optional<Tensor> scale_b,
+    const std::optional<at::blas::ScalingType> scaling_choice_a,
+    const std::optional<at::blas::ScalingType> scaling_choice_b,
+    const Tensor& offs,
+    Tensor& out,
+    const std::optional<Tensor> alpha = std::nullopt);
 } // namespace at::native::onednn
