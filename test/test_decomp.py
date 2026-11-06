@@ -623,6 +623,7 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @skipOps(comprehensive_failures)
     @suppress_warnings
+    @periodic
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
