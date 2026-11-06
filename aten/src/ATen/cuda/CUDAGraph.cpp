@@ -202,8 +202,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     // stock a spare in the shared pool for it to reserve instead.
     at::cuda::ensureCublasLtHandlesAvailable(1);
   }
-  // Under capture the public BLAS handle is a capture handle, and handles
-  // cannot be created once capture is active.
+  // With caching disabled, the public BLAS handle under capture is a capture
+  // handle, and handles cannot be created once capture is active.
   at::cuda::prepareCaptureCublasHandles();
 #endif
 
