@@ -223,11 +223,3 @@ terminate processes upon detecting an error in one of them.
 ```{eval-rst}
 .. py:module:: torch.multiprocessing.reductions
 ```
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    rebuild_device_tensor
-```
