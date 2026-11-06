@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/cat.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
