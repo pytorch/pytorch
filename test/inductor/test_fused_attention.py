@@ -2266,32 +2266,29 @@ class TestAttentionFusionDeviceRouting(TestCase):
         on_cuda = torch.device(device).type == "cuda" and torch.version.hip is None
         self.assertEqual(sdpa_calls, 0 if on_cuda else 1)
 
+    @recover_orig_fp32_precision
     def test_zero_scale_rejection(self, device):
         from torch._inductor.fx_passes.fuse_attention import (
             _sfdp_extra_check,
             _sfdp_params_check,
         )
 
-        # The zero check runs before the dtype/precision gates, so any device
-        # rejects 0.0, -0.0 and the int 0 with the flag set. The factory passes
+        # Fuse fp32 attention on CUDA too, so False below comes from the zero
+        # check and not from _sfdp_params_check's fp32 gate. The factory passes
         # the flag down to _sfdp_params_check, which checks match.kwargs.
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+
+        # The zero check runs before the dtype/precision gates, so any device
+        # rejects 0.0, -0.0 and the int 0 with the flag set.
         for inv_scale in (0.0, -0.0, 0):
             match = self._match_for(device, inv_scale=inv_scale)
             self.assertFalse(_sfdp_params_check(match, reject_zero_scale=True))
             self.assertFalse(_sfdp_extra_check(reject_zero_scale=True)(match))
 
-        # A nonzero scale fuses like any other match.
+        # A nonzero scale fuses through both guards.
         match = self._match_for(device, inv_scale=0.5)
-        if torch.device(device).type == "cuda":
-            matmul = torch.backends.cuda.matmul
-            saved = matmul.fp32_precision
-            try:
-                matmul.fp32_precision = "tf32"
-                self.assertTrue(_sfdp_params_check(match, reject_zero_scale=True))
-            finally:
-                matmul.fp32_precision = saved
-        else:
-            self.assertTrue(_sfdp_params_check(match, reject_zero_scale=True))
+        self.assertTrue(_sfdp_params_check(match, reject_zero_scale=True))
+        self.assertTrue(_sfdp_extra_check(reject_zero_scale=True)(match))
 
     def test_fp32_fusion_gated_by_precision(self, device):
         from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check

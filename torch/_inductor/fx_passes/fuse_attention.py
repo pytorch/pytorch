@@ -961,6 +961,9 @@ def _is_supported_scale(scale) -> bool:
 
 def _is_zero_scale(scale) -> bool:
     scale = _scale_value(scale)
+    if isinstance(scale, torch.SymInt):
+        hint = scale.node.hint
+        return isinstance(hint, (int, float)) and hint == 0
     return isinstance(scale, (float, int)) and scale == 0
 
 
@@ -1020,6 +1023,7 @@ def _sfdp_extra_check(
     scale_factor_op=None,
     fp32_upcast_softmax=False,
     math_path_only=False,
+    *,
     reject_zero_scale=False,
 ):
     def fn(match):
@@ -1038,9 +1042,7 @@ def _sfdp_extra_check(
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
             if not _is_supported_scale(scale_factor_node.args[1]):
                 return False
-            if scale_factor_op is aten.div.Tensor and _is_zero_scale(
-                scale_factor_node.args[1]
-            ):
+            if reject_zero_scale and _is_zero_scale(scale_factor_node.args[1]):
                 return False
         return _sfdp_params_check(match, reject_zero_scale=reject_zero_scale)
 
@@ -1161,7 +1163,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_1,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_2,
@@ -1175,7 +1177,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_3,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_4,
@@ -1231,14 +1233,14 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_11,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_12,
                 _sfdp_replacement_12,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_13,
@@ -1252,35 +1254,35 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_14,
                 [g(), g(), g(), m(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
                 [g(), g(), g(), m_2d(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
                 [g(), g(), g(), m_2d(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_18,
@@ -1446,7 +1448,9 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, math_path_only=True, reject_zero_scale=True
+                    ),
                 )
             )
             candidates.append(
@@ -1455,7 +1459,9 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, math_path_only=True, reject_zero_scale=True
+                    ),
                 )
             )
 
