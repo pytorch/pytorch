@@ -486,6 +486,20 @@ class MPSBasicTests(TestCase):
 class MPSBasicTestsAOTI(TestCase):
     hw_classification = HardwareClassification.MPS
 
+    def test_buffer_limit_error(self):
+        kernel = unittest.mock.Mock()
+        kernel.args.sizevars = {}
+        kernel.headers = set()
+        kernel.max_buffer_args = MetalKernel.max_buffer_args
+        kernel._dynamic_numel_trees.return_value = []
+        with patch("torch._inductor.codegen.mps.V") as virtualized:
+            virtualized.graph.cpp_wrapper = True
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"too_many_args needs 32.*at most 31.*Disable cpp_wrapper",
+            ):
+                MetalKernel._use_argument_buffer(kernel, 32, "too_many_args")
+
     @parametrize("num_weights", [29, 30])
     @inductor_config.patch(cpp_wrapper=True)
     def test_many_buffer_args(self, num_weights):

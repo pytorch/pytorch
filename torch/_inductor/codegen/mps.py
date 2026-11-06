@@ -713,18 +713,20 @@ class MetalKernel(SIMDKernel):
             if not isinstance(t.numel, sympy.Integer)
         ]
 
-    def _use_argument_buffer(self) -> bool:
+    def _use_argument_buffer(self, num_tensor_args: int, kernel_name: str) -> bool:
         """
         Kernels that need more buffer arguments than Metal allows take all their
         tensors in one argument buffer and all their ints in one array.
         """
-        n_args = len(self._tensor_args()) + len(self.args.sizevars)
+        n_args = num_tensor_args + len(self.args.sizevars)
         n_args += len(self._dynamic_numel_trees()) + ("error" in self.headers)
         if n_args <= self.max_buffer_args:
             return False
         if V.graph.cpp_wrapper:
             raise RuntimeError(
-                f"cpp_wrapper supports at most {self.max_buffer_args} Metal buffer arguments"
+                f"Metal kernel {kernel_name} needs {n_args} buffer arguments, "
+                f"but cpp_wrapper supports at most {self.max_buffer_args}. "
+                "Disable cpp_wrapper to use argument buffers."
             )
         return True
 
@@ -1171,8 +1173,8 @@ class MetalKernel(SIMDKernel):
                 )
                 code.writeline(header_contents)
 
-            use_argbuf = self._use_argument_buffer()
             tensor_args = self._tensor_args()
+            use_argbuf = self._use_argument_buffer(len(tensor_args), fn_name)
             int_args = [
                 *self.args.sizevars.values(),
                 *(f"{t.prefix}numel" for t in self._dynamic_numel_trees()),
@@ -1289,7 +1291,7 @@ class MetalKernel(SIMDKernel):
             args.append(str(expr))
             arg_types.append(int)
 
-        if self._use_argument_buffer():
+        if self._use_argument_buffer(len(tensor_args), name):
             # Tensor lists contain GPU addresses and inline CPU scalar values.
             int_args = args[len(tensor_args) :]
             args = [f"[{', '.join(arg.outer for arg in tensor_args)}]"]
