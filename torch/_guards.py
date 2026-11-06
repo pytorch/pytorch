@@ -1555,12 +1555,14 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
-        - Currently active fake mode on stack
+        - Currently active fake mode, Python or C++
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
+
+    The result can be a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
         maybe_get_fake_mode,
@@ -1576,35 +1578,33 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, "active fake mode", i))
+    if (m := active_fake_mode()) is not None:
+        fake_modes.append((m, "active fake mode"))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if is_fake_tensor(flat_input):
-            fake_modes.append((maybe_get_fake_mode(flat_input), "fake tensor input", i))
+            input_mode = maybe_get_fake_mode(flat_input)
+            fake_modes.append((input_mode, f"fake tensor input {i}"))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
-                    (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
+                    (maybe_get_fake_mode(tensor), f"subclass input {i} {ix}")
                     for ix, tensor in enumerate(fake_tensors)
                 ]
             )
 
     if fake_modes:
-        fake_mode, desc1, i1 = fake_modes[0]
-        for m, desc2, i2 in fake_modes[1:]:
+        fake_mode, src1 = fake_modes[0]
+        for m, src2 in fake_modes[1:]:
             if fake_mode is not m:
                 raise AssertionError(
-                    f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                    f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+                    f"fake mode ({fake_mode}) from {src1} doesn't match mode ({m}) from {src2}\n\n"
+                    f"fake mode from {src1} allocated at:\n{fake_mode.stack}\n"
+                    f"fake mode from {src2} allocated at:\n{m.stack}"
                 )
 
         return fake_mode
@@ -1614,14 +1614,11 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
 def active_fake_mode() -> FakeTensorMode | None:
     """
-    Inspects the dispatch mode stack for an active fake mode and returns it.
-    Returns None if no fake mode is active.
+    Returns the active fake mode, or None if no fake mode is active. It can be
+    a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
+    torch/_subclasses/fake_tensor.py.
     """
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            return m
-
-    return None
+    # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
+    # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
+    # CppFakeTensorMode wrapper when that slot is empty.
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
