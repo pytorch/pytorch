@@ -105,7 +105,6 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         out_dtype,
         aten._to_copy,
-        aten._trilinear,
         aten.tril_indices,
         aten.triu_indices,
         aten.unbind_copy.int,

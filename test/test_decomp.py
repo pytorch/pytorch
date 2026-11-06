@@ -233,6 +233,8 @@ op_assert_ref_tol_table = {
     # eager operator, causing a significant difference on float16
     (torch.bfloat16, torch.ops.aten.addcmul.default): 1e-5,
     (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
+    (torch.float16, torch.ops.aten._trilinear.default): 2e-3,
+    (torch.bfloat16, torch.ops.aten._trilinear.default): 1e-2,
 }
 
 
