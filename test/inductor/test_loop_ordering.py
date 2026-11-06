@@ -38,10 +38,15 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._triton import has_triton
 
 
 # set so that metrics appear
@@ -83,6 +88,7 @@ class MockSchedulerTest(TestCase):
 
 
 @inductor_config.patch(loop_ordering_after_fusion=True)
+@instantiate_parametrized_tests
 class ImplDetailTest(MockSchedulerTest):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1442,12 +1448,15 @@ class LoopOrderingTest(TestCase):
             "test_configs.max_mm_configs": 4,
         }
     )
-    @unittest.skipIf(not is_big_gpu(), "Need big gpu for max-autotune")
     def test_interaction_with_triton_template(self, device):
         """
         Make sure the dependency prefix for TritonTempalate and its
         prologue match.
         """
+        if not has_triton():
+            self.skipTest("Triton is required for max-autotune")
+        if not is_big_gpu():
+            self.skipTest("Need big gpu for max-autotune")
 
         @torch.compile
         def f(x, y):
@@ -1474,11 +1483,14 @@ class LoopOrderingTest(TestCase):
             "test_configs.max_mm_configs": 4,
         }
     )
-    @unittest.skipIf(not is_big_gpu(), "Need big gpu for max-autotune")
     def test_interaction_with_multi_template(self, device):
         """
         Skip MultiTemplateBuffer during loop reordering
         """
+        if not has_triton():
+            self.skipTest("Triton is required for max-autotune")
+        if not is_big_gpu():
+            self.skipTest("Need big gpu for max-autotune")
 
         @torch.compile
         def f(x, y):
@@ -1874,35 +1886,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             self.assertEqual(foo(x), torch.compile(foo)(x))
 
-    def test_coalescing(self, device):
-        from torch._inductor import tiling_utils
-
-        # Define symbolic variables
-        i, j, n, m = sympy.symbols("i j n m", integer=True)
-
-        # Test cases: (expression, var_ranges, expected_result)
-        test_cases = [
-            # Simple direct case
-            (i + j * 5, {i: 10, j: 8}, i),
-            # Floor division case
-            (i + FloorDiv(j, 2), {i: 4, j: 8}, i),
-            # Modular indexing
-            (i * 10 + ModularIndexing(j, 1, 3), {i: 5, j: 10}, j),
-            # Case with no coalescing variable
-            (i * 2 + j * 3, {i: 8, j: 5}, None),
-            # Division case
-            (i / 2, {i: 10}, None),
-            # More complex floor division
-            (j + FloorDiv(i, 3), {i: 6, j: 12}, j),
-            # Addition inside modular indexing
-            (ModularIndexing(i + 3, 1, 6), {i: 8, j: 12}, i),
-        ]
-
-        for expr, var_ranges, expected in test_cases:
-            # Test the function
-            result = tiling_utils.find_coalesced_var(expr, var_ranges)
-            self.assertEqual(result, expected)
-
     @parametrize("downcast_transposed_v", (False, True))
     @parametrize("dynamic", (False, True))
     def test_tiled_coalesce_analysis(self, device, downcast_transposed_v, dynamic):
@@ -2020,86 +2003,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
         ):
             self.assertEqual(torch.compile(foo)(x, y), foo(x, y))
 
-    def test_solve_for_zero(self, device):
-        from torch._inductor import tiling_utils
-
-        x, y = sympy.symbols("x y", integer=True)
-        # Test cases: (expression, expected_result)
-        test_cases = [
-            # Simple linear expressions
-            (x + 5, (-5)),
-            (2 * x - 10, (5)),
-            # Constant expressions (should return None)
-            (sympy.Integer(7), None),
-            (sympy.Integer(0), None),
-            # FloorDiv cases (should return None per function)
-            (FloorDiv(x, 2), None),
-            (FloorDiv(x, 2) + 5, None),
-            # ModularIndexing cases
-            (ModularIndexing(x, 1, 5), (5)),
-            (ModularIndexing(x, 1, 3), (3)),
-            # Expressions with no constant solution
-            (x**2 + 1, None),  # No real solution
-        ]
-        for expr, expected in test_cases:
-            result = tiling_utils.solve_for_zero(expr)
-            self.assertEqual(result, expected)
-
-    def test_solve_for_zero_floordiv_does_not_query_constant(self):
-        from torch._inductor import tiling_utils
-
-        x = sympy.Symbol("x", integer=True, nonnegative=True)
-        expr = FloorDiv(Mod(x, 4), 2)
-        with mock.patch.object(
-            FloorDiv,
-            "is_constant",
-            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
-        ):
-            self.assertIsNone(tiling_utils.solve_for_zero(expr))
-
-    def test_solve_for_tiling(self, device):
-        from torch._inductor import tiling_utils
-
-        x = sympy.Symbol("x", integer=True)
-
-        test_cases = [
-            # Simple linear cases that coalesce
-            (3 * x, None),
-            # # # # Expression with no free symbols
-            # (sympy.Integer(5), None),
-            (x / 3, 3),
-            (FloorDiv(x * 2, 6), 3),
-            # # ModularIndexing expressions
-            (ModularIndexing(FloorDiv(x, 4), 1, 64), 4),
-            (x + ModularIndexing(x, 1, 5), None),
-            (x**2, None),  # Non-linear, diff is not constant
-            (4096 * (ModularIndexing(32 * x, 1, 2048)) + FloorDiv(x, 64), 64),
-            (4096 * (ModularIndexing(x, 1, 2048)) + FloorDiv(x, 2048), 2048),
-        ]
-
-        for expr, expected in test_cases:
-            result = tiling_utils.solve_for_tiling(expr)
-            self.assertEqual(result, expected)
-
-    def test_solve_for_tiling_nested_modularindexing(self, device):
-        from torch._inductor import tiling_utils
-
-        n0 = sympy.Symbol("n0", integer=True, nonnegative=True)
-        inner = ModularIndexing(n0 - 252252, 1, 50)
-        for expr in (
-            inner,
-            ModularIndexing(inner, 1, 50),
-            ModularIndexing(ModularIndexing(inner, 1, 50), 1, 50),
-        ):
-            # must not raise, and nested forms solve identically to the flat form
-            self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
-
-        # mixed nesting has no tiling solution, but must not raise either
-        mixed = FloorDiv(
-            ModularIndexing(5 * FloorDiv(ModularIndexing(n0 + 8, 1, 6), 5), 1, 36), 8
-        )
-        self.assertEqual(tiling_utils.solve_for_tiling(mixed), None)
-
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, device, dynamic):
         def fn(nodes):
@@ -2142,6 +2045,119 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # Assert that we captured code, before checking it.
             self.assertTrue(code)
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
+
+
+class MemoryMetricsSolveTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_coalescing(self):
+        from torch._inductor import tiling_utils
+
+        # Define symbolic variables
+        i, j, n, m = sympy.symbols("i j n m", integer=True)
+
+        # Test cases: (expression, var_ranges, expected_result)
+        test_cases = [
+            # Simple direct case
+            (i + j * 5, {i: 10, j: 8}, i),
+            # Floor division case
+            (i + FloorDiv(j, 2), {i: 4, j: 8}, i),
+            # Modular indexing
+            (i * 10 + ModularIndexing(j, 1, 3), {i: 5, j: 10}, j),
+            # Case with no coalescing variable
+            (i * 2 + j * 3, {i: 8, j: 5}, None),
+            # Division case
+            (i / 2, {i: 10}, None),
+            # More complex floor division
+            (j + FloorDiv(i, 3), {i: 6, j: 12}, j),
+            # Addition inside modular indexing
+            (ModularIndexing(i + 3, 1, 6), {i: 8, j: 12}, i),
+        ]
+
+        for expr, var_ranges, expected in test_cases:
+            # Test the function
+            result = tiling_utils.find_coalesced_var(expr, var_ranges)
+            self.assertEqual(result, expected)
+
+    def test_solve_for_zero(self):
+        from torch._inductor import tiling_utils
+
+        x, y = sympy.symbols("x y", integer=True)
+        # Test cases: (expression, expected_result)
+        test_cases = [
+            # Simple linear expressions
+            (x + 5, (-5)),
+            (2 * x - 10, (5)),
+            # Constant expressions (should return None)
+            (sympy.Integer(7), None),
+            (sympy.Integer(0), None),
+            # FloorDiv cases (should return None per function)
+            (FloorDiv(x, 2), None),
+            (FloorDiv(x, 2) + 5, None),
+            # ModularIndexing cases
+            (ModularIndexing(x, 1, 5), (5)),
+            (ModularIndexing(x, 1, 3), (3)),
+            # Expressions with no constant solution
+            (x**2 + 1, None),  # No real solution
+        ]
+        for expr, expected in test_cases:
+            result = tiling_utils.solve_for_zero(expr)
+            self.assertEqual(result, expected)
+
+    def test_solve_for_tiling(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True)
+
+        test_cases = [
+            # Simple linear cases that coalesce
+            (3 * x, None),
+            # # # # Expression with no free symbols
+            # (sympy.Integer(5), None),
+            (x / 3, 3),
+            (FloorDiv(x * 2, 6), 3),
+            # # ModularIndexing expressions
+            (ModularIndexing(FloorDiv(x, 4), 1, 64), 4),
+            (x + ModularIndexing(x, 1, 5), None),
+            (x**2, None),  # Non-linear, diff is not constant
+            (4096 * (ModularIndexing(32 * x, 1, 2048)) + FloorDiv(x, 64), 64),
+            (4096 * (ModularIndexing(x, 1, 2048)) + FloorDiv(x, 2048), 2048),
+        ]
+
+        for expr, expected in test_cases:
+            result = tiling_utils.solve_for_tiling(expr)
+            self.assertEqual(result, expected)
+
+    def test_solve_for_tiling_nested_modularindexing(self):
+        from torch._inductor import tiling_utils
+
+        n0 = sympy.Symbol("n0", integer=True, nonnegative=True)
+        inner = ModularIndexing(n0 - 252252, 1, 50)
+        for expr in (
+            inner,
+            ModularIndexing(inner, 1, 50),
+            ModularIndexing(ModularIndexing(inner, 1, 50), 1, 50),
+        ):
+            # must not raise, and nested forms solve identically to the flat form
+            self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
+
+        # mixed nesting has no tiling solution, but must not raise either
+        mixed = FloorDiv(
+            ModularIndexing(5 * FloorDiv(ModularIndexing(n0 + 8, 1, 6), 5), 1, 36), 8
+        )
+        self.assertEqual(tiling_utils.solve_for_tiling(mixed), None)
+
+    def test_solve_for_zero_floordiv_does_not_query_constant(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        expr = FloorDiv(Mod(x, 4), 2)
+        with mock.patch.object(
+            FloorDiv,
+            "is_constant",
+            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
+        ):
+            self.assertIsNone(tiling_utils.solve_for_zero(expr))
 
 
 layouts = ("cont", "NHWC", "T")
@@ -2865,7 +2881,5 @@ instantiate_device_type_tests(TestTiling, globals(), except_for="cpu", allow_xpu
 
 
 if __name__ == "__main__":
-    from torch.utils._triton import has_triton
-
     if has_triton():
         run_tests()
