@@ -89,14 +89,9 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 sympy.Eq(sympy.Mod(k, k_split), 0)
             )
         ]
-        dynamic_k = (
-            config.triton.decompose_k_dynamic_k
-            and isinstance(k, sympy.Expr)
-            and not k.is_number
-        )
+        dynamic_k = isinstance(k, sympy.Expr) and not k.is_number
 
         if "ATEN" in bmm_backends:
-            # decomposeK runs the K rows a split leaves over as a separate MM.
             aten_k_splits = (
                 dynamic_k_decompose_k_splits(m, n, k) if dynamic_k else exact_k_splits
             )
