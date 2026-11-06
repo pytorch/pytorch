@@ -7,15 +7,20 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/intrusive_ptr.h>
 
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d {
+
+class ProcessGroup;
 
 // Identifies the operation a pre/post hook is firing for. One value per
 // dispatcher op rather than per collective family: the flight recorder writes
 // the name into the trace and the analyzer keys its size rules off it, so
 // folding e.g. every allgather variant into ALLGATHER would report an
 // _allgather_base as a plain all_gather and apply the wrong check to it.
+// SPLIT, NEW_WINDOW and RECONFIGURE are group lifecycle ops, not dispatcher
+// ops; they fire with no tensors.
 // Consumers that only care about the family (NanCheckHook) can ignore the
 // extra values.
 enum class HookOpName : uint8_t {
@@ -39,6 +44,7 @@ enum class HookOpName : uint8_t {
   REDUCE_SCATTER_BASE,
   REDUCE_SCATTER_TENSOR_COALESCED,
   ALLTOALL_BASE,
+  RECONFIGURE,
   UNKNOWN,
 };
 
@@ -62,6 +68,10 @@ struct PostHookArgs {
   // Work handle for the issued operation; may be null for synchronous ops.
   c10::intrusive_ptr<Work> work;
   int64_t op_id = 0;
+  // New group for SPLIT; null on ranks not in it and for other ops.
+  c10::intrusive_ptr<ProcessGroup> group;
+  // New window for NEW_WINDOW; null for other ops.
+  c10::intrusive_ptr<Window> window;
 };
 
 using PostHook = std::function<void(const PostHookArgs&)>;
