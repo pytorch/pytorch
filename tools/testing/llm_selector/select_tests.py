@@ -1,19 +1,30 @@
 """Ask an LLM which test files a change can break.
 
+    python -m tools.testing.llm_selector.select_tests --base origin/main --head <pr-head-sha>
+
+LLM_SELECTOR_MODEL and LLM_SELECTOR_EFFORT, when set and not empty, are the defaults of
+--model and --effort.
+
 The prompt holds the PR title and description, the diff, and every test file
-CI can run annotated with its CI cost. The model answers through `claude -p`
+CI can run annotated with its CI cost. Nothing from the change is executed:
+in CI this script runs from the default branch and only reads the PR through git. The model answers through `claude -p`
 with a JSON schema; on Bedrock set CLAUDE_CODE_USE_BEDROCK=1 and AWS
-credentials.
+credentials. A failure of git, the model call or its output, or the test times
+yields a run_all selection, so CI never skips tests because the selector broke;
+a bad LLM_SELECTOR_EFFORT or a failed write of --output writes no file.
 """
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,8 +32,15 @@ from typing import TYPE_CHECKING
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.testing.discover_tests import BLOCKLISTED_PATTERNS
-from tools.testing.llm_selector.selection import needs_run_all, SWEEPS
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_test_times
+from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, CPP_TEST_PREFIX, TESTS
+from tools.testing.llm_selector.selection import (
+    LLM_SELECTION_FILE,
+    needs_run_all,
+    Selection,
+    SWEEPS,
+    TEST_INFRA_REASON,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -40,8 +58,10 @@ DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
 # A larger change runs everything rather than paying for an oversized prompt.
 MAX_CHANGED_FILES = 1000
-# Seconds the model call may take.
+# Seconds the model call may take, and then all the git greps on its answer
+# together; past either, the selector fails and writes a run_all selection.
 QUERY_TIMEOUT = 600
+GREP_BUDGET = 180
 # Room for the note that replaces a truncated file's tail.
 TRUNCATION_MARKER = 40
 # With a checkout, the model may use these tools on it, and the prompt starts with this.
@@ -293,12 +313,33 @@ def changed_files(merge_base: str, head: str) -> list[str]:
     return git_paths("diff", "--name-only", "--no-renames", merge_base, head, "--")
 
 
+def diffstat_and_diff(merge_base: str, head: str) -> tuple[str, str]:
+    # Pin the output edits_doctest and truncate_diff parse, whatever the git config.
+    pinned = ["--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"]
+    stat = git("diff", "--stat=200", "--no-renames", "--no-color", merge_base, head)
+    return stat, git("diff", *pinned, merge_base, head)
+
+
+def pr_text(args: argparse.Namespace, head: str) -> tuple[str, str]:
+    if args.title is not None:
+        return args.title, args.body or ""
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path and os.path.exists(event_path):
+        with open(event_path) as f:
+            pr = json.load(f).get("pull_request") or {}
+        if pr:
+            return pr.get("title") or "", pr.get("body") or ""
+    return git("log", "-1", "--format=%s", head).strip(), git(
+        "log", "-1", "--format=%b", head
+    )
+
+
 def run_all_reason(changed: list[str]) -> str | None:
     """Why select runs everything on these changed files without asking the model, if it does."""
     if not changed:
         return "no changed files"
     if needs_run_all(changed):
-        return "change touches test infrastructure"
+        return TEST_INFRA_REASON
     # The path patterns' `.` and `$` do not handle a newline.
     if any(re.search(r"[\x00-\x1f\x7f]", f) for f in changed):
         return "a changed path contains a control character"
@@ -318,3 +359,170 @@ def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
     }
     blocked = tuple(BLOCKLISTED_PATTERNS)
     return {t for t in tests if not t.startswith(blocked) and t not in listed}
+
+
+def select(args: argparse.Namespace, record: dict) -> Selection | None:
+    """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
+    head = git("rev-parse", args.head).strip()
+    record["head"] = head
+    merge_base = git("merge-base", args.base, head).strip()
+    record["merge_base"] = merge_base
+    changed = changed_files(merge_base, head)
+    if (reason := run_all_reason(changed)) and not args.print_prompt:
+        return Selection(run_all=True, reason=reason)
+    # get_test_times reports its download on stdout, where --print-prompt writes.
+    with contextlib.redirect_stdout(sys.stderr):
+        test_times = get_test_times()
+    if not test_times and not args.print_prompt:
+        return Selection(run_all=True, reason="no test times", error="no test times")
+    diffstat, diff = diffstat_and_diff(merge_base, head)
+    # TESTS comes from the checkout this script runs from, which in CI is the
+    # trusted default branch rather than the PR; add the test files the PR adds
+    # (see added_test_files).
+    added = git_paths(
+        "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, head
+    )
+    new = added_test_files(added, TESTS)
+    # The C++ tests, which TESTS lists when the build has them, always run.
+    candidates = sorted(
+        t for t in set(TESTS) | new if not t.startswith(f"{CPP_TEST_PREFIX}/")
+    )
+    title, body = pr_text(args, head)
+    minutes = test_minutes(test_times)
+    prompt = build_prompt(title, body, diffstat, diff, candidates, minutes, new)
+    if args.print_prompt:
+        print(prompt)
+        return None
+
+    result = query_model(prompt, args.model, args.effort)
+    out = None if result.get("is_error") else result.get("structured_output")
+    record["cost_usd"] = result.get("total_cost_usd")
+    record["model_output"] = out
+    # A deleted file, or the old path of a moved one, needs no reader.
+    deleted = git_paths(
+        "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, head
+    )
+    deadline = time.monotonic() + GREP_BUDGET
+    greps: dict[str, list[str]] = {}
+
+    def grep(pattern: str) -> list[str]:
+        if pattern not in greps:
+            try:
+                timeout = max(deadline - time.monotonic(), 0.001)
+                greps[pattern] = git_grep(pattern, head, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(
+                    f"git grep ran past the {GREP_BUDGET}s budget after the model call"
+                ) from None
+        return greps[pattern]
+
+    selection = Selection.from_model_output(
+        out, set(candidates), changed, grep, set(deleted), diff
+    )
+    if selection.error is not None:
+        # Without an answer, the CLI's own output says why.
+        cli = str(result.get("result") or "") if out is None else ""
+        selection.error = (cli or selection.error)[:2000]
+    # Only the doctest rule follows a change outside test/, so an answer naming
+    # no tests or dirs for one leaves at most doctests and ALWAYS_COVERED outside
+    # its sweeps' configs: never enforce.
+    keys = ("tests", "dirs")
+    picked = selection.run_all or out is None or any(out[k] for k in keys)
+    if not picked and any(not f.startswith("test/") for f in changed):
+        record["not_enforced"] = "the model chose no tests for a change outside test/"
+    return selection
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--base", default="origin/main", help="diff against merge-base(base, head)"
+    )
+    parser.add_argument("--head", default="HEAD", help="the change to select tests for")
+    parser.add_argument(
+        "--title",
+        help="the PR title; by default the PR event's, else head's commit subject",
+    )
+    parser.add_argument("--body", help="the PR description; needs --title")
+    # An unset repository variable reaches the workflow as an empty string.
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("LLM_SELECTOR_MODEL") or DEFAULT_MODEL,
+        help=f"the claude model (default: LLM_SELECTOR_MODEL or {DEFAULT_MODEL})",
+    )
+    efforts = ["low", "medium", "high", "xhigh", "max"]
+    parser.add_argument(
+        "--effort",
+        default=os.environ.get("LLM_SELECTOR_EFFORT") or "medium",
+        choices=efforts,
+        help="the model's effort (default: LLM_SELECTOR_EFFORT or medium)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_SELECTION_FILE,
+        help="where to write the selection file (default: where run_test.py reads it)",
+    )
+    parser.add_argument(
+        "--enforce",
+        action="store_true",
+        help="tell run_test.py to skip uncovered files",
+    )
+    parser.add_argument(
+        "--print-prompt",
+        action="store_true",
+        help="print the prompt instead of calling the model; writes no file",
+    )
+    args = parser.parse_args(argv)
+    if args.body is not None and args.title is None:
+        parser.error("--body needs --title")
+    # argparse checks choices only for values given on the command line.
+    if args.effort not in efforts:
+        parser.error(f"LLM_SELECTOR_EFFORT={args.effort!r} is not one of {efforts}")
+
+    record: dict = {
+        "model": args.model,
+        "effort": args.effort,
+        "merge_base": None,
+        "head": None,
+        "cost_usd": None,
+        "model_output": None,
+        "not_enforced": None,
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    if not args.print_prompt:
+        args.output.unlink(missing_ok=True)
+    try:
+        selection = select(args, record)
+    except Exception as e:
+        if args.print_prompt:
+            raise
+        # TimeoutExpired's message is mostly the claude argv, prompt included.
+        if isinstance(e, subprocess.TimeoutExpired):
+            error = f"model call timed out after {e.timeout}s"
+        else:
+            error = f"{type(e).__name__}: {e}"
+        selection = Selection(
+            run_all=True, reason=f"selector failed: {error[:500]}", error=error[:2000]
+        )
+    if record["not_enforced"] is not None:
+        args.enforce = False
+    if selection is None:
+        return
+    selection.enforce = args.enforce
+    args.output.write_text(
+        json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
+    )
+    print(
+        f"LLM selector: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
+    )
+    # json.dumps keeps a model-written newline from starting a workflow command,
+    # and escaping "#" keeps the runner from parsing a legacy ##[command].
+    reason = json.dumps(selection.reason).replace("#", "\\u0023")
+    print(f"LLM selector: {reason}")
+
+
+if __name__ == "__main__":
+    main()
