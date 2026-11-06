@@ -163,7 +163,11 @@ class _StorageBase:
 
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        return cls._release_ipc_counter_cuda(*args, **kwargs)
+        return cls._release_ipc_counter_device(*args, **kwargs)
+
+    @classmethod
+    def _release_ipc_counter_device(cls, *args, **kwargs) -> Self:
+        raise NotImplementedError
 
     @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
@@ -191,10 +195,17 @@ class _StorageBase:
     def _set_cdata(self, *args, **kwargs):
         raise NotImplementedError
 
+    def _share_device_(self, *args, **kwargs):
+        raise NotImplementedError
+
     def _share_cuda_(self, *args, **kwargs):
         raise NotImplementedError
 
     def is_shared(self) -> _bool:
+        raise NotImplementedError
+
+    @classmethod
+    def _new_shared_device(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
@@ -1459,6 +1470,9 @@ class TypedStorage:
     def _set_cdata(self, *args, **kwargs):
         return self._untyped_storage._set_cdata(*args, **kwargs)
 
+    def _share_device_(self, *args, **kwargs):
+        return self._untyped_storage._share_device_(*args, **kwargs)
+
     def _share_cuda_(self, *args, **kwargs):
         return self._untyped_storage._share_cuda_(*args, **kwargs)
 
@@ -1469,6 +1483,10 @@ class TypedStorage:
     # For internal use only, to avoid deprecation warning
     def _is_shared(self):
         return self._untyped_storage.is_shared()
+
+    @classmethod
+    def _new_shared_device(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_device(*args, **kwargs)
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
@@ -1488,7 +1506,7 @@ class TypedStorage:
 
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+        return torch.UntypedStorage._release_ipc_counter_device(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._untyped_storage._shared_incref(*args, **kwargs)
@@ -1548,7 +1566,7 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
 
     @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
-        return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+        return torch.UntypedStorage._release_ipc_counter_device(*args, **kwargs)
 
     @classmethod
     def _new_shared_filename(cls, manager, obj, size):

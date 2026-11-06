@@ -18,12 +18,11 @@
 #include <torch/csrc/StorageSharing.h>
 
 #ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -279,14 +278,14 @@ static PyObject* THPStorage_newSharedFd(PyObject* /*_unused*/, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
+static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
-#ifdef USE_CUDA
   const auto& storage = THPStorage_Unpack(self);
+  const auto acc_type = at::accelerator::getAccelerator(true).value();
   TORCH_CHECK(
-      storage.device_type() == at::kCUDA,
-      "_share_cuda_: only available on CUDA");
+      storage.device_type() == acc_type,
+      "_share_device_: only available on the current accelerator");
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
   if (storage_impl->received_ipc()) {
@@ -356,9 +355,6 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
   PyTuple_SET_ITEM(tuple.get(), 6, _event_handle.release());
   PyTuple_SET_ITEM(tuple.get(), 7, _event_sync_required.release());
   return tuple.release();
-#else
-  TORCH_CHECK(false, "CUDA is not available");
-#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -366,7 +362,6 @@ static PyObject* THPStorage_releaseIPCCounter(
     PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
-#ifdef USE_CUDA
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
   PyObject* _ref_counter = PyTuple_GET_ITEM(args, 0);
   PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 1);
@@ -375,7 +370,7 @@ static PyObject* THPStorage_releaseIPCCounter(
     THPUtils_invalidArguments(
         args,
         nullptr,
-        "_release_ipc_counter in CUDA mode",
+        "_release_ipc_counter in device mode",
         1,
         "(bytes _ref_counter, int _ref_counter_offset)");
     return nullptr;
@@ -398,30 +393,26 @@ static PyObject* THPStorage_releaseIPCCounter(
     // Already warned inside of producer process
   }
   Py_RETURN_NONE;
-#else
-  TORCH_CHECK(false, "CUDA is not available");
-#endif
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef USE_CUDA
 static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   HANDLE_TH_ERRORS
   char* buffer = nullptr;
   Py_ssize_t handle_size = 0;
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
+#ifdef USE_CUDA
     TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
+#endif
   }
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }
-#endif
 
-static PyObject* THPStorage_newSharedCuda(
+static PyObject* THPStorage_newSharedDevice(
     PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
-#ifdef USE_CUDA
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 8, "tuple of 8 items expected");
   PyObject* _device = PyTuple_GET_ITEM(args, 0);
   PyObject* _handle = PyTuple_GET_ITEM(args, 1);
@@ -439,7 +430,7 @@ static PyObject* THPStorage_newSharedCuda(
     THPUtils_invalidArguments(
         args,
         nullptr,
-        "_new_shared in CUDA mode",
+        "_new_shared in device mode",
         1,
         "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset, bytes event_handle, bool event_sync_required)");
     return nullptr;
@@ -452,7 +443,7 @@ static PyObject* THPStorage_newSharedCuda(
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   const auto acc_type = at::accelerator::getAccelerator(true).value();
-  at::cuda::CUDAGuard device_guard(device);
+  at::DeviceGuard device_guard({acc_type, device});
 
   if (PyObject_IsTrue(_event_sync_required)) {
     // Ensure that producer prepared all tensor's data
@@ -461,10 +452,8 @@ static PyObject* THPStorage_newSharedCuda(
     if (s_ipc_event_handle.empty()) {
       return nullptr;
     }
-    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
-        s_ipc_event_handle.c_str());
-    at::cuda::CUDAEvent event(device, ipc_event_handle);
-    event.block(c10::cuda::getCurrentCUDAStream(device));
+    c10::Event event({acc_type, device}, s_ipc_event_handle);
+    event.block(at::accelerator::getCurrentStream(device));
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
@@ -496,7 +485,7 @@ static PyObject* THPStorage_newSharedCuda(
   ctx->device = device;
   ctx->received_data.shared_ptr_ = std::move(basePtr);
 
-  auto cur_device = at::cuda::current_device();
+  auto cur_device = at::accelerator::getDeviceIndex();
   c10::DataPtr data_ptr(
       devPtr,
       ctx.release(),
@@ -521,8 +510,7 @@ static PyObject* THPStorage_newSharedCuda(
 
         // TODO: this isn't needed since CUDACachingAllocator already
         // synchronizes on free.
-        at::cuda::stream_synchronize(
-            c10::cuda::getCurrentCUDAStream(ctx->device));
+        at::accelerator::getCurrentStream(ctx->device).synchronize();
 
         // We don't want to break existing code, so resource deletion is best
         // effort basis. Exception expected if producer process terminated
@@ -540,7 +528,7 @@ static PyObject* THPStorage_newSharedCuda(
           // Already warned inside of producer process
         }
       },
-      at::Device(at::DeviceType::CUDA, cur_device));
+      at::Device(acc_type, cur_device));
 
   auto base = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -553,9 +541,36 @@ static PyObject* THPStorage_newSharedCuda(
   base->set_received_ipc(true);
 
   return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
-#else
-  TORCH_CHECK(false, "CUDA is not available");
-#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_shareCudaDeprecated(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE(
+      "UntypedStorage._share_cuda_ is deprecated, use _share_device_ instead.");
+  return THPStorage_shareDevice(self, noargs);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedCudaDeprecated(
+    PyObject* unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE(
+      "UntypedStorage._new_shared_cuda is deprecated, use _new_shared_device instead.");
+  return THPStorage_newSharedDevice(unused, args);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_releaseIPCCounterCudaDeprecated(
+    PyObject* unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE(
+      "UntypedStorage._release_ipc_counter_cuda is deprecated, use _release_ipc_counter_device instead.");
+  return THPStorage_releaseIPCCounter(unused, args);
   END_HANDLE_TH_ERRORS
 }
 
@@ -645,13 +660,23 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      THPStorage_newWithWeakPtr,
      METH_O | METH_CLASS,
      nullptr},
-    {"_share_cuda_", THPStorage_shareCuda, METH_NOARGS, nullptr},
+    {"_share_device_", THPStorage_shareDevice, METH_NOARGS, nullptr},
+    {"_new_shared_device",
+     THPStorage_newSharedDevice,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_release_ipc_counter_device",
+     THPStorage_releaseIPCCounter,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    // Deprecated CUDA-named aliases, to be removed in 2.18
+    {"_share_cuda_", THPStorage_shareCudaDeprecated, METH_NOARGS, nullptr},
     {"_new_shared_cuda",
-     THPStorage_newSharedCuda,
+     THPStorage_newSharedCudaDeprecated,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_release_ipc_counter_cuda",
-     THPStorage_releaseIPCCounter,
+     THPStorage_releaseIPCCounterCudaDeprecated,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},
