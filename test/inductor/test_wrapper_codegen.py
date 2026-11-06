@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 
+import struct
 import types
+from cmath import nanj
 from itertools import count
 from types import SimpleNamespace
 from unittest import mock
@@ -33,6 +35,40 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.prefix = IndentedBuffer()
         return wrapper
+
+    @parametrize(
+        "components",
+        (
+            (0.0, -0.4),
+            (-0.0, -0.4),
+            (0.0, 0.4),
+            (-0.0, 0.4),
+            (0.0, -0.0),
+            (-0.0, 0.0),
+            (float("inf"), -float("inf")),
+            (-float("inf"), 0.0),
+            (float("nan"), -0.0),
+            (-0.0, float("nan")),
+        ),
+    )
+    def test_complex_scalar_argument_roundtrip(self, components):
+        value = complex(*components)
+        expression = self._new_wrapper().val_to_arg_str(value)
+        actual = eval(
+            expression, {"inf": float("inf"), "nan": float("nan"), "nanj": nanj}
+        )
+        self.assertEqual(
+            struct.pack("dd", actual.real, actual.imag),
+            struct.pack("dd", value.real, value.imag),
+        )
+
+    def test_nested_complex_scalar_arguments(self):
+        values = [complex(0.0, -0.4), (complex(-0.0, -0.0),)]
+        actual = eval(self._new_wrapper().val_to_arg_str(values))
+        self.assertEqual(
+            pytree.tree_map(lambda z: struct.pack("dd", z.real, z.imag), actual),
+            pytree.tree_map(lambda z: struct.pack("dd", z.real, z.imag), values),
+        )
 
     def _new_autotune_storage_case(self):
         wrapper = self._new_wrapper()

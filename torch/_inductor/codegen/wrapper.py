@@ -5935,6 +5935,10 @@ class PythonWrapperCodegen(CodeGen):
             return pexpr(s.node.expr)
         elif isinstance(s, sympy.Expr):
             return pexpr(s)
+        elif isinstance(s, complex):
+            return (
+                f"complex({self.val_to_arg_str(s.real)}, {self.val_to_arg_str(s.imag)})"
+            )
         elif isinstance(s, (tuple, list)):
 
             @dataclasses.dataclass
