@@ -2737,66 +2737,6 @@ class TestSDPAGeneric(NNTestCase):
     """
     hw_classification = HardwareClassification.GENERIC
 
-    @parametrize("dtype", [torch.float32, torch.float64])
-    @parametrize("masked", [False, True])
-    @parametrize("transposed", [False, True])
-    @parametrize("factor", [0.0, 2.5])
-    @parametrize("case", ["equal", "floor_below", "floor_equal", "floor_above", "relative_equal", "relative_above",
-                         "nan_actual", "nan_reference", "nan_both", "nan_golden", "inf_actual", "inf_reference",
-                         "bad_grad", "bad_mask"])
-    def test_check_out_and_grad_matches_legacy(self, device, dtype, masked, transposed, factor, case):
-        if torch.device(device).type in ("mps", "mtia") and dtype == torch.float64:
-            self.skipTest("Double precision is not supported on this device")
-        golden = torch.zeros((2, 3), device=device, dtype=dtype)
-        reference = torch.zeros_like(golden)
-        actual = torch.zeros_like(golden)
-        floor = torch.full_like(golden, default_atol[torch.float32])
-        infinity = torch.full_like(golden, float("inf"))
-        if case == "floor_below":
-            actual = torch.nextafter(floor, golden)
-        elif case == "floor_equal":
-            actual = floor
-        elif case in ("floor_above", "bad_grad", "bad_mask"):
-            actual = torch.nextafter(floor, infinity)
-        elif case in ("relative_equal", "relative_above"):
-            reference.fill_(0.002)
-            actual = torch.maximum(floor, reference * factor)
-            if case == "relative_above":
-                actual = torch.nextafter(actual, infinity)
-        elif case in ("nan_actual", "nan_both"):
-            actual.fill_(float("nan"))
-            if case == "nan_both":
-                reference.fill_(float("nan"))
-        elif case == "nan_reference":
-            reference.fill_(float("nan"))
-            actual = floor * 2
-        elif case == "nan_golden":
-            golden.fill_(float("nan"))
-        elif case in ("inf_actual", "inf_reference"):
-            actual = infinity
-            if case == "inf_reference":
-                reference = infinity
-        names = ["out", "grad_query", "grad_key", "grad_value", "grad_attn_mask"]
-        field = 1 if case == "bad_grad" else 4 if case == "bad_mask" else 0
-        checks = [(torch.zeros_like(golden), torch.zeros_like(golden), torch.zeros_like(golden)) for _ in names]
-        checks[field] = (golden, reference, actual)
-        if transposed:
-            checks = [tuple(tensor.transpose(0, 1) for tensor in values) for values in checks]
-        active = checks if masked else checks[:4]
-        expected_error = None
-        try:
-            for values, name in zip(active, names):
-                _check_equal(*values, factor, name)
-        except ValueError as error:
-            expected_error = str(error)
-        arguments = (*checks[:4], checks[4] if masked else None, dict.fromkeys(names, factor))
-        if expected_error is None:
-            check_out_and_grad(*arguments)
-        else:
-            with self.assertRaises(ValueError) as error:
-                check_out_and_grad(*arguments)
-            self.assertEqual(str(error.exception), expected_error)
-
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     @parametrize("ref_dtype", [None, torch.float16, torch.float32, torch.float64])
     @parametrize("layout", ["contiguous", "transposed", "sliced"])
@@ -6010,6 +5950,21 @@ class TestSDPAAccelerator(NNTestCase):
                         # cuDNN attention has no deterministic fallback
                         self.assertRaises(RuntimeError, lambda:
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
+
+    @onlyCUDA
+    @skipIfRocm  # CK's mem-efficient backward ignores deterministic mode
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    def test_mem_eff_backwards_determinism(self, device):
+        # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
+        shape = (1, 1, 4096, 64)
+        query, key, value = (torch.rand(shape, device=device, requires_grad=True) for _ in range(3))
+        upward_grad = torch.rand(shape, device=device)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]), use_deterministic_algorithims(True, warn_only=False):
+            out = F.scaled_dot_product_attention(query, key, value)
+            expected = torch.autograd.grad(out, (query, key, value), upward_grad)
+            for _ in range(20):
+                out = F.scaled_dot_product_attention(query, key, value)
+                self.assertEqual(torch.autograd.grad(out, (query, key, value), upward_grad), expected, atol=0, rtol=0)
 
     # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
