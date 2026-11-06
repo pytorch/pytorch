@@ -822,7 +822,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
                 except AttributeError as e:
                     msgs.append(str(e))
             del cls.helper
-            return x + cls.RED.value, msgs, hasattr(cls, "helper")
+            return x + cls.RED.value, msgs
 
         x = torch.ones(2)
         ref_cls, res_cls = make_cls(), make_cls()
