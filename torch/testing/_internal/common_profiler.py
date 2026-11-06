@@ -1,4 +1,3 @@
-import os
 import unittest
 from contextlib import contextmanager, ExitStack
 from unittest.mock import patch
@@ -10,11 +9,19 @@ from torch.profiler import (
     ProfilerActivity,
     supported_activities,
 )
+from torch.testing._internal.common_utils import IS_S390X, IS_WINDOWS
 
 
 def _profiler_test_skip_reason():
     # Preserve test_profiler.py's runner exclusions when moving its tests.
-    return os.getenv("PYTORCH_TEST_SKIP_PROFILER_CAPTURE")
+    if IS_S390X:
+        return "Profiler tests disabled on s390x"
+    if IS_WINDOWS:
+        from torch.testing._internal.common_cuda import SM89OrLater
+
+        if SM89OrLater:
+            return "Profiler tests disabled on Windows SM89 and later"
+    return None
 
 
 def skipIfProfilerUnsupported(test):
