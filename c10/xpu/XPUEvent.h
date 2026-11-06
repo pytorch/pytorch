@@ -169,6 +169,9 @@ struct XPUEvent {
     TORCH_CHECK(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
+    TORCH_CHECK(
+        device_index_ == other.device_index_,
+        "Both events must be on the same device.");
 
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
