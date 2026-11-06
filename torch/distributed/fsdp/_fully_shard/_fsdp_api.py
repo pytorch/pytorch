@@ -156,6 +156,10 @@ class Comm(ABC):
 class AllGather(Comm):
     """
     Interface for all_gather comm primitive
+
+    A comm whose type an all-gather layout requires as its ``comm_type`` is also
+    called with ``output_metadata``: the metadata that the layout prepared for
+    the call, or ``None`` for a call with rank-major output.
     """
 
     @abstractmethod
