@@ -203,7 +203,7 @@ def _blackwell_decompose_k_partial_kwargs(
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
         # Gate TF32 on the full GEMM this plan replaces, as eager mm would.
-        "ALLOW_TF32": mm_allow_tf32(m, n, k, mat1.get_device().type),
+        "ALLOW_TF32": mm_allow_tf32(m, n, k, mat1.get_device().type, mat1.get_dtype()),
         "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
         "FLATTEN": not use_meta_ws,
