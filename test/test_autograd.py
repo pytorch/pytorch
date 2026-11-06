@@ -19165,7 +19165,9 @@ Outer.apply(x).backward()
 
 class TestAutogradThreadShutdown(TestCase):
     # No hw_classification: it checks the engine's device threads both with and
-    # without an accelerator present, so it runs on every job.
+    # without an accelerator present, so it isn't GENERIC. The test takes no
+    # device parameter and the class doesn't use instantiate_device_type_tests,
+    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     def test_thread_shutdown(self):

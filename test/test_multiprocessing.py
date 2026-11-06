@@ -689,7 +689,9 @@ instantiate_device_type_tests(TestMultiprocessingDevice, globals(), allow_xpu=Tr
 )
 class TestMultiprocessingAutogradFork(TestCase):
     # No hw_classification: fork after autograd fails only when an accelerator is
-    # present, and this checks both cases, so it runs on every job.
+    # present, and this checks both cases, so it isn't GENERIC. The test takes no
+    # device parameter and the class doesn't use instantiate_device_type_tests,
+    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
 
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
