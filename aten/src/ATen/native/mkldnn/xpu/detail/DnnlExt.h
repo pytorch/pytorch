@@ -289,6 +289,19 @@ inline void get_strides<trans_type_t::nt>(
   dst_strides = {ldc, 1};
 }
 
+template <>
+inline void get_strides<trans_type_t::tt>(
+    memory::dims& src_strides,
+    memory::dims& wei_strides,
+    memory::dims& dst_strides,
+    const int64_t lda,
+    const int64_t ldb,
+    const int64_t ldc) {
+  src_strides = {1, lda};
+  wei_strides = {1, ldb};
+  dst_strides = {ldc, 1};
+}
+
 using primitive_cache =
     at::native::onednn::lru_cache<memory::dims, primitive_ext>;
 
@@ -388,6 +401,19 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
   switch (Tt) {
     case trans_type_t::nt:
       return matmul_primitive_cache_t<trans_type_t::nt, Ts, Sd, F>::get(
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          b_dims,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
+    case trans_type_t::tt:
+      return matmul_primitive_cache_t<trans_type_t::tt, Ts, Sd, F>::get(
           m,
           n,
           k,
