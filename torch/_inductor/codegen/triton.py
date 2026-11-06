@@ -1551,16 +1551,24 @@ class TritonOverrides(OpOverrides):
             # inputs; nan/inf inputs should still produce nan like x - x.
             non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
             return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
+        if (
+            utils.is_strict_cuda_triton()
+            and cast(Any, get_dtype_handler()).sub(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+            # Fusing producers can reorder subtraction's NaN operand priority.
+            result = f"triton_helpers.eager_unary_nan({y}, {x} - {y})"
+            return f"triton_helpers.eager_unary_nan({x}, {result})"
         return f"{x} - {y}"
 
     @staticmethod
     def mul(x, y):
-        if (
-            utils.is_strict_cuda_triton()
-            and get_dtype_handler().mul(x, y) == torch.float64
-        ):
-            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
-            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+        if utils.is_strict_cuda_triton() and (
+            dtype := get_dtype_handler().mul(x, y)
+        ) in (torch.float32, torch.float64):
+            x = TritonOverrides._cast_libdevice_arg(x, dtype)
+            y = TritonOverrides._cast_libdevice_arg(y, dtype)
             # CUDA chooses the first NaN; fusion can commute the multiplication.
             result = f"triton_helpers.eager_unary_nan({y}, {x} * {y})"
             return f"triton_helpers.eager_unary_nan({x}, {result})"
@@ -2613,6 +2621,22 @@ class TritonKernelOverrides(TritonOverrides):
     variables which are assumed to already be defined in the current scope.
     """
 
+    @staticmethod
+    def copysign(x, y):
+        if (
+            utils.is_strict_cuda_triton()
+            and cast(Any, get_dtype_handler()).copysign(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+            # Copy the sign without quieting or changing NaN payload bits.
+            return (
+                f"((({x}).to(tl.uint64, bitcast=True) & 0x7FFFFFFFFFFFFFFF) | "
+                f"(({y}).to(tl.uint64, bitcast=True) & 0x8000000000000000))"
+                ".to(tl.float64, bitcast=True)"
+            )
+        return TritonOverrides.copysign(x, y)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -2662,7 +2686,10 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def log_ndtr(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_log_ndtr({x})"
         return cast(Any, TritonOverrides).log_ndtr(x)
 
@@ -2676,10 +2703,14 @@ class TritonKernelOverrides(TritonOverrides):
             torch.float16,
             torch.bfloat16,
             torch.float32,
+            torch.float64,
         ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i0(ops.to_dtype(x, torch.float32)).value
+            dtype = (
+                torch.float64 if triton_arg_dtype(x) == torch.float64 else torch.float32
+            )
+            return OpDecompositions._strict_i0(ops.to_dtype(x, dtype), dtype).value
         return _triton_cyl_bessel_i(0, x)
 
     @staticmethod
@@ -2688,55 +2719,85 @@ class TritonKernelOverrides(TritonOverrides):
             torch.float16,
             torch.bfloat16,
             torch.float32,
+            torch.float64,
         ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i1(ops.to_dtype(x, torch.float32)).value
+            dtype = (
+                torch.float64 if triton_arg_dtype(x) == torch.float64 else torch.float32
+            )
+            return OpDecompositions._strict_i1(ops.to_dtype(x, dtype), dtype).value
         return _triton_cyl_bessel_i(1, x)
 
     @staticmethod
     def modified_bessel_i0(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and (dtype := triton_arg_dtype(x)) in (
+            torch.float32,
+            torch.float64,
+        ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i0(x).value
+            # CUDA's modified i0 leaves the final FP64 recurrence unfused.
+            return OpDecompositions._strict_i0(
+                x, cast(torch.dtype, dtype), fuse_final=dtype != torch.float64
+            ).value
         return _triton_cyl_bessel_i(0, x)
 
     @staticmethod
     def modified_bessel_i1(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and (dtype := triton_arg_dtype(x)) in (
+            torch.float32,
+            torch.float64,
+        ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i1_impl(x, modified_bessel=True).value
+            return OpDecompositions._strict_i1_impl(
+                x, modified_bessel=True, dtype=cast(torch.dtype, dtype)
+            ).value
         return _triton_cyl_bessel_i(1, x)
 
     @staticmethod
     def bessel_j0(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_bessel_j0({x})"
         return _triton_bessel(0, "j", x)
 
     @staticmethod
     def bessel_j1(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_bessel_j1({x})"
         return _triton_bessel(1, "j", x)
 
     @staticmethod
     def bessel_y0(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_bessel_y0({x})"
         return _triton_bessel(0, "y", x)
 
     @staticmethod
     def bessel_y1(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_bessel_y1({x})"
         return _triton_bessel(1, "y", x)
 
     @staticmethod
     def erfcx(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and triton_arg_dtype(x) in (
+            torch.float32,
+            torch.float64,
+        ):
             return f"triton_helpers.aten_erfcx({x})"
         return f"libdevice.erfcx({x})"
 
