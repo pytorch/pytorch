@@ -44,6 +44,7 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -419,56 +420,11 @@ class TestStaticTritonLauncherUnit(TestCase):
         with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
             pass
 
-    @skipIfRocm
-    def test_global_scratch_allocation(self):
-        kernel = self._global_scratch_kernel()
-        scratch = SimpleNamespace(data_ptr=lambda: 2)
-        alloc_fn = mock.Mock(return_value=scratch)
-        launch_kernel = mock.Mock()
-        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
-
-        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
-        with mock.patch(
-            "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
-            return_value=allocator_var,
-        ):
-            kernel.run(2, 3, 1, 4, 5)
-
-        alloc_fn.assert_called_once_with(192, 16, 4)
-        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
-
-    @skipIfRocm
-    def test_fast_launcher_rejects_global_scratch(self):
-        import types
-
-        kernel = self._global_scratch_kernel()
-
-        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
-            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
-
-        launcher = types.FunctionType(
-            launcher_body.__code__, {"runner": kernel.run}, "launcher"
-        )
-        launcher._is_static = True
-        autotuner = object.__new__(CachingAutotuner)
-        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
-        autotuner.device_props = SimpleNamespace(type="cuda")
-        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
-            self.assertIsNone(autotuner._build_fast_launcher(launcher))
-        fast_launcher.assert_not_called()
-
     def test_xpu_rejects_global_scratch(self):
         with self.assertRaisesRegex(
             NotImplementedError, "Global scratch not yet supported"
         ):
             self._global_scratch_kernel(StaticallyLaunchedXpuKernel)
-
-    @unittest.skipUnless(torch.version.hip, "ROCm only")
-    def test_rocm_rejects_global_scratch(self):
-        with self.assertRaisesRegex(
-            NotImplementedError, "Global scratch not yet supported"
-        ):
-            self._global_scratch_kernel()
 
     def test_register_statically_launched_kernel(self):
         # A registered device type dispatches to its kernel class.
@@ -672,6 +628,70 @@ class StaticLauncherTestMixin:
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
+
+
+@instantiate_parametrized_tests
+class TestStaticTritonLauncherUnitRoCm(TestCase):
+    """Scratch-space behavior of the CUDA-family launcher runtime on RoCm vs
+    non-RoCm builds, split out of TestStaticTritonLauncherUnit so that class
+    holds only device-independent tests.
+
+    Classified CUDA and not instantiated: the bodies exercise CUDA/ROCm launcher
+    internals through mocks; XPU or PrivateUse1 class variants would duplicate
+    coverage meaninglessly. The scratch-kernel factory stays on the unit class
+    and is delegated by reference, never copied.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    _global_scratch_kernel = staticmethod(
+        TestStaticTritonLauncherUnit._global_scratch_kernel
+    )
+
+    @skipIfRocm
+    def test_global_scratch_allocation(self):
+        kernel = self._global_scratch_kernel()
+        scratch = SimpleNamespace(data_ptr=lambda: 2)
+        alloc_fn = mock.Mock(return_value=scratch)
+        launch_kernel = mock.Mock()
+        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
+
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+            return_value=allocator_var,
+        ):
+            kernel.run(2, 3, 1, 4, 5)
+
+        alloc_fn.assert_called_once_with(192, 16, 4)
+        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
+
+    @skipIfRocm
+    def test_fast_launcher_rejects_global_scratch(self):
+        import types
+
+        kernel = self._global_scratch_kernel()
+
+        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        fast_launcher.assert_not_called()
+
+    @unittest.skipUnless(torch.version.hip, "ROCm only")
+    def test_rocm_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel()
 
 
 @requires_gpu_and_triton
