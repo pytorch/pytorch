@@ -1678,11 +1678,13 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         self, mesh: DeviceMesh, reshard_after_forward: bool | int
     ):
         class FeedForward(nn.Module):
-            # Stacked gate and up projections, sharded on F like w2
+            # Stacked gate and up projections, sharded on F like w2. Scaled like
+            # nn.Linear, so activations stay O(1) and fp32 reduction-order
+            # differences stay within tolerance.
             def __init__(self, dim: int, hidden_dim: int):
                 super().__init__()
-                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim))
-                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim))
+                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim) / dim**0.5)
+                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim) / hidden_dim**0.5)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 gate, up = torch.einsum("bd,nfd->nbf", x, self.w13)
