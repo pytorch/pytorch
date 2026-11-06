@@ -183,12 +183,14 @@ class HardwareClassificationPytestPlugin:
         import torch.testing._internal.common_utils as _cu
 
         selected = []
+        # Older nightlies (see the HW_CLASSIFICATION_EXCLUDE import fallback) lack `exclude`.
+        exclude_kwargs = {"exclude": self.exclude} if self.exclude else {}
         _cu.filter_by_hw_classification(
             items,
             self.hw_classification,
             get_class=lambda item: getattr(item, "cls", None),
             on_match=selected.append,
-            exclude=self.exclude,
+            **exclude_kwargs,
         )
         if len(selected) < len(items):
             kept = set(selected)
