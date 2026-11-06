@@ -514,9 +514,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
+        device: torch.device,
     ) -> str:
         raise NotImplementedError(
-            "User-defined CuTeDSL kernels are not supported by the C++ wrapper yet"
+            "User-defined CuTeDSL kernels need a CUDA device (CppWrapperGpu)"
         )
 
     def _generate_kernel_call_helper(
@@ -1289,6 +1290,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
+        # Each model instance holds a reference to the CUDA library of every CuTeDSL
+        # kernel, taken at its first launch (see user_kernel_aot.emit_cpp_declarations).
+        for prefix in self.cutedsl_exported_kernels:
+            self.prefix.writeline(f"    {prefix}_module_ref {prefix}_ref;")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 
@@ -1864,7 +1869,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # their absolute paths positionally to the linker encodes them as
         # absolute DT_NEEDED entries that resolve at module load (same
         # mechanism HalideCodeCache uses for its standalone runtime).
-        extra_flags_repr = repr(tuple(self.external_kernel_libs))
+        extra_flags_repr = repr((*self.external_kernel_libs, *self.cutedsl_link_args()))
         # Cpp entry function for JIT with cpp wrapper
         result.splice(f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(

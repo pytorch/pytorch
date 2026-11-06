@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import types
 import zipfile
 
 
@@ -303,62 +304,46 @@ def _cuda_major() -> int | None:
     return None
 
 
-def _archive_major(parts: list[str]) -> int:
-    """The CUDA major a split archive's path claims, or -1 for an unsuffixed one."""
-    for p in parts:
-        if p.startswith("cu") and p[2:].isdigit():
-            return int(p[2:])
-    return -1
+def _cutedsl_export() -> types.ModuleType:
+    """torch/_native/cutedsl/export.py of this tree, loaded by path: importing it as
+    torch._native.cutedsl.export would import torch into this process, which every
+    probe here keeps out of it (see _run_probe). It imports nothing from torch at
+    module level."""
+    import importlib.util
+
+    path = os.path.join(REPO, "torch", "_native", "cutedsl", "export.py")
+    spec = importlib.util.spec_from_file_location("_native_aot_cutedsl_export", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"native-AOT stage 2: cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _dsl_runtime_archive() -> str | None:
-    """The DSL dialect runtime archive the CuTeDSL kernel objects need, preferring
-    this build's CUDA major.
-
-    4.5.x shipped one archive at <root>/lib/; 4.6 and later split it per major
-    (cu12/lib/, cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13
-    environment often holds cu12 alone. A mismatch warns rather than failing:
-    in 4.6.2 the archives were the same objects (`ar p | md5sum` equal, differing
-    only in ar timestamps), and a CUDA 13.2 build linked against cu12 passed the
-    AOT suite. Still preferred and reported, since newer archives may diverge."""
+    """The DSL dialect runtime archive the CuTeDSL kernel objects need, for this
+    build's CUDA major, or None if the DSL or the archive is missing: the lookup
+    Inductor links user CuTeDSL kernels with (runtime_archive in
+    torch/_native/cutedsl/export.py), which falls back to the archive for another
+    major, reported here, when the wheel ships none for this one. A mismatch warns
+    rather than failing: in 4.6.2 the archives were the same objects (`ar p | md5sum`
+    equal, differing only in ar timestamps), and a CUDA 13.2 build linked against
+    cu12 passed the AOT suite. Still preferred and reported, since newer archives may
+    diverge."""
     import importlib.util
 
     spec = importlib.util.find_spec("nvidia_cutlass_dsl")
     if spec is None or not spec.submodule_search_locations:
         return None
-    archive = "libcuda_dialect_runtime_static.a"
-    found, split = [], False
-    for root in spec.submodule_search_locations:
-        for dirpath, _dirs, files in os.walk(root):
-            if archive not in files:
-                continue
-            # Components RELATIVE to the package root. The absolute path also holds
-            # the venv or conda directory, so an environment named cu12/cu13 was read
-            # as the wheel's own per-major layout: it matched both archives and the
-            # walk order picked one, or it made an unsplit pre-4.6 wheel look split
-            # and be refused.
-            parts = os.path.relpath(dirpath, root).split(os.sep)
-            found.append((os.path.join(dirpath, archive), parts))
-            split = split or _archive_major(parts) >= 0
-    if not found:
+    roots = [os.path.dirname(loc) for loc in spec.submodule_search_locations]
+
+    def warn(msg: str) -> None:
+        _report(f"{msg} (see install_cutlass_dsl in .ci/pytorch/common_utils.sh)")
+
+    try:
+        return _cutedsl_export().runtime_archive(roots, _cuda_major(), warn)
+    except FileNotFoundError:
         return None
-    if not split:
-        return found[0][0]
-    major = _cuda_major()
-    for path, parts in found:
-        if f"cu{major}" in parts:
-            return path
-    # Highest major present, sorted first so the pick is deterministic.
-    fallback = max(sorted(found), key=lambda f: _archive_major(f[1]))
-    _report(
-        f"the CuTeDSL wheel ships no dialect runtime for CUDA {major}; linking "
-        f"{fallback[0]} instead (found: {', '.join(sorted(p for p, _ in found))}). "
-        f"Only cu12 is a hard dependency of nvidia-cutlass-dsl, so install the "
-        f"matching extra to be sure -- `pip install "
-        f"'nvidia-cutlass-dsl[cu{major}]==<pinned version>'`, see install_cutlass_dsl "
-        f"in .ci/pytorch/common_utils.sh."
-    )
-    return fallback[0]
 
 
 def should_run() -> bool:
