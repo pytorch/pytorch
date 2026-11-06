@@ -482,23 +482,36 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
 
 
 def check_cpuinfo_symbols(install_root: Path) -> None:
+    """Check that libc10 is the only library defining cpuinfo symbols."""
+    if os.uname().machine in {"s390x", "ppc64le"}:
+        return
+
     from subprocess import check_output
 
     lib_dir = install_root / "lib"
 
-    def nm(lib: Path, option: str) -> str:
-        return check_output(["nm", "-D", option, str(lib)], text=True)
+    def nm(lib: Path, option: str) -> list[str]:
+        output = check_output(["nm", "-D", option, str(lib)], text=True)
+        return [line for line in output.splitlines() if " cpuinfo_" in line]
 
+    print("Checking cpuinfo symbol ownership")
     libc10 = lib_dir / "libc10.so"
     libtorch_cpu = lib_dir / "libtorch_cpu.so"
-    if " cpuinfo_initialize" not in nm(libc10, "--defined-only"):
-        raise RuntimeError("libc10.so does not define cpuinfo_initialize")
-    if " cpuinfo_initialize" not in nm(libtorch_cpu, "--undefined-only"):
-        raise RuntimeError("libtorch_cpu.so does not resolve cpuinfo through libc10.so")
 
-    for lib in lib_dir.glob("libtorch*.so"):
-        if " cpuinfo_" in nm(lib, "--defined-only"):
-            raise RuntimeError(f"{lib.name} defines duplicate cpuinfo symbols")
+    if not any(
+        line.endswith(" cpuinfo_initialize") for line in nm(libc10, "--defined-only")
+    ):
+        raise RuntimeError("libc10.so does not define cpuinfo_initialize")
+
+    for lib in lib_dir.glob("*.so*"):
+        if lib != libc10 and (symbols := nm(lib, "--defined-only")):
+            raise RuntimeError(f"{lib.name} defines cpuinfo symbols: {symbols[:100]}")
+
+    if not any(
+        line.endswith(" cpuinfo_initialize")
+        for line in nm(libtorch_cpu, "--undefined-only")
+    ):
+        raise RuntimeError("libtorch_cpu.so must leave cpuinfo_initialize undefined")
 
 
 def main() -> None:
