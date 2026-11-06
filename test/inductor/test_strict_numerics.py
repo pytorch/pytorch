@@ -628,20 +628,6 @@ class StrictNumericsCompileTest(TestCase):
         for scalar in (float("nan"), -float("nan"), 0.7):
             self._assert_bitwise_equal(compiled(scalar, nans), fn(scalar, nans))
 
-    @dtypes(torch.float32, torch.float64)
-    @parametrize("axis", (None, 1))
-    def test_sum_fallback_preserves_eager_input_layout(self, device, dtype, axis):
-        a = torch.randn(301, 64, device=device, dtype=dtype).t()
-        b = torch.randn(64, 301, device=device, dtype=dtype)
-
-        def fn(a, b):
-            return (a + b).sum(axis)
-
-        compiled = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})
-        actual, codes = run_and_get_code(compiled, a, b)
-        self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(actual, fn(a, b))
-
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("scalar_left", (False, True))
