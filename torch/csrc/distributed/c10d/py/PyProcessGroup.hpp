@@ -80,7 +80,13 @@ class PyProcessGroup : public ProcessGroup {
         return Work::getFutureResult();
       }
       py::object o = override();
-      TORCH_CHECK(!o.is_none(), "get_future_result returned None");
+      TORCH_CHECK(
+          py::isinstance<torch::jit::PythonFutureWrapper>(o),
+          py::type::of(py::cast(static_cast<const Work*>(this)))
+              .attr("__qualname__")
+              .cast<std::string>(),
+          ".get_future_result() must return a torch.futures.Future, got ",
+          py::type::of(o).attr("__qualname__").cast<std::string>());
       return o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
     }
   };
