@@ -471,7 +471,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="tell run_test.py to skip uncovered files",
+        help="request that run_test.py replace TD's split with the selection (see selection.apply_selection); a no-op until selection.ENFORCEMENT_ENABLED is flipped, and refused (enforce stays false in the selection file) when the selector fails or its answer is not_enforced",
     )
     parser.add_argument(
         "--print-prompt",

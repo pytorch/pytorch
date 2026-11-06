@@ -13,6 +13,7 @@ HEDGE_SHARE).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING
 from tools.testing.target_determination.heuristics.edited_by_pr import (
     ADDITIONAL_MAPPINGS,
 )
+from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 
 if TYPE_CHECKING:
@@ -629,8 +631,8 @@ class Selection:
     # not ask the model.
     run_all: bool = False
     reason: str = ""
-    # Whether run_test.py should skip the files the selection does not cover,
-    # rather than only reporting what it would have skipped.
+    # Whether run_test.py should replace TD's split with Selection.split rather
+    # than only reporting it; see apply_selection for when it does.
     enforce: bool = False
     # The test files the model chose from. Any other file, such as a C++ test
     # or test_openreg, is always covered. None covers no extra file, so it
@@ -673,20 +675,19 @@ class Selection:
         needs no reader, so one missing from it can run everything. So do more
         than MAX_DATA_FILES edited files under test/ that need a reader.
 
-        A missing or malformed output, a change to test infrastructure, an
-        edited inductor failure list naming an unknown class, too many import
-        hops, with `grep` an edited file under test/ that no test reads (see
-        data_file_readers) and a failed `grep` all fall back to running
-        everything; only a missing or malformed output and a failed `grep` set
-        error. Test files the change edits and their drivers are always
-        selected, and with `grep` so are the test files that import them (see
-        importers), those defining the tests that an edited failure list names
-        (see failure_list_sources), and those reading an edited data file (see
-        data_file_readers), with their importers."""
+        A change to test infrastructure, too many import hops, and with `grep`
+        an edited file under test/ that no test reads (see data_file_readers)
+        also fall back to running everything. A missing or malformed output or
+        a failed `grep` sets error instead, so run_test.py keeps TD's split
+        (see apply_selection). Test files the change edits and their drivers
+        are always selected, and with `grep` so are the test files that import
+        them (see importers), those defining the tests that an edited failure
+        list names (see failure_list_sources), and those reading an edited data
+        file (see data_file_readers), with their importers."""
         if out is None:
             return cls(
                 run_all=True,
-                reason="no model output; running everything",
+                reason="no model output; TD's split runs",
                 error="no model output",
             )
         try:
@@ -694,7 +695,7 @@ class Selection:
         except ValueError as e:
             return cls(
                 run_all=True,
-                reason=f"malformed model output ({e}); running everything",
+                reason=f"malformed model output ({e}); TD's split runs",
                 error=f"malformed model output: {e}",
             )
         except GREP_ERRORS as e:
@@ -909,3 +910,180 @@ class Split:
     hedged: set[str]
     budget: float
     chose_nothing: bool
+
+
+@dataclass
+class AppliedSelection:
+    """A Selection applied to TD's split of one run_test.py call's test list.
+    would_enforce records that apply_selection would enforce the selection
+    with ENFORCEMENT_ENABLED (a PR with TD on, enforce set, no selector error
+    and no fallback), and fallback why a selection that would otherwise be
+    enforced keeps TD's split (no test times, previous failures not recorded,
+    or no file chosen), else None; both are set with the flag off too.
+    enforced and kept_td are would_enforce and fallback is not None with
+    ENFORCEMENT_ENABLED, and False without it. A request the selector refused
+    (enforce_requested without enforce: a failed selector or a not_enforced
+    answer) has neither would_enforce nor a fallback.
+    previous_failures_known records that the TD results stored previous failures,
+    which the TD job does when its pytest cache download step succeeded. That
+    step also succeeds without a cache, as on a PR whose only failures were in
+    jobs that upload none (ROCm, fork PRs), so it does not mean every previous
+    failure is known."""
+
+    selection: Selection
+    split: Split
+    td_enabled: bool
+    enforcement_enabled: bool
+    enforced: bool
+    kept_td: bool
+    would_enforce: bool
+    fallback: str | None
+    previous_failures_known: bool
+    td_include: set[str]
+    td_include_runs: set[TestRun]
+    file_time: dict[str, float]
+
+    @property
+    def selection_metric(self) -> dict[str, object]:
+        """The llm_selection metric. Every shard of a config emits the same
+        one, so count one per (workflow run, run attempt, build_environment,
+        config, list_id): list_id hashes only the call's test file names.
+        selector_error tells a failed selector, which is never enforced, from
+        a deliberate run_all. enforce_requested is the selection's, also true
+        when enforced and whether or not TD is on: the requested enforcements
+        that ran TD are the rows with enforcement_enabled, enforce_requested
+        and td_enabled but not enforced, on PR jobs; of those, kept_td fell
+        back in apply_selection and the rest the selector refused. With the
+        flag off, would_enforce and fallback record what enforcing would
+        have done, and enforce whether the selector granted the request."""
+        split, times = self.split, self.file_time
+        files = "\n".join(sorted(times)).encode()
+        return {
+            "list_id": hashlib.sha256(files).hexdigest()[:12],
+            "enforced": self.enforced,
+            "enforce_requested": self.selection.enforce_requested,
+            "enforcement_enabled": self.enforcement_enabled,
+            "td_enabled": self.td_enabled,
+            "run_all": self.selection.run_all,
+            "selector_error": self.selection.error,
+            "num_tests": len(times),
+            "num_covered": len(split.covered),
+            "num_td_include": len(self.td_include),
+            "num_hedged": len(split.hedged),
+            "num_previous_failures_added": len(split.previous_failures_added),
+            "kept_td": self.kept_td,
+            "enforce": self.selection.enforce,
+            "would_enforce": self.would_enforce,
+            "fallback": self.fallback,
+            "previous_failures_known": self.previous_failures_known,
+            "time_total": sum(times.values()),
+            "time_covered": sum(times[f] for f in split.covered),
+            "time_hedged": sum(times[f] for f in split.hedged),
+            "time_previous_failures_added": sum(
+                times[f] for f in split.previous_failures_added
+            ),
+        }
+
+    def failure_metric(self, test: TestRun) -> dict[str, object]:
+        f = test.test_file
+        return {
+            "failure": str(test),
+            "covered": f in self.split.covered,
+            "enforced": self.enforced,
+            "enforce_requested": self.selection.enforce_requested,
+            "enforcement_enabled": self.enforcement_enabled,
+            "td_enabled": self.td_enabled,
+            "in_td_include": test in self.td_include_runs,
+            "hedged": f in self.split.hedged,
+            "previous_failure_added": f in self.split.previous_failures_added,
+            "kept_td": self.kept_td,
+            "enforce": self.selection.enforce,
+            "would_enforce": self.would_enforce,
+            "fallback": self.fallback,
+            "previous_failures_known": self.previous_failures_known,
+            "selector_error": self.selection.error,
+        }
+
+
+def apply_selection(
+    selection: Selection,
+    include: list[TestRun],
+    exclude: list[TestRun],
+    score: Callable[[TestRun], float],
+    test_times: dict[str, float],
+    *,
+    test_config: str,
+    td_enabled: bool,
+    previous_failures: Collection[str] | None,
+) -> AppliedSelection:
+    """Apply the selection to TD's (include, exclude) split.
+
+    The selection is enforced, replacing TD's split, only with
+    ENFORCEMENT_ENABLED, on a PR with TD enabled, the selection's enforce set
+    and no selector error, only if some of the files have a test time, only
+    if `previous_failures` (the PR's
+    previous failures stored with TD's ranking, see import_results) is not
+    None, and only if the split chooses some file.
+    run_test.py falls back to the default job's times for a config without its
+    own, so the times are missing when none of the call's files has a time
+    (for example without test-times.json, or a call of only new test files).
+    The metric's list_id hashes this call's test list, so it is the same on
+    every shard of a config."""
+    ranked = include + exclude
+    td = {x.test_file for x in include}
+    # Partial TestRuns of one file share its time, so account per file.
+    file_time = {x.test_file: test_times.get(x.test_file, 0) for x in ranked}
+    prev = previous_failures or ()
+    split = selection.split(
+        ranked, score, file_time, test_config, previous_failures=prev, td_include=td
+    )
+    td_on_pr = td_enabled and get_pr_number() is not None
+    wanted = td_on_pr and selection.enforce and selection.error is None
+    # select_tests clears enforce when the selector fails, but keeps the request.
+    requested = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce_requested
+    if not sum(file_time.values()):
+        fallback = "no test times"
+    elif previous_failures is None:
+        fallback = "previous failures not recorded in the TD results"
+    elif split.chose_nothing:
+        fallback = "chose no files"
+    else:
+        fallback = None
+    fallback = fallback if wanted else None
+    would_enforce = wanted and fallback is None
+    enforced = ENFORCEMENT_ENABLED and would_enforce
+    if selection.error is not None and requested:
+        print(
+            f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD",
+            file=sys.stderr,
+        )
+    elif requested and not selection.enforce:
+        print(
+            "LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD",
+            file=sys.stderr,
+        )
+    if ENFORCEMENT_ENABLED and fallback is not None:
+        print(f"LLM selection: {fallback}, using TD", file=sys.stderr)
+    if enforced:
+        s, n = split, len({x.test_file for x in split.include})
+        print(
+            f"LLM selection: running {n} of {len(file_time)} test files"
+            f" ({len(s.covered)} covered; {len(s.previous_failures_added)}"
+            f" previous failures added; {len(s.hedged)} hedged within"
+            f" {s.budget:.0f}s)",
+            file=sys.stderr,
+        )
+    return AppliedSelection(
+        selection=selection,
+        split=split,
+        td_enabled=td_enabled,
+        enforcement_enabled=ENFORCEMENT_ENABLED,
+        enforced=enforced,
+        kept_td=ENFORCEMENT_ENABLED and fallback is not None,
+        would_enforce=would_enforce,
+        fallback=fallback,
+        previous_failures_known=previous_failures is not None,
+        td_include=td,
+        td_include_runs=set(include),
+        file_time=file_time,
+    )
