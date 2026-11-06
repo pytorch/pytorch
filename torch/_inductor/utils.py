@@ -3361,6 +3361,60 @@ def use_decompose_k_choice(
     )
 
 
+def dynamic_k_decompose_k_splits(m: _IntLike, n: _IntLike, k: sympy.Expr) -> list[int]:
+    """Splits offered for a dynamic K: those that divide every K (e.g. 16 for
+    K = 256 * s0), keeping K / k_split >= 128 for the K hint as get_k_splits
+    does for a static K. Requiring K % k_split == 0 by guard would recompile
+    for most new K."""
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+    k_hint = sizevars.optimization_hint(k)
+    return [
+        s
+        for s in get_k_splits(m, n, k)
+        if k_hint // s >= 128
+        and sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
+    ]
+
+
+def use_dynamic_k_decompose_k_choice(
+    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
+) -> bool:
+    """decompose_k for a backed dynamic K, decided on its hint.
+
+    The base check guards K >= threshold * max(M, N) only when the hint
+    qualifies, so a later K below the threshold recompiles. A larger
+    threshold_multiple only trims the other candidates, so it reads the hint
+    without guarding. Not cached: the result installs a guard in the current
+    graph and depends on config.
+    """
+    from torch._inductor.virtualized import V
+
+    if (
+        not isinstance(k, sympy.Expr)
+        or k.is_number
+        or V.graph.aot_mode
+        or V.graph.cpp_wrapper
+        or config.triton.num_decompose_k_splits <= 0
+    ):
+        return False
+    if any(free_unbacked_symbols(x) for x in (m, n, k) if isinstance(x, sympy.Expr)):
+        return False
+    threshold = config.triton.decompose_k_threshold * threshold_multiple
+    sizevars = V.graph.sizevars
+    m_hint, n_hint, k_hint = (sizevars.guarding_hint_or_throw(x) for x in (m, n, k))
+    if k_hint < threshold * max(m_hint, n_hint) or not dynamic_k_decompose_k_splits(
+        m, n, k
+    ):
+        return False
+    if threshold_multiple > 1:
+        return True
+    return sizevars.guard_or_false(
+        sympy.And(sympy.Ge(k, threshold * m), sympy.Ge(k, threshold * n))
+    )
+
+
 @functools.cache
 def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     """

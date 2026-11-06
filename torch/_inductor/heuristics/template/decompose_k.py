@@ -16,7 +16,11 @@ from ...kernel.decompose_k import (
     effective_two_ctas,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import get_k_splits, use_triton_blackwell_tma_template
+from ...utils import (
+    dynamic_k_decompose_k_splits,
+    get_k_splits,
+    use_triton_blackwell_tma_template,
+)
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -85,13 +89,18 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 sympy.Eq(sympy.Mod(k, k_split), 0)
             )
         ]
+        dynamic_k = isinstance(k, sympy.Expr) and not k.is_number
 
         if "ATEN" in bmm_backends:
-            for k_split in exact_k_splits:
+            aten_k_splits = (
+                dynamic_k_decompose_k_splits(m, n, k) if dynamic_k else exact_k_splits
+            )
+            for k_split in aten_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
-        # Return before the TMA checks below, which install guards.
-        if "TRITON" not in bmm_backends or not exact_k_splits:
+        # Return before the TMA checks below, which install guards. The Triton
+        # partial BMM specializes K, which would recompile for every dynamic K.
+        if "TRITON" not in bmm_backends or not exact_k_splits or dynamic_k:
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
