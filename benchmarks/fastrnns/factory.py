@@ -193,6 +193,8 @@ def varlen_lstm_factory(cell):
 
 
 def varlen_lstm_creator(**kwargs):
+    if "script" in kwargs:
+        raise TypeError("varlen_lstm_creator() does not support 'script'")
     sequences, _, hidden, params, _ = varlen_lstm_inputs(return_module=False, **kwargs)
     inputs = [sequences, hidden] + params[0]
     return ModelDef(

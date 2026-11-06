@@ -1104,7 +1104,6 @@
 # /.devcontainer/
 # /.vscode/
 # /benchmarks/README.md
-# /benchmarks/compare.sh
 # /benchmarks/upload_scribe.py
 # /binaries/
 # /scripts/
