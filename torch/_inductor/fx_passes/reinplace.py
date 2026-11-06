@@ -21,6 +21,7 @@ from torch._higher_order_ops.user_kernel_hop import (
 from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import (
     _same_size_stride_and_storage_offset,
+    get_mutated_input_nodes,
     get_node_storage,
     is_node_realized,
 )
@@ -543,10 +544,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_args_to_copy_nodes_via_views = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
+    storage_to_mutations = defaultdict(OrderedSet)
     node_order: dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
+        for written in get_mutated_input_nodes(node):
+            storage_to_mutations[get_node_storage(written)].add(node)
         if node.target is aten.copy_.default and node.args[0].op in (
             "placeholder",
             "get_attr",
@@ -659,6 +663,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             for v in shared_view_nodes
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
+
+        result_storage = get_node_storage(node)
+        if result_storage is not None:
+            for mutation in storage_to_mutations[get_node_storage(mutated_arg)]:
+                if node_order[mutation] <= node_order[node]:
+                    continue
+                if any_use_of_views_after_node(
+                    mutation,
+                    storage_to_nodes[result_storage],
+                    copy_node=None,
+                    mutated_arg=node,
+                ):
+                    return False
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
