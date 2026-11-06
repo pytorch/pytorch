@@ -142,12 +142,19 @@ class TestAllowTf32DynamicShapes(TestCase):
                 mock.patch("torch.cuda.is_available", return_value=True),
                 mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
                 mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
+                mock.patch("torch.version.hip", None),
             ):
-                dtype_arg = () if dtype is None else (dtype, batched)
-                result = mm_allow_tf32(sym_m, sym_n, 512, "cuda", *dtype_arg)
+                if dtype is None:
+                    result = mm_allow_tf32(sym_m, sym_n, 512, "cuda")
+                else:
+                    result = mm_allow_tf32(
+                        sym_m, sym_n, 512, "cuda", dtype, batched=batched
+                    )
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
-        names = {sym_m: sympy.Symbol("m"), sym_n: sympy.Symbol("n")}
+        names = {sym_m: sympy.Symbol("m")}
+        if n_range is not None:
+            names[sym_n] = sympy.Symbol("n")
         return result, [str(g.expr.subs(names)) for g in shape_env.guards]
 
     @parametrize(
@@ -334,6 +341,7 @@ class TestAllowTf32ExtraKwargs(TestCase):
             (True, None, "bmm", (16, 512, 512), torch.float32, True),
             (True, None, "bmm", (16, 256, 4096), torch.float32, False),
             (True, None, "mm", (16, 511, 4096), torch.float32, False),
+            (True, None, "mm", (16, 4096, 511), torch.float32, False),
             (True, None, "mm", (17, 128, 128), torch.float32, True),
             (True, None, "mm", (1365, 15, 320), torch.float32, False),
             (True, None, "mm", (1365, 16, 320), torch.float32, True),

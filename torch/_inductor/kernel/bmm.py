@@ -413,6 +413,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             n,
             k,
         )
+        # Imported here: the heuristics package imports this module's templates.
         from ..heuristics.template.triton import mm_allow_tf32
 
         allow_tf32 = mm_allow_tf32(

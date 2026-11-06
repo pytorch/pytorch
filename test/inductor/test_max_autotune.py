@@ -1826,6 +1826,7 @@ class TestMaxAutotune(TestCase):
         HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
     )
     @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
     @parametrize("sm10x", (False, True))
     @parametrize(
         "n,expected_default,expected_sm10x",
@@ -1874,19 +1875,26 @@ class TestMaxAutotune(TestCase):
     )
     @recover_orig_fp32_precision
     def test_bmm_allow_tf32_dynamic_n_bounded_range(self):
-        # A bounded N range spanning a threshold takes the proof path: no
-        # ConstraintViolationError, no recompile.
+        # On SM10x a bounded N range spanning a threshold takes the proof path:
+        # no TF32, no ConstraintViolationError, no recompile.
         torch._dynamo.reset()
         torch.backends.cuda.matmul.fp32_precision = "tf32"
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled = torch.compile(torch.bmm, backend=cnt)
-        a = torch.randn(4, 1024, 256, device=GPU_TYPE)
-        for n in (128, 96, 400):
-            b = torch.randn(4, 256, n, device=GPU_TYPE)
-            torch._dynamo.mark_dynamic(b, 2, min=17, max=500)
-            out = compiled(a, b)
-            self.assertEqual(out, torch.bmm(a, b), atol=1e-1, rtol=1e-2)
+        a = torch.randn(4, 1024, 512, device=GPU_TYPE)
+        heuristics = "torch._inductor.heuristics.template.triton"
+        codes = []
+        with (
+            mock.patch(f"{heuristics}.using_b200", return_value=True),
+            mock.patch.object(GraphLowering, "save_output_code", codes.append),
+        ):
+            for n in (128, 96, 400):
+                b = torch.randn(4, 512, n, device=GPU_TYPE)
+                torch._dynamo.mark_dynamic(b, 2, min=17, max=500)
+                out = compiled(a, b)
+                self.assertEqual(out, torch.bmm(a, b), atol=1e-1, rtol=1e-2)
         self.assertEqual(cnt.frame_count, 1)
+        self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
 
     @unittest.skipUnless(
         HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"

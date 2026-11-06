@@ -1460,10 +1460,11 @@ class TestBlackwellBMMTemplate(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("fp32_precision", ("ieee", "tf32"))
-    @parametrize("n", (128, 512))
+    @parametrize("n", (32, 128, 512))
     def test_blackwell_bmm_template_allow_tf32(self, fp32_precision: str, n: int):
-        # fp32 follows the shared TF32 gate (min(N, K) >= 16 on SM10x).
-        expect_tf32 = fp32_precision == "tf32"
+        # fp32 follows the shared TF32 gate: batched GEMMs on SM10x need
+        # min(N, K) >= 64.
+        expect_tf32 = fp32_precision == "tf32" and n >= 64
         if meta_ws_enabled() and not expect_tf32:
             self.skipTest("Meta autoWS fails to warp-specialize IEEE fp32 dots")
         a = torch.randint(-2, 3, (2, 256, 512), device=GPU_TYPE).float()
