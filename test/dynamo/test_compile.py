@@ -3,13 +3,20 @@
 import inspect
 import io
 import os
+import sys
 import tempfile
+import warnings
 from unittest.mock import patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import munge_exc
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    munge_exc,
+    parametrize,
+    set_warn_always_context,
+)
 
 
 class ToyModel(torch.nn.Module):
@@ -22,6 +29,7 @@ class ToyModel(torch.nn.Module):
         return self.relu(self.linear(x))
 
 
+@instantiate_parametrized_tests
 class InPlaceCompilationTests(TestCase):
     def test_compilation(self):
         torch._dynamo.reset()
@@ -190,23 +198,121 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
-    def test_torch_script_compilation(self):
-        @torch.jit._script.script
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            return x
+    @parametrize("api", ["compile", "optimize"])
+    @parametrize(
+        "artifact",
+        [
+            "function",
+            "defined_module",
+            "traced_module",
+            "defined_method",
+            "traced_method",
+        ],
+    )
+    def test_torch_script_compilation(self, api, artifact):
+        x = torch.ones(3)
+        if artifact == "function":
 
-        a = torch.randn(1, 1)
-        out = torch.compile(fn, backend="eager")(a)
-        self.assertEqual(out, a)
+            @torch.jit._script.script
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x + 1
+
+        elif artifact.startswith("defined"):
+
+            class DefinedModule(torch.jit.ScriptModule):
+                pass
+
+            fn = DefinedModule()
+            fn.define("def forward(self, x: Tensor) -> Tensor:\n    return x + 1\n")
+        else:
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            fn = torch.jit._trace.trace(M(), (x,))
+        if artifact.endswith("method"):
+            fn = fn.forward
+        expected = fn(x)
+        cnt = CompileCounter()
+        with (
+            patch("torch._dynamo.eval_frame._warned_torchscript_input", False),
+            set_warn_always_context(True),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            if api == "compile":
+                line = sys._getframe().f_lineno + 1
+                compiled = torch.compile(fn, backend=cnt)
+            else:
+                compiled = torch._dynamo.optimize(cnt)(fn)
+            self.assertEqual(compiled(x), expected)
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, FutureWarning)
+        if api == "compile":
+            self.assertEqual(caught[0].filename, __file__)
+            self.assertEqual(caught[0].lineno, line)
+        message = str(caught[0].message)
+        self.assertIn("deprecated starting in PyTorch 2.16", message)
+        self.assertIn("no earlier than PyTorch 2.18", message)
+        self.assertIn("180 days of nightly warnings", message)
+        self.assertIn("original eager Python module/function", message)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/201298", message)
+        self.assertEqual(cnt.frame_count, 1 if artifact == "function" else 0)
+
+    def test_torch_script_input_warn_once(self):
+        fn = torch.jit.CompilationUnit(
+            "def forward(x: Tensor) -> Tensor:\n    return x + 1\n"
+        ).forward
+        with (
+            patch("torch._dynamo.eval_frame._warned_torchscript_input", False),
+            set_warn_always_context(False),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            torch.compile(fn, backend="eager")
+            torch._dynamo.optimize("eager")(fn)
+            self.assertEqual(len(caught), 1)
+            with set_warn_always_context(True):
+                torch.compile(fn, backend="eager")
+                torch._dynamo.optimize("eager")(fn)
+            self.assertEqual(len(caught), 3)
+
+    def test_torch_script_input_warning_scope(self):
+        @torch.jit._script.script
+        def scripted(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def eager(x):
+            return scripted(x)
+
+        x = torch.ones(3)
+        cnt = CompileCounter()
+        with (
+            set_warn_always_context(True),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            self.assertEqual(torch.compile(eager, backend=cnt)(x), x + 1)
+            self.assertEqual(torch._dynamo.disable(scripted)(x), x + 1)
+        self.assertEqual(caught, [])
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_compile_script_module_error(self):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
         scripted = torch.jit._script.script(model)
-        with self.assertRaisesRegex(
-            RuntimeError, "torch.compile does not support compiling torch.jit.script"
+        with (
+            set_warn_always_context(True),
+            warnings.catch_warnings(record=True) as caught,
+            self.assertRaisesRegex(
+                RuntimeError,
+                "torch.compile does not support compiling torch.jit.script",
+            ),
         ):
+            warnings.simplefilter("always")
             torch.compile(scripted, backend="eager")
+        self.assertEqual(caught, [])
 
     def test_inline_script_module_graph_break(self):
         class OuterModule(torch.nn.Module):

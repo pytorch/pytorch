@@ -150,6 +150,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_warned_torchscript_input = False
+
 _next_isolate_recompiles_id = itertools.count()
 
 
@@ -1555,8 +1557,25 @@ class OptimizeContext(_TorchDynamoContext):
             self.enter_exit_hooks.append(call_compiled_autograd)
 
     def __call__(self, fn: Any) -> Any:
+        global _warned_torchscript_input
         result = super().__call__(fn)
         result._is_torch_compile = True  # type: ignore[attr-defined]
+        if isinstance(
+            innermost_fn(fn),
+            (torch.jit.ScriptModule, torch.jit.ScriptFunction, torch.ScriptMethod),
+        ):
+            if not _warned_torchscript_input or torch.is_warn_always_enabled():
+                warnings.warn(
+                    "Passing TorchScript artifacts directly to torch.compile or Dynamo "
+                    "is deprecated starting in PyTorch 2.16. This input support will be "
+                    "removed no earlier than PyTorch 2.18 and after at least 180 days "
+                    "of nightly warnings. Pass the original eager Python module/function "
+                    "to torch.compile instead; use torch.export for archival workflows. "
+                    "See https://github.com/pytorch/pytorch/issues/201298.",
+                    FutureWarning,
+                    stacklevel=3,
+                )
+                _warned_torchscript_input = True
         return result
 
     def __reduce__(
