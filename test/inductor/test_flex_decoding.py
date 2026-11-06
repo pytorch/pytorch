@@ -2503,6 +2503,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
 
 class TestGetSplitKDeviceRouting(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression guard: get_split_k must query the SM count from the kernel's
     # own device via DeviceInterface, not from ambient backend state.
     def test_split_k_queries_kernel_device(self):
