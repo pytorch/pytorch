@@ -39,6 +39,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch._C._distributed_c10d import WorkResult
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
@@ -589,6 +590,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             exc = work.exception()
             self.assertIsInstance(exc, RuntimeError)
             self.assertIn("Timed out", str(exc))
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
 
     @requires_gloo()
     def test_allreduce_overall_timeout(self):
@@ -1863,6 +1867,73 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
+
+    @requires_gloo()
+    def test_send_recv_work_result(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        tensor = torch.zeros(4)
+        if self.rank == 0:
+            work = pg.send([tensor], 1, 0)
+        elif self.rank == 1:
+            work = pg.recv([tensor], 0, 0)
+        if self.rank < 2:
+            # p2p results complete on wait().
+            self.assertFalse(work.get_future_result().done())
+            work.wait()
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+            )
+        if self.rank == 0:
+            # Never sent. The timeout closes the pairs, so this must be the
+            # last op on pg.
+            work = pg.recv([tensor], 1, 1)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting"):
+                work.wait(timedelta(milliseconds=100))
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
+            store.set("done", "1")
+        elif self.rank == 1:
+            # Keep rank 1's pair open until rank 0's recv times out.
+            store.wait(["done"])
+
+    @requires_gloo()
+    def test_reduce_scatter_work_result(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        pg = dist.group.WORLD
+        output = torch.empty(1)
+        work = pg.reduce_scatter_single_coalesced(
+            [output], [torch.ones(self.world_size)]
+        )
+        work.wait()
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+        )
+        self.assertEqual(output, torch.tensor([float(self.world_size)]))
+
+        if self.rank == 0:
+            # Only rank 0 joins, so the composed allreduces time out. This must
+            # be the last op on pg.
+            opts = c10d.ReduceScatterOptions()
+            opts.timeout = timedelta(milliseconds=1)
+            work = pg.reduce_scatter(
+                [output], [[torch.ones(1)] * self.world_size], opts
+            )
+            # Gloo reports either the op timeout or the resulting pair closure.
+            with self.assertRaisesRegex(RuntimeError, "(Timed out|timeout)"):
+                work.wait()
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
+            store.set("done", "1")
+        else:
+            store.wait(["done"])
 
     @requires_gloo()
     def test_barrier_implies_wait(self):
