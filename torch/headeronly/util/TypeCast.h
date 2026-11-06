@@ -12,6 +12,7 @@
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/overflows.h>
 
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -73,15 +74,29 @@ unchecked_cast_to_int(src_t src) {
 }
 
 namespace detail {
-// Whether converting a double to T would round twice, through the float
-// constructors of T.
+// Whether a double can be rounded correctly to T through float: rounding it to
+// odd (round_to_odd_float) and then with T's float conversion rounds it once,
+// for binary formats that float covers with at least two more significand
+// bits. Converting a double through T's float conversion directly would round
+// twice.
 template <typename T>
-inline constexpr bool rounds_through_float =
-    std::is_same_v<T, Half> || std::is_same_v<T, BFloat16> ||
-    std::is_same_v<T, Float8_e4m3fn> || std::is_same_v<T, Float8_e4m3fnuz> ||
-    std::is_same_v<T, Float8_e5m2> || std::is_same_v<T, Float8_e5m2fnuz> ||
-    std::is_same_v<T, Float8_e5m3fnu> || std::is_same_v<T, Float8_e8m0fnu> ||
-    std::is_same_v<T, complex<Half>> || std::is_same_v<T, complex<BFloat16>>;
+inline constexpr bool rounds_through_float = [] {
+  using L = std::numeric_limits<T>;
+  using F = std::numeric_limits<float>;
+  return L::is_specialized && !L::is_integer && L::radix == 2 &&
+      L::digits + 2 <= F::digits && L::max_exponent <= F::max_exponent &&
+      L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
+}();
+
+// Whether T converts from double with a single rounding anyway: Half does on
+// aarch64 CPUs, where it is constructed from the native float16_t (Half.h).
+template <typename T>
+inline constexpr bool converts_from_double_once =
+#if defined(__aarch64__) && !defined(__CUDACC__)
+    std::is_same_v<T, Half>;
+#else
+    false;
+#endif
 } // namespace detail
 
 template <typename dest_t, typename src_t>
@@ -94,7 +109,15 @@ struct static_cast_with_inter_type {
       return unchecked_cast_to_int<dest_t>(r);
     } else if constexpr (
         std::is_same_v<decltype(r), double> &&
-        detail::rounds_through_float<dest_t>) {
+        torch::headeronly::is_complex<dest_t>::value) {
+      // The real part on its own, so that it is rounded once.
+      using part_t = std::decay_t<decltype(std::declval<dest_t>().real())>;
+      return dest_t(
+          static_cast_with_inter_type<part_t, double>::apply(r), part_t(0));
+    } else if constexpr (
+        std::is_same_v<decltype(r), double> &&
+        detail::rounds_through_float<dest_t> &&
+        !detail::converts_from_double_once<dest_t>) {
       return static_cast<dest_t>(detail::round_to_odd_float(r));
     } else {
       return static_cast<dest_t>(r);
