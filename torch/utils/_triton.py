@@ -152,7 +152,6 @@ def has_triton_tma() -> bool:
 def has_triton_tma_device() -> bool:
     if has_triton_package():
         import torch
-        from torch._utils import _is_privateuse1_backend_available
 
         if (
             (
@@ -162,7 +161,6 @@ def has_triton_tma_device() -> bool:
             )
             or torch.xpu.is_available()
             or has_triton_cpu_backend()
-            or _is_privateuse1_backend_available()
         ):
             # old API
             try:
@@ -249,7 +247,6 @@ def has_datacenter_blackwell_tma_device() -> bool:
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
         import torch
-        from torch._utils import _is_privateuse1_backend_available
 
         if (
             (
@@ -259,7 +256,6 @@ def has_triton_stable_tma_api() -> bool:
             )
             or torch.xpu.is_available()
             or has_triton_cpu_backend()
-            or _is_privateuse1_backend_available()
         ):
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401

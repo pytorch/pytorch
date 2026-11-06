@@ -23,6 +23,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
 )
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
@@ -921,7 +922,10 @@ class TestFlexDecoding(InductorTestCase):
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
-    @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
+    @unittest.skipIf(
+        not (has_triton_tma_device() or _is_privateuse1_backend_available()),
+        "Skip when TMA is not available",
+    )
     @skip_on_cpu
     @parametrize_device_dtype("dtypes_fast")
     def test_tma_decoding(self, device, dtype: torch.dtype):
