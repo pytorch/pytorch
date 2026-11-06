@@ -1797,6 +1797,43 @@ def _foreach_lerp_scalarlist(
     )
 
 
+# Batch norm shares native statistics and reduction dispatch with its backward.
+NATIVE_BATCH_NORM_OPS = tuple(
+    get_decompositions(
+        [
+            aten.native_batch_norm,
+            aten.native_batch_norm_backward,
+            aten._native_batch_norm_legit,
+            aten._native_batch_norm_legit_functional,
+            aten._native_batch_norm_legit_no_training,
+            aten._batch_norm_with_update,
+            aten._batch_norm_with_update_functional,
+            aten._batch_norm_no_update,
+            aten.batch_norm_backward,
+        ]
+    )
+)
+
+
+def _strict_native_batch_norm(decomp_fn):
+    @functools.wraps(decomp_fn)
+    def decomposition(*args, **kwargs):
+        if config.strict_reduction and any(
+            isinstance(arg, torch.Tensor) and is_strict_cuda_triton(arg.device)
+            for arg in (*args, *kwargs.values())
+        ):
+            return NotImplemented
+        return decomp_fn(*args, **kwargs)
+
+    return decomposition
+
+
+for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
+    decompositions[_batch_norm_op] = _strict_native_batch_norm(
+        decompositions[_batch_norm_op]
+    )
+
+
 @functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
