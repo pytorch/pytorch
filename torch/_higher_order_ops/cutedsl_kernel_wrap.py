@@ -177,7 +177,11 @@ class _CuteDSLConstantRules(ConstantRules):
 CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
 
 # Unlike Triton's table, torch._dynamo.reset() leaves this one alone: graphs and
-# exported programs captured before a reset keep resolving their indices.
+# exported programs captured before a reset keep resolving their indices. So every
+# host function recorded here stays alive for the life of the process, and with it
+# its eager compiles (see _compiled in torch/_native/cutedsl/user_kernel.py): a
+# @cute.jit function built anew for each call adds a record and a compile per call.
+# TODO: release the records that no captured graph or exported program refers to.
 cutedsl_kernel_side_table: KernelSideTable[CuteDSLKernel] = KernelSideTable(
     constant_rules=CUTEDSL_CONSTANT_RULES
 )

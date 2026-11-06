@@ -1500,6 +1500,8 @@ class CuteDSLHOPTests(TestCase):
         # A compiled function's kernels are resolved on every device (see the
         # docstring of torch/_native/cutedsl/user_kernel.py), so a signature
         # compiled under cuda:0 launches on cuda:1 without another compile.
+        # TODO: run this in a CI job that has two GPUs and installs nvidia-cutlass-dsl;
+        # the smoke jobs that run this file skip it unless their runner has two.
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         if torch.cuda.get_device_capability(0) != torch.cuda.get_device_capability(1):
@@ -2311,6 +2313,8 @@ def forward(self, x_1, y_1):
     def test_cutedsl_layout_constraint_ignores_triton_config(self):
         # Inductor keeps the traced strides of a CuTeDSL kernel's tensors, whatever
         # Triton's layout config says.
+        # TODO: move to TestCuteDSLHOPHelpers in test/test_hop_infra.py (GENERIC):
+        # this needs neither CUDA nor nvidia-cutlass-dsl.
         from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
         from torch._inductor import config
 
