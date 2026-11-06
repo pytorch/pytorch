@@ -679,6 +679,20 @@ class StrictNumericsCompileTest(TestCase):
             )
 
     @dtypes(torch.float32, torch.float64)
+    @parametrize("axis", (None, 1))
+    def test_sum_fallback_preserves_eager_input_layout(self, device, dtype, axis):
+        a = torch.randn(301, 64, device=device, dtype=dtype).t()
+        b = torch.randn(64, 301, device=device, dtype=dtype)
+
+        def fn(a, b):
+            return (a + b).sum(axis)
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})
+        actual, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertTrue(_outputs_equal(actual, fn(a, b)))
+
+    @dtypes(torch.float32, torch.float64)
     def test_empty_reshape_preserves_dtype_view_strides(self, device, dtype):
         complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
 
