@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
@@ -281,64 +282,10 @@ struct Copy<dst_t, c10::complex<float>> {
   }
 };
 
-#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                                                \
-  AT_DISPATCH_SWITCH(                                                                            \
-      TYPE,                                                                                      \
-      NAME,                                                                                      \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                                                           \
-          at::ScalarType::Byte,                                                                  \
-          src_t,                                                                                 \
-          __VA_ARGS__) AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Char, src_t, __VA_ARGS__) \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(                                                       \
-              at::ScalarType::Long, src_t, __VA_ARGS__)                                          \
-              AT_PRIVATE_CASE_TYPE_USING_HINT(                                                   \
-                  at::ScalarType::Short, src_t, __VA_ARGS__)                                     \
-                  AT_PRIVATE_CASE_TYPE_USING_HINT(                                               \
-                      at::ScalarType::Int, src_t, __VA_ARGS__)                                   \
-                      AT_PRIVATE_CASE_TYPE_USING_HINT(                                           \
-                          at::ScalarType::Double, src_t, __VA_ARGS__)                            \
-                          AT_PRIVATE_CASE_TYPE_USING_HINT(                                       \
-                              at::ScalarType::Float, src_t, __VA_ARGS__)                         \
-                              AT_PRIVATE_CASE_TYPE_USING_HINT(                                   \
-                                  at::ScalarType::ComplexDouble,                                 \
-                                  src_t,                                                         \
-                                  __VA_ARGS__)                                                   \
-                                  AT_PRIVATE_CASE_TYPE_USING_HINT(                               \
-                                      at::ScalarType::ComplexFloat,                              \
-                                      src_t,                                                     \
-                                      __VA_ARGS__)                                               \
-                                      AT_PRIVATE_CASE_TYPE_USING_HINT(                           \
-                                          at::ScalarType::Half,                                  \
-                                          src_t,                                                 \
-                                          __VA_ARGS__)                                           \
-                                          AT_PRIVATE_CASE_TYPE_USING_HINT(                       \
-                                              at::ScalarType::BFloat16,                          \
-                                              src_t,                                             \
-                                              __VA_ARGS__)                                       \
-                                              AT_PRIVATE_CASE_TYPE_USING_HINT(                   \
-                                                  at::ScalarType::Bool,                          \
-                                                  src_t,                                         \
-                                                  __VA_ARGS__)                                   \
-                                                  AT_PRIVATE_CASE_TYPE_USING_HINT(               \
-                                                      at::ScalarType::                           \
-                                                          Float8_e4m3fn,                         \
-                                                      src_t,                                     \
-                                                      __VA_ARGS__)                               \
-                                                      AT_PRIVATE_CASE_TYPE_USING_HINT(           \
-                                                          at::ScalarType::                       \
-                                                              Float8_e4m3fnuz,                   \
-                                                          src_t,                                 \
-                                                          __VA_ARGS__)                           \
-                                                          AT_PRIVATE_CASE_TYPE_USING_HINT(       \
-                                                              at::ScalarType::                   \
-                                                                  Float8_e5m2,                   \
-                                                              src_t,                             \
-                                                              __VA_ARGS__)                       \
-                                                              AT_PRIVATE_CASE_TYPE_USING_HINT(   \
-                                                                  at::ScalarType::               \
-                                                                      Float8_e5m2fnuz,           \
-                                                                  src_t,                         \
-                                                                  __VA_ARGS__))
+// The dtypes the fused copy dispatches, for both self and src.
+#define FUSED_COPY_TYPES                                        \
+  AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kHalf, kBFloat16, kBool, \
+      kFloat8_e4m3fn, kFloat8_e4m3fnuz, kFloat8_e5m2, kFloat8_e5m2fnuz
 
 namespace {
 
@@ -404,6 +351,15 @@ struct CopyFunctor {
   }
 };
 
+bool has_fused_copy_kernel(ScalarType dtype) {
+  for (auto fused : {FUSED_COPY_TYPES}) {
+    if (dtype == fused) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // anonymous namespace
 
 void foreach_tensor_copy_list_kernel_cuda_(
@@ -426,58 +382,65 @@ void foreach_tensor_copy_list_kernel_cuda_(
               return t.dtype() == self[0].dtype();
             }) &&
         _check_tensors_share_sizes_and_strides({self, src}) &&
-        // The fused kernel doesn't instantiate barebones unsigned types.
-        !isBarebonesUnsignedType(self[0].scalar_type()) &&
-        !isBarebonesUnsignedType(src[0].scalar_type()))) {
+        // Other dtypes, e.g. barebones unsigned ones or float8_e8m0fnu, are
+        // copied one by one.
+        has_fused_copy_kernel(self[0].scalar_type()) &&
+        has_fused_copy_kernel(src[0].scalar_type()))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
 
   auto tensor_lists = c10::make_nested<Tensor>(src.vec(), self.vec());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      ScalarType::Bool,
-      ScalarType::Float8_e4m3fn,
-      ScalarType::Float8_e4m3fnuz,
-      ScalarType::Float8_e5m2,
-      ScalarType::Float8_e5m2fnuz,
+  AT_DISPATCH_V2(
       self[0].scalar_type(),
       "foreach_tensor_copy",
-      [&]() {
-        AT_DISPATCH_SOURCE_TYPES(src[0].scalar_type(), "foreach_tensor_copy", [&] {
-          if constexpr (std::is_same_v<scalar_t, src_t>) {
-            multi_tensor_apply<2>(
-                tensor_lists,
-                UnaryOpFunctor<
-                    scalar_t,
-                    /* depth */ 2,
-                    /* r_args_depth */ 1,
-                    /* res_arg_index */ 1>(),
-                Copy<scalar_t, scalar_t>());
-          } else {
-            // Ref:
-            // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
-            if (!self[0].is_complex() && src[0].is_complex()) {
-              TORCH_WARN_ONCE(
-                  "Casting complex values to real discards the imaginary part");
-            }
-            multi_tensor_apply<2>(
-                tensor_lists,
-                CopyFunctor<
-                    scalar_t,
-                    src_t,
-                    /* depth */ 2,
-                    /* r_args_depth */ 1,
-                    /* res_arg_index */ 1>(),
-                Copy<scalar_t, src_t>());
-          }
-        });
-      });
+      AT_WRAP([&]() {
+        using dst_t = scalar_t;
+        AT_DISPATCH_V2(
+            src[0].scalar_type(),
+            "foreach_tensor_copy",
+            AT_WRAP([&]() {
+              using src_t = scalar_t;
+              if constexpr (std::is_same_v<dst_t, src_t>) {
+                // Copies bits: the functor's round trip through float would
+                // canonicalize the NaNs of 1- and 2-byte floating types.
+                using bits_t = std::conditional_t<
+                    sizeof(dst_t) == 1,
+                    uint8_t,
+                    std::conditional_t<sizeof(dst_t) == 2, uint16_t, dst_t>>;
+                multi_tensor_apply<2>(
+                    tensor_lists,
+                    UnaryOpFunctor<
+                        bits_t,
+                        /* depth */ 2,
+                        /* r_args_depth */ 1,
+                        /* res_arg_index */ 1>(),
+                    Copy<bits_t, bits_t>());
+              } else {
+                // Ref:
+                // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
+                if (!self[0].is_complex() && src[0].is_complex()) {
+                  TORCH_WARN_ONCE(
+                      "Casting complex values to real discards the imaginary part");
+                }
+                multi_tensor_apply<2>(
+                    tensor_lists,
+                    CopyFunctor<
+                        dst_t,
+                        src_t,
+                        /* depth */ 2,
+                        /* r_args_depth */ 1,
+                        /* res_arg_index */ 1>(),
+                    Copy<dst_t, src_t>());
+              }
+            }),
+            AT_EXPAND(FUSED_COPY_TYPES));
+      }),
+      AT_EXPAND(FUSED_COPY_TYPES));
   increment_version(self);
 }
 
-#undef AT_DISPATCH_SOURCE_TYPES
+#undef FUSED_COPY_TYPES
 
 } // namespace at::native
