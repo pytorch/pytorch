@@ -690,8 +690,8 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   // With the lock dropped: both calls go into the backend, and the callback
   // runs inline if the op has already finished -- see the lock-order note.
   c10::intrusive_ptr<c10::ivalue::Future> result;
-  // Asked first: Work types with no result future (e.g. ucc, mpi, fake)
-  // would otherwise throw for every op.
+  // Asked first: Work types with no result future (e.g. ucc, mpi) would
+  // otherwise throw for every op.
   if (args.work->hasFutureResult()) {
     try {
       result = args.work->getFutureResult();
