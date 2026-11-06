@@ -2279,6 +2279,22 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 
 @triton.jit
+def cuda_mul_full_block(index, numel):
+    # TensorIterator recursively halves iterations whose byte offsets exceed int32.
+    start = index * 0
+    size = start + numel
+    while tl.max(tl.reshape(size, (size.numel,))) > 268435456:
+        active = size > 268435456
+        half = size // 2
+        right = active & (index - start >= half)
+        start = tl.where(right, start + half, start)
+        size = tl.where(active, tl.where(right, size - half, half), size)
+    # CUDA's vectorized FP64 MulFunctor uses 128 threads and 8 elements per thread.
+    # An odd chunk start also misaligns the fresh native output pointer.
+    return (index - start < size // 1024 * 1024) & (start % 2 == 0)
+
+
+@triton.jit
 def eager_unary_nan(x, result):
     # CUDA abs, neg and frexp canonicalize NaNs except float64, which only quiets them.
     if result.dtype == tl.float64:
