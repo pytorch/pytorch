@@ -27,7 +27,7 @@ if not dist.is_available():
 from torch._C._distributed_c10d import FlightRecorderHook
 from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -124,25 +124,12 @@ class AbstractFlightRecorderHookTest:
     def _communicates(self):
         return self.backend_name != "fake"
 
-    @property
-    def _has_result_future(self):
-        # Two tiers. A backend whose Work has a result future reports real
-        # completion, so an entry is retired when its collective actually
-        # finished and reads "completed" with the backend's own duration. A
-        # backend without one ("fake") is retired by the post-hook, at issue:
-        # honest but degraded, since nothing will ever tell the hook the op
-        # finished.
-        return self.backend_name == "nccl2"
-
-    def _completed_state(self):
-        return "completed" if self._has_result_future else "scheduled"
-
     def _await_retired(self, count=0, timeout=60.0):
-        # Completion arrives when the backend establishes it: on its watchdog,
-        # which ticks about once a second, or on the next collective through the
-        # same group. Nothing polls at dump time any more, so a dump taken the
-        # instant after cuda.synchronize() can be one tick early. Returns as soon
-        # as it can, which for the retire-at-issue tier is immediately.
+        # Completion arrives when the backend establishes it: at issue for
+        # fake; for nccl2 on its watchdog, which ticks about once a second, or
+        # on the next collective through the same group. Nothing polls at dump
+        # time any more, so a dump taken the instant after cuda.synchronize()
+        # can be one tick early.
         deadline = time.time() + timeout
         while True:
             entries = self._hook_entries()
@@ -194,20 +181,16 @@ class AbstractFlightRecorderHookTest:
         self.assertIn(self._name("all_reduce"), names)
         self.assertIn(self._name("broadcast"), names)
         self.assertIn(self._name("barrier"), names)
-        # Every entry is retired, on both tiers. Only a backend with a result
-        # future can also say the collective finished.
         for e in entries:
             self.assertTrue(e["retired"], msg=str(e))
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
         hook.remove()
 
     def test_entry_state_from_result_future(self):
-        # Tier one: the backend completes the Work's result future where its
-        # watchdog establishes completion, so "completed" is reachable without
-        # the hook polling anything. See
-        # test_retires_at_issue_without_result_future for the other tier.
-        if not self._has_result_future:
-            self.skipTest("backend has no result future")
+        # Tier one: the backend completes the Work's result future once it
+        # establishes completion, so "completed" is reachable without the hook
+        # polling anything. See
+        # FlightRecorderHookNoResultFutureTest for the other tier.
         self._init_pg()
         sub_pg = dist.new_group(list(range(self.world_size)))
         hook = self._fr_hook(sub_pg)
@@ -229,37 +212,6 @@ class AbstractFlightRecorderHookTest:
             self.assertGreater(e["time_discovered_started_ns"], 0, msg=str(e))
         hook.remove()
 
-    def test_retires_at_issue_without_result_future(self):
-        # Tier two: a backend with no result future. The post-hook has to
-        # retire the entry itself, at issue, because nothing else ever will and
-        # an entry nothing retires is indistinguishable from a hang. What it must
-        # not do is claim a completion nobody observed, so the entry reads
-        # "scheduled" and carries no duration.
-        if self._has_result_future:
-            self.skipTest("backend has a result future")
-        pg = self._init_pg()
-        hook = self._fr_hook(pg)
-        before = len(self._hook_entries())
-
-        t = torch.ones(8, device=self.device)
-        for _ in range(2):
-            dist.all_reduce(t)
-        # Its Work reports no result future.
-        work = dist.all_reduce(t, async_op=True)
-        with self.assertRaisesRegex(
-            NotImplementedError, "getFutureResult not implemented"
-        ):
-            work.get_future_result()
-
-        entries = self._hook_entries()[before:]
-        self.assertEqual(len(entries), 3)
-        for e in entries:
-            self.assertTrue(e["retired"], msg=str(e))
-            self.assertEqual(e["state"], "scheduled", msg=str(e))
-            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
-            self.assertNotIn("duration_ms", e, msg=str(e))
-        hook.remove()
-
     def test_duration_ms_absent_without_backend_timing(self):
         # duration_ms comes from the backend, which reports none unless it was
         # asked to time collectives. There is deliberately no host clock stand-in:
@@ -278,7 +230,7 @@ class AbstractFlightRecorderHookTest:
         entries = self._await_retired(before + 3)[before:]
         self.assertEqual(len(entries), 3)
         for e in entries:
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
             self.assertNotIn("duration_ms", e, msg=str(e))
         hook.remove()
 
@@ -742,7 +694,7 @@ class AbstractFlightRecorderHookTest:
         )
 
         for e in entries:
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
         local = {
             "entries": entries,
             "pg_config": trace["pg_config"],
@@ -1031,8 +983,8 @@ class AbstractFlightRecorderHookTest:
         # once the sentinel's entry is retired the target has finished on the
         # device too, and is_completed() publishes its result -- before a
         # post-hook that has not run yet, because it is waiting on this one.
-        if not self._has_result_future:
-            self.skipTest("backend has no result future")
+        if self.backend_name != "nccl2":
+            self.skipTest("needs a device stream and collective timing")
         pg = self._init_pg()
         pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
@@ -1218,6 +1170,64 @@ for backend_name, device_type in FR_HOOK_BACKENDS:
     globals()[f"{backend_name.capitalize()}FlightRecorderHookTest"] = (
         _make_fr_hook_test_class(backend_name, device_type)
     )
+
+
+class _NoResultWork(dist.Work):
+    def wait(self, timeout=timedelta(0)):
+        return True
+
+
+class _NoResultBackend(dist.BackendBase):
+    def __init__(self):
+        super().__init__(0, 1)
+
+    def getBackendName(self):
+        return "noresult"
+
+    def allreduce(self, tensors, opts):
+        return _NoResultWork()
+
+
+class FlightRecorderHookNoResultFutureTest(TestCase):
+    def test_retires_at_issue_without_result_future(self):
+        # Tier two: a Work with no result future. The post-hook has to retire
+        # the entry itself, at issue, because nothing else ever will and an
+        # entry nothing retires is indistinguishable from a hang. What it must
+        # not do is claim a completion nobody observed, so the entry reads
+        # "scheduled" and carries no duration.
+        pg = dist.ProcessGroup(FakeStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"),
+            dist.ProcessGroup.BackendType.CUSTOM,
+            _NoResultBackend(),
+        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name("noresult")
+        hook = FlightRecorderHook.attach(pg, [0])
+
+        def entries():
+            trace = torch._C._distributed_c10d._dump_fr_trace_json(backend="noresult")
+            return json.loads(trace).get("entries", [])
+
+        before = len(entries())
+        t = torch.ones(8)
+        for _ in range(2):
+            pg.allreduce(t)
+        # Its Work reports no result future.
+        work = pg.allreduce(t)
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented"
+        ):
+            work.get_future_result()
+
+        new = entries()[before:]
+        self.assertEqual(len(new), 3, msg=str(new))
+        for e in new:
+            self.assertTrue(e["retired"], msg=str(e))
+            self.assertEqual(e["state"], "scheduled", msg=str(e))
+            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
+            self.assertNotIn("duration_ms", e, msg=str(e))
+        hook.remove()
 
 
 class FlightRecorderHookGlooTest(MultiProcessTestCase):
