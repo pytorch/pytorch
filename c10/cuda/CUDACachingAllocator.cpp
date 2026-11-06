@@ -320,17 +320,6 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-// Expandable segments have no ROCm fabric handle path, so ROCm keeps POSIX fds
-// even on devices where get_fabric_access() is true for symmetric memory.
-bool use_fabric_handles(c10::DeviceIndex device) {
-#ifdef USE_ROCM
-  (void)device;
-  return false;
-#else
-  return cuda::get_fabric_access(device);
-#endif
-}
-
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
     defined(USE_ROCM)
 
@@ -602,7 +591,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       if (ipcEnabled()) {
-        if (use_fabric_handles(device_)) {
+        if (cuda::get_fabric_access(device_)) {
 #ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -708,7 +697,7 @@ struct ExpandableSegment {
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
-    header.handle_type = use_fabric_handles(device_)
+    header.handle_type = cuda::get_fabric_access(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
 
@@ -764,7 +753,7 @@ struct ExpandableSegment {
         header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
             (header.handle_type ==
                  Expandable_Segments_Handle_Type::FABRIC_HANDLE &&
-             use_fabric_handles(device)),
+             cuda::get_fabric_access(device)),
         "Unsupported expandable_segments IPC handle type ",
         static_cast<int>(header.handle_type),
         " on device ",
@@ -900,7 +889,7 @@ struct ExpandableSegment {
     if (!ipcEnabled()) {
       return Expandable_Segments_Handle_Type::UNSPECIFIED;
     }
-    return use_fabric_handles(device_)
+    return cuda::get_fabric_access(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
@@ -3646,7 +3635,7 @@ class DeviceCachingAllocator {
     }
     if (handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       TORCH_CHECK(
-          use_fabric_handles(device_id),
+          cuda::get_fabric_access(device_id),
           "the expandable segment at ",
           address,
           " was saved with fabric handles, but device ",
