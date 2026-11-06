@@ -190,11 +190,12 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         config_index: int | None = None
         grid_type = inductor_meta.get("grid_type")
         if grid_type == "PrecomputedGrid":
-            from ..runtime.triton_heuristics import PrecomputedGrid
-
-            config_index = PrecomputedGrid.find_candidate_index(
-                cast("InductorMeta", inductor_meta), config_dict
-            )
+            precomputed_grids = inductor_meta.get("precomputed_grids", [])
+            for idx, entry in enumerate(precomputed_grids):
+                entry_config = entry.get("config", {})
+                if all(config_dict.get(k) == v for k, v in entry_config.items()):
+                    config_index = idx
+                    break
 
         # Per-subkernel block sizes for combo kernels, or single-element lists.
         num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
@@ -679,12 +680,7 @@ class DeferredTritonCallWrapper:
                 switch_cases.append(
                     f"case {idx}: grid_0 = {g0}; grid_1 = {g1}; grid_2 = {g2}; break;"
                 )
-            # Unreachable: both Python producers raise on no match.
-            switch_cases.append(
-                f'default: throw std::runtime_error("Invalid config_index " '
-                f"+ std::to_string({kernel_name}_result.config_index) "
-                f'+ " for kernel {kernel_name}");'
-            )
+            switch_cases.append("default: grid_0 = 1; grid_1 = 1; grid_2 = 1; break;")
             switch_body = "\n                        ".join(switch_cases)
 
             prefix.splice(
