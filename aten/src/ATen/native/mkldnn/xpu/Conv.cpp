@@ -1,5 +1,6 @@
 #include <vector>
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/mkldnn/xpu/Conv.h>
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
@@ -327,10 +328,15 @@ Tensor _convolution_out(
   weight = make_contiguous_and_aligned(weight, mfmt);
   check_shape_forward(input, weight, bias, params);
 
+  // a caller-supplied output is described to oneDNN by its own strides and
+  // written in place; callers must ensure it does not overlap the inputs
   Tensor output;
+  if (output_r.defined()) {
+    output = ndim == 3 ? view4d(output_r) : output_r;
+  }
   if (transposed_) {
     // create output and propagate memory format
-    if (!output_r.defined()) {
+    if (!output.defined()) {
       auto dst_tz = deconv_dst_size(
           input.sizes(),
           weight.sizes(),
@@ -340,8 +346,6 @@ Tensor _convolution_out(
           params.output_padding,
           params.groups);
       output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
     }
 
     onednn::deconvolution(
@@ -374,7 +378,7 @@ Tensor _convolution_out(
     }
 
     // create output and propagate memory format
-    if (!output_r.defined()) {
+    if (!output.defined()) {
       auto dst_tz = conv_dst_size(
           input.ndimension(),
           input.sizes(),
@@ -384,8 +388,6 @@ Tensor _convolution_out(
           params.stride,
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
     }
     onednn::convolution(
         output,
@@ -400,13 +402,8 @@ Tensor _convolution_out(
         attr);
   }
 
-  if (ndim == 3) {
-    output = view3d(output);
-  }
-  if (output_r.defined() && !output_r.is_same(output)) {
-    output_r.copy_(output);
-  } else {
-    output_r = output;
+  if (!output_r.defined()) {
+    output_r = ndim == 3 ? view3d(output) : output;
   }
   return output_r;
 }
@@ -705,7 +702,13 @@ Tensor& convolution_pointwise_binary_(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
   c10::DeviceGuard device_guard(input_t.device());
+  at::assert_no_internal_overlap(other_t);
+  at::assert_no_overlap(other_t, input_t);
+  at::assert_no_overlap(other_t, weight_t);
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  if (bias.defined()) {
+    at::assert_no_overlap(other_t, bias);
+  }
   // Step1: Construct binary attr
   Attr attr;
   attr = construct_binary_attr(attr, binary_attr, other_t);

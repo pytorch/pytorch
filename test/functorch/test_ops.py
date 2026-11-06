@@ -997,10 +997,6 @@ class TestOperatorsDevice(TestCase):
                 # vmap 0). https://github.com/pytorch/pytorch/issues/196289
                 xfail("masked.softmax", device_type=("cuda", "xpu")),
                 xfail("masked.softmin", device_type=("cuda", "xpu")),
-                # XPU convolution_backward misreads a contiguous grad_output
-                # whose strides look channels-last, which vmap produces here.
-                # https://github.com/intel/torch-xpu-ops/issues/5640
-                xfail("nn.functional.conv3d", device_type="xpu"),
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
                 # got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
@@ -1263,10 +1259,6 @@ class TestOperatorsDevice(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
-                # XPU convolution_backward misreads a contiguous grad_output
-                # whose strides look channels-last, which vmap produces here.
-                # https://github.com/intel/torch-xpu-ops/issues/5640
-                xfail("nn.functional.conv3d", device_type="xpu"),
             }
         ),
     )
@@ -1930,10 +1922,6 @@ class TestOperatorsDevice(TestCase):
     @skipOps(
         vjp_fail.union(
             {
-                # XPU convolution_backward misreads a contiguous grad_output
-                # whose strides look channels-last, which vmap produces here.
-                # https://github.com/intel/torch-xpu-ops/issues/5640
-                xfail("nn.functional.conv3d", device_type="xpu"),
                 # Following operators take too long, hence skipped
                 skip("atleast_1d"),
                 skip("atleast_2d"),
