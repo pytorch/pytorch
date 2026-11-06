@@ -1393,7 +1393,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             padded_out = input.new_empty_strided(input.shape, (48, 1))
             with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
                 torch.ops.aten._scaled_addmm.out(
@@ -1410,7 +1410,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 )
 
         expected = scaled_addmm(input, *args)
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
             with self.assertRaisesRegex(ValueError, "16-byte aligned"):
                 scaled_addmm_(misaligned, *args)
@@ -1419,7 +1419,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         aligned_16 = input.new_empty(input.numel() + alignment_offset)[
             alignment_offset:
         ].view_as(input)
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             self.assertEqual(aligned_16.data_ptr() % 32, 16)
         aligned_16.copy_(input)
         self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
