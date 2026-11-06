@@ -939,9 +939,8 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
     )
 
 
-# Same as pattern 14 but with mul(scale_factor) instead of div(inv_scale)
 def _sfdp_pattern_31(query, key, value, attn_mask, scale_factor):
-    # Permutations are needed to create clones in graph.
+    # pattern 14 with mul(scale_factor) instead of div(inv_scale)
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
     v = value.permute([0, 2, 1, 3])
@@ -1456,6 +1455,13 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_pattern_31,
                 _sfdp_replacement_31,
                 [g(), g(), g(), m(), c()],
+                {},
+                _sfdp_extra_check(aten.mul.Tensor),
+            ),
+            (
+                _sfdp_pattern_31,
+                _sfdp_replacement_31,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 {},
                 _sfdp_extra_check(aten.mul.Tensor),
             ),
