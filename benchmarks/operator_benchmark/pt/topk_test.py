@@ -11,6 +11,7 @@ topk_configs_short = op_bench.config_list(
     attrs=[
         [(16, 4), 4, 1],
         [(1024 * 1024,), 16, 0],
+        [(32, 50257), 50, 1],  # top-k sampling over a GPT-2 vocabulary
     ],
     cross_product_configs={"device": ["cpu"], "dtype": [torch.float]},
     tags=["short"],
