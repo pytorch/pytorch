@@ -1308,11 +1308,16 @@ def add(
     if y.ndim == 0:
         y = y.reshape(1)
 
-    z = y
-    if alpha is not None:
-        z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
-
+    strict_complex = is_strict_cuda_triton(x.device)
+    if strict_complex:
+        # TensorIterator promotes both operands before complex alpha arithmetic.
+        x = x.to(complex_type)
+        y = y.to(complex_type)
+    z = y
+    if strict_complex or alpha is not None:
+        # CUDA multiplies by complex alpha even when it is one.
+        z = (1 if alpha is None else alpha) * y
     if _requires_fallback(x) or _requires_fallback(z):
         return NotImplemented
 
@@ -1335,9 +1340,14 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
-    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
-    x = x + 0
-    z = z + 0
+    # Resolve conjugated values before viewing their real storage.
+    if strict_complex:
+        # Cloning resolves conjugation without changing signed zeros.
+        x = x.clone()
+        z = z.clone()
+    else:
+        x = x + 0
+        z = z + 0
 
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
