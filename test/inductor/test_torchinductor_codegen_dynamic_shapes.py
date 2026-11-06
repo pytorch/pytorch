@@ -12,7 +12,6 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
     TEST_WITH_ASAN,
@@ -20,8 +19,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    HAS_CPU,
     HAS_GPU,
+    RUN_CPU,
 )
 
 
@@ -115,6 +114,8 @@ def check_codegen(
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # histogramdd remains an external ATen call, so it emits no dynamic loop.
+    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     #
     # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
     #
@@ -191,6 +192,15 @@ test_failures = {
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
     "test_to_device_constant_dynamic_shapes": TestFailure(("cpu",)),
+    "test_to_device_constant_view_size_2_view_reshape_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_to_device_constant_view_size_64_view_slice_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_to_device_constant_view_size_64_view_transpose_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
@@ -511,10 +521,11 @@ test_failures = {
 add_test_failures(test_failures, dynamic_shapes_test_failures)
 
 if not TEST_WITH_ROCM:
+    HAS_MKLDNN = torch.backends.mkldnn.is_available()
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda",) if IS_LINUX else ("cpu", "cuda", "xpu")
+                ("cuda",) if HAS_MKLDNN else ("cpu", "cuda", "xpu")
             ),
         }
     )
@@ -548,7 +559,7 @@ class DynamicShapesCodegenTestCase(TestCase):
         return self.device_type
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
         hw_classification = HardwareClassification.CPU
@@ -752,9 +763,13 @@ if not TEST_WITH_ASAN:
                 _cls.test_randint_distribution_dynamic_shapes
             )
 
+    # The loops above leave these module-level names bound to test classes,
+    # which the test loader would collect again under those names.
+    _variant_cls = _cls = None
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or HAS_GPU:
         run_tests(needs="filelock")

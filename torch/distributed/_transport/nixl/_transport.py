@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -96,12 +96,17 @@ class NIXLTransport(Transport):
             raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
         self._timeout = timeout
         self._default_timeout = timeout
-        self._peer_name: str | None = None
+        self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
+        # Lifecycle: open -> closing -> closed. Closing rejects new operations and
+        # is terminal; a failed or timed-out close retains unreleased resources
+        # and retrying close only finishes cleanup. Failed transfer-handle or
+        # peer-metadata cleanup also starts closing. Registrations are released
+        # only by unregister or close, independent of Work completion.
         self._closed = False
         self._closing = False
 
@@ -156,15 +161,13 @@ class NIXLTransport(Transport):
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        if self._peer_name is not None:
-            raise RuntimeError("transport is already connected")
         name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
-        self._peer_name = name
+        self._peers.add(name)
         self._remote_agents.add(name)
         return 0
 
     def connected(self) -> bool:
-        return self._peer_name is not None and not self._closed and not self._closing
+        return bool(self._peers) and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -211,6 +214,13 @@ class NIXLTransport(Transport):
             if not registration.active:
                 return
             if any(
+                cast(NIXLMemoryView, view)._memory._registration is registration
+                for view in self._cuda_stream_views()
+            ):
+                raise RuntimeError(
+                    "memory is retained by CUDA stream transfers or graphs"
+                )
+            if any(
                 work._buffers[0]._memory._registration is registration
                 for work in self._pending.values()
             ):
@@ -242,16 +252,9 @@ class NIXLTransport(Transport):
             metadata,
         )
 
-    def _submit(
-        self,
-        operation: str,
-        local_buffer: MemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        mutable: bool,
-        timeout: float,
-    ) -> _NIXLWork:
-        agent = self._ensure_open()
+    def _check_transfer(
+        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
+    ) -> None:
         expected_type = NIXLMutableMemoryView if mutable else NIXLMemoryView
         if not isinstance(local_buffer, expected_type) or (
             local_buffer._memory._transport is not self
@@ -259,8 +262,8 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
-        if self._peer_name != remote_buffer.agent_name:
-            raise ValueError("remote buffer does not belong to the connected peer")
+        if remote_buffer.agent_name not in self._peers:
+            raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
@@ -272,21 +275,38 @@ class NIXLTransport(Transport):
             raise RuntimeError(
                 "registered tensor was resized or its storage was replaced"
             )
+
+    def _submit(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+        timeout: float,
+    ) -> _NIXLWork:
+        agent = self._ensure_open()
+        self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        local_buffer = cast(NIXLMemoryView, local_buffer)
+        remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
+        registration = local_buffer._memory._registration
         work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
             work._done = True
             return work
         loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
-        self._remote_agents.add(loaded_name)
         if loaded_name != remote_buffer.agent_name:
-            try:
-                agent.remove_remote_agent(loaded_name)
-            except Exception:
-                # Preserve the agent for retryable close, including failed cleanup.
-                self._closing = True
-                _live_transports.add(self)
-                raise
-            self._remote_agents.remove(loaded_name)
+            # Keep agents loaded by other peers; they may have transfers in flight.
+            if loaded_name not in self._remote_agents:
+                self._remote_agents.add(loaded_name)
+                try:
+                    agent.remove_remote_agent(loaded_name)
+                except Exception:
+                    # Preserve the agent for retryable close, including failed cleanup.
+                    self._closing = True
+                    _live_transports.add(self)
+                    raise
+                self._remote_agents.remove(loaded_name)
             raise ValueError("remote buffer metadata names a different agent")
         local_descs = agent.get_xfer_descs(
             [
@@ -427,6 +447,7 @@ class NIXLTransport(Transport):
             return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -455,6 +476,7 @@ class NIXLTransport(Transport):
         Retry close after pending work completes. Native cleanup is not
         interruptible; peer access must already have been stopped externally.
         """
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -489,7 +511,7 @@ class NIXLTransport(Transport):
         for name in list(self._remote_agents):
             agent.remove_remote_agent(name)
             self._remote_agents.remove(name)
-        self._peer_name = None
+        self._peers.clear()
         self._agent = None
         self._closed = True
         _live_transports.discard(self)

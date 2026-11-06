@@ -14,16 +14,15 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef, set_warn_always_context
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
 from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, onlyAccelerator,
-     largeTensorTest)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, expectedFailureXPU,
+     onlyAccelerator, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -699,6 +698,23 @@ class TestSparse(TestSparseBase):
         values = torch.randn(NNZ, dtype=dtype, device=device)
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
+
+    @onlyAccelerator
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5669
+    @dtypes(torch.float32, torch.float16, torch.bool)
+    @dtypesIfMPS(torch.float32)
+    def test_coalesce_wide_dense_dims(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199483
+        sparse_size = 50
+        for nnz, dense_size in itertools.product([2, 3, 8, 64, 1000], [(264,), (300,), (512,), (1024,), (3, 100)]):
+            indices = torch.randint(0, sparse_size, (1, nnz))
+            # Small integers keep the sums exact for every dtype.
+            values = torch.randint(-4, 5, (nnz, *dense_size)).to(dtype)
+            t = torch.sparse_coo_tensor(indices, values, (sparse_size, *dense_size))
+            expected = t.coalesce()
+            actual = t.to(device).coalesce()
+            self.assertEqual(actual._indices(), expected._indices())
+            self.assertEqual(actual._values(), expected._values())
 
     @dtypes(torch.float32)
     @expectedFailureMPS
@@ -2696,7 +2712,8 @@ class TestSparse(TestSparseBase):
             self.assertTrue(result.layout == torch.strided)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA|MPS)' backend"
+            RuntimeError,
+            rf"Could not run 'aten::empty_strided' with arguments from the 'Sparse({torch.device(device).type.upper()})' backend",
         ):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
@@ -4013,14 +4030,12 @@ class TestSparse(TestSparseBase):
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183435")
     @dtypes(torch.double, torch.float)
-    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
     @dtypes(torch.double, torch.float)
-    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
@@ -4048,6 +4063,7 @@ class TestSparse(TestSparseBase):
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16, torch.complex64, torch.complex128))
     @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
@@ -4394,50 +4410,59 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_cuda_from_cpu(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_device_from_cpu(self, device):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                     torch.randn(4, 4, 4),
                                     [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                     torch.randn(4, 4, 4, 0),
                                     [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
+            torch.sparse_coo_tensor(torch.empty(1, 0).long().to(device),
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_cuda_sparse_cpu_dense_add(self):
+    def test_device_sparse_cpu_dense_add(self, device):
         x = torch.zeros(3, 4, 4)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
-                                           torch.randn(4, 4, 4).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
+                                           torch.randn(4, 4, 4).to(device),
                                            [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
-                                           torch.randn(4, 4, 4, 0).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
+                                           torch.randn(4, 4, 4, 0).to(device),
                                            [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
-                                           torch.randn(0, 4, 4, 0).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().to(device),
+                                           torch.randn(0, 4, 4, 0).to(device),
                                            [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
 
@@ -4803,23 +4828,27 @@ class TestSparseMeta(TestCase):
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_fake(self, dtype, layout):
-        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
         fake_mode = FakeTensorMode()
         index_dtype = torch.int64
         device = 'cpu'
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
-            f = FakeTensor.from_tensor(t, fake_mode)
-            self.assertIsInstance(f, FakeTensor)
+            f = fake_mode.from_tensor(t)
+            self.assertTrue(is_fake_tensor(f))
             self.assertEqualMeta(f, t, 0)
 
             d = f.detach()
-            self.assertIsInstance(d, FakeTensor)
+            self.assertTrue(is_fake_tensor(d))
             self.assertEqualMeta(d, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_zeros_like_fake(self, dtype, layout):
-        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch._subclasses.fake_tensor import (
+            FakeTensor,
+            FakeTensorMode,
+            maybe_get_fake_device,
+        )
         from torch.utils._mode_utils import no_dispatch
         fake_mode = FakeTensorMode()
         index_dtype = torch.int64
@@ -4828,7 +4857,7 @@ class TestSparseMeta(TestCase):
             f = FakeTensor.from_tensor(t, fake_mode)
             expected = torch.zeros_like(t)
             with no_dispatch():
-                result = torch.zeros_like(f, device=f.fake_device)
+                result = torch.zeros_like(f, device=maybe_get_fake_device(f))
             self.assertEqual(result, expected)
             self.assertEqualMeta(result, expected, 0)
 
@@ -5465,7 +5494,8 @@ class TestSparseAny(TestCase):
         if layout is torch.sparse_bsr and not masked or layout is torch.sparse_bsc:
             with self.assertRaisesRegex(
                     RuntimeError,
-                    r"addmm: computation on (CPU|CUDA) is not implemented for Strided \+ Sparse(Bsr|Bsc) @ Strided"):
+                    rf"addmm: computation on {torch.device(device).type.upper()} is not implemented for "
+                    r"Strided \+ Sparse(Bsr|Bsc) @ Strided"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
@@ -5473,7 +5503,7 @@ class TestSparseAny(TestCase):
                     RuntimeError,
                     r"(sparse_addmm_sparse_backward: unsupported combination of layouts,"
                     r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"
-                    r"|addmm: computation on (CPU|CUDA) is not implemented for "
+                    rf"|addmm: computation on {torch.device(device).type.upper()} is not implemented for "
                     r"Strided \+ Sparse(Csc|Bsr|Bsc) @ Strided without MKL)"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
@@ -5891,17 +5921,21 @@ class TestSparseAny(TestCase):
                 self.assertEqual(res.to_dense(), torch.view_as_complex(xs.to_dense()))
             self.assertEqual(torch.view_as_real(torch.view_as_complex(xs)), xs)
 
-# e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
+# e.g., TestSparseUnaryUfuncsCPU, TestSparseUnaryUfuncsCUDA, and TestSparseUnaryUfuncsXPU
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True, except_for='meta')
 
-instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for='meta')
+instantiate_device_type_tests(TestSparseMaskedReductions, globals(), allow_xpu=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseOnlyCPU, globals(), only_for="cpu")
 
-# e.g., TestSparseCPU and TestSparseCUDA
-instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, except_for='meta')
+# e.g., TestSparseCPU, TestSparseCUDA, and TestSparseXPU
+instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, allow_xpu=True, except_for='meta')
 
-instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
+instantiate_device_type_tests(TestSparseAny, globals(), allow_xpu=True, except_for='meta')
+
+instantiate_device_type_tests(
+    TestSparseOneOff, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 instantiate_parametrized_tests(TestSparseMeta)
 

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAException.h>
 
 #include <ATen/test/allocator_clone_test.h>
 
@@ -12,7 +13,7 @@ std::unordered_map<void*, size_t> allocation_sizes;
 
 void* logging_malloc(size_t size, int device, cudaStream_t stream) {
     void* ptr;
-    cudaMalloc(&ptr, size);
+    C10_CUDA_CHECK(cudaMalloc(&ptr, size));
     allocation_sizes[ptr] = size;
     return ptr;
 }
@@ -25,7 +26,7 @@ void logging_free(void* ptr, size_t size, int device, cudaStream_t stream) {
     } else {
       TORCH_CHECK(false, "free of unknown ptr");
     }
-    cudaFree(ptr);
+    C10_CUDA_CHECK(cudaFree(ptr));
     allocation_sizes.erase(ptr);
 }
 

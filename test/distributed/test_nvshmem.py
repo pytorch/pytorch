@@ -124,7 +124,10 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             else:
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # src_rank writes into every peer's buffer below, so each peer's zeros
+        # must land first.
+        hdl.barrier()
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
@@ -170,6 +173,10 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
+        hdl = symm_mem.rendezvous(y, group=group_name)
+        # rank 0 writes into every peer's y below, so each peer's mm must land
+        # first.
+        hdl.barrier()
         torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
@@ -259,6 +266,10 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 0 writes into rank 1's buffer below, so rank 1's fill_ must land
+        # first. Channel 0's barrier slots overlap the uint64 signal at offset 0
+        # that nvshmem_put_with_signal sets, so use channel 1.
+        hdl.barrier(channel=1)
         signal_pad = hdl.get_signal_pad(self.rank)
         signal_val = 5
 
@@ -280,6 +291,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 0 reads rank 1's buffer below, so rank 1's fill_ must land first.
+        hdl.barrier()
 
         if self.rank == 0:
             torch.ops.symm_mem.nvshmem_get(tensor, 1)
@@ -315,6 +328,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         tensor = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
         tensor.fill_(-1)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # rank 1 writes into rank 0's buffer below, so rank 0's fill_(-1) must
+        # land first.
+        hdl.barrier()
 
         if self.rank == 0:
             hdl.wait_signal(src_rank=1)
@@ -623,7 +639,10 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
 
         symm_mem.rendezvous(inp, group=group_name)
-        symm_mem.rendezvous(out, group=group_name)
+        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        # Peers write into `out`, so every rank's fill_(-1) must land first.
+        # dist.barrier() would run on gloo and not wait for the fill on the GPU.
+        out_hdl.barrier()
         torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
 
         expected = torch.cat(
@@ -1053,6 +1072,57 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMTeamPoolTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @requires_nvls()
+    def test_team_pool_released_on_process_group_destroy(self) -> None:
+        self._init_device()
+        ranks = list(range(self.world_size))
+        # Keep allocations alive across groups so this tests team reuse without
+        # interleaving the allocator's collective nvshmem_free with tile kernels.
+        full_inp = symm_mem.empty(
+            1024, 1024, dtype=torch.float, device=self.device
+        ).fill_(self.rank)
+        full_out = symm_mem.empty(1024, 1024, dtype=torch.float, device=self.device)
+        expected = torch.zeros_like(full_out)
+        if self.rank == 0:
+            expected[:512, :512].fill_(self.world_size * (self.world_size - 1) / 2)
+
+        # Use fresh workers: the tile tests keep a 24-team WORLD pool live, and
+        # NVSHMEM's internal duplicate teams can make a second pool exceed the
+        # limit even without a leak. Only one pool is live here at a time.
+        for _ in range(32):
+            group = dist.new_group(ranks)
+            try:
+                group_name = group.group_name
+                full_out.zero_()
+                # Populate the host pool first, including on the reuse path.
+                # get_n_teams must still initialize its new device array.
+                symm_mem.rendezvous(full_inp, group)
+                torch.ops.symm_mem.tile_reduce(
+                    full_inp[:512, :512],
+                    full_out[:512, :512],
+                    0,
+                    group_name,
+                )
+                self.assertEqual(full_out, expected)
+                device_module.synchronize()
+                dist.barrier()
+            finally:
+                dist.destroy_process_group(group)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
@@ -1060,7 +1130,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property

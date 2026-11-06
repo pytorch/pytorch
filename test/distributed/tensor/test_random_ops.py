@@ -61,25 +61,22 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
-            # create DTensor from Tensor
-            _tensor = torch.empty(*input_size, device=self.device_type)
+            # create DTensor from Tensor, each rank holds an input_size shard
+            _tensor = torch.empty(
+                input_size[0], input_size[1] * self.world_size, device=self.device_type
+            )
             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
 
             # DTensor random init
             dtensor = init_op(dtensor, *args, **kwargs)
-            local_tensor = dtensor.to_local()
 
-            # compare with local tensors from other ranks
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    slice_idx = (
-                        slice(input_size[0]),
-                        slice(
-                            other_rank * input_size[1], (other_rank + 1) * input_size[1]
-                        ),
-                    )
-                    # other rank should have a different local tensor
-                    self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
+            @maybe_run_for_local_tensor
+            def check_shards_differ(full_tensor):
+                shards = full_tensor.split(input_size[1], dim=1)
+                for a, b in itertools.combinations(shards, 2):
+                    self.assertNotEqual(a, b)
+
+            check_shards_differ(dtensor.full_tensor())
 
     @with_comms
     def test_init_ops(self):
@@ -588,6 +585,35 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         )
 
             compute_rankwise_if_local_tensor(local_tensor, self.rank)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_deterministic_multinomial_1d(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        probs = torch.ones(self.world_size, 64, device=self.device_type)
+
+        @maybe_run_for_local_tensor
+        def check_chunks(tensor, equal):
+            for a, b in itertools.combinations(tensor.chunk(self.world_size), 2):
+                if equal:
+                    self.assertEqual(a, b)
+                else:
+                    self.assertNotEqual(a, b)
+
+        for replacement in (True, False):
+            # each rank samples its own row, so the rows should differ
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(0)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            check_chunks(samples.full_tensor(), False)
+
+            # the categories dim is redistributed to Replicate before sampling,
+            # so every rank should draw the same samples
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(1)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            local_tensor = funcol.all_gather_single(
+                samples.to_local(), gather_dim=0, group=(device_mesh, 0)
+            )
+            check_chunks(local_tensor, True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

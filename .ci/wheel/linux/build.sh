@@ -67,6 +67,7 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
             # probe here was wrong).
             if [[ "$(python3 tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
               install_cutlass_dsl
+              retry bash scripts/install_triton_wheel.sh
             fi
             python3 tools/native_aot/build_stage2.py --wheel "${RAW_WHEEL}"
         fi  # GPU_ARCH_TYPE == cuda*

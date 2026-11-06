@@ -22,8 +22,8 @@ and with CONTRIBUTING.md, which states them for users:
   * the interpreter has no published DSL wheel and none is installed
   * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
-  * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
-    with it unset, on-device export runs if a supported GPU is present
+  * TORCH_CUDA_ARCH_LIST matches no target declared by an op; with it unset,
+    on-device export runs if the local GPU matches a declared target
 
 Two modes, split by the skip list.
 
@@ -467,29 +467,39 @@ def should_run() -> bool:
         if not archs:
             _report(
                 f"skipped (TORCH_CUDA_ARCH_LIST={arch_list!r} has no "
-                f"exportable arch; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"compatible native-AOT declaration target)"
             )
             return False
         if len(archs) > 1:
-            # Supported (export nests one tree per arch and the generated stub
-            # selects per capability); reported because it multiplies embedded
-            # bytes, one full set per arch.
-            _report(f"multi-arch: {' '.join(archs)}")
+            # Export nests one tree per selected target and the generated stub
+            # selects among them at runtime; report when several trees are embedded.
+            _report(f"multi-target: {' '.join(archs)}")
     elif not _torch_probe("torch.cuda.is_available()"):
         _report("skipped (no TORCH_CUDA_ARCH_LIST and no local GPU to detect from)")
         return False
     else:
-        # On-device export compiles for whatever GPU is present, so check it
-        # BEFORE committing: a dev box outside EXPORTABLE_ARCHES exported for its
-        # own arch and then failed in generation, after a successful build.
+        # Check the detected device before committing to stage 2: a device matching
+        # no declaration would export nothing after a successful main build.
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
+        from torchgen import native_aot_decl as decl
+
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
-        if local not in export_mod.EXPORTABLE_ARCHES:
+        try:
+            local_cc = decl.cc_of(local) if local else None
+        except RuntimeError:
+            local_cc = None
+        if local_cc not in decl.known_device_capabilities():
             _report(
-                f"skipped (local GPU is {local or 'undetectable'}; exportable: "
-                f"{' '.join(export_mod.EXPORTABLE_ARCHES)})"
+                f"skipped (local GPU is {local or 'undetectable'}; native-AOT "
+                f"does not know that device capability)"
+            )
+            return False
+        targets = export_mod.targets_for_arches([local]) if local else []
+        if not targets:
+            _report(
+                f"skipped (local GPU is {local or 'undetectable'}; no compatible "
+                f"native-AOT declaration target)"
             )
             return False
 
@@ -524,9 +534,10 @@ def require_runtimes() -> None:
         raise RuntimeError(
             f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
             f"runtimes are not installed ({detail}). Install the distributions "
-            f"that provide them -- {', '.join(dists)} -- as "
-            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh does (it holds "
-            f"the pinned versions), or set TORCH_NATIVE_AOT=0 to build without "
+            f"that provide them -- {', '.join(dists)} -- using "
+            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh and "
+            f"scripts/install_triton_wheel.sh for the pinned versions, or set "
+            f"TORCH_NATIVE_AOT=0 to build without "
             f"embedded DSL kernels."
         )
 
@@ -904,24 +915,25 @@ def main(argv: list[str] | None = None) -> int:
     # The archive the generator names in the CMake it emits.
     if archive := _dsl_runtime_archive():
         gen += ["--dsl-runtime", archive]
-    # Name the arches THIS build targets, so a tree left by a build with a different
-    # TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
+    # Name the AOT targets selected for THIS build, so a tree left by a build with a
+    # different TORCH_CUDA_ARCH_LIST is ignored. Omitted for an on-device export.
     if arch_list:
         from tools.native_aot import export as export_mod
 
-        # Both: --archs filters the trees, --arch-list is the raw value recorded
-        # in the emitted CMake. Only this caller knows they are one request.
+        # Both: --archs is a coarse tree filter, while --arch-list selects targets
+        # per declaration and is recorded in the emitted CMake. Only this caller
+        # knows they are one request.
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     _run_child(gen, "generating stub sources", cwd=REPO)
-    # Nothing generated is legitimate: no declaration ships kernels for this arch.
+    # Nothing generated is legitimate: no declaration ships kernels for this build.
     # Stop rather than relink unchanged and then assert kernels are in it.
     sources = glob.glob(os.path.join(art, "*", "aot_*.cpp"))
     if not sources:
         _report("no declaration ships kernels for this build; nothing embedded")
         return 0
     # The count, and the size delta after the relink, rather than parsing the generated
-    # CMake: these bytes scale with declarations x precompile points x arches.
+    # CMake: these bytes scale with declarations x precompile points x targets.
     _report(f"embedding kernels from {len(sources)} generated source(s)")
     # Reconfigure explicitly: the generated file registers itself in
     # CMAKE_CONFIGURE_DEPENDS only from the reconfigure that first reads it.
