@@ -4,6 +4,8 @@ import json
 import os
 import re
 import sys
+import time
+import unittest
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
@@ -149,6 +151,65 @@ class NodeidFilePlugin:
         items[:] = selected
 
 
+class PhaseTimingPlugin:
+    """Measurement only: sums per-phase test time in this process and writes it as
+    JSON to $PYTORCH_TEST_PHASE_TIMING_FILE, which run_test.py prints. unittest
+    setUp/tearDown run inside pytest's call phase, so they are timed separately,
+    as is the first CUDA context creation."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.totals: dict[str, float] = defaultdict(float)
+        self.tests = 0
+        case = unittest.TestCase
+        case._callSetUp = self._timed(case._callSetUp, "unittest_setUp")
+        case._callTearDown = self._timed(case._callTearDown, "unittest_tearDown")
+        case._callCleanup = self._timed(case._callCleanup, "unittest_tearDown")
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda._lazy_init = self._timed_cuda_init(torch.cuda._lazy_init)
+
+    def _timed(self, fn, key: str):
+        totals = self.totals
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                totals[key] += time.perf_counter() - start
+
+        return wrapper
+
+    def _timed_cuda_init(self, fn):
+        import torch
+
+        totals = self.totals
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if torch.cuda.is_initialized():
+                return fn(*args, **kwargs)
+            start = time.perf_counter()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                totals["cuda_init"] += time.perf_counter() - start
+
+        return wrapper
+
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
+        self.totals[f"pytest_{report.when}"] += report.duration
+        if report.when == "call":
+            self.tests += 1
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        with open(self.path, "a") as f:
+            f.write(json.dumps({"tests": self.tests, **self.totals}) + "\n")
+
+
 class HardwareClassificationPytestPlugin:
     """Pytest plugin to filter collected tests by hw_classification."""
 
@@ -212,6 +273,9 @@ def pytest_configure(config: Config) -> None:
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
             "hw_classification_plugin",
         )
+    timing_file = os.getenv("PYTORCH_TEST_PHASE_TIMING_FILE")
+    if timing_file and not hasattr(config, "workerinput"):
+        config.pluginmanager.register(PhaseTimingPlugin(timing_file), "phase_timing")
     if config.getoption("multigpu_min_gpus"):
         config.pluginmanager.register(
             MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),

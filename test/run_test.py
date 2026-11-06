@@ -2429,11 +2429,15 @@ def run_test_module(
         start = time.perf_counter()
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
+        # Measurement only: PhaseTimingPlugin in conftest.py appends per-phase totals here.
+        timing_file = os.path.join(tempfile.mkdtemp(prefix="phase-timing-"), "timing")
+        os.environ["PYTORCH_TEST_PHASE_TIMING_FILE"] = timing_file
         return_code = handler(test, test_directory, options)
         end = time.perf_counter()
         print_to_stderr(
             f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
         )
+        print_phase_timing(str(test), options.additional_args, timing_file)
         if not isinstance(return_code, int) or isinstance(return_code, bool):
             raise AssertionError(
                 f"While running {str(test)} got non integer return code {return_code}"
@@ -2450,6 +2454,21 @@ def run_test_module(
         return TestFailure(test.test, message)
     except Exception as e:
         return TestFailure(test.test, f"{str(test)} failed! {e}")
+
+
+def print_phase_timing(test: str, args: list[str], timing_file: str) -> None:
+    """Prints one [phase-timing] line per test process, summed over its reruns."""
+    if not os.path.exists(timing_file):
+        return
+    totals: dict[str, float] = defaultdict(float)
+    with open(timing_file) as f:
+        for line in f:
+            for key, value in json.loads(line).items():
+                totals[key] += value
+    shutil.rmtree(os.path.dirname(timing_file), ignore_errors=True)
+    marker = args[args.index("-m") + 1] if "-m" in args else ""
+    fields = " ".join(f"{k}={v:.3f}" for k, v in sorted(totals.items()))
+    print_to_stderr(f"[phase-timing] {test} marker={marker!r} {fields}")
 
 
 def run_tests(
