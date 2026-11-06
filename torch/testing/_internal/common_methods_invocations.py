@@ -12348,15 +12348,23 @@ op_db: list[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
+               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+               DecorateInfo(unittest.skip("XPU complex arange is unsupported; see intel/torch-xpu-ops#5668"),
+                            'TestDecomp', 'test_comprehensive',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
-           )),
+            )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
            inplace_variant=torch.Tensor.cauchy_,
@@ -12637,7 +12645,9 @@ op_db: list[OpInfo] = [
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
+           # matmul with 1D x 1D inputs dispatches to dot, which XPU does not implement
+           # for integer types, so int8/uint8 are excluded here (consistent with 'matmul').
+           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12691,7 +12701,9 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
-           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
+           # A full contraction reduces to dot, which XPU does not implement for
+           # integer types, so int8/uint8 are excluded here.
+           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
@@ -14774,7 +14786,7 @@ op_db: list[OpInfo] = [
                        torch.float32: tol(atol=1e-5, rtol=1e-5),
                        torch.complex64: tol(atol=1e-5, rtol=1e-5),
                    }),
-                   "TestDecomp", "test_comprehensive", device_type="cuda",
+                   "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu"),
                ),
            ],
            skips=(
@@ -14838,7 +14850,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
            )),
@@ -14854,7 +14866,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
            )),
@@ -14869,7 +14881,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
            )),
     OpInfo('std_mean',
            variant_test_name='unbiased',
@@ -14889,7 +14901,7 @@ op_db: list[OpInfo] = [
                    }),
                    "TestDecomp",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=("cuda", "xpu")
                ),
                DecorateInfo(
                    toleranceOverride({
@@ -15335,7 +15347,7 @@ op_db: list[OpInfo] = [
                     "for multi-dimensional weight inputs"
                 ),
                 'TestDecomp', 'test_comprehensive',
-                device_type="cuda"),
+                device_type=("cuda", "xpu")),
             # RuntimeError: input->type()->kind() ==
             # TypeKind::OptionalType INTERNAL ASSERT FAILED at
             # "torch/csrc/jit/passes/utils/check_alias_annotation.cpp":267
@@ -15392,7 +15404,12 @@ op_db: list[OpInfo] = [
             # through nll_loss2d for the per-row reduction).
             DecorateInfo(
                 unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                "TestDecomp", "test_comprehensive", device_type="cuda"),
+                "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu")),
+            # LinearCrossEntropyOptions is a Python dataclass; JIT scripting
+            # cannot infer it. Every chunked sample carries options=..., so
+            # all dtypes hit this -- not just float32.
+            DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
+                         "TestJit", "test_variant_consistency_jit"),
             # acc_policy="auto" accumulates fp16/bf16 in fp32 on CPU only, so the
             # CPU reference is more precise than MPS by design.
             DecorateInfo(unittest.skip("CPU uses fp32 accumulation"),
@@ -16444,7 +16461,7 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/131050
                DecorateInfo(unittest.skip("Flaky on Linux/ROCm CUDA"),
                             'TestDecomp', 'test_comprehensive',
-                            device_type='cuda', dtypes=(torch.bfloat16,),
+                            device_type=('cuda', 'xpu'), dtypes=(torch.bfloat16,),
                             active_if=IS_LINUX or TEST_WITH_ROCM),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -18702,7 +18719,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples'),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda",
+                            "TestDecomp", "test_comprehensive", device_type=("cuda", "xpu"),
                             active_if=TEST_WITH_ROCM),
            ),
            skips=(
@@ -22094,15 +22111,37 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
-            # mps refuses 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
             # raising sample only marks a dtype partially supported, and test_out_warning,
             # which returns on the first sample, a 4-D bilinear one.
-            # TODO: drop these when mps implements 5-D bicubic.
+            # TODO: drop these when mps / xpu implement 5-D bicubic.
             # MPS TestConsistency has its own entry in common_mps.py.
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_noncontiguous_samples", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="xpu"),
+            # not instantiated on mps
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_operator", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_backward", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_view_replay", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMathBits",
+                         "test_neg_view", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_amp", device_type="xpu"),
+            # the gradient suites run on xpu, which claims float64
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_grad", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_gradgrad", device_type="xpu"),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
