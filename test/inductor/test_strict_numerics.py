@@ -223,6 +223,41 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("op_name", ("sub", "rsub", "logaddexp2", "ldexp", "mul"))
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_arithmetic_opmath(self, device, dtype, op_name, numerics, upcast):
+        x = torch.linspace(-3, 3, 128, device=device, dtype=dtype)
+        y = torch.linspace(2, -2, 128, device=device, dtype=dtype)
+
+        def fn(x, y):
+            if op_name in ("sub", "rsub"):
+                result = getattr(torch, op_name)(x, y, alpha=0.7)
+            elif op_name == "mul":
+                result = x * 0.6931471805599453
+            else:
+                result = getattr(torch, op_name)(x, y)
+            return result, result.double()
+
+        actual, code = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+            y,
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x, y)),
+        )
+
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
@@ -1743,11 +1778,6 @@ POINTWISE_XFAIL = frozenset(
         ("i0", "bfloat16"),
         ("i0", "float16"),
         ("i0", "float32"),
-        ("ldexp", "bfloat16"),
-        ("ldexp", "float16"),
-        ("logaddexp2", "bfloat16"),
-        ("logaddexp2", "float16"),
-        ("logaddexp2", "float32"),
         ("mvlgamma_mvlgamma_p_1", "bfloat16"),
         ("mvlgamma_mvlgamma_p_1", "float16"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
@@ -1769,9 +1799,6 @@ POINTWISE_XFAIL = frozenset(
         ("round_decimals_neg_3", "bfloat16"),
         ("round_decimals_neg_3", "float16"),
         ("round_decimals_neg_3", "float32"),
-        ("rsub", "bfloat16"),
-        ("rsub", "float16"),
-        ("rsub", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
@@ -1783,9 +1810,6 @@ POINTWISE_XFAIL = frozenset(
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
-        ("sub", "bfloat16"),
-        ("sub", "float16"),
-        ("sub", "float32"),
     }
 )
 
@@ -1841,10 +1865,6 @@ BACKWARD_XFAIL = frozenset(
         ("i0", "bfloat16"),
         ("i0", "float16"),
         ("i0", "float32"),
-        ("ldexp", "bfloat16"),
-        ("ldexp", "float16"),
-        ("ldexp", "float32"),
-        ("logaddexp2", "float32"),
         ("logit", "bfloat16"),
         ("logit", "float16"),
         ("logit", "float32"),
@@ -1881,6 +1901,10 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "ldexp",
+        "logaddexp2",
+        "rsub",
+        "sub",
         "nn_functional_gelu",
         "nn_functional_hardswish",
         "nn_functional_mish",
