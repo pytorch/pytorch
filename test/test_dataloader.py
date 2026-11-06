@@ -1234,7 +1234,9 @@ def filter_len(row):
 )
 class TestDataLoader(TestCase):
     # No hw_classification: several tests also pin memory when an accelerator is
-    # present, so the class can't be GENERIC until those are split out.
+    # present, so the class can't be GENERIC until those are split out. Its tests
+    # take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     def setUp(self):
         super().setUp()
