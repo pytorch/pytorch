@@ -1799,10 +1799,10 @@ def get_new_module_tests():
         dict(
             fullname='EmbeddingBag_sparse',
             constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
-            test_cpp_api_parity=False,
             input_fn=lambda: torch.randperm(2).repeat(1, 2),
             check_gradgrad=False,
             has_sparse_gradients=True,
+            test_cpp_api_parity=False,
         ),
         dict(
             constructor=lambda: nn.Embedding(4, 3, dtype=torch.double, sparse=True),
