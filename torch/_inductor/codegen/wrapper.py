@@ -3755,7 +3755,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         if self.kernels_kept_for_asserts:
             self.kernel_autotune_defs.writeline(f"{KEPT_KERNELS_HAD_CHOICES} = {{}}")
-        scope = {}  # type: ignore[var-annotated]
+        scope: dict[str, Any] = {}
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
