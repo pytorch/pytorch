@@ -7244,6 +7244,12 @@ Done""",
             self.assertFalse(
                 gradcheck(fn, (x,), raise_exception=False, fast_mode=fast_mode)
             )
+            if fast_mode:
+                # Only fast mode sees a wrong backward for a zero-element output
+                with self.assertRaisesRegex(
+                    RuntimeError, "input 0, the output is empty"
+                ):
+                    gradcheck(lambda x: fn(x)[:0], (x,), fast_mode=True)
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
             with self.assertRaisesRegex(
@@ -7543,8 +7549,15 @@ Done""",
             def jvp(ctx, grad):
                 return grad.mul(5)
 
+        def bad_sum(x):
+            out = x.sum()
+            p, d = fwAD.unpack_dual(out)
+            return out if d is None else fwAD.make_dual(p, d + 1)
+
         x = torch.ones(2, dtype=torch.double, requires_grad=True)
         a = torch.ones(3, dtype=torch.double)
+        x0 = torch.ones(0, dtype=torch.double, requires_grad=True)
+        x0c = torch.ones(0, dtype=torch.cdouble, requires_grad=True)
         cases = (
             (
                 "non-differentiable output",
@@ -7559,6 +7572,8 @@ Done""",
                 0,
             ),
             ("non-differentiable input", lambda a, x: BadMul.apply(x), (a, x), 0),
+            ("zero-element input", bad_sum, (x0,), 0),
+            ("zero-element complex input", bad_sum, (x0c,), 0),
         )
         kwargs = {
             "fast_mode": True,

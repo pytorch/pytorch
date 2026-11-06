@@ -1903,12 +1903,30 @@ def _check_analytical_numerical_equal(
     is_forward_ad=False,
 ):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
+        u = all_u[i]
+        u_is_empty = (u[0] if isinstance(u, tuple) else u).numel() == 0
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
             if is_forward_ad:
                 a = all_analytical[i][j]
             else:
                 a = all_analytical[j][i]
+            if u_is_empty or (all_v is not None and all_v[j].numel() == 0):
+                # Forward mode: an empty u (zero-element input) makes J u exactly 0,
+                # while the numerical estimate holds only the noise of evaluating func
+                # twice.
+                # Backward mode: an empty v (zero-element output) makes v^T J u and its
+                # numerical estimate exactly 0, with no slow-mode jacobian to report; an
+                # empty u makes v^T J u trivially 0 and its estimate noise, as above.
+                if a.count_nonzero() != 0:
+                    mode = "computed with forward mode " if is_forward_ad else ""
+                    kind = "input" if is_forward_ad else "output"
+                    raise GradcheckError(
+                        f"Jacobian {mode}mismatch for output {j:d} with respect to "
+                        f"input {i:d}, the {kind} is empty, expected exactly zero,\n"
+                        f"analytical:{a}\n"
+                    )
+                continue
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
