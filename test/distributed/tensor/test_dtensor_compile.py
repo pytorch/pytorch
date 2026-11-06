@@ -220,6 +220,7 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
     return sharded_mod
 
 
+@instantiate_parametrized_tests
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -268,6 +269,77 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         fn(x).backward()
         self.assertEqual(local.grad, torch.full_like(local, 2))
+
+    @parametrize("style", ["colwise", "rowwise"])
+    def test_tp_linear_3d_input_dynamic_backward(self, style):
+        # https://github.com/pytorch/pytorch/issues/201624: tracing the backward
+        # of a TP linear on a 3D input used to recurse forever while resolving
+        # the untracked global sizes that sharding propagation creates.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        if style == "colwise":
+            parallel_style, in_dim = ColwiseParallel(), 8
+        else:
+            parallel_style, in_dim = RowwiseParallel(), 8 // self.world_size
+        linear = nn.Linear(8, 8, bias=False, device=self.device_type)
+        parallelize_module(linear, mesh, parallel_style)
+        compiled = torch.compile(linear, backend="aot_eager", dynamic=True)
+        for seq_len in (4, 6):
+            x = torch.randn(2, seq_len, in_dim, device=self.device_type)
+            x_ref = x.clone().requires_grad_()
+            x.requires_grad_()
+            linear(x_ref).sum().backward()
+            compiled(x).sum().backward()
+            self.assertEqual(x.grad, x_ref.grad)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_global_size_no_tangent_dependency(self):
+        # The unbacked size u0 of a forward output is first seen on its tangent.
+        # The untracked global size DTensor computes for z must still resolve
+        # to the forward value, or the forward graph depends on a tangent.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x, w):
+            dt = DTensor.from_local(x[x > 0], mesh, [Replicate()], run_check=False)
+            z = dt.view(-1, 1)
+            return z.to_local() * w.sum(), torch.zeros(z.shape)
+
+        x = torch.randn(16, device=self.device_type, requires_grad=True)
+        w = torch.randn(3, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        out, zeros = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
+        out_ref, zeros_ref = fn(x_ref, w_ref)
+        self.assertEqual(out, out_ref)
+        self.assertEqual(zeros, zeros_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_unbacked_rebuilt_sym_max_inductor(self):
+        # Sharding propagation computes global strides like Max(1, u0) with
+        # proxy tracing disabled, so make_fx rebuilds them from their sympy
+        # expression; the rebuilt node must be one Inductor can lower.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+        local_ref = local.detach().clone().requires_grad_()
+
+        def fn(x):
+            return (x @ x.t()).to_local()
+
+        def make_input(t):
+            x = DTensor.from_local(t, mesh, [Shard(1)], run_check=False)
+            torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+            torch._dynamo.decorators.mark_unbacked(x, 1, hint_override=x.shape[1])
+            return x
+
+        ref = fn(make_input(local_ref))
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(make_input(local))
+        self.assertEqual(res, ref)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(local.grad, local_ref.grad)
 
     def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180614.
