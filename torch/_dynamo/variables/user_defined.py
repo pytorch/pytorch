@@ -245,9 +245,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     except ImportError:
         pass
 
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
-
     return ctx in f_ctxs
 
 

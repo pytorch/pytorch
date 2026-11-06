@@ -520,7 +520,6 @@
   "test/inductor/test_wrapper_codegen.py",
   "test/inductor/test_wrapper_preamble.py",
   "test/inductor/test_xpu_basic.py",
-  "test/jit/fixtures_srcs/test_upgrader_models_generation.py",
   "test/jit/test_alias_analysis.py",
   "test/jit/test_async.py",
   "test/jit/test_aten_pow.py",
