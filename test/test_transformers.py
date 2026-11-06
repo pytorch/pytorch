@@ -247,9 +247,9 @@ def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.
     """ Clones the query, key, and value tensors and moves them to the specified dtype. """
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().to(dtype=dtype, copy=True).requires_grad_(query.requires_grad)
+    key_ref = key.detach().to(dtype=dtype, copy=True).requires_grad_(key.requires_grad)
+    value_ref = value.detach().to(dtype=dtype, copy=True).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 def get_platform_specific_sdpa():
@@ -2688,6 +2688,39 @@ class TestSDPAGeneric(NNTestCase):
         add it to TestSDPAAccelerator.
     """
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("ref_dtype", [None, torch.float16, torch.float32, torch.float64])
+    @parametrize("layout", ["contiguous", "transposed", "sliced"])
+    @parametrize("requires_grad", [False, True])
+    def test_query_key_value_clones(self, device, dtype, ref_dtype, layout, requires_grad):
+        if torch.device(device).type in ("mps", "mtia") and torch.float64 in (dtype, ref_dtype):
+            self.skipTest("Double precision is not supported on this device")
+        tensor = torch.arange(24, device=device, dtype=dtype).reshape(4, 6)
+        if layout == "transposed":
+            tensor = tensor.transpose(0, 1)
+        elif layout == "sliced":
+            tensor = tensor[:, ::2]
+        inputs = [tensor.detach().requires_grad_(flag) for flag in (requires_grad, False, requires_grad)]
+        expected = tensor.detach().clone().to(ref_dtype or dtype)
+        clones = query_key_value_clones(*inputs, dtype=ref_dtype)
+        self.assertEqual(len({clone.data_ptr() for clone in clones}), 3)
+        for original, clone in zip(inputs, clones):
+            self.assertEqual(clone, expected)
+            self.assertEqual(clone.dtype, ref_dtype or dtype)
+            self.assertEqual(clone.device, original.device)
+            self.assertEqual(clone.requires_grad, original.requires_grad)
+            self.assertTrue(clone.is_leaf)
+            self.assertIsNone(clone.grad_fn)
+            self.assertNotEqual(clone.data_ptr(), original.data_ptr())
+            if clone.requires_grad:
+                clone.sum().backward()
+                self.assertEqual(clone.grad, torch.ones_like(clone))
+                self.assertIsNone(original.grad)
+        with torch.no_grad():
+            tensor.zero_()
+        for clone in clones:
+            self.assertEqual(clone, expected)
 
     @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
