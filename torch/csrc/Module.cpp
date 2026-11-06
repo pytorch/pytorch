@@ -2980,19 +2980,17 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_property(
           "allow_meta",
-          [](const c10::FakeTensorMode& mode) {
-            return mode.allow_meta_.load();
-          },
+          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_; },
           [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_meta_.store(value);
+            mode.allow_meta_ = value;
           })
       .def_property(
           "_allow_unsafe_data_ptr_access",
           [](const c10::FakeTensorMode& mode) {
-            return mode.allow_unsafe_data_ptr_access_.load();
+            return mode.allow_unsafe_data_ptr_access_;
           },
           [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_unsafe_data_ptr_access_.store(value);
+            mode.allow_unsafe_data_ptr_access_ = value;
           });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
