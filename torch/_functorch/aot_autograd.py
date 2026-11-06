@@ -548,7 +548,9 @@ def create_aot_state(
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
     stack.enter_context(torch.autograd.set_multithreading_enabled(False))
-    stack.enter_context(preserve_rng_state())
+    # Tracing runs under fake mode and draws nothing from a device RNG, so don't
+    # initialize a device just to save its state.
+    stack.enter_context(preserve_rng_state(skip_uninitialized_devices=True))
     stack.enter_context(fake_mode)
     stack.enter_context(python_dispatcher_mode)
     stack.enter_context(PhiloxStateTracker())
