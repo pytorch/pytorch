@@ -259,7 +259,18 @@ void XpuptiActivityApi::enableXpuptiActivities(
     switch (activity) {
       case ActivityType::XPU_RUNTIME:
         XPUPTI_CALL(ptiViewEnableRuntimeApiClass(
-            1, PTI_API_CLASS_GPU_OPERATION_CORE, PTI_API_GROUP_ALL));
+            /*enable=*/1, PTI_API_CLASS_GPU_OPERATION_CORE, PTI_API_GROUP_ALL));
+        break;
+
+      case ActivityType::XPU_DRIVER:
+        // ptiViewEnable above left every L0 id enabled.
+        // The class call below is the first to set granularity,
+        // which resets the group to all-disabled before applying,
+        // so the per-id calls after it only add.
+        XPUPTI_CALL(ptiViewEnableDriverApiClass(
+            /*enable=*/1,
+            PTI_API_CLASS_GPU_OPERATION_CORE,
+            PTI_API_GROUP_LEVELZERO));
         break;
 
       case ActivityType::EXTERNAL_CORRELATION:
