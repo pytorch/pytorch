@@ -1888,7 +1888,12 @@ def as_strided(
     # are exempt -- their real storage may legitimately extend past the layout, and
     # the adjustment above has already rebased the offset onto the incoming pointer.
     needed = new_layout.storage_size()
-    if isinstance(storage_data, ir.InputBuffer):
+    if (
+        V.graph.aot_mode
+        and config.aot_inductor.cudagraphs
+        and isinstance(storage_data, ir.InputBuffer)
+        and storage_data.get_name() in V.graph.graph_inputs
+    ):
         _record_input_as_strided(storage_data, new_layout)
     buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
     if buffer is not None and not isinstance(buffer, ir.InputBuffer):
