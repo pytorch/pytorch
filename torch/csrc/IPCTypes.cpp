@@ -1,6 +1,6 @@
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
-#include <torch/csrc/CudaIPCTypes.h>
+#include <torch/csrc/IPCTypes.h>
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -14,13 +14,13 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
   if (!warned) {
     LOG(WARNING)
-        << "Producer process has been terminated before all shared CUDA tensors released. See Note [Sharing CUDA tensors]";
+        << "Producer process has been terminated before all shared device tensors released. See Note [Sharing CUDA tensors]";
     warned = true;
   }
 }
 
-struct CudaIPCGlobalEntities {
-  // This class is used as a singleton (see cuda_ipc_global_entities)
+struct IPCGlobalEntities {
+  // This class is used as a singleton (see ipc_global_entities)
   // This variable is used to track its lifetime to avoid accessing it
   // after it was destroyed which would lead to segmentation faults
   // Note that a trivial type is used which doesn't suffer from construction
@@ -29,20 +29,20 @@ struct CudaIPCGlobalEntities {
 
   std::mutex ref_counters_mutex_;
   std::atomic<int64_t> sync_events_used_{0};
-  std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
+  std::map<std::string, std::shared_ptr<IPCRefCountersFile>>
       ref_counters_files_;
-  std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
-  CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  CudaIPCGlobalEntities() {
+  std::shared_ptr<IPCRefCountersFile> next_available_ref_counters_file_;
+  IPCSentDataLimbo ipc_sent_data_limbo_;
+  IPCGlobalEntities() {
     alive = true;
   }
-  CudaIPCGlobalEntities(const CudaIPCGlobalEntities&) = delete;
-  CudaIPCGlobalEntities(CudaIPCGlobalEntities&&) = delete;
-  CudaIPCGlobalEntities& operator=(const CudaIPCGlobalEntities&) = delete;
-  CudaIPCGlobalEntities& operator=(CudaIPCGlobalEntities&&) = delete;
-  ~CudaIPCGlobalEntities() {
+  IPCGlobalEntities(const IPCGlobalEntities&) = delete;
+  IPCGlobalEntities(IPCGlobalEntities&&) = delete;
+  IPCGlobalEntities& operator=(const IPCGlobalEntities&) = delete;
+  IPCGlobalEntities& operator=(IPCGlobalEntities&&) = delete;
+  ~IPCGlobalEntities() {
     alive = false;
-    CudaIPCSentDataLimbo_.collect();
+    ipc_sent_data_limbo_.collect();
     safe_clean_current_file();
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
@@ -58,22 +58,22 @@ struct CudaIPCGlobalEntities {
   }
 };
 
-bool CudaIPCGlobalEntities::alive = false;
-CudaIPCGlobalEntities cuda_ipc_global_entities;
+bool IPCGlobalEntities::alive = false;
+IPCGlobalEntities ipc_global_entities;
 
-CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
+IPCSentDataLimbo::~IPCSentDataLimbo() {
   collect();
   if (size() > 0) {
     warnProducerTerminatedBeforeSharedTensorsReleased();
   }
 }
 
-bool CudaIPCSentDataLimbo::collect() {
+bool IPCSentDataLimbo::collect() {
   bool freed_memory = false;
-  std::vector<std::unique_ptr<CudaIPCSentData>> reset_blocks;
+  std::vector<std::unique_ptr<IPCSentData>> reset_blocks;
   { // Begin critical section to modify shared blocks
     std::lock_guard<std::mutex> lock(limbo_mutex_);
-    std::vector<std::unique_ptr<CudaIPCSentData>> kept_blocks;
+    std::vector<std::unique_ptr<IPCSentData>> kept_blocks;
     for (auto& sd : shared_blocks_) {
       if (sd->counter_value() > 0) {
         kept_blocks.push_back(std::move(sd));
@@ -92,14 +92,13 @@ bool CudaIPCSentDataLimbo::collect() {
   return freed_memory;
 }
 
-void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
+void IPCSentDataLimbo::add(std::unique_ptr<IPCSentData> shared_block) {
   std::lock_guard<std::mutex> lock(limbo_mutex_);
   static bool warned = false;
-  if (shared_blocks_.size() > CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO &&
-      !warned) {
+  if (shared_blocks_.size() > IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO && !warned) {
     LOG(WARNING)
         << "Producer process tried to deallocate over "
-        << CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO
+        << IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO
         << " memory blocks referred by consumer processes. Deallocation might be significantly slowed down. "
         << "We assume it will never going to be the case, but if it is, please file but to https://github.com/pytorch/pytorch";
     warned = true;
@@ -107,30 +106,28 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
   shared_blocks_.push_back(std::move(shared_block));
 }
 
-uint64_t CudaIPCSentDataLimbo::size() {
+uint64_t IPCSentDataLimbo::size() {
   std::lock_guard<std::mutex> lock(limbo_mutex_);
   return shared_blocks_.size();
 }
 
-void CudaIPCSentDataDelete(void* ptr) {
-  std::unique_ptr<CudaIPCSentData> sent_data(
-      static_cast<CudaIPCSentData*>(ptr));
-  if (!CudaIPCGlobalEntities::alive) {
+void IPCSentDataDelete(void* ptr) {
+  std::unique_ptr<IPCSentData> sent_data(static_cast<IPCSentData*>(ptr));
+  if (!IPCGlobalEntities::alive) {
     return;
   }
   if (sent_data->counter_value() > 0) {
-    cuda_ipc_global_entities.CudaIPCSentDataLimbo_.add(std::move(sent_data));
+    ipc_global_entities.ipc_sent_data_limbo_.add(std::move(sent_data));
   }
-  cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
+  ipc_global_entities.ipc_sent_data_limbo_.collect();
 }
 
 void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
-  if (!CudaIPCGlobalEntities::alive) {
+  if (!IPCGlobalEntities::alive) {
     return;
   }
-  std::lock_guard<std::mutex> lock(
-      cuda_ipc_global_entities.ref_counters_mutex_);
-  auto& map = cuda_ipc_global_entities.ref_counters_files_;
+  std::lock_guard<std::mutex> lock(ipc_global_entities.ref_counters_mutex_);
+  auto& map = ipc_global_entities.ref_counters_files_;
   auto it = map.find(handle);
   if (it != map.end()) {
     it->second->return_offset(offset);
@@ -142,7 +139,7 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 } // namespace
 
-CudaIPCSentData::CudaIPCSentData(
+IPCSentData::IPCSentData(
     std::string handle,
     uint64_t offset,
     uint64_t* counter_ptr,
@@ -153,9 +150,9 @@ CudaIPCSentData::CudaIPCSentData(
       device_(device) {
   auto stream = at::accelerator::getCurrentStream(device_.index());
   // Backends may limit the number of live interprocess events, so fall back to
-  // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
-  if (cuda_ipc_global_entities.sync_events_used_.load() <
-      CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
+  // stream sync once IPC_MAXIMUM_EVENTS_TO_USE is reached.
+  if (ipc_global_entities.sync_events_used_.load() <
+      IPC_MAXIMUM_EVENTS_TO_USE) {
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
@@ -164,7 +161,7 @@ CudaIPCSentData::CudaIPCSentData(
         device_.type(),
         c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
     event_->record(stream);
-    cuda_ipc_global_entities.sync_events_used_++;
+    ipc_global_entities.sync_events_used_++;
     event_sync_required_ = true;
   } else {
     stream.synchronize();
@@ -173,25 +170,25 @@ CudaIPCSentData::CudaIPCSentData(
   }
 }
 
-CudaIPCSentData::~CudaIPCSentData() {
-  if (!CudaIPCGlobalEntities::alive) {
+IPCSentData::~IPCSentData() {
+  if (!IPCGlobalEntities::alive) {
     original_ptr_.release_context();
   }
   ReturnRefCounter(handle_, offset_);
   try {
     if (event_sync_required_) {
       event_.reset();
-      if (!CudaIPCGlobalEntities::alive) {
+      if (!IPCGlobalEntities::alive) {
         return;
       }
-      cuda_ipc_global_entities.sync_events_used_--;
+      ipc_global_entities.sync_events_used_--;
     }
     // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
 }
 
-uint64_t CudaIPCSentData::counter_value() {
+uint64_t IPCSentData::counter_value() {
   return *counter_ptr_;
 }
 
@@ -200,9 +197,8 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   uint64_t ref_counter_offset;
   uint64_t* ref_counter_ptr;
   {
-    std::lock_guard<std::mutex> lock(
-        cuda_ipc_global_entities.ref_counters_mutex_);
-    if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
+    std::lock_guard<std::mutex> lock(ipc_global_entities.ref_counters_mutex_);
+    if (!ipc_global_entities.next_available_ref_counters_file_) {
       ref_counter_handle = at::NewProcessWideShmHandle();
 
       int flags =
@@ -210,19 +206,19 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
-          sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,
+          sizeof(int64_t) * IPC_REF_COUNTER_FILE_SIZE,
           nullptr);
-      auto rc = std::make_shared<CudaIPCRefCountersFile>(
-          ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
-      cuda_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
-      cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
+      auto rc = std::make_shared<IPCRefCountersFile>(
+          ref_counter_handle, IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
+      ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
+      ipc_global_entities.next_available_ref_counters_file_ = rc;
     }
     auto& ref_counter_file =
-        cuda_ipc_global_entities.next_available_ref_counters_file_;
+        ipc_global_entities.next_available_ref_counters_file_;
     ref_counter_handle = ref_counter_file->handle();
     ref_counter_offset = ref_counter_file->get_offset();
     ref_counter_ptr = ref_counter_file->counter_ptr();
-    // Reserve the slot before CudaIPCSentData can trigger IPC collection.
+    // Reserve the slot before IPCSentData can trigger IPC collection.
     ref_counter_file->set_counter(1);
     ref_counter_file->rotate_offset();
     if (!ref_counter_file->have_offsets()) {
@@ -230,31 +226,24 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     }
   }
   try {
-    auto sent_data = std::make_unique<CudaIPCSentData>(
+    auto sent_data = std::make_unique<IPCSentData>(
         ref_counter_handle, ref_counter_offset, ref_counter_ptr, device);
-    return at::DataPtr(
-        data, sent_data.release(), CudaIPCSentDataDelete, device);
+    return at::DataPtr(data, sent_data.release(), IPCSentDataDelete, device);
   } catch (...) {
     ReturnRefCounter(ref_counter_handle, ref_counter_offset);
     throw;
   }
 }
 
-bool CudaIPCCollect() {
-  if (!CudaIPCGlobalEntities::alive) {
+bool IPCCollect() {
+  if (!IPCGlobalEntities::alive) {
     return true;
   }
-  bool freed_memory = cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
-  if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
-    cuda_ipc_global_entities.safe_clean_current_file();
+  bool freed_memory = ipc_global_entities.ipc_sent_data_limbo_.collect();
+  if (ipc_global_entities.ipc_sent_data_limbo_.size() == 0) {
+    ipc_global_entities.safe_clean_current_file();
   }
   return freed_memory;
 }
 
 } // namespace torch
-
-namespace c10 {
-namespace {
-REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback)
-}
-} // namespace c10
