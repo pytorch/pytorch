@@ -25,8 +25,8 @@ TORCH_API void set_and_normalize_fake_device(
 // base's marked storage and do not mark it again.
 //
 // impl must read as meta: a meta tensor, or, inside a kernel, a fake. The
-// latter is how the fake fallback (later in this stack) makes a new fake of a
-// kernel output that inherited fake state from an input. A view whose kernel
+// latter is how the fake fallback (FakeFallbackKernel.cpp) makes a new fake of
+// a kernel output that inherited fake state from an input. A view whose kernel
 // calls maybe_copy_fake_tensor_metadata (e.g. as_strided, alias, view,
 // _reshape_alias) has the input's fake device and mode, while one whose kernel
 // does not (view_as_real, view_as_complex, view.dtype) inherits only the Fake
