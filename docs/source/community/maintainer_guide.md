@@ -68,13 +68,14 @@ automated review and finalize it.
 
 To accept the pre-review, react with a thumbs-up to the PR description or comment `@pytorchbot pre-review accept`.
 To object, react with a thumbs-down or use "Request changes". A team assigned as reviewer accepts once any of its
-members other than the author does. The bot adds the `in progress` label once every assigned reviewer accepts, or once
-the pre-review deadline passes with no objection.
+members other than the author does, unless a member objects. The bot adds the `in progress` label once every assigned
+reviewer accepts, or once the pre-review deadline passes with no objection.
 
 The deadline is one week after the PR enters pre-review (triaged, marked ready after being a draft, or
 `missing actionable issue` removed). Adding reviewers does not extend it. If you have not responded by then, you no
 longer block the PR, so ignoring a pre-review does not reject it. An objection keeps blocking until you remove your
-thumbs-down, or your change request is dismissed or replaced by an approval. If you move a PR back to draft, also leave
+thumbs-down, or your change request is dismissed or replaced by an approval. A thumbs-down does not hold back an
+approval that satisfies the merge rules; use "Request changes" for that. If you move a PR back to draft, also leave
 a thumbs-down so your objection still blocks once it is marked ready again. The PR Status comment shows who has
 responded and the exact deadline.
 
@@ -118,9 +119,9 @@ PRs labeled `no automated review` skip these checks and move directly to `ready 
 withdraws the automated review's change requests, so anyone who can label the PR can clear them; your review is
 then the only check.
 
-Do your review as usual. Once you accept the PR, the author is able to merge it. Your approval counts only if a rule
-in `merge_rules.yaml` names you (or one of your teams) and covers every file the PR changes. Otherwise the PR stays
-`ready for review` until such a reviewer approves. An approval like this given during pre-review also ends pre-review.
+Do your review as usual. If a rule in `merge_rules.yaml` names you (or one of your teams) and covers every file the PR
+changes, your approval lets the author merge it. Otherwise the PR still needs an approval from such a reviewer. An
+approval like this given during pre-review also ends pre-review.
 If the PR requires significant changes, use "Request changes".
 If you see patterns that shouldn't happen, update the
 [pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md) <!-- @lint-ignore --> so that the

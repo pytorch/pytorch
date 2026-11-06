@@ -194,12 +194,12 @@ If the PR requires a longer discussion, that discussion should happen on the ass
 Pre-review has a one-week deadline, which starts when the PR enters pre-review: when it is triaged, marked ready for review after being a draft, or when its `missing actionable issue` label is removed.
 Adding reviewers does not extend it.
 Reviewers who have not responded by the deadline no longer block the PR.
-Objections (a thumbs-down on the PR description or an outstanding change request) keep blocking until withdrawn.
+Objections from assigned reviewers (a thumbs-down on the PR description or an outstanding change request) keep blocking until withdrawn.
 The PR Status section of the pytorchbot comment shows who has responded and the exact deadline.
 
 Only an approval that satisfies [`.github/merge_rules.yaml`](.github/merge_rules.yaml) accepts a PR: the approver must be named by a rule that covers every file the PR changes.
-Such an approval also ends pre-review.
-Other approvals are welcome feedback but leave the PR in its current stage.
+Such an approval also ends pre-review, even over a thumbs-down, but not while a change request is outstanding.
+Other approvals are welcome feedback, but the PR still needs one that satisfies the merge rules.
 
 To assess a PR:
 
