@@ -10,6 +10,7 @@ import re
 import sys
 import unittest
 import warnings
+import weakref
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from unittest import mock
@@ -2373,9 +2374,9 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.num_checkpoints(), 0)
 
             out = foo(inp())
-            out_id = id(out)
+            out_ref = weakref.ref(out)
             del out
-            self.assertEqual(id(foo(inp())), out_id)
+            self.assertIs(foo(inp()), out_ref())
 
             @torch.compile(mode="reduce-overhead")
             def foo2(x):
@@ -2402,7 +2403,7 @@ if HAS_CUDA_AND_TRITON:
             new_out = foo(inp())
             curr_node = self.curr_node()
             self.assertFalse(curr_node.unaliased_in_all_paths[0])
-            self.assertFalse(out_id == id(new_out))
+            self.assertIsNot(new_out, out_ref())
 
         def test_aliased_static_parameter(self):
             inp = torch.rand([20, 20], device="cuda")
