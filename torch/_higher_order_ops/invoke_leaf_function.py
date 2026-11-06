@@ -450,15 +450,17 @@ def _make_forward(
     exclude_keys: DispatchKeySet,
 ) -> tuple[Callable, dict[str, Any]]:
     state: dict[str, Any] = {"inputs": None, "outputs": None}
-    # See NOTE: [Autograd support for invoke_leaf_function], item 2
-    effective_keys = include_keys - (
-        DispatchKeySet(DispatchKey.PythonDispatcher)
-        | DispatchKeySet(DispatchKey.Python)
-        | DispatchKeySet(DispatchKey.Fake)
-    )
 
     @functools.wraps(fn)
     def forward(*args, **kwargs):
+        # See NOTE: [Autograd support for invoke_leaf_function], item 2
+        effective_keys = include_keys
+        if include_keys.has(DispatchKey.PythonDispatcher):
+            effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
+        if effective_keys.has(DispatchKey.Python):
+            effective_keys = effective_keys.remove(DispatchKey.Python)
+        if effective_keys.has(DispatchKey.Fake):
+            effective_keys = effective_keys.remove(DispatchKey.Fake)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*args, **kwargs)
