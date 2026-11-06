@@ -1416,6 +1416,53 @@ print(public_active, active, allocated)
         self.assertGreater(cached_active, 0)
         self.assertGreater(cached_allocated, 0)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm keys ATen's rocBLAS handles by stream")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @serialTest()
+    def test_cublas_workspace_cache_env_handles_rocm(self):
+        # With workspace caching, current_blas_handle() returns ATen's own
+        # handles: one for each stream outside capture, and inside a capture the
+        # thread's handle for the device, for every stream in the capture, even
+        # a stream that has its own handle outside capture.
+        test_script = """
+import torch
+torch.backends.cuda.preferred_blas_library("cublas")
+a = torch.randn(64, 64, device="cuda")
+expected = a @ a
+first = torch.cuda.Stream()
+second = torch.cuda.Stream()
+with torch.cuda.stream(first):
+    first_handle = torch.cuda.current_blas_handle()
+with torch.cuda.stream(second):
+    second_handle = torch.cuda.current_blas_handle()
+assert first_handle != second_handle, "two streams share a handle"
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, stream=first):
+    captured_handle = torch.cuda.current_blas_handle()
+    captured = a @ a
+    second.wait_stream(first)
+    with torch.cuda.stream(second):
+        side_handle = torch.cuda.current_blas_handle()
+        side_captured = a @ a
+    first.wait_stream(second)
+assert captured_handle != first_handle, "the capture uses its stream's handle"
+assert side_handle == captured_handle, "a forked stream uses another handle"
+assert side_handle != second_handle, "a forked stream uses its own handle"
+graph.replay()
+torch.cuda.synchronize()
+torch.testing.assert_close(captured, expected)
+torch.testing.assert_close(side_captured, expected)
+"""
+        env = os.environ.copy()
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-c", test_script], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @serialTest()
     @blas_library_context("cublaslt")
