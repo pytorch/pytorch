@@ -1,6 +1,5 @@
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <atomic>
 #include <map>
