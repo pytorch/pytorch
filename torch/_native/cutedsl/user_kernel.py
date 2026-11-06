@@ -9,10 +9,11 @@ signature, which is: the compute capability of the device; the dtype, shape, str
 and alignment of every tensor; for every runtime scalar, the cutlass Numeric
 annotation of its parameter, or the Python type python_scalar converts it to (bool,
 int or float) if the parameter is unannotated; and the constant_key of every
-constant, which keys lists, tuples, dicts, dataclass instances and plain objects by
-type and content, and an object with state in __slots__ (dataclass fields aside) or a
-callable object other than a dataclass instance as itself, by identity unless its
-class hashes by value (see _object_state in user_kernel_hop.py).
+constant, which keys lists, tuples, dicts, dataclass instances, plain objects and
+kernel objects (whose class's __call__ is @cute.jit) by type and content, and an
+object with state in __slots__ (dataclass fields aside) or any other callable object
+that is not a dataclass instance as itself, by identity unless its class hashes by
+value (see _object_state in user_kernel_hop.py).
 
 The signature has no device index: devices of one capability share a compile.
 cute.compile returns a CudaDialectJitCompiledFunction, which loads its cubin as a
@@ -89,7 +90,6 @@ def launch_cutedsl_kernel(
 
     from torch._higher_order_ops.cutedsl_kernel_wrap import (
         CUTEDSL_CONSTANT_RULES,
-        cutedsl_kernel_name,
         get_host_fn_info,
         python_scalar,
     )
@@ -102,8 +102,8 @@ def launch_cutedsl_kernel(
     )
     from torch._native.cutedsl.plan_cache import cached_plan
 
-    name = cutedsl_kernel_name(fn)
     info = get_host_fn_info(fn)
+    name = info.name
     info.check_call(name, args.keys())
     runtime_args, constant_args = info.split_args(name, args)
     device = _launch_device(name, runtime_args.values())

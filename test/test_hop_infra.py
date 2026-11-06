@@ -23,8 +23,10 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 )
 from torch._higher_order_ops.user_kernel_hop import (
     _snapshot,
+    constant_contents,
     constant_key,
     KernelSideTable,
+    map_constant,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -616,26 +618,53 @@ class TestCuteDSLHOPHelpers(TestCase):
             (Cfg(2.0, weight=t), r" at \.weight"),
             (with_extra, r" at \.extra"),
             (types.SimpleNamespace(w=t), r" at \.w"),
-            (t, ""),
         ):
             with self.assertRaisesRegex(TypeError, msg.format(where)):
                 table.add_constant_args({"cfg": value})
+        msg = "^a constant kernel argument is a tensor: pass each tensor as its own "
+        with self.assertRaisesRegex(TypeError, msg + "argument$"):
+            table.add_constant_args({"cfg": t})
+
+    def test_tensors_are_never_containers(self):
+        # A tensor of a subclass that does not hash would pass for a plain object (a
+        # __dict__, no __slots__ attributes, not callable), which constant_key and
+        # _snapshot walk by its attributes. constant_contents does not take it for
+        # one, so _snapshot keeps it as itself instead of copying it. (constant_key
+        # and map_constant refuse every tensor before they ask.)
+        class UnhashableTensor(torch.Tensor):
+            __hash__ = None
+
+        @dataclasses.dataclass
+        class Cfg:
+            alpha: float
+            weight: object = None
+
+        t = torch.randn(4).as_subclass(UnhashableTensor)
+        rules = CUTEDSL_CONSTANT_RULES
+        self.assertIsNone(constant_contents(t, rules))
+        self.assertIs(_snapshot(Cfg(2.0, weight=[t]), rules).weight[0], t)
 
     def test_dict_subclasses_are_rebuilt_with_their_items(self):
-        # _snapshot rebuilds a dict, of a subclass too, with each item assigned: a
-        # Counter's update() would count the (key, value) pairs
+        # _snapshot and map_constant rebuild a dict, of a subclass too, with each item
+        # assigned: a Counter's update() would count the (key, value) pairs
         # (Counter({('a', 3): 1})), and dict.update() would leave an OrderedDict
         # empty to iterate.
+        def double(leaf):
+            return 2 * leaf if isinstance(leaf, int) else leaf
+
         rules = CUTEDSL_CONSTANT_RULES
-        for value in (
-            collections.Counter({"a": 3}),
-            collections.OrderedDict([("b", 1), ("a", 2)]),
+        for value, doubled in (
+            (collections.Counter({"a": 3}), [("a", 6)]),
+            (collections.OrderedDict([("b", 1), ("a", 2)]), [("b", 2), ("a", 4)]),
         ):
             with self.subTest(type=type(value).__name__):
                 snapshot = _snapshot(value, rules)
                 self.assertIsNot(snapshot, value)
                 self.assertIs(type(snapshot), type(value))
                 self.assertEqual(list(snapshot.items()), list(value.items()))
+                mapped = map_constant(value, rules, double)
+                self.assertIs(type(mapped), type(value))
+                self.assertEqual(list(mapped.items()), doubled)
 
     def test_host_fn_info_checks_and_splits_a_call(self):
         # check_call and split_args need only a parsed signature, written out here: a
