@@ -272,12 +272,17 @@ def _warn_host_tma_clone(name: str) -> None:
     )
 
 
-def _host_tma_aligned(tensor, name):
+def _host_tma_aligned(tensor, name, is_output=False):
     """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
     warning) only if its base address is not aligned. Used by the host-side TMA
-    launcher to build TensorDescriptors from aligned storage."""
+    launcher to build TensorDescriptors from aligned storage. An output can't be
+    cloned, since the kernel's writes would land in the copy."""
     if tensor.data_ptr() % TMA_ALIGNMENT == 0:
         return tensor
+    if is_output:
+        raise RuntimeError(
+            f"host-side TMA: output {name} is not {TMA_ALIGNMENT}-byte aligned"
+        )
     _warn_host_tma_clone(name)
     return tensor.clone()
 
@@ -2995,9 +3000,11 @@ class CompileResult(Generic[_T]):
                 continue
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
-            # _host_tma_aligned clones (warning once) only if misaligned.
+            # _host_tma_aligned clones a misaligned input (warning once) and
+            # raises for a misaligned output.
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if desc_info.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
@@ -3056,7 +3063,8 @@ class CompileResult(Generic[_T]):
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if desc_info.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
