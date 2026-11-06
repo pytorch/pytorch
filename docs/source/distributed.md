@@ -965,9 +965,9 @@ backend. A post-hook runs once the operation is issued, not when it completes.
 standard collective and point-to-point operations, and with no tensors for
 {func}`torch.distributed.split_group` and the `ProcessGroup` methods `new_window`
 and `reconfigure` (op names `SPLIT`, `NEW_WINDOW` and `RECONFIGURE`). Their
-post-hook `work` is `None` for `SPLIT` and `NEW_WINDOW` and may be `None` for
-other synchronous operations, so hooks must not assume a `Work` or non-empty
-tensor lists. Calling these on a `Backend` directly, or through a Python
+post-hook `work` is `None` for `SPLIT` and `NEW_WINDOW`, which pass the new
+`group` or `window` instead, and may be `None` for other synchronous
+operations, so hooks must not assume a `Work` or non-empty tensor lists. Calling these on a `Backend` directly, or through a Python
 subclass override, bypasses hooks. Other
 group creation paths, such as `new_group` (including when it splits from an
 eagerly initialized default group),

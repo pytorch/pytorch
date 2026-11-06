@@ -297,13 +297,12 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     newGroup->setBackend(deviceType, backendType, splitBackend);
     splitBackends.emplace(backendType, splitBackend);
   }
-  firePostHook(HookOpName::SPLIT, /*async_op=*/false, op_id, nullptr);
-
-  if (!newGroup) {
-    return nullptr;
+  if (newGroup) {
+    newGroup->setGroupName(groupName);
+    newGroup->setGroupDesc(groupDesc);
   }
-  newGroup->setGroupName(groupName);
-  newGroup->setGroupDesc(groupDesc);
+  firePostHook(
+      HookOpName::SPLIT, /*async_op=*/false, op_id, /*work=*/nullptr, newGroup);
   return newGroup;
 }
 

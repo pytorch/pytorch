@@ -314,6 +314,8 @@ class PostHookArgs:
     async_op: bool
     work: Work | None
     op_id: int
+    group: ProcessGroup | None
+    window: Window | None
 
 class Store:
     def set(self, key: str, value: str) -> None: ...

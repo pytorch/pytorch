@@ -9,9 +9,12 @@
 #include <c10/core/Device.h>
 #include <c10/util/intrusive_ptr.h>
 
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d {
+
+class ProcessGroup;
 
 // Identifies the operation a pre/post hook is firing for. One value per
 // dispatcher op rather than per collective family: the flight recorder writes
@@ -70,6 +73,10 @@ struct PostHookArgs {
   // Work handle for the issued operation; may be null for synchronous ops.
   c10::intrusive_ptr<Work> work;
   int64_t op_id = 0;
+  // New group for SPLIT; null on ranks not in it and for other ops.
+  c10::intrusive_ptr<ProcessGroup> group;
+  // New window for NEW_WINDOW; null for other ops.
+  c10::intrusive_ptr<Window> window;
 };
 
 using PostHook = std::function<void(const PostHookArgs&)>;

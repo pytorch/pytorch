@@ -726,7 +726,11 @@ class TestPyBackend(TestCase):
 
         backend._new_work = lambda result=None: NoneWork(result, backend)
         work = group.allreduce([torch.zeros(2)])
-        with self.assertRaisesRegex(RuntimeError, "returned None"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"NoneWork.get_future_result\(\) must return a torch.futures.Future, "
+            "got NoneType",
+        ):
             work.get_future_result()
 
     def test_collective_returns_none(self) -> None:

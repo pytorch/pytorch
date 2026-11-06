@@ -167,7 +167,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
     def test_hooks_fire_for_split_group(self):
         pg = _get_default_group()
         pre: list[tuple[HookOpName, int, int, int, bool]] = []
-        post: list[tuple[HookOpName, int, bool]] = []
+        post = []
         pg.register_pre_hook(
             0,
             lambda args: pre.append(
@@ -180,10 +180,9 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
                 )
             ),
         )
-        pg.register_post_hook(
-            0, lambda args: post.append((args.name, args.op_id, args.work is None))
-        )
-        child = dist.split_group(split_ranks=[list(range(self.world_size))])
+        pg.register_post_hook(0, post.append)
+        # Rank 0 is not in the new group.
+        child = dist.split_group(split_ranks=[list(range(1, self.world_size))])
         pg.unregister_pre_hook(0)
         pg.unregister_post_hook(0)
 
@@ -191,8 +190,18 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         name, op_id, num_tensors, root, async_op = pre[0]
         self.assertEqual(name, HookOpName.SPLIT)
         self.assertEqual((num_tensors, root, async_op), (0, -1, False))
-        self.assertEqual(post, [(HookOpName.SPLIT, op_id, True)])
-        dist.destroy_process_group(child)
+        self.assertEqual(len(post), 1)
+        args = post[0]
+        self.assertEqual((args.name, args.op_id), (HookOpName.SPLIT, op_id))
+        self.assertIsNone(args.work)
+        self.assertIsNone(args.window)
+        if self.rank == 0:
+            self.assertEqual(child, dist.GroupMember.NON_GROUP_MEMBER)
+            self.assertIsNone(args.group)
+        else:
+            self.assertIs(args.group, child)
+            self.assertEqual(args.group.group_name, child.group_name)
+            dist.destroy_process_group(child)
 
         dist.barrier()
 

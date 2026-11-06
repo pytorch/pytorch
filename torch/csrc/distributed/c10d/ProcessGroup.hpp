@@ -1151,7 +1151,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto op_id =
         firePreHook(HookOpName::NEW_WINDOW, /*async_op=*/false, /*root=*/-1);
     auto window = getDefaultBackend()->new_window(tensor);
-    firePostHook(HookOpName::NEW_WINDOW, /*async_op=*/false, op_id, nullptr);
+    firePostHook(
+        HookOpName::NEW_WINDOW,
+        /*async_op=*/false,
+        op_id,
+        /*work=*/nullptr,
+        /*group=*/{},
+        window);
     return window;
   }
 
@@ -1394,11 +1400,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       HookOpName name,
       bool async_op,
       int64_t op_id,
-      const c10::intrusive_ptr<Work>& work) {
+      const c10::intrusive_ptr<Work>& work,
+      const c10::intrusive_ptr<ProcessGroup>& group = {},
+      const c10::intrusive_ptr<Window>& window = {}) {
     if (postHooks_.empty()) {
       return;
     }
-    PostHookArgs args{name, async_op, work, op_id};
+    PostHookArgs args{name, async_op, work, op_id, group, window};
     for (auto& entry : postHooks_) {
       entry.second(args);
     }
