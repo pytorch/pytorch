@@ -12342,9 +12342,6 @@ op_db: list[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
                DecorateInfo(unittest.skip("XPU complex arange is unsupported; see intel/torch-xpu-ops#5668"),
                             'TestDecomp', 'test_comprehensive',
