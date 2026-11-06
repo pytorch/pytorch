@@ -2723,10 +2723,15 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def modified_bessel_i1(x):
-        if TritonKernelOverrides._use_aten_fp32_special(x):
+        if utils.is_strict_cuda_triton() and (dtype := triton_arg_dtype(x)) in (
+            torch.float32,
+            torch.float64,
+        ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i1_impl(x, modified_bessel=True).value
+            return OpDecompositions._strict_i1_impl(
+                x, modified_bessel=True, dtype=cast(torch.dtype, dtype)
+            ).value
         return _triton_cyl_bessel_i(1, x)
 
     @staticmethod
