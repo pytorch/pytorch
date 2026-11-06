@@ -1296,6 +1296,7 @@ for warning in w:
         self.assertEqual(enabled, warn_always)
 
     @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("flag", ["conj", "neg", "inference"])
     def test_is_conj_is_neg_is_inference(self, device, flag):
         import libtorch_agn_2_16 as libtorch_agnostic
