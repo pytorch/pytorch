@@ -658,6 +658,22 @@ class TestBenchmarker(TestCase):
             + ["call", "call", *replay, "exit"],
         )
 
+    @parametrize(
+        "timings, expected",
+        (((-0.02, 0.0, 2.0, 1.5), 1.5), ((-0.02, 0.0), float("inf"))),
+    )
+    def test_event_pairs_min_timing_ignores_non_positive(self, timings, expected):
+        class FakeEvent:
+            def __init__(self, timing):
+                self.timing = timing
+
+            def elapsed_time(self, other):
+                return self.timing
+
+        event_pairs = [(FakeEvent(t), FakeEvent(t)) for t in timings]
+        result = InductorBenchmarker().get_event_pairs_min_timing(event_pairs)
+        self.assertEqual(result, expected)
+
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
 

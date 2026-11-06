@@ -658,13 +658,16 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def get_event_pairs_min_timing(
         self: Self, event_pairs: list[tuple[Any, Any]]
     ) -> float:
-        """Get the minimum timing, in milliseconds, for a group of event pairs."""
-        return min(
-            [
-                start_event.elapsed_time(end_event)
-                for start_event, end_event in event_pairs
-            ]
-        )
+        """Get the minimum valid timing, in milliseconds, for a group of event pairs.
+
+        Device runtimes can report non-positive elapsed times (seen on ROCm on
+        Windows), which must not win autotuning. Returns inf if no timing is valid.
+        """
+        timings = [
+            start_event.elapsed_time(end_event)
+            for start_event, end_event in event_pairs
+        ]
+        return min((t for t in timings if t > 0), default=float("inf"))
 
     @may_distort_benchmarking_result
     @time_and_count
@@ -772,7 +775,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
-        if estimated_timing > 0:
+        if estimated_timing < float("inf"):
             benchmark_iters = max(
                 min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
             )
@@ -898,7 +901,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
             end_event.record()
         device_interface.synchronize()
         estimated_ms = self.get_event_pairs_min_timing(event_pairs)
-        if estimated_ms > 0:
+        if estimated_ms < float("inf"):
             rep = max(min(rep, int(max_benchmark_duration / estimated_ms)), 1)
 
         # Light memory warmup: flush the cache into a steady state before

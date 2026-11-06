@@ -72,6 +72,29 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
 
+    @parametrize("baseline_timing", (0.0, -1.0))
+    def test_non_positive_baseline_timing_is_invalid(self, baseline_timing):
+        tuner = CoordescTuner()
+        baseline_config = triton.Config({"XBLOCK": 1}, num_warps=8, num_stages=1)
+
+        def func(config):
+            return abs(config.kwargs["XBLOCK"] - 15)
+
+        best_config = tuner.autotune(func, baseline_config, baseline_timing)
+        self.assertEqual(best_config.kwargs["XBLOCK"], 16)
+
+    @parametrize("invalid_timing", (0.0, -1.0))
+    def test_non_positive_candidate_timing_does_not_win(self, invalid_timing):
+        tuner = CoordescTuner()
+        baseline_config = triton.Config({"XBLOCK": 4}, num_warps=8, num_stages=1)
+
+        def func(config):
+            xblock = config.kwargs["XBLOCK"]
+            return invalid_timing if xblock == 2 else xblock
+
+        best_config = tuner.autotune(func, baseline_config)
+        self.assertEqual(best_config.kwargs["XBLOCK"], 4)
+
     def test_reduction_blocks(self):
         tuner = CoordescTuner()
         for reduction_dim in range(3):
