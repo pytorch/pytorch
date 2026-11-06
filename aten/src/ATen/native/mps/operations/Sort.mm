@@ -712,7 +712,14 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)(const Tensor& self,
                                      bool descending,
                                      const Tensor& values,
                                      const Tensor& indices) {
-  sort_out_mps_impl(self, stable, dim, descending, values, indices);
+  if (indices.scalar_type() == kLong) {
+    sort_out_mps_impl(self, stable, dim, descending, values, indices);
+    return;
+  }
+  // Narrow out= indices: meta allowed them, but the Metal sort writes int64.
+  Tensor indices_long = at::empty_like(indices, indices.options().dtype(kLong));
+  sort_out_mps_impl(self, stable, dim, descending, values, indices_long);
+  indices.copy_(indices_long);
 }
 
 TORCH_IMPL_FUNC(topk_out_mps)
