@@ -1,67 +1,47 @@
 from __future__ import annotations
 
-import builtins
-import operator
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Literal, Self, TYPE_CHECKING
 
-from torch.distributed._transport._serialization import _WireDescriptor
+from .._api import _slice_range, _subrange
+from .._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
+    import builtins
+
     import torch
 
     from ._transport import MooncakeTransport
 
 
-def _subrange(size: int, offset: int | None, length: int | None) -> tuple[int, int]:
-    offset = 0 if offset is None else operator.index(offset)
-    length = size - offset if length is None else operator.index(length)
-    if not 0 <= offset <= size or not 0 <= length <= size - offset:
-        raise ValueError("view exceeds the registered memory")
-    return offset, length
-
-
-def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
-    if not isinstance(key, builtins.slice):
-        raise TypeError("expected a slice such as [a:b]")
-    start, stop, step = key.indices(size)
-    if step != 1:
-        raise ValueError("slice step must be 1")
-    return start, max(stop - start, 0)
-
-
-@dataclass(frozen=True)
-class _Endpoint(_WireDescriptor):
-    _backend = "mooncake.endpoint"
-    _fields = {"session": str, "segment": str}
-
-    session: str
-    segment: str
-
-
 @dataclass(frozen=True)
 class MooncakeRemoteBuffer(_WireDescriptor):
-    """Byte-range descriptor; exchange only through a trusted control plane."""
+    """A serializable descriptor for memory registered by a Mooncake peer.
+
+    Mooncake addresses peers by endpoint and reaches their registered segments
+    directly, so the descriptor carries no opaque per-buffer metadata blob. A
+    slice narrows ``address``/``length``; Mooncake resolves the sub-range to the
+    covering registered buffer.
+    """
 
     _backend = "mooncake"
     _fields = {
-        "session": str,
-        "segment": str,
+        "endpoint": str,
         "address": int,
         "length": int,
-        "generation": int,
+        "device_id": int,
+        "memory_type": str,
     }
 
-    session: str
-    segment: str
+    endpoint: str
     address: int
     length: int
-    generation: int = 0
+    device_id: int
+    memory_type: str
 
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
-        offset, length = _subrange(self.length, offset, length)
+        offset, length = _subrange(self.length, offset, length, "remote buffer")
         return replace(self, address=self.address + offset, length=length)
 
     def __getitem__(self, key: builtins.slice) -> Self:
@@ -74,18 +54,20 @@ class _Registration:
     storage: Any
     address: int
     length: int
+    device_id: int
+    memory_type: str
     active: bool = True
+    # Set when a transfer times out: Mooncake may still be accessing the memory.
+    pinned: bool = False
 
-    def check(self) -> None:
+    def ensure_active(self) -> None:
         if not self.active:
             raise RuntimeError("memory has been unregistered")
-        if self.tensor.data_ptr() != self.address or (
-            self.tensor.numel() * self.tensor.element_size() != self.length
-        ):
-            raise RuntimeError("registered tensor was resized or its storage replaced")
 
 
 class MooncakeMemoryView:
+    """A byte range in Mooncake-registered memory."""
+
     def __init__(self, memory: MooncakeMemory, offset: int, length: int) -> None:
         self._memory = memory
         self._offset = offset
@@ -95,8 +77,8 @@ class MooncakeMemoryView:
         return self._length
 
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
-        self._memory._registration.check()
-        offset, length = _subrange(self._length, offset, length)
+        self._memory._registration.ensure_active()
+        offset, length = _subrange(self._length, offset, length, "view")
         return type(self)(self._memory, self._offset + offset, length)
 
     def __getitem__(self, key: builtins.slice) -> Self:
@@ -104,10 +86,14 @@ class MooncakeMemoryView:
 
 
 class MooncakeMutableMemoryView(MooncakeMemoryView):
+    """A writable byte range in Mooncake-registered memory."""
+
     writable: Literal[True] = True
 
 
 class MooncakeMemory:
+    """A tensor registered with a Mooncake transport."""
+
     def __init__(
         self, transport: MooncakeTransport, registration: _Registration
     ) -> None:
@@ -115,10 +101,8 @@ class MooncakeMemory:
         self._registration = registration
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
-        self._registration.check()
-        capacity = self._registration.length
-        offset, length = _subrange(capacity, offset, length)
-        return offset, length
+        self._registration.ensure_active()
+        return _subrange(self._registration.length, offset, length)
 
     def to_view(
         self, offset: int | None = None, length: int | None = None
@@ -131,14 +115,6 @@ class MooncakeMemory:
         return MooncakeMutableMemoryView(self, *self._range(offset, length))
 
     def to_remote_buffer(self, *, timeout: float | None = None) -> MooncakeRemoteBuffer:
-        with self._transport._locked(timeout):
-            self._transport._ensure_open()
-            self._registration.check()
-            endpoint = self._transport._endpoint
-            return MooncakeRemoteBuffer(
-                endpoint.session,
-                endpoint.segment,
-                self._registration.address,
-                self._registration.length,
-                self._transport._generation,
-            )
+        return self._transport._call(
+            lambda: self._transport._remote_buffer(self._registration), timeout
+        )

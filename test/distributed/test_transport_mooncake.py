@@ -2,485 +2,401 @@
 
 import asyncio
 import ctypes
-import gc
-import sys
-import threading
-import tomllib
-import types
-import weakref
-from contextlib import contextmanager
-from datetime import timedelta
-from importlib.metadata import EntryPoint
-from pathlib import Path
+import os
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 
+from transport_test_utils import TransportTestMixin
+
 import torch
-from torch.distributed._transport import _registry, new_transport, wait_all
-from torch.distributed._transport.mooncake import MooncakeRemoteBuffer
-from torch.distributed._transport.mooncake._memory import _Endpoint
-from torch.distributed._transport.mooncake._work import _live_transports
+from torch.distributed._transport import new_transport, register_transport
+from torch.distributed._transport.mooncake import (
+    _transport as _mooncake,
+    MooncakeMemory,
+    MooncakeRemoteBuffer,
+    MooncakeTransport,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     TestCase,
 )
 
 
-class Operation:
-    def __init__(self, local, remote, length, read):
-        self.local, self.remote, self.length, self.read = (local, remote, length, read)
-        self.ready = False
-        self.error = ""
-        self.query_error = False
-        self.completed = False
-
-    def poll(self):
-        if self.query_error:
-            raise RuntimeError("status unavailable")
-        if self.ready and (not self.completed):
-            if not self.error:
-                dest, src = (
-                    (self.local, self.remote)
-                    if self.read
-                    else (self.remote, self.local)
-                )
-                ctypes.memmove(dest, src, self.length)
-            self.completed = True
-        return (self.completed, self.error if self.completed else "")
+class _Opcode:
+    Read = "READ"
+    Write = "WRITE"
 
 
-class Engine:
-    TransferOpcode = types.SimpleNamespace(Read=0, Write=1)
-    port = 12300
+class _Engine:
+    """In-process fake of mooncake.engine.TransferEngine.
+
+    Transfers copy bytes directly between the real process addresses of the
+    registered tensors, so the shared conformance assertions observe real data
+    movement without RDMA hardware. Like Mooncake, a transfer resolves ``peer``
+    to that engine and fails unless the local range is registered here and the
+    remote range is registered on the peer.
+    """
+
+    _next_port = 20000
+    _by_port: dict[int, "_Engine"] = {}
 
     def __init__(self):
-        Engine.port += 1
-        self.endpoint = f"127.0.0.1:{Engine.port}"
-        self.operations = []
-        self.registrations = {}
-        self.ready = False
-        self.unregister_error = False
-        self.refreshes = []
+        self._regions: dict[int, int] = {}
+        self._port = 0
+        self._next_batch = 0
+        self._failed: set[int] = set()
+        self.options = None
 
-    def initialize(self, *args):
-        self.init_args = args
+    def initialize(self, host, metadata_server, protocol, device_name):
+        self.options = (metadata_server, protocol, device_name)
+        type(self)._next_port += 1
+        self._port = type(self)._next_port
+        self._by_port[self._port] = self
         return 0
 
-    def get_endpoint(self):
-        return self.endpoint
+    def get_rpc_port(self):
+        return self._port
 
-    def refresh_remote(self, segment):
-        self.refreshes.append(segment)
-
-    def register_memory(self, address, length, location):
-        self.registrations[address] = length
+    def register_memory(self, address, length, location="*"):
+        if address in self._regions:
+            raise AssertionError("allocation registered twice")
+        self._regions[address] = length
         return 0
 
     def unregister_memory(self, address):
-        if self.unregister_error:
-            return -1
-        del self.registrations[address]
+        self._regions.pop(address, None)
         return 0
 
-    def submit_transfer(self, segment, local, remote, length, opcode):
-        operation = Operation(local, remote, length, opcode == 0)
-        operation.ready = self.ready
-        self.operations.append(operation)
-        return operation
+    def _covers(self, address, length):
+        return any(
+            start <= address and address + length <= start + size
+            for start, size in self._regions.items()
+        )
+
+    def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
+        self._next_batch += 1
+        target = self._by_port.get(int(peer.rpartition(":")[2]))
+        requests = list(zip(buffers, peer_buffers, lengths))
+        if target is None or not all(
+            self._covers(buffer, length) and target._covers(peer_buffer, length)
+            for buffer, peer_buffer, length in requests
+        ):
+            self._failed.add(self._next_batch)
+            return self._next_batch
+        for buffer, peer_buffer, length in requests:
+            if opcode == _Opcode.Write:
+                ctypes.memmove(peer_buffer, buffer, length)
+            else:
+                ctypes.memmove(buffer, peer_buffer, length)
+        return self._next_batch
+
+    def transfer_check_status(self, batch_id):
+        return -1 if batch_id in self._failed else 1
 
 
-def buffers(pair):
-    left, right = pair
-    source = torch.arange(16, dtype=torch.float32)
-    target = torch.zeros_like(source)
-    local = left.register_memory(source)
-    remote = right.register_memory(target)
-    descriptor = MooncakeRemoteBuffer.deserialize(remote.to_remote_buffer().serialize())
-    return (source, target, local, remote, descriptor)
+def _backend():
+    return SimpleNamespace(TransferEngine=_Engine, TransferOpcode=_Opcode)
 
 
-async def _next_loop_turn():
-    loop = asyncio.get_running_loop()
-    ready = loop.create_future()
-    loop.call_soon(ready.set_result, None)
-    await ready
-
-
-@contextmanager
-def _pair():
-    module = types.ModuleType("mooncake.engine")
-    module.TransferEngine = Engine
-    entry = EntryPoint(
-        name="mooncake",
-        value="torch.distributed._transport.mooncake:MooncakeTransport",
-        group="torch.distributed.transports",
-    )
-    with (
-        patch.dict(sys.modules, {"mooncake.engine": module}),
-        patch.object(_registry, "entry_points", return_value=[entry]),
-        patch.object(_registry, "_registered_transports", {}),
-    ):
-        left = new_transport("mooncake", "cpu", protocol="tcp", timeout=0.01)
-        right = new_transport("mooncake", "cpu", protocol="tcp", timeout=0.01)
-        left.connect(right.bind())
-        right.connect(left.bind())
-        try:
-            yield (left, right)
-        finally:
-            for owner in (left, right):
-                if owner._engine is not None:
-                    owner._engine.unregister_error = False
-                    for operation in owner._engine.operations:
-                        operation.query_error = False
-                        operation.ready = True
-                try:
-                    owner.close()
-                except RuntimeError:
-                    owner.close()
-            if left in _live_transports or right in _live_transports:
-                raise AssertionError("closed transports retained registrations")
-
-
-class TestMooncakeTransport(TestCase):
-    hw_classification = HardwareClassification.CPU
+class TestMooncakeTransport(TransportTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
-        self.pair = self.enterContext(_pair())
+        register_transport("mooncake", MooncakeTransport, replace=True)
+        self.addCleanup(_mooncake._pinned_registrations.clear)
 
-    def test_package_entrypoint(self):
-        config = tomllib.loads(
-            (Path(__file__).parents[2] / "pyproject.toml").read_text()
-        )
+    def make_transport_pair(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            first = new_transport("mooncake", host="127.0.0.1")
+            second = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        self.assertEqual(first.connect(second.bind()), 0)
+        self.assertEqual(second.connect(first.bind()), 0)
+        return first, second
+
+    def test_initialize_uses_p2p_handshake(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            transport = new_transport(
+                "mooncake", host="127.0.0.1", protocol="tcp", device_name="mlx5_0"
+            )
+        self.addCleanup(transport.close)
+        self.assertEqual(transport._engine.options, ("P2PHANDSHAKE", "tcp", "mlx5_0"))
+        self.assertTrue(transport._endpoint.startswith("127.0.0.1:"))
+
+    def test_ipv6_host_requires_mc_use_ipv6(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.dict(os.environ, {"MC_USE_IPV6": "1"}):
+                transport = new_transport("mooncake", host="::1")
+            self.addCleanup(transport.close)
+            self.assertTrue(transport._endpoint.startswith("[::1]:"))
+            with patch.dict(os.environ):
+                os.environ.pop("MC_USE_IPV6", None)
+                with self.assertRaises(RuntimeError) as ctx:
+                    new_transport("mooncake", host="::1")
+        self.assertIsInstance(ctx.exception.__cause__, ValueError)
+
+    def test_initialization_failure_raises(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.object(_Engine, "initialize", return_value=-1):
+                with self.assertRaises(RuntimeError):
+                    new_transport("mooncake")
+
+    def test_descriptor_roundtrip_excludes_metadata_blob(self):
+        descriptor = MooncakeRemoteBuffer("[::1]:20001", 4096, 64, 0, "DRAM")
+        restored = MooncakeRemoteBuffer.deserialize(descriptor.serialize())
+        self.assertEqual(descriptor, restored)
         self.assertEqual(
-            config["project"]["entry-points"]["torch.distributed.transports"][
-                "mooncake"
-            ],
-            "torch.distributed._transport.mooncake:MooncakeTransport",
+            set(MooncakeRemoteBuffer._fields),
+            {
+                "endpoint",
+                "address",
+                "length",
+                "device_id",
+                "memory_type",
+            },
         )
 
-    def test_read_write_offsets_and_no_nixl(self):
-        pair = self.pair
-        left, _ = pair
-        source, target, local, _, remote = buffers(pair)
-        left._engine.ready = True
-        self.assertEqual(left.write(local.to_view(offset=8, length=16), remote), 0)
-        self.assertEqual(target[:4], source[2:6])
-        target.fill_(42)
-        self.assertEqual(
-            left.read(local.to_mutable_view(offset=4, length=12), remote), 0
-        )
-        self.assertEqual(source[1:4], target[:3])
-        self.assertTrue(
-            not any(name == "nixl" or name.startswith("nixl.") for name in sys.modules)
-        )
-
-    def test_independent_work_handles_and_zero_length(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        first = left.write(local.to_view(), remote, async_op=True)
-        second = left.write(local.to_view(), remote, async_op=True)
-        self.assertIsNot(first._operation, second._operation)
-        second._operation.ready = True
-        self.assertTrue(second.wait())
-        self.assertTrue(not first.is_completed())
-        zero = left.write(local.to_view(length=0), remote, async_op=True)
-        self.assertEqual(zero.get_future().wait(), [])
-
-    def test_timeout_retains_work_tensor_and_rejects_early_unregister(self):
-        pair = self.pair
-        left, _ = pair
-        source, _, local, _, remote = buffers(pair)
-        tensor_ref = weakref.ref(source)
-        work = left.write(local.to_view(), remote, async_op=True)
-        with self.assertRaises(TimeoutError):
-            work.wait(timedelta(milliseconds=1))
-        with self.assertRaisesRegex(RuntimeError, "retained"):
-            left.unregister_memory(local)
-        work_ref = weakref.ref(work)
-        del work, source
-        gc.collect()
-        self.assertTrue(tensor_ref() is not None and work_ref() is not None)
-        self.assertIn(left, _live_transports)
-        left._engine.operations[0].ready = True
-        self.assertTrue(work_ref().wait())
-        left.unregister_memory(local)
-        with self.assertRaisesRegex(RuntimeError, "unregistered"):
-            local.to_view()
-
-    def test_alias_invalidation_and_overlapping_registration(self):
-        pair = self.pair
-        left, _ = pair
-        source, _, local, _, _ = buffers(pair)
-        alias = left.register_memory(source.view(-1))
-        self.assertIs(alias._registration, local._registration)
-        with self.assertRaisesRegex(ValueError, "overlapping"):
-            left.register_memory(source[1:])
-        left.unregister_memory(alias)
-        left.unregister_memory(local)
-        with self.assertRaisesRegex(RuntimeError, "unregistered"):
-            local.to_remote_buffer()
-        replacement = left.register_memory(source)
-        self.assertIsNot(replacement._registration, alias._registration)
-
-    def test_remote_registration_refresh(self):
-        pair = self.pair
-        left, right = pair
-        _, target, local, output, remote = buffers(pair)
-        left._engine.ready = True
-        left.write(local.to_view(), remote)
-        left.write(local.to_view(), remote)
-        self.assertEqual(len(left._engine.refreshes), 1)
-        right.unregister_memory(output)
-        replacement = right.register_memory(target)
-        fresh = replacement.to_remote_buffer()
-        self.assertGreater(fresh.generation, remote.generation)
-        left.write(local.to_view(), fresh)
-        self.assertEqual(len(left._engine.refreshes), 2)
-
-    @parametrize("tensor", [torch.empty(0), torch.zeros(4, 4).T])
-    def test_bad_tensor(self, tensor):
-        pair = self.pair
-        with self.assertRaisesRegex(ValueError, "contiguous"):
-            pair[0].register_memory(tensor)
-
-    def test_read_requires_mutable_view_and_valid_peer(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, other, remote = buffers(pair)
-        with self.assertRaisesRegex(TypeError, "writable"):
-            left.read(local.to_view(), remote)
+    def test_registration_reuse_and_validation(self):
+        first, _ = self.make_transport_pair()
+        tensor = torch.zeros(32, dtype=torch.uint8)
+        memory = first.register_memory(tensor)
+        self.assertIsInstance(memory, MooncakeMemory)
+        self.assertIs(memory._registration, first.register_memory(tensor)._registration)
+        with self.assertRaises(ValueError):
+            first.register_memory(torch.empty(0))
+        with self.assertRaises(ValueError):
+            first.register_memory(torch.zeros(4, 4).t())
         with self.assertRaises(TypeError):
-            left.write(other.to_view(), remote)
-        wrong = MooncakeRemoteBuffer(
-            "different-session", remote.segment, remote.address, remote.length
-        )
-        with self.assertRaisesRegex(ValueError, "connected peer"):
-            left.write(local.to_view(), wrong)
-        small = MooncakeRemoteBuffer(remote.session, remote.segment, remote.address, 1)
-        with self.assertRaisesRegex(ValueError, "capacity"):
-            left.write(local.to_view(), small)
-        with self.assertRaises(ValueError):
-            local.to_view(offset=-1)
-        with self.assertRaises(ValueError):
-            local.to_view(length=10000)
+            first.register_memory(None)
 
-    def test_resized_tensor_rejected(self):
-        pair = self.pair
-        left, _ = pair
-        source, _, local, _, remote = buffers(pair)
-        source.resize_(1)
-        with self.assertRaisesRegex(RuntimeError, "resized"):
-            left.write(local.to_view(), remote)
-
-    @parametrize("data", [b"{}", b'{"version":1,"version":1}', b"not-json", b"[]"])
-    def test_malformed_descriptor(self, data):
+    def test_transfer_to_unconnected_peer_rejected(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        stranger = MooncakeRemoteBuffer("[::1]:9", 0, 8, 0, "DRAM")
         with self.assertRaises(ValueError):
-            MooncakeRemoteBuffer.deserialize(data)
+            first.write(source.to_view(), stranger)
 
-    def test_descriptor_type_and_backend_validation(self):
-        pair = self.pair
-        left, _ = pair
-        with self.assertRaises(ValueError):
-            MooncakeRemoteBuffer.deserialize(left.bind())
-        with self.assertRaises(ValueError):
-            MooncakeRemoteBuffer("s", "e", True, 10).serialize()
-        with self.assertRaises(TypeError):
-            _Endpoint.deserialize("not-bytes")
-
-    def test_close_timeout_latches_shutdown_and_can_retry(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        work = left.write(local.to_view(), remote, async_op=True)
-        with self.assertRaises(TimeoutError):
-            left.close(timeout=0)
-        self.assertTrue(local._registration.active)
-        self.assertIn(left, _live_transports)
-        with self.assertRaisesRegex(RuntimeError, "closed"):
-            left.write(local.to_view(), remote)
-        work._operation.ready = True
-        left.close()
-        self.assertTrue(not local._registration.active)
-        left.close()
-
-    def test_failed_query_is_not_completion_and_failure_drains(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        work = left.write(local.to_view(), remote, async_op=True)
-        operation = work._operation
-        operation.query_error = True
-        self.assertTrue(not work.is_completed())
-        with self.assertRaises(TimeoutError):
-            work.wait(timedelta(milliseconds=1))
-        operation.query_error = False
-        operation.ready = True
-        with self.assertRaisesRegex(RuntimeError, "status unavailable"):
+    def test_connects_multiple_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            peers = [new_transport("mooncake", host="127.0.0.1") for _ in range(2)]
+        third, fourth = peers
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        self.assertEqual(first.connect(third.bind()), 0)
+        self.assertEqual(first._peers, {second._endpoint, third._endpoint})
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth), targets)
+        ]
+        works = [first.write(source.to_view(), r, async_op=True) for r in remotes[:2]]
+        for work in works:
             work.wait()
-        self.assertTrue(work.is_completed())
-        left.unregister_memory(local)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+        first.close()
+        self.assertFalse(first.connected())
+        self.assertEqual(first._peers, set())
 
-    def test_close_drains_after_terminal_error(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        first = left.write(local.to_view(), remote, async_op=True)
-        second = left.write(local.to_view(), remote, async_op=True)
-        first._operation.error = "transfer failed"
-        first._operation.ready = second._operation.ready = True
+    def test_transfers_reach_the_descriptor_peer(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            third = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(third.close)
+        first.connect(third.bind())
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(2)]
+        memories = [p.register_memory(t) for p, t in zip((second, third), targets)]
+        remotes = [memory.to_remote_buffer() for memory in memories]
+        first.write(source.to_view(), remotes[1])
+        self.assertEqual(targets[1], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[0].count_nonzero(), 0)
+        misrouted = replace(remotes[1], endpoint=remotes[0].endpoint)
+        targets[1].zero_()
         with self.assertRaisesRegex(RuntimeError, "transfer failed"):
-            left.close()
-        self.assertTrue(second.is_completed() and left._closed)
+            first.write(source.to_view(), misrouted)
+        self.assertEqual(targets[1].count_nonzero(), 0)
+        second.unregister_memory(memories[0])
+        with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+            first.write(source.to_view(), remotes[0])
+        self.assertEqual(targets[0].count_nonzero(), 0)
 
-    def test_cleanup_failure_retains_registration_for_retry(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, _ = buffers(pair)
-        left._engine.unregister_error = True
-        with self.assertRaisesRegex(RuntimeError, "unregistration"):
-            left.close()
-        self.assertTrue(local._registration.active and left in _live_transports)
-        left._engine.unregister_error = False
-        left.close()
+    def test_remote_slice_ranges(self):
+        _, second = self.make_transport_pair()
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual((part.address, part.length), (remote.address + 3, 2))
+        self.assertEqual(part.endpoint, remote.endpoint)
+        self.assertEqual(remote.slice(remote.length).length, 0)
 
-    def test_future_reentrancy(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        work = left.write(local.to_view(), remote, async_op=True)
-        work._operation.ready = True
-        future = work.get_future()
-        self.assertEqual(future.then(lambda _: work.get_future().wait()).wait(), [])
-
-    def test_async_progress_cancellation_and_close(self):
-        pair = self.pair
-
-        async def run():
-            left, _ = pair
-            _, target, local, _, remote = buffers(pair)
-            task = asyncio.create_task(left.write_async(local.to_view(), remote))
-            await _next_loop_turn()
-            task.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await task
-            self.assertEqual(len(left._pending), 1)
-            work = next(iter(left._pending.values()))
-            work._operation.ready = True
-            await wait_all([work])
-            self.assertEqual(target, torch.arange(16, dtype=torch.float32))
-            await left.close_async()
-            self.assertTrue(left._closed)
-
-        asyncio.run(run())
-
-    def test_async_close_timeout_and_cancellation_retain_resources(self):
-        pair = self.pair
-
-        async def run():
-            left, _ = pair
-            _, _, local, _, remote = buffers(pair)
-            work = left.write(local.to_view(), remote, async_op=True)
-            with self.assertRaises(TimeoutError):
-                await left.close_async(timeout=0)
-            self.assertTrue(left._closing and local._registration.active)
-            closer = asyncio.create_task(left.close_async(timeout=10))
-            await _next_loop_turn()
-            closer.cancel()
-            with self.assertRaises(asyncio.CancelledError):
-                await closer
-            self.assertTrue(local._registration.active)
-            work._operation.ready = True
-            await left.close_async()
-
-        asyncio.run(run())
-
-    def test_async_lock_contention_yields_to_event_loop(self):
-        pair = self.pair
-        left, _ = pair
-        _, _, local, _, remote = buffers(pair)
-        held, release = (threading.Event(), threading.Event())
-
-        def holder():
-            with left._lock:
-                held.set()
-                release.wait(5)
-
-        thread = threading.Thread(target=holder)
-        thread.start()
-        self.assertTrue(held.wait(5))
-
-        async def run():
-            asyncio.get_running_loop().call_soon(release.set)
-            left._engine.ready = True
-            await left.write_async(local.to_view(), remote, timeout=0.5)
-
-        try:
-            asyncio.run(run())
-        finally:
-            release.set()
-            thread.join(5)
-
-    @parametrize("timeout", [-1, float("nan"), float("inf")])
-    def test_invalid_timeout(self, timeout):
-        pair = self.pair
-        with self.assertRaises(ValueError):
-            pair[0].bind(timeout=timeout)
-
-    def test_multi_peer_and_idempotent_connect(self):
-        from torch.distributed._transport.mooncake import MooncakeTransport
-
-        left, right = self.pair
-        with MooncakeTransport("cpu", protocol="tcp") as third:
-            left.connect(third.bind())
-            left.connect(right.bind())
-            self.assertTrue(left.connected())
-            source = torch.arange(8, dtype=torch.float32)
-            local = left.register_memory(source)
-            outputs = [torch.zeros_like(source), torch.zeros_like(source)]
-            descriptors = [
-                owner.register_memory(output).to_remote_buffer()
-                for owner, output in zip((right, third), outputs)
-            ]
-            left._engine.ready = True
-            for descriptor in descriptors:
-                left.write(local.to_view(), descriptor)
-            for output in outputs:
-                self.assertEqual(output, source)
-            self.assertEqual(len(left._engine.refreshes), 2)
-
-    def test_nested_views_and_remote_slices(self):
-        left, _ = self.pair
-        source, target, local, _, remote = buffers(self.pair)
-        left._engine.ready = True
-        view = local.to_view()[4:28].slice(4, 8)
-        descriptor = MooncakeRemoteBuffer.deserialize(remote[12:20].serialize())
-        left.write(view, descriptor)
-        self.assertEqual(target[3:5], source[2:4])
-        target.fill_(17)
-        mutable = local.to_mutable_view()[8:24][-8:]
-        left.read(mutable, remote.slice(4, 8))
-        self.assertEqual(source[4:6], target[1:3])
-        self.assertEqual(local.to_view()[100:200].size(), 0)
-        self.assertEqual(remote[20:10].length, 0)
-        for value in (local.to_view(), remote):
-            with self.assertRaises(ValueError):
-                value.slice(-1)
-            with self.assertRaises(ValueError):
-                value.slice(0, 10000)
-            with self.assertRaises(ValueError):
-                value[::2]
-            with self.assertRaises(TypeError):
-                value[0]
-        left.unregister_memory(local)
+    def test_slice_unregistered_view(self):
+        first, _ = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        view = source.to_view()
+        first.unregister_memory(source)
         with self.assertRaisesRegex(RuntimeError, "unregistered"):
-            view.slice()
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
+    def test_unregister_then_use_fails(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        stale_view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaises(RuntimeError):
+            source.to_view()
+        with self.assertRaises(RuntimeError):
+            first.write(stale_view, remote)
+
+    def test_close_after_handled_failure_does_not_reraise(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        with patch.object(_Engine, "transfer_check_status", return_value=-1):
+            with self.assertRaises(RuntimeError):
+                first.write(source.to_view(), remote)
+        # The handled failure settled and was dropped; close must not resurface
+        # it, and a second close/__exit__ must stay a no-op.
+        self.assertEqual(first._pending, {})
+        first.close()
+        first.close()
+
+    def test_failed_transfer_fails_only_its_work(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            third = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(third.close)
+        first.connect(third.bind())
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        target = torch.zeros(8, dtype=torch.uint8)
+        dead = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        live = third.register_memory(target).to_remote_buffer()
+        with patch.object(_Engine, "transfer_check_status", return_value=-1):
+            with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+                first.write(source.to_view(), dead.to_remote_buffer())
+        first.write(source.to_view(), live)
+        self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
+        with patch.object(_Engine, "unregister_memory", return_value=0) as native:
+            first.unregister_memory(source)
+        native.assert_called_once_with(source._registration.address)
+
+    def test_timeout_status_pins_memory(self):
+        first, second = self.make_transport_pair()
+        timed_out = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        other = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        with patch.object(_Engine, "transfer_check_status", return_value=-2) as check:
+            with self.assertRaisesRegex(RuntimeError, "stays pinned"):
+                first.write(timed_out.to_view(), remote)
+        check.assert_called_once()
+        with self.assertRaisesRegex(RuntimeError, "pinned after a timed-out"):
+            first.write(timed_out.to_view(), remote)
+        first.write(other.to_view(), remote)
+        engine = first._engine
+        with patch.object(_Engine, "unregister_memory", return_value=0) as native:
+            first.unregister_memory(timed_out)
+            first.close()
+        native.assert_called_once_with(other._registration.address)
+        self.assertEqual(
+            _mooncake._pinned_registrations, [(engine, timed_out._registration)]
+        )
+
+    def test_connect_rejects_malformed_peer_url(self):
+        first, _ = self.make_transport_pair()
+        peers = set(first._peers)
+        for url in (b"", b"host", b"host:", b":1234", b"host:port", b"\xff:1"):
+            with self.assertRaisesRegex(ValueError, r"bind\(\) endpoint"):
+                first.connect(url)
+        self.assertEqual(first._peers, peers)
+        self.assertEqual(first.connect(b"[::1]:1234"), 0)
+
+    def test_close_async_after_handled_failure_does_not_reraise(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+
+        async def run():
+            with patch.object(_Engine, "transfer_check_status", return_value=-1):
+                with self.assertRaises(RuntimeError):
+                    await first.write_async(source.to_view(), remote)
+            self.assertEqual(first._pending, {})
+            await first.close_async()
+            await first.close_async()
+
+        asyncio.run(run())
 
 
-instantiate_parametrized_tests(TestMooncakeTransport)
+_RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
+
+
+@skipUnless(
+    _RUN_INTEGRATION and MooncakeTransport.supported(),
+    "set RUN_MOONCAKE_INTEGRATION=1 with a working Mooncake install to run",
+)
+class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+    protocol = os.environ.get("MOONCAKE_PROTOCOL", "rdma")
+
+    def make_transport_pair(self):
+        first = new_transport(
+            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
+        )
+        second = new_transport(
+            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
+        )
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        self.assertEqual(first.connect(second.bind()), 0)
+        self.assertEqual(second.connect(first.bind()), 0)
+        return first, second
+
+    def test_connects_multiple_peers(self):
+        first, second = self.make_transport_pair()
+        third = new_transport(
+            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
+        )
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = torch.arange(64, dtype=torch.uint8)
+        view = first.register_memory(source).to_view()
+        targets = [torch.zeros(64, dtype=torch.uint8) for _ in range(2)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third), targets)
+        ]
+        works = [
+            first.write(view[:32], remotes[0][16:48], async_op=True),
+            first.write(view[32:], remotes[1][:32], async_op=True),
+        ]
+        for work in works:
+            work.wait()
+        self.assertEqual(targets[0][16:48], source[:32])
+        self.assertEqual(targets[1][:32], source[32:])
+        self.assertEqual(targets[0][:16].count_nonzero(), 0)
+        self.assertEqual(targets[1][32:].count_nonzero(), 0)
+
 
 if __name__ == "__main__":
     run_tests()

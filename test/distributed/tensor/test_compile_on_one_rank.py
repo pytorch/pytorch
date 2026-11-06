@@ -34,6 +34,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._triton import has_triton
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -1237,6 +1238,33 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             )
             compiled(torch.randn(4, device=f"{device_type}:1"))
             self.assertEqual(cnt.frame_count, before + 1)
+
+    @requires_multigpu
+    @unittest.skipIf(not has_triton(), "requires triton")
+    def test_synchronize_indexless_device_uses_caller_device_without_coor(self):
+        # Outside CooR an index-less synchronize means the caller's current device.
+        # Inductor runs the call under a guard for the graph's device, so the index
+        # has to be resolved at trace time rather than by the runtime.
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            y = x + 1
+            torch.get_device_module(device_type).synchronize(torch.device(device_type))
+            return y + 2
+
+        torch._dynamo.reset()
+        with fresh_cache(), torch.accelerator.device_index(0):
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            x = torch.zeros(1, device=f"{device_type}:1")
+            synced = []
+            with patch.object(
+                torch._C, "_accelerator_synchronizeDevice", side_effect=synced.append
+            ):
+                compiled(x)
+                with torch.accelerator.device_index(1):
+                    compiled(x)
+
+        self.assertEqual(synced, [0, 1])
 
     # ---- inductor codegen and launcher must be device-agnostic across ranks ----
     # A device-derived factory + a reduction, so inductor emits a real kernel.

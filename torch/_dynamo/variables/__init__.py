@@ -160,7 +160,6 @@ from .misc import (
     LambdaVariable,
     NewGlobalVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,

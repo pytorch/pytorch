@@ -41,8 +41,10 @@ def _worker(rank, pipe, device_type, stream_mode):
     device = f"cuda:{rank}" if device_type == "cuda" else "cpu"
     with MooncakeTransport(
         device,
+        host="127.0.0.1",
         protocol=os.getenv("MOONCAKE_TEST_PROTOCOL", "tcp"),
     ) as transport:
+        checker.assertTrue(transport._managed, "requires managed Mooncake bindings")
         pipe.send_bytes(transport.bind())
         transport.connect(_receive(pipe))
         source = torch.arange(_NUMEL, dtype=torch.float32, device=device) + rank
@@ -153,8 +155,9 @@ def _multi_peer_worker(rank, connections):
     checker = TestCase()
     # Rank 0 reads from ranks 1 and 2 through one endpoint.
     with MooncakeTransport(
-        "cpu", protocol=os.getenv("MOONCAKE_TEST_PROTOCOL", "tcp")
+        "cpu", host="127.0.0.1", protocol=os.getenv("MOONCAKE_TEST_PROTOCOL", "tcp")
     ) as transport:
+        checker.assertTrue(transport._managed, "requires managed Mooncake bindings")
         tensor = torch.full((1024,), float(rank))
         memory = transport.register_memory(tensor)
         if rank == 0:

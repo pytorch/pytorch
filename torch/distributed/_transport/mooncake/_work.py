@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import asyncio
-import threading
-import time
+from concurrent.futures import Future as _ThreadFuture, TimeoutError as _ThreadTimeout
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.distributed import Work
-from torch.distributed._transport._work import _validate_timeout
+
+from .._work import _validate_timeout
 
 
 if TYPE_CHECKING:
@@ -16,94 +15,82 @@ if TYPE_CHECKING:
     from ._transport import MooncakeTransport
 
 
-# Exposed memory must survive even when Python callers drop the transport/Work.
-# Only explicit unregistration or successful close removes this retention root.
+# Registered memory can still receive remote DMA after the last local transfer.
+# Retain the owner until explicit unregister/close, not merely Work completion.
 _live_transports: set[MooncakeTransport] = set()
 
 
-class MooncakeWork(Work):
+class _MooncakeWork(Work):
+    """Completion handle for a transfer settled by the transport's poller.
+
+    A ``None`` future marks a zero-length no-op that is already complete.
+    """
+
     def __init__(
         self,
         transport: MooncakeTransport,
         local: MooncakeMemoryView,
         remote: MooncakeRemoteBuffer,
-        timeout: float,
+        future: _ThreadFuture[None] | None,
+        timeout: float | None,
     ) -> None:
         super().__init__()
+        _validate_timeout(timeout)
         self._transport = transport
         self._buffers = (local, remote)
+        self._future = future
         self._timeout = timeout
-        self._operation: Any = None
-        self._done = False
-        self._error: Exception | None = None
-        self._future: torch.futures.Future[Any] = torch.futures.Future()
-        self._future_lock = threading.Lock()
-        self._notified = False
-        self._progress: asyncio.Task[None] | None = None
+        self._result: torch.futures.Future[Any] = torch.futures.Future()
+        if future is None:
+            self._result.set_result([])
+        else:
+            future.add_done_callback(self._settle)
+
+    def _settle(self, future: _ThreadFuture[None]) -> None:
+        # Runs on the poller thread once the transfer settles.
+        error = future.exception()
+        if error is None:
+            self._result.set_result([])
+        else:
+            if not isinstance(error, Exception):
+                error = RuntimeError(str(error))
+            self._result.set_exception(error)
 
     def is_completed(self) -> bool:
-        owner = self._transport
-        if not owner._lock.acquire(blocking=False):
-            return False
-        try:
-            if not self._done:
-                try:
-                    done, error = self._operation.poll()
-                except Exception as error:
-                    # A query failure does not establish physical completion.
-                    self._error = error
-                    return False
-                if not done:
-                    return False
-                if error and self._error is None:
-                    self._error = RuntimeError(error)
-                self._operation = None
-                self._done = True
-                owner._pending.pop(id(self), None)
-        finally:
-            owner._lock.release()
-        with self._future_lock:
-            notify = not self._notified
-            self._notified = True
-        # Callbacks can re-enter Work methods; never notify under either lock.
-        if notify:
-            if self._error is None:
-                self._future.set_result([])
-            else:
-                self._future.set_exception(self._error)
-        return True
-
-    def wait(self, timeout: timedelta = timedelta(0)) -> bool:
-        seconds = timeout.total_seconds()
-        _validate_timeout(seconds)
-        deadline = time.monotonic() + (seconds or self._timeout)
-        while not self.is_completed():
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    "transport wait timed out; operation remains pending"
-                )
-            # The native handle offers polling only; bound CPU usage between queries.
-            time.sleep(0.001)
-        if self._error is not None:
-            raise self._error
-        return True
-
-    async def _drive(self) -> None:
-        while not self.is_completed():
-            await asyncio.sleep(0.001)
-
-    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
-        if not self.is_completed():
-            loop = asyncio.get_running_loop()
-            if self._progress is None or self._progress.done():
-                self._progress = loop.create_task(self._drive())
-        return self._future
+        return self._future is None or self._future.done()
 
     def is_success(self) -> bool:
-        return self.is_completed() and self._error is None
+        return self.is_completed() and self.exception() is None
 
-    def exception(self) -> Exception | None:
-        return self._error if self.is_completed() else None
+    def exception(self) -> BaseException | None:
+        if self._future is None or not self._future.done():
+            return None
+        return self._future.exception()
+
+    def wait(self, timeout: timedelta = timedelta(0)) -> bool:
+        if self._future is None:
+            return True
+        seconds = timeout.total_seconds()
+        _validate_timeout(seconds)
+        seconds = seconds or self._timeout
+        try:
+            # Raises the transfer's exception on failure; the transfer keeps
+            # running on timeout, so buffers must stay retained until it settles.
+            self._future.result(timeout=seconds)
+        except _ThreadTimeout:
+            raise TimeoutError(
+                "transport wait timed out; operation remains pending"
+            ) from None
+        finally:
+            # Settled transfers (success or failure) leave _pending here so a
+            # later close() does not revisit and re-raise an observed failure.
+            # A still-running transfer after a timeout stays pending.
+            if self._future.done():
+                self._transport._prune(id(self))
+        return True
+
+    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
+        return self._result
 
     def result(self) -> list[torch.Tensor]:
         self.wait()

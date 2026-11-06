@@ -1,7 +1,16 @@
-"""Experimental PyTorch 2.15 one-sided transport using Transfer Engine directly."""
-
-from ._memory import MooncakeRemoteBuffer
+from ._memory import (
+    MooncakeMemory,
+    MooncakeMemoryView,
+    MooncakeMutableMemoryView,
+    MooncakeRemoteBuffer,
+)
 from ._transport import MooncakeTransport
 
 
-__all__ = ["MooncakeRemoteBuffer", "MooncakeTransport"]
+__all__ = [
+    "MooncakeMemory",
+    "MooncakeMemoryView",
+    "MooncakeMutableMemoryView",
+    "MooncakeRemoteBuffer",
+    "MooncakeTransport",
+]
