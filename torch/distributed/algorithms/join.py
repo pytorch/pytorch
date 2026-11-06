@@ -136,6 +136,8 @@ class Join:
 
         throw_on_early_termination (bool): a flag controlling whether to throw an
             exception upon detecting uneven inputs (default: ``False``).
+            Must be ``True`` when AOTAutograd cross-rank cache synchronization
+            is enabled, since join hooks do not shadow compiler collectives.
 
     Example::
 
@@ -172,6 +174,15 @@ class Join:
     ):
         if len(joinables) == 0:
             raise ValueError("The join context manager requires at least one joinable")
+        if enable and not throw_on_early_termination:
+            from torch._functorch import config
+
+            if config._sync_cache_decision_cross_ranks:
+                raise RuntimeError(
+                    "Join requires throw_on_early_termination=True when "
+                    "_sync_cache_decision_cross_ranks is enabled. Join hooks "
+                    "do not shadow compiler synchronization collectives."
+                )
         self._joinables = joinables
         self._join_hooks = [
             joinable.join_hook(**kwargs) for joinable in self._joinables

@@ -444,6 +444,9 @@ _sync_decision_cross_ranks = False
 # SerializableAOTDispatchCompiler backend with local or remote caching on, so a rank that
 # differs on enable_autograd_cache, force_disable_caches, or the remote cache JustKnob
 # never joins the all_reduce and hangs the ranks that did.
+# Strict tangent layout variants synchronize their runtime hit/miss decisions too.
+# Enabled Join contexts must use throw_on_early_termination=True: their hooks cannot
+# shadow the compiler process group's collectives when a rank exhausts its inputs.
 _sync_cache_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.

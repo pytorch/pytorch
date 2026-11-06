@@ -44,6 +44,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_vals,
+    GuardOnDataDependentSymNode,
     statically_known_true,
 )
 from torch.fx.graph_module import GraphModule
@@ -2380,6 +2381,10 @@ def _aot_stage2b_bw_compile(
     - the placeholder list for the backward graph
     - the compiled backward function
     """
+    if aot_config.preserve_tangent_layout:
+        from .functional_utils import normalize_backward_views
+
+        normalize_backward_views(bw_module)
     with torch.no_grad():
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
@@ -2583,6 +2588,17 @@ def aot_stage2_autograd(
         aot_config,
         bw_compiler,
     )
+    backward_input_signature = None
+    if aot_config.preserve_tangent_layout and compiled_bw_func is not None:
+        from .runtime_wrappers import _backward_input_signature
+
+        try:
+            backward_input_signature = _backward_input_signature(
+                lazy_backward_info.placeholder_list
+            )
+        except GuardOnDataDependentSymNode:
+            # Data-dependent sizes are available only when the backward runs.
+            pass
 
     try_save_cache_entry, entry = _cache_autograd_info(
         aot_config,
@@ -2600,6 +2616,7 @@ def aot_stage2_autograd(
         num_symints_saved_for_bw,
         bw_module,
         min_cut_info_str,
+        backward_input_signature=backward_input_signature,
     )
 
     return _aot_stage2c_make_autograd_function(
@@ -2616,6 +2633,7 @@ def aot_stage2_autograd(
         entry,  # type: ignore[arg-type]
         _indices_of_inps_to_detach,
         num_symints_saved_for_bw,
+        backward_input_signature=backward_input_signature,
     )
 
 
@@ -2634,6 +2652,7 @@ def _aot_stage2c_make_autograd_function(
     entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
+    backward_input_signature: tuple[Any, ...] | None = None,
 ) -> DispatchReturn:
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -2657,6 +2676,7 @@ def _aot_stage2c_make_autograd_function(
         aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
+        backward_input_signature=backward_input_signature,
     )
     compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 
@@ -2696,6 +2716,7 @@ def _cache_autograd_info(
     num_symints_saved_for_bw: int,
     bw_module: torch.fx.GraphModule | None,
     min_cut_info_str: str | None,
+    backward_input_signature: tuple[Any, ...] | None = None,
 ) -> tuple[
     GenericAOTAutogradResult[Any, Any] | None,
     Callable[..., Any],
@@ -2724,6 +2745,7 @@ def _cache_autograd_info(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
+            backward_input_signature: tuple[Any, ...] | None = None,
         ) -> GenericAOTAutogradResult[Any, Any] | None:
             cache_info = aot_config.cache_info
 
@@ -2762,8 +2784,13 @@ def _cache_autograd_info(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
-                    serialized_bw_module=serialize_graph_module(bw_module),
+                    serialized_bw_module=serialize_graph_module(
+                        copy.deepcopy(bw_module)
+                        if aot_config.preserve_tangent_layout
+                        else bw_module
+                    ),
                     min_cut_info_str=min_cut_info_str,
+                    backward_input_signature=backward_input_signature,
                 )
                 AOTAutogradCache.save(
                     cache_info.cache_key,
@@ -2784,8 +2811,10 @@ def _cache_autograd_info(
                 bw_module,
                 fw_metadata,
                 aot_config,  # type: ignore[arg-type]
+                backward_input_signature=backward_input_signature,
             )
-            try_save_cache_entry = None
+            if not aot_config.preserve_tangent_layout:
+                try_save_cache_entry = None
 
     return try_save_cache_entry, entry  # type: ignore[return-value]
 
