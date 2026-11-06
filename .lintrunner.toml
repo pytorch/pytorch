@@ -1280,6 +1280,23 @@ command = [
 ]
 
 [[linter]]
+code = 'WORKFLOWDUP'
+include_patterns = [
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
+]
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.11',
+    '--script',
+    'tools/linter/adapters/workflow_duplicate_jobs_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'NO_WORKFLOWS_ON_FORK'
 include_patterns = [
     '.github/**/*.yml',
