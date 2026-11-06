@@ -718,7 +718,6 @@ XPU_EAGER_EQUIV_XFAILS = {
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "nn.functional.linear": {fp32},
-        "nn.functional.rms_norm": {fp32},
         "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
