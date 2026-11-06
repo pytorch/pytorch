@@ -538,6 +538,65 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_p2p_future_result(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        send_t = torch.full((4,), float(self.rank + 1), device=self.device)
+        recv_t = torch.full((4,), -1.0, device=self.device)
+        # The group is shared with later tests, so the window must not leak.
+        pg._start_coalescing(self.device)
+        try:
+            works = [
+                dist.isend(send_t, (self.rank + 1) % self.world_size),
+                dist.irecv(recv_t, (self.rank - 1) % self.world_size),
+            ]
+            # Not issued yet, so the sentinels' result is still pending.
+            pending = [not work.get_future_result().done() for work in works]
+        finally:
+            window = pg._end_coalescing(self.device)
+        # Taken once: Work.get_future_result() polls the work.
+        window_result = window.get_future_result()
+        self.assertEqual(pending, [True, True])
+        # Each op's sentinel completes with the batch, not before it.
+        for work in works:
+            result = WorkResult(work.get_future_result().wait())
+            self.assertEqual(result, WorkResult.SUCCESS)
+            self.assertTrue(window_result.done())
+        window.wait()
+        self.assertEqual(WorkResult(window_result.wait()), WorkResult.SUCCESS)
+        peer = (self.rank - 1) % self.world_size
+        self.assertEqual(recv_t, torch.full_like(recv_t, float(peer + 1)))
+
+        pg._start_coalescing(self.device)
+        empty = pg._end_coalescing(self.device)
+        self.assertEqual(
+            WorkResult(empty.get_future_result().wait()), WorkResult.SUCCESS
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_p2p_issue_error(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        # Non-contiguous: issuing the batch fails its contiguity check on every
+        # rank before any NCCL call.
+        send_t = torch.ones(4, 2, device=self.device).t()
+        pg._start_coalescing(self.device)
+        try:
+            work = dist.isend(send_t, (self.rank + 1) % self.world_size)
+        except BaseException:
+            pg._end_coalescing(self.device)
+            raise
+        with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
+            pg._end_coalescing(self.device)
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+        )
+        # The group is still usable.
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_shared_options_type(self) -> None:
         self.assertIs(dist.ProcessGroupNCCL2.Options, dist.ProcessGroupNCCL.Options)
         opts = dist.ProcessGroupNCCL2.Options()
