@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import inspect
 from typing import cast
 
 import torch
@@ -41,6 +42,7 @@ _backend_type_doc = """
 # Create an enum type, `BackendType`, with empty members.
 # Can't handle Function Enum API (mypy bug #9079)
 BackendType = enum.Enum(value="BackendType", names={})  # type: ignore[misc]
+_backend_type_classes = (BackendType,)
 # Unable to assign a function a method (mypy bug #2427)
 BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 
@@ -61,6 +63,35 @@ def backend_registered(backend_name):
     return backend_name in BackendType.__members__
 
 
+def _is_backend_type(backend):
+    return isinstance(backend, _backend_type_classes)
+
+
+def _can_bind_rpc_backend_options(signature, *args, **kwargs):
+    try:
+        signature.bind(*args, **kwargs)
+    except TypeError:
+        return False
+    return True
+
+
+def _can_construct_rpc_backend_options(backend):
+    handler = backend.value.construct_rpc_backend_options_handler
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return True
+    return _can_bind_rpc_backend_options(
+        signature,
+        rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
+        rpc_constants.DEFAULT_INIT_METHOD,
+    ) or _can_bind_rpc_backend_options(
+        signature,
+        rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
+        init_method=rpc_constants.DEFAULT_INIT_METHOD,
+    )
+
+
 def register_backend(
     backend_name, construct_rpc_backend_options_handler, init_backend_handler
 ):
@@ -75,7 +106,7 @@ def register_backend(
             `_init_rpc_backend()` function is called with a backend.
             This returns the agent.
     """
-    global BackendType
+    global BackendType, _backend_type_classes
     if backend_registered(backend_name):
         raise RuntimeError(f"RPC backend {backend_name}: already registered")
     # Create a new enum type, `BackendType`, with extended members.
@@ -91,6 +122,7 @@ def register_backend(
     )
     # Can't handle Function Enum API (mypy bug #9079)
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
+    _backend_type_classes += (BackendType,)
     # Unable to assign a function a method (mypy bug #2427)
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
@@ -105,9 +137,18 @@ def construct_rpc_backend_options(
     init_method=rpc_constants.DEFAULT_INIT_METHOD,
     **kwargs,
 ):
-    return backend.value.construct_rpc_backend_options_handler(
-        rpc_timeout, init_method, **kwargs
-    )
+    handler = backend.value.construct_rpc_backend_options_handler
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return handler(rpc_timeout, init_method, **kwargs)
+    if not _can_bind_rpc_backend_options(
+        signature, rpc_timeout, init_method, **kwargs
+    ) and _can_bind_rpc_backend_options(
+        signature, rpc_timeout=rpc_timeout, init_method=init_method, **kwargs
+    ):
+        return handler(rpc_timeout=rpc_timeout, init_method=init_method, **kwargs)
+    return handler(rpc_timeout, init_method, **kwargs)
 
 
 def init_backend(backend, *args, **kwargs):

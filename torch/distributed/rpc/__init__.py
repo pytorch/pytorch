@@ -80,15 +80,29 @@ if is_available():
 
     from . import api, backend_registry, functions
     from .api import *  # noqa: F403
-    from .backend_registry import BackendType
     from .options import TensorPipeRpcBackendOptions
     from .server_process_global_profiler import _server_process_global_profile
 
     rendezvous_iterator: Generator[tuple[Store, int, int], None, None]
 
+    _BACKEND_TYPE_NAME = "BackendType"
+
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
     # pyrefly: ignore [unresolvable-dunder-all]
     __all__ = __all__ + api.__all__ + backend_registry.__all__
+
+    def __getattr__(name: str):
+        if name == _BACKEND_TYPE_NAME:
+            return backend_registry.BackendType
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    def __dir__():
+        return sorted({*globals(), _BACKEND_TYPE_NAME})
+
+    def _canonicalize_backend(backend):
+        if not backend_registry._is_backend_type(backend):
+            return None
+        return backend_registry.BackendType[backend.name]
 
     def init_rpc(
         name,
@@ -126,10 +140,10 @@ if is_available():
                 are available.
         """
         torch._C._log_api_usage_once("torch.distributed.init_rpc")
-        if backend is not None and not isinstance(
-            backend, backend_registry.BackendType
-        ):
-            raise TypeError("Argument backend must be a member of BackendType")
+        if backend is not None:
+            backend = _canonicalize_backend(backend)
+            if backend is None:
+                raise TypeError("Argument backend must be a member of BackendType")
 
         if rpc_backend_options is not None and not isinstance(
             rpc_backend_options, RpcBackendOptions
@@ -140,15 +154,21 @@ if is_available():
 
         # Try to detect the backend from the options
         if backend is None and rpc_backend_options is not None:
-            for candidate_backend in BackendType:
-                if isinstance(
-                    rpc_backend_options,
-                    type(
-                        backend_registry.construct_rpc_backend_options(
-                            candidate_backend
-                        )
-                    ),
+            tensorpipe_backend = backend_registry.BackendType.TENSORPIPE
+            candidate_backends = (tensorpipe_backend,) + tuple(
+                candidate_backend
+                for candidate_backend in backend_registry.BackendType
+                if candidate_backend != tensorpipe_backend
+            )
+            for candidate_backend in candidate_backends:
+                if not backend_registry._can_construct_rpc_backend_options(
+                    candidate_backend
                 ):
+                    continue
+                candidate_options_type = type(
+                    backend_registry.construct_rpc_backend_options(candidate_backend)
+                )
+                if isinstance(rpc_backend_options, candidate_options_type):
                     backend = candidate_backend
                     break
             else:
@@ -156,7 +176,7 @@ if is_available():
                     f"Could not infer backend for options {rpc_backend_options}"
                 )
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
-            if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
+            if backend != tensorpipe_backend:
                 logger.warning(
                     "RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
                     "corresponding to %(backend)s, hence that backend will be used "
@@ -166,7 +186,7 @@ if is_available():
                 )
 
         if backend is None:
-            backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
+            backend = backend_registry.BackendType.TENSORPIPE
 
         if rpc_backend_options is None:
             # default construct a set of RPC backend options.
@@ -210,8 +230,13 @@ if is_available():
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
     def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
+        canonical_backend = _canonicalize_backend(backend)
+        if canonical_backend is None:
+            raise RuntimeError(
+                f"Argument {backend} must be of type {backend_registry.BackendType} "
+                f"but got type {type(backend)}"
+            )
         type_mapping = {
-            backend: backend_registry.BackendType,
             store: dist.Store,
             name: str,
             rank: numbers.Integral,
@@ -224,16 +249,21 @@ if is_available():
                 raise RuntimeError(
                     f"Argument {arg} must be of type {arg_type} but got type {type(arg)}"
                 )
+        return canonical_backend
 
     def _init_rpc_backend(
-        backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
+        backend=None,
         store=None,
         name=None,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
     ):
-        _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
+        if backend is None:
+            backend = backend_registry.BackendType.TENSORPIPE
+        backend = _validate_rpc_args(
+            backend, store, name, rank, world_size, rpc_backend_options
+        )
 
         if _is_current_rpc_agent_set():
             raise RuntimeError("RPC is already initialized")

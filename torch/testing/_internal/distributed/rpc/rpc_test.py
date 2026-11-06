@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import contextlib
+import enum
 import json
 import operator
 import os
@@ -101,6 +102,19 @@ DONE_FUTURE = concurrent.futures.Future()
 
 FIFTY_MIL_CYCLES = 50000000
 
+FIRST_STUB_BACKEND = "first_stub_backend"
+BACKEND_ARGUMENT_TYPE_ERROR = "must be of type"
+BACKEND_TYPE_ERROR = "Argument backend must be a member of BackendType"
+CUSTOM_OPTIONS_BACKEND = "custom_options_backend"
+FAILING_OPTIONS_BACKEND = "failing_options_backend"
+KEYWORD_OPTIONS_BACKEND = "keyword_options_backend"
+MISSING_RPC_ATTRIBUTE = "missing_rpc_attribute"
+MISSING_RPC_ATTRIBUTE_ERROR = "has no attribute"
+OPTIONS_CONSTRUCTOR_ERROR = "options constructor failed"
+PUBLIC_STUB_BACKEND = "public_stub_backend"
+SECOND_STUB_BACKEND = "second_stub_backend"
+REQUIRED_ARGS_BACKEND = "required_args_backend"
+
 _rpc_barrier_count = 0
 
 
@@ -127,6 +141,24 @@ class StubRpcAgent:
 
 def _stub_construct_rpc_backend_options_handler(**kwargs):
     return mock.Mock()  # RpcBackendOptions.
+
+
+def _required_args_construct_rpc_backend_options_handler(
+    rpc_timeout, init_method, required_argument
+):
+    return mock.Mock()  # RpcBackendOptions.
+
+
+def _custom_construct_rpc_backend_options_handler(rpc_timeout, init_method):
+    return FooBackendOptions(init_method)
+
+
+def _failing_construct_rpc_backend_options_handler(rpc_timeout, init_method):
+    raise TypeError(OPTIONS_CONSTRUCTOR_ERROR)
+
+
+def _keyword_construct_rpc_backend_options_handler(*, rpc_timeout, init_method):
+    return FooBackendOptions(init_method)
 
 
 def _stub_init_rpc_backend_handler(store, name, rank, world_size, rpc_backend_options):
@@ -1347,6 +1379,219 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
+
+    @mock.patch.object(torch.distributed.autograd, "_init")
+    @mock.patch.object(torch.distributed.rpc.api, "_set_and_start_rpc_agent")
+    @dist_init(setup_rpc=False)
+    def test_registered_backend_remains_usable_after_later_registration(
+        self, mock_rpc_agent, mock_dist_autograd_init
+    ):
+        first_backend = rpc.backend_registry.register_backend(
+            FIRST_STUB_BACKEND,
+            _stub_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        rpc.backend_registry.register_backend(
+            SECOND_STUB_BACKEND,
+            _stub_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+
+        validated_backend = rpc._validate_rpc_args(
+            first_backend,
+            dist.HashStore(),
+            worker_name(self.rank),
+            self.rank,
+            self.world_size,
+            self.rpc_backend_options,
+        )
+        self.assertIs(
+            validated_backend,
+            rpc.backend_registry.BackendType[FIRST_STUB_BACKEND],
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=first_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+    @dist_init(setup_rpc=False)
+    def test_public_backend_type_tracks_registration(self):
+        registered_backend = rpc.backend_registry.register_backend(
+            PUBLIC_STUB_BACKEND,
+            _stub_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+
+        from torch.distributed.rpc import BackendType
+
+        self.assertIs(BackendType, rpc.backend_registry.BackendType)
+        self.assertIs(BackendType[PUBLIC_STUB_BACKEND], registered_backend)
+        self.assertIn(BackendType.__name__, dir(rpc))
+        with self.assertRaisesRegex(AttributeError, MISSING_RPC_ATTRIBUTE_ERROR):
+            getattr(rpc, MISSING_RPC_ATTRIBUTE)
+
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_backend_default_tracks_registration(self):
+        rpc.backend_registry.register_backend(
+            PUBLIC_STUB_BACKEND,
+            _stub_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        store = dist.HashStore()
+        options = self.rpc_backend_options
+
+        with (
+            mock.patch.object(rpc.backend_registry, "init_backend") as init_backend,
+            mock.patch.object(rpc.api, "_init_rpc_states"),
+        ):
+            rpc._init_rpc_backend(
+                store=store,
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+        init_backend.assert_called_once_with(
+            rpc.backend_registry.BackendType.TENSORPIPE,
+            store=store,
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+    def test_validate_rpc_args_rejects_non_backend(self):
+        with self.assertRaisesRegex(RuntimeError, BACKEND_ARGUMENT_TYPE_ERROR):
+            rpc._validate_rpc_args(
+                rpc.BackendType.TENSORPIPE.name,
+                dist.HashStore(),
+                worker_name(self.rank),
+                self.rank,
+                self.world_size,
+                self.rpc_backend_options,
+            )
+
+    def test_backend_options_handler_without_signature_is_attempted(self):
+        backend = mock.Mock()
+        options = mock.Mock()
+        backend.value.construct_rpc_backend_options_handler.return_value = options
+        with mock.patch.object(
+            rpc.backend_registry.inspect, "signature", side_effect=ValueError
+        ):
+            self.assertTrue(
+                rpc.backend_registry._can_construct_rpc_backend_options(backend)
+            )
+            self.assertIs(
+                rpc.backend_registry.construct_rpc_backend_options(backend), options
+            )
+
+    def test_foreign_backend_enum_rejected(self):
+        foreign_backend_type = enum.Enum(
+            rpc.BackendType.__name__,
+            {
+                rpc.BackendType.TENSORPIPE.name: rpc.BackendType.TENSORPIPE.value,
+            },
+        )
+        with self.assertRaisesRegex(TypeError, BACKEND_TYPE_ERROR):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=foreign_backend_type.TENSORPIPE,
+            )
+
+    def test_infer_custom_backend_skips_required_args_backend(self):
+        custom_backend = rpc.backend_registry.register_backend(
+            CUSTOM_OPTIONS_BACKEND,
+            _custom_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        rpc.backend_registry.register_backend(
+            REQUIRED_ARGS_BACKEND,
+            _required_args_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        store = dist.HashStore()
+        options = FooBackendOptions(self.init_method)
+
+        with (
+            mock.patch.object(dist, "_create_store_from_options", return_value=store),
+            mock.patch.object(torch.distributed.autograd, "_init"),
+            mock.patch.object(rpc, "_set_profiler_node_id"),
+            mock.patch.object(rpc, "_init_rpc_backend") as init_rpc_backend,
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                rpc_backend_options=options,
+            )
+
+        args = init_rpc_backend.call_args.args
+        self.assertIs(args[0], rpc.backend_registry.BackendType[custom_backend.name])
+
+    def test_infer_backend_with_keyword_only_options_handler(self):
+        keyword_backend = rpc.backend_registry.register_backend(
+            KEYWORD_OPTIONS_BACKEND,
+            _keyword_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        store = dist.HashStore()
+        options = FooBackendOptions(self.init_method)
+
+        with (
+            mock.patch.object(dist, "_create_store_from_options", return_value=store),
+            mock.patch.object(torch.distributed.autograd, "_init"),
+            mock.patch.object(rpc, "_set_profiler_node_id"),
+            mock.patch.object(rpc, "_init_rpc_backend") as init_rpc_backend,
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                rpc_backend_options=options,
+            )
+
+        args = init_rpc_backend.call_args.args
+        self.assertIs(args[0], rpc.backend_registry.BackendType[keyword_backend.name])
+
+    def test_infer_backend_preserves_constructor_type_error(self):
+        rpc.backend_registry.register_backend(
+            FAILING_OPTIONS_BACKEND,
+            _failing_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        store = dist.HashStore()
+        options = FooBackendOptions(self.init_method)
+
+        with (
+            mock.patch.object(dist, "_create_store_from_options", return_value=store),
+            mock.patch.object(torch.distributed.autograd, "_init"),
+            mock.patch.object(rpc, "_set_profiler_node_id"),
+            mock.patch.object(rpc, "_init_rpc_backend"),
+            self.assertRaisesRegex(TypeError, OPTIONS_CONSTRUCTOR_ERROR),
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                rpc_backend_options=options,
+            )
+
+    def test_default_backend_uses_current_tensorpipe(self):
+        store = dist.HashStore()
+        with (
+            mock.patch.object(dist, "_create_store_from_options", return_value=store),
+            mock.patch.object(torch.distributed.autograd, "_init"),
+            mock.patch.object(rpc, "_set_profiler_node_id"),
+            mock.patch.object(rpc, "_init_rpc_backend") as init_rpc_backend,
+        ):
+            rpc.init_rpc(name=worker_name(self.rank), rank=self.rank)
+
+        args = init_rpc_backend.call_args.args
+        self.assertIs(args[0], rpc.backend_registry.BackendType.TENSORPIPE)
 
     @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
@@ -4572,6 +4817,25 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rank=self.rank,
             world_size=self.world_size,
             # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.TensorPipeAgent)
+
+    def test_infer_backend_with_required_args_backend_registered(self):
+        rpc.backend_registry.register_backend(
+            REQUIRED_ARGS_BACKEND,
+            _required_args_construct_rpc_backend_options_handler,
+            _stub_init_rpc_backend_handler,
+        )
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.init_method, _transports=tp_transports()
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,
         )
 
