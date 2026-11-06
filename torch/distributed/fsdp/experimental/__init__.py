@@ -30,6 +30,7 @@ import torch
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
+    _pad_and_reorder_by_rank,
 )
 
 
@@ -59,10 +60,9 @@ def all_gather_output_fn_with_native_copy(
     copy_outputs = outputs
     if all_gather_output.dtype == torch.uint8:
         copy_outputs = [output.view(torch.uint8) for output in outputs]
-    if any(
-        output.numel() != split_size * world_size
-        for output, split_size in zip(copy_outputs, split_sizes)
-    ):
+    numels = [output.numel() for output in copy_outputs]
+    gathered = [split_size * world_size for split_size in split_sizes]
+    if any(numel > n for numel, n in zip(numels, gathered)):
         _default_all_gather_output_fn(
             all_gather_output,
             outputs,
@@ -71,8 +71,20 @@ def all_gather_output_fn_with_native_copy(
             world_size=world_size,
         )
         return
+    output_inner_sizes = None
+    if numels != gathered:
+        # Outputs of unevenly sharded Shard(i), i > 0, parameters drop the
+        # padding in each of their rows
+        output_inner_sizes = [
+            numel // outer_size for numel, outer_size in zip(numels, outer_sizes)
+        ]
     torch.ops.fsdp._all_gather_copy_out_(
-        copy_outputs, all_gather_output, split_sizes, outer_sizes, world_size
+        copy_outputs,
+        all_gather_output,
+        split_sizes,
+        outer_sizes,
+        world_size,
+        output_inner_sizes=output_inner_sizes,
     )
 
 
@@ -88,20 +100,26 @@ def reduce_scatter_input_fn_with_native_copy(
     :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
     See the module documentation for the performance tradeoffs.
 
-    Contiguous nonzero-dimension shards copy directly into the collective buffer.
-    Noncontiguous gradients sharded on a nonzero dim use the existing
-    chunk-and-concatenate reorder.
+    Contiguous nonzero-dimension shards copy directly into the collective buffer,
+    which zero-pads uneven ones. Noncontiguous gradients sharded on a nonzero dim
+    take the default reorder.
     """
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim == 0:
                 continue
-            if unsharded_grads[i].is_contiguous():
+            grad = unsharded_grads[i]
+            if grad.is_contiguous():
                 num_leading_dims[i] = shard_dim
-            else:
-                chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
-                unsharded_grads[i] = torch.cat(chunks, dim=0)
+                continue
+            if grad.shape[shard_dim] % world_size:
+                unsharded_grads[i] = _pad_and_reorder_by_rank(
+                    grad, shard_dim, world_size
+                )
+                continue
+            chunks = torch.chunk(grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     def copy_in(output: torch.Tensor) -> None:
         torch.ops.fsdp.chunk_cat_mixed_dtype(
