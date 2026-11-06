@@ -50,6 +50,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_real_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
+    UnsupportedFakeTensorException,
     UnsupportedOperatorException,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -6152,13 +6153,129 @@ class TestCppFakeTensorModeBindings(TestCase):
             with unset_fake_temporarily():
                 self.assertIsNone(active_fake_mode())
 
+    def test_cpp_fake_tensor_mode_static_shapes(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        # Same default as FakeTensorMode: static without a ShapeEnv
+        self.assertTrue(CppFakeTensorMode().static_shapes)
+        self.assertTrue(self._make_mode()[0].static_shapes)
+        mode = CppFakeTensorMode(shape_env=ShapeEnv())
+        self.assertFalse(mode.static_shapes)
+        # It decides what from_tensor builds when not told
+        self.assertIsInstance(mode.from_tensor(torch.randn(4)).shape[0], torch.SymInt)
+        static = CppFakeTensorMode(shape_env=ShapeEnv(), static_shapes=True)
+        self.assertIsInstance(static.from_tensor(torch.randn(4)).shape[0], int)
+        # A symbolic_context picks the dynamic sizes, and conflicts with
+        # static_shapes
+        context = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+            constraint_sizes=[None, None],
+        )
+        dynamic = mode.from_tensor(torch.randn(4, 5), symbolic_context=context)
+        self.assertIsInstance(dynamic.shape[0], torch.SymInt)
+        self.assertIsInstance(dynamic.shape[1], int)
+        real = torch.randn(4, 5)
+        with self.assertRaisesRegex(AssertionError, "cannot set both"):
+            mode.from_tensor(real, static_shapes=True, symbolic_context=context)
+
+    def test_cpp_fake_tensor_mode_from_tensor(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        mode = CppFakeTensorMode()
+        real = torch.randn(2, 3)
+        # The conversion's own ops bypass the active mode
+        with mode:
+            fake = mode.from_tensor(real)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
+        self.assertEqual(fake.device, real.device)
+        self.assertEqual(fake.shape, real.shape)
+        # Memoized, and the mode's own fake is returned as is
+        self.assertIs(mode.from_tensor(real), fake)
+        self.assertIs(mode.from_tensor(fake), fake)
+
+        leaf = mode.from_tensor(torch.randn(2, requires_grad=True))
+        non_leaf = mode.from_tensor(torch.randn(2, requires_grad=True) * 2)
+        for t in (leaf, non_leaf):
+            self.assertIs(torch._C._maybe_get_fake_mode(t), mode)
+            self.assertEqual(t.device.type, "cpu")
+            self.assertTrue(t.requires_grad)
+        self.assertTrue(leaf.is_leaf)
+        self.assertFalse(non_leaf.is_leaf)
+
+    def test_cpp_fake_tensor_mode_from_tensor_constants(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, maybe_get_item_memo
+
+        mode = CppFakeTensorMode()
+        real = torch.ones(2)
+        converter = mode.fake_tensor_converter
+        const = converter.from_real_tensor(mode, real, make_constant=True)
+        self.assertIs(torch._C._get_fake_constant(const), real)
+        # A 0-d CPU tensor converted without a ShapeEnv memoizes its value
+        scalar = mode.from_tensor(torch.tensor(3))
+        self.assertEqual(maybe_get_item_memo(scalar), 3)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_cpp_fake_tensor_mode_from_mkldnn(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        with self.assertRaisesRegex(UnsupportedFakeTensorException, "mkldnn"):
+            CppFakeTensorMode().from_tensor(torch.randn(2).to_mkldnn())
+
+    def test_cpp_fake_tensor_mode_in_kernel_invocation(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        mode = CppFakeTensorMode()
+        real = torch.randn(4)
+        fake = mode.from_tensor(real)
+        with in_kernel_invocation_manager(mode):
+            self.assertTrue(torch._C._in_kernel_invocation())
+            self.assertTrue(torch._C._meta_in_tls_dispatch_include())
+            self.assertEqual(fake.device.type, "meta")
+            with in_kernel_invocation_manager(mode):
+                pass
+            # The inner exit leaves the outer state in place
+            self.assertTrue(torch._C._in_kernel_invocation())
+            self.assertTrue(torch._C._meta_in_tls_dispatch_include())
+            self.assertEqual(fake.device.type, "meta")
+        self.assertFalse(torch._C._in_kernel_invocation())
+        self.assertFalse(torch._C._meta_in_tls_dispatch_include())
+        self.assertEqual(fake.device.type, "cpu")
+        # As for a Python mode, a leaked Meta TLS include is caught on entry
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            with self.assertRaisesRegex(AssertionError, "True, False"):
+                with in_kernel_invocation_manager(mode):
+                    pass
+        # Unlike for a Python mode, the thread-local flag may already be set
+        # without the Meta include, by a bare _InKernelInvocation
+        with torch._C._InKernelInvocation():
+            with in_kernel_invocation_manager(mode):
+                self.assertEqual(fake.device.type, "meta")
+            self.assertFalse(torch._C._meta_in_tls_dispatch_include())
+
+        # The converter sets the storage, under in_kernel_invocation_manager, of
+        # a tensor that is not a view but shares an already converted storage,
+        # or whose storage offset or strides a fresh tensor cannot reproduce
+        alias = torch.empty(0).set_(real.untyped_storage(), 0, (2,), (1,))
+        strided = torch.empty(0).set_(torch.empty(8).untyped_storage(), 2, (2,), (2,))
+        for t in (alias, strided):
+            fake_t = mode.from_tensor(t)
+            self.assertEqual(fake_t.device.type, "cpu")
+            self.assertEqual(fake_t.shape, t.shape)
+            self.assertEqual(fake_t.stride(), t.stride())
+            self.assertEqual(fake_t.storage_offset(), t.storage_offset())
+        storage = mode.from_tensor(alias).untyped_storage()
+        self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
+
     @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
         self.addCleanup(self._restore_fake_mode_state)
         shape_env = ShapeEnv()
-        mode = CppFakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
+        mode = CppFakeTensorMode(
+            shape_env=shape_env, allow_non_fake_inputs=True, static_shapes=True
+        )
         cpp_mode, converter = mode._cpp_mode, mode.fake_tensor_converter
         stack = mode.stack
         mode.epoch += 2
@@ -6178,6 +6295,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(rebuilt.shape_env, shape_env)
         self.assertEqual(rebuilt.epoch, epoch)
         self.assertTrue(rebuilt.allow_non_fake_inputs)
+        self.assertTrue(rebuilt.static_shapes)
         self.assertEqual(rebuilt.stack, stack)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
         with rebuilt:

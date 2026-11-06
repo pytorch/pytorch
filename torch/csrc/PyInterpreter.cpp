@@ -1414,8 +1414,8 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       "infer_fake_from_real_out");
 }
 
-// Convert a real tensor to a meta tensor via the mode's converter, then stamp
-// it as a C++ fake on the real tensor's device.
+// Convert a real tensor to a C++ fake of the active mode through the mode's
+// converter (FakeTensorConverter.from_real_tensor).
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
