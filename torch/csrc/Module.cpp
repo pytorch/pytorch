@@ -3095,6 +3095,19 @@ Call this whenever a new thread is created in order to propagate values from
           [](c10::FakeTensorMode& mode, uint64_t value) {
             mode.epoch_ = value;
           })
+      .def_property(
+          "_stack_trace",
+          [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.stack_trace_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.stack_trace_->ptr(getPyInterpreter()));
+          },
+          [](c10::FakeTensorMode& mode, const py::object& value) {
+            mode.stack_trace_ = std::make_shared<c10::SafePyObject>(
+                value.inc_ref().ptr(), getPyInterpreter());
+          })
       .def_property_readonly(
           "fake_tensor_converter",
           [](const c10::FakeTensorMode& mode) -> py::object {

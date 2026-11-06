@@ -249,6 +249,10 @@ struct C10_API FakeTensorMode {
   // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
   // only getCppFakeTensorModePyObj accesses it, under a lock.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  // Where the mode's Python wrapper was created (CppFakeTensorMode.stack, a
+  // traceback.StackSummary). Kept here rather than on the wrapper so that a
+  // rebuilt wrapper still reports it. Set once, when the wrapper is created.
+  std::shared_ptr<c10::SafePyObject> stack_trace_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
