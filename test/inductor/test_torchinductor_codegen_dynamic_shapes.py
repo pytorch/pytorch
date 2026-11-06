@@ -19,8 +19,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    HAS_CPU,
     HAS_GPU,
+    RUN_CPU,
 )
 
 
@@ -559,7 +559,7 @@ class DynamicShapesCodegenTestCase(TestCase):
         return self.device_type
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
         hw_classification = HardwareClassification.CPU
@@ -771,5 +771,5 @@ if not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or HAS_GPU:
         run_tests(needs="filelock")

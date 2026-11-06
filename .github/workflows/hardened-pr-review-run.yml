@@ -8,11 +8,13 @@ name: In Progress PR Review Run
 #
 #   prepare  authenticate the Stage-1 artifact, re-derive pr_number/base_sha,
 #            fetch the PR conversation
-#   announce marks the newest automated review in progress (GITHUB_TOKEN with
-#            pull-requests: write only; no AWS, no environment, no PR code)
+#   announce marks the newest automated review in progress, or says the PR is
+#            too large to review (GITHUB_TOKEN with pull-requests: write only;
+#            no AWS, no environment, no PR code)
 #   review   reads UNTRUSTED code; Bedrock + PutObject on the trace prefix only
-#   publish  verdict JSON -> S3, then posts it as a PR review, or puts back the
-#            review `announce` marked; never runs PR code
+#   publish  verdict JSON -> S3, then posts it as a PR review (the too-large
+#            notice when `review` found the diff over MAX_DIFF_BYTES), or puts
+#            back the review `announce` marked; never runs PR code
 #
 # Nothing here changes a label. Dr. CI reads the verdict row and decides
 # `ready for review` from it together with CI status.
@@ -535,11 +537,12 @@ jobs:
 
   announce:
     needs: prepare
-    # Marks the PR's newest automated review in progress, so its verdict is not
-    # read as current while this run reviews. `publish` replaces it or puts it
-    # back. Same condition as `review`. GITHUB_TOKEN only: no environment, no
-    # AWS role, no pull-request code.
-    if: needs.prepare.outputs.fresh == 'true' && needs.prepare.outputs.too_large != 'true'
+    # Tells the PR what this run is doing. On a run that reviews, marks the
+    # newest automated review in progress, so its verdict is not read as
+    # current; `publish` replaces it or puts it back. On a PR over the file
+    # cap, posts the too-large notice, since `review` and `publish` stand down.
+    # GITHUB_TOKEN only: no environment, no AWS role, no pull-request code.
+    if: needs.prepare.outputs.fresh == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -553,6 +556,7 @@ jobs:
           persist-credentials: false
 
       - name: Mark the previous automated review in progress
+        if: needs.prepare.outputs.too_large != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -561,6 +565,18 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
         run: python3 scripts/pr_review/post_review.py --mark-pending
+
+      # The diff-size half of the gate is only known in `review`; `publish`
+      # posts the same notice for that path from its `skipped_too_large` row.
+      - name: Say the PR is too large to review
+        if: needs.prepare.outputs.too_large == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+          OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
+        run: python3 scripts/pr_review/post_review.py --too-large
 
   review:
     needs: prepare
@@ -1337,7 +1353,8 @@ jobs:
             "s3://${S3_BUCKET}/${S3_PREFIX}/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_terminal.json"
 
       - name: Post the automated review on the PR
-        # Posts the verdict as a GitHub review and hides the previous one.
+        # Posts the verdict, or the too-large notice on a `skipped_too_large`
+        # row, as a GitHub review and hides the previous one.
         # Runs after the terminal row is in S3, so a posting failure cannot cost telemetry.
         # See the docstring of post_review.py.
         env:
