@@ -221,8 +221,8 @@ class DeviceInterface:
     def allow_tf32() -> bool:
         """Whether the backend permits MM templates to set ALLOW_TF32.
 
-        CUDA applies an additional shape threshold at the call site. bmm,
-        tl.dot input precision, and device TFLOPS do not use this method.
+        CUDA applies an additional shape threshold at the call site. tl.dot
+        input precision and device TFLOPS do not use this method.
         """
         return False
 
