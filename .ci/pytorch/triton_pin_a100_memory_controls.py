@@ -35,6 +35,15 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+def extract_wheel(wheel, destination):
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(destination)
+        for member in archive.infolist():
+            mode = (member.external_attr >> 16) & 0o777
+            if mode:
+                (destination / member.filename).chmod(mode)
+
+
 REPORT.mkdir(parents=True, exist_ok=True)
 DEBUG.mkdir(parents=True, exist_ok=True)
 native_wheels = list((WORKSPACE / "dist").rglob("*.whl"))
@@ -43,8 +52,7 @@ if len(torch_wheels) != 1 or "gitf8b01c4" not in torch_wheels[0].name:
     raise RuntimeError(f"Wrong native artifact: {torch_wheels}")
 native_packages = []
 for wheel in native_wheels:
-    with zipfile.ZipFile(wheel) as archive:
-        archive.extractall(NATIVE)
+    extract_wheel(wheel, NATIVE)
     native_packages.append({"wheel": wheel.name, "sha256": digest(wheel)})
 
 sources = [
@@ -79,8 +87,7 @@ for phase, pin in PINS.items():
     if len(wheels) != 1 or digest(wheels[0]) != pin["wheel_sha256"]:
         raise RuntimeError(f"Wrong complete {phase} Triton wheel: {wheels}")
     package = DEBUG / phase / "triton-site"
-    with zipfile.ZipFile(wheels[0]) as archive:
-        archive.extractall(package)
+    extract_wheel(wheels[0], package)
     metadata = list(package.glob("*.dist-info"))
     if len(metadata) != 1 or pin["short"] not in Distribution.at(metadata[0]).version:
         raise RuntimeError(f"Wrong package metadata: {metadata}")
@@ -149,6 +156,7 @@ compiler.compile = triton.compiler.compile = triton.compile = traced_compile
     environment["TORCH_CUSTOM_PYTHONPATH"] = environment["PYTHONPATH"]
     preflight = """import json, os, pathlib, subprocess, torch, torchvision, triton
 from triton._C import libtriton
+from triton.backends.nvidia.compiler import get_ptxas
 from torch._inductor.utils import python_subprocess_env
 worker_pythonpath = python_subprocess_env()["PYTHONPATH"]
 if worker_pythonpath != os.environ["PYTHONPATH"]:
@@ -158,11 +166,16 @@ if "A100" not in gpu or "sm_80" not in torch.cuda.get_arch_list():
     raise RuntimeError("Original A100/native architecture mismatch")
 if torch.version.cuda != "13.2" or torch.backends.cudnn.version() != 92700:
     raise RuntimeError("Original CUDA/cuDNN stack mismatch")
+ptxas = pathlib.Path(get_ptxas(80).path)
+if not ptxas.resolve().is_relative_to(pathlib.Path(triton.__file__).parent.resolve()):
+    raise RuntimeError("Assembler escaped its complete Triton SDK")
+ptxas_version = subprocess.check_output([str(ptxas), "--version"], text=True)
 print(json.dumps(dict(torch_sha=torch.version.git_version, cuda=torch.version.cuda,
  cudnn=torch.backends.cudnn.version(), gpu=gpu, arches=torch.cuda.get_arch_list(),
  torch_package=torch.__file__, torchvision_package=torchvision.__file__,
  torchvision_version=torchvision.__version__, triton_package=triton.__file__,
  triton_native=libtriton.__file__, compiler_subprocess_pythonpath=worker_pythonpath,
+ ptxas_path=str(ptxas), ptxas_version=ptxas_version,
  config=torch.__config__.show(),
  nvidia_smi=subprocess.check_output(["nvidia-smi"], text=True)), indent=2))
 """
