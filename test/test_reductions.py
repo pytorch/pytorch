@@ -2602,6 +2602,23 @@ class TestReductionsDevice(TestCase):
 
     @onlyAccelerator
     @serialTest()
+    @largeTensorTest("4GB")
+    def test_reductions_many_short_rows(self, device):
+        # A simdgroup or threadgroup per row puts over 2**32 threads in the grid
+        rows = (1 << 27) + 8
+        x = torch.zeros(rows, 2, dtype=torch.int8, device=device)
+        x[:, 1] = 1
+        r = x.argmax(1)
+        self.assertEqual((r.amin().item(), r.amax().item()), (1, 1))
+        del x, r
+        y = torch.zeros(rows, 4, dtype=torch.int8, device=device)
+        y[:, 2] = 7
+        v = y[:, ::2]  # strided, so it is reduced by the generic kernels
+        for r, want in ((v.amax(1), 7), (v.sum(1), 7), (v.argmax(1), 1)):
+            self.assertEqual((r.amin().item(), r.amax().item()), (want, want))
+
+    @onlyAccelerator
+    @serialTest()
     @largeMPSBufferTest("9GB")
     @largeTensorTest("9GB")
     def test_var_mean_above_uint32(self, device):
