@@ -35,7 +35,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .ops_handler import DefaultHandler
 from .sizevars import statically_known_true
-from .utils import generate_assert, is_linear_indexing
+from .utils import generate_assert, is_affine_indexing
 from .virtualized import V
 
 
@@ -384,7 +384,7 @@ class IndexPropagation(DefaultHandler):
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)
-            if not config.avoid_modular_indexing or is_linear_indexing(expr):
+            if not config.avoid_modular_indexing or is_affine_indexing(expr):
                 if generate_assert(check):
                     self.fallback(
                         "check_bounds",
