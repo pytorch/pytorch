@@ -18,6 +18,8 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -256,6 +258,31 @@ class TestSubprocess(TestCase):
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
             self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
+
+    @requires_gpu()
+    @requires_triton()
+    @torch._inductor.config.patch(
+        {
+            "triton.mix_order_reduction": True,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+        }
+    )
+    def test_mix_order_reduction(self):
+        # The mix-order kernel combines its partial sums outside of any
+        # LoopBody, where V.interpreter is the default NullHandler.
+        from torch._inductor.compile_fx_subproc import _SubprocessFxCompile
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(32768, 768, device=GPU_TYPE)
+        act, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(f(x), act, atol=1e-3, rtol=1e-3)
+        self.assertEqual(
+            FxCompile._compile_stats[_SubprocessFxCompile].codegen_and_compile, 1
+        )
+        FileCheck().check("Call mix order reduction kernel").run(code)
 
 
 if RUN_CPU:

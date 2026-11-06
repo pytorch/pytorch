@@ -83,6 +83,7 @@ class _VirtualizedSerializer:
     ops: object = None
     kernel: object = None
     current_node: object = None
+    interpreter: object = None
 
     @classmethod
     def serialize(cls) -> _VirtualizedSerializer:
