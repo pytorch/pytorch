@@ -99,7 +99,12 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _disable_current_modes,
+    _get_current_dispatch_mode,
+    BaseTorchDispatchMode,
+    TorchDispatchMode,
+)
 
 
 aten = torch.ops.aten
@@ -5506,6 +5511,12 @@ class TestCppFakeTensorModeBindings(TestCase):
     def _make_mode(self, shape_env=None):
         return _make_cpp_mode(shape_env)
 
+    def _installed(self):
+        return (
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+            torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.Fake),
+        )
+
     def test_create(self):
         mode, wrapper = self._make_mode()
         self.assertIs(wrapper._cpp_mode, mode)
@@ -5695,6 +5706,166 @@ class TestCppFakeTensorModeBindings(TestCase):
             make_fake(mode).data_ptr()
         with self.assertWarnsOnceRegex(UserWarning, warning):
             fake.data_ptr()
+
+    def test_fake_dispatch_mode_slot(self):
+        _, wrapper = self._make_mode()
+        fake = torch._C._TorchDispatchModeKey.FAKE
+
+        self.assertEqual(self._installed(), (None, False))
+        with self.assertRaisesRegex(RuntimeError, "no _cpp_mode or _mode_key"):
+            torch._C._set_dispatch_mode(object())
+
+        class NullCppMode:
+            _cpp_mode = None
+
+        with self.assertRaisesRegex(RuntimeError, "_cpp_mode is None"):
+            torch._C._set_dispatch_mode(NullCppMode())
+        # A C++ mode and a Python FakeTensorMode cannot both be installed
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        try:
+            with python_mode:
+                msg = "Python FakeTensorMode is set"
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch._C._set_dispatch_mode(wrapper)
+            self.assertEqual(self._installed(), (None, False))
+            torch._C._set_dispatch_mode(wrapper)
+            self.assertEqual(self._installed(), (wrapper, True))
+            _, other_wrapper = self._make_mode()
+            with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                torch._C._set_dispatch_mode(other_wrapper)
+            msg = r"C\+\+ FakeTensorMode is set"
+            for install in (
+                torch._C._set_dispatch_mode,
+                torch._C._push_on_torch_dispatch_stack,
+            ):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    install(python_mode)
+            self.assertEqual(self._installed(), (wrapper, True))
+            # Only the FAKE key sees it, and the mode stack does not
+            proxy = torch._C._TorchDispatchModeKey.PROXY
+            self.assertIsNone(torch._C._get_dispatch_mode(proxy))
+            self.assertIsNone(torch._C._unset_dispatch_mode(proxy))
+            self.assertEqual(torch._C._len_torch_dispatch_stack(), 0)
+            self.assertEqual(self._installed(), (wrapper, True))
+            self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
+            self.assertEqual(self._installed(), (None, False))
+            self.assertIsNone(torch._C._unset_dispatch_mode(fake))
+        finally:
+            # A rejection that regressed can leave both a Python and a C++ mode
+            # installed, which _unset_dispatch_mode rejects, so the Python one
+            # is popped first. The wrappers are still alive, so unsetting does
+            # not rebuild them.
+            if torch._C._get_dispatch_mode(fake) is python_mode:
+                torch._C._pop_torch_dispatch_stack(fake)
+            torch._C._unset_dispatch_mode(fake)
+        self.assertEqual(self._installed(), (None, False))
+
+    @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its wrapper")
+    def test_failed_unset_keeps_mode(self):
+        # Unsetting a mode whose wrapper was collected rebuilds the wrapper; if
+        # that fails, the mode stays installed
+        mode, wrapper = self._make_mode()
+        fake = torch._C._TorchDispatchModeKey.FAKE
+        torch._C._set_dispatch_mode(wrapper)
+        del wrapper
+        gc.collect()
+
+        class Unrebuildable:
+            @classmethod
+            def _from_cpp_mode(cls, *args):
+                raise RuntimeError("rebuild failed")
+
+        class Rebuildable:
+            @classmethod
+            def _from_cpp_mode(cls, cpp_mode, *args):
+                self = cls()
+                self._cpp_mode = cpp_mode
+                return self
+
+        ft = torch._subclasses.fake_tensor
+        try:
+            with patch.object(ft, "CppFakeTensorMode", Unrebuildable, create=True):
+                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
+                    torch._C._get_dispatch_mode(fake)
+                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
+                    torch._C._unset_dispatch_mode(fake)
+                # _disable_current_modes pushes the Python modes it popped back
+                # even when unsetting the C++ mode fails
+                with BaseTorchDispatchMode() as py_mode:
+                    with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
+                        with _disable_current_modes():
+                            pass
+                    self.assertIs(_get_current_dispatch_mode(), py_mode)
+            installed = torch._C._dispatch_tls_is_dispatch_key_included(
+                torch._C.DispatchKey.Fake
+            )
+        finally:
+            with patch.object(ft, "CppFakeTensorMode", Rebuildable, create=True):
+                try:
+                    got = torch._C._get_dispatch_mode(fake)
+                    # Suspending and restoring goes through the rebuilt wrapper
+                    with unset_fake_temporarily():
+                        suspended = self._installed()
+                    restored = self._installed()
+                finally:
+                    unset = torch._C._unset_dispatch_mode(fake)
+        self.assertTrue(installed)
+        self.assertIsInstance(got, Rebuildable)
+        self.assertIs(got._cpp_mode, mode)
+        self.assertEqual(suspended, (None, False))
+        self.assertEqual(restored, (got, True))
+        self.assertIs(unset, got)
+        self.assertEqual(self._installed(), (None, False))
+
+    def test_from_meta_and_device_sparse_mode_installed(self):
+        # The placeholder meta indices and values that the sparse impls' copies
+        # allocate do not dispatch to the installed mode. With no Fake kernel
+        # registered yet, they would fail; once the fake fallback is, it would
+        # make meta fakes of them, which this mode's allow_meta rejects.
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            mode, wrapper = self._make_mode()
+        layouts = (torch.sparse_coo, torch.sparse_csr)
+        metas = [torch.empty(2, 2, layout=layout, device="meta") for layout in layouts]
+        cpu = torch.device("cpu")
+        torch._C._set_dispatch_mode(wrapper)
+        try:
+            fakes = [torch._C._from_meta_and_device(t, cpu, mode) for t in metas]
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        for fake, layout in zip(fakes, layouts):
+            self.assertTrue(torch._C._is_fake_tensor(fake))
+            self.assertEqual(fake.layout, layout)
+            self.assertEqual(fake.device, cpu)
+
+    def test_suspend_for_real_tensors(self):
+        _, wrapper = self._make_mode()
+        torch._C._set_dispatch_mode(wrapper)
+        try:
+            with unset_fake_temporarily() as old:
+                self.assertIs(old, wrapper)
+                self.assertEqual(self._installed(), (None, False))
+                self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
+            self.assertEqual(self._installed(), (wrapper, True))
+            # Python modes on the stack are suspended and restored with it
+            with BaseTorchDispatchMode() as py_mode:
+                with _disable_current_modes():
+                    self.assertEqual(self._installed(), (None, False))
+                    self.assertIsNone(_get_current_dispatch_mode())
+                    self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
+                self.assertEqual(self._installed(), (wrapper, True))
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
+                # A failed C++ mode restore still restores the Python modes
+                _, other_wrapper = self._make_mode()
+                with self.assertRaisesRegex(RuntimeError, "one already exists"):
+                    with _disable_current_modes():
+                        self.assertEqual(self._installed(), (None, False))
+                        torch._C._set_dispatch_mode(other_wrapper)
+                # The restore raised, leaving other_wrapper installed
+                self.assertEqual(self._installed(), (other_wrapper, True))
+                self.assertIs(_get_current_dispatch_mode(), py_mode)
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        self.assertEqual(self._installed(), (None, False))
 
 
 if __name__ == "__main__":
