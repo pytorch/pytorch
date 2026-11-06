@@ -49,17 +49,12 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    requires_accelerator,
     xfailIfNoAcceleratorTriton,
 )
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 T = TypeVar("T")
 
@@ -6147,6 +6142,7 @@ class GraphModule(torch.nn.Module):
 
         from torch._dynamo.variables.functions import (
             BaseUserFunctionVariable,
+            FunctionWrapperVariable,
             WrapperUserFunctionVariable,
             WrapperUserMethodVariable,
         )
@@ -6159,7 +6155,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertTrue(issubclass(WrapperUserMethodVariable, BaseUserFunctionVariable))
         self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
-        self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
+        self.assertIs(FunctionWrapperVariable._cpython_type, types.FunctionType)
 
     def test_wrapper_user_method_torchdynamo_inline(self):
         # Dynamo traces the _torchdynamo_inline target instead of meth, so the
@@ -6329,6 +6325,20 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_lru_cache_wrapper_attr_write_replayed(self):
+        @functools.lru_cache
+        def cached(x):
+            return x + 1
+
+        def fn(x):
+            cached.foo = 1
+            cached.__doc__ = "new"
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.zeros(1))
+        self.assertEqual(cached.foo, 1)
+        self.assertEqual(cached.__doc__, "new")
+
     def test_functools_cache_guard(self):
         class Foo:
             @functools.lru_cache  # noqa: B019
@@ -6348,7 +6358,7 @@ class GraphModule(torch.nn.Module):
         def f1():
             mod1 = torch.get_device_module()
             mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device(device_type))
+            mod3 = torch.get_device_module(torch.device("cpu"))
             return mod1, mod2, mod3
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
@@ -6373,43 +6383,6 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaises(Unsupported):
             f4()
-
-        # test for changing torch.get_device_module() (super rare case due to lru_cache)
-        @torch.compile(backend="eager", fullgraph=True)
-        def f5():
-            return torch.get_device_module()
-
-        f5()
-        new_device = (
-            "cpu"
-            if torch._C._get_accelerator() == torch.device(device_type)
-            else device_type
-        )
-
-        old_get_device_module = torch.get_device_module
-
-        def new_get_device_module(device=None):
-            if device:
-                return old_get_device_module(device)
-            return getattr(torch, new_device)
-
-        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
-        # torch.get_device_module
-        with patch("torch.get_device_module", new_get_device_module):
-            print(torch.get_device_module())
-            self.assertEqual(f5(), getattr(torch, new_device))
-
-    # synchronize needs a usable accelerator.
-    @requires_accelerator
-    def test_torch_get_device_module_synchronize(self):
-        # synchronize causes a graph break, so no fullgraph=True
-        @torch.compile(backend="eager")
-        def f6():
-            mod = torch.get_device_module()
-            mod.synchronize()
-            return mod
-
-        f6()
 
     def test_torch_source(self):
         global torch
@@ -7617,6 +7590,43 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def test_torch_get_device_module(self, device):
+        def f():
+            explicit = torch.get_device_module(torch.device(device))
+            return torch.get_device_module(), explicit
+
+        self.assertEqual(f(), torch.compile(f, backend="eager", fullgraph=True)())
+
+    def test_torch_get_device_module_patched(self, device):
+        # test for changing torch.get_device_module() (super rare case due to lru_cache)
+        @torch.compile(backend="eager", fullgraph=True)
+        def f5():
+            return torch.get_device_module()
+
+        self.assertEqual(f5(), torch.get_device_module(device))
+
+        old_get_device_module = torch.get_device_module
+
+        def new_get_device_module(dev=None):
+            if dev:
+                return old_get_device_module(dev)
+            return torch.cpu
+
+        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
+        # torch.get_device_module
+        with patch("torch.get_device_module", new_get_device_module):
+            self.assertEqual(f5(), torch.cpu)
+
+    def test_torch_get_device_module_synchronize(self, device):
+        # synchronize causes a graph break, so no fullgraph=True
+        @torch.compile(backend="eager")
+        def f6():
+            mod = torch.get_device_module()
+            mod.synchronize()
+            return mod
+
+        self.assertEqual(f6(), torch.get_device_module(device))
+
     def test_device_manual_seed(self, device):
         import torch._inductor.config as inductor_config
 
@@ -8646,6 +8656,37 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    @parametrize(
+        "attr",
+        [
+            "__defaults__",
+            "__kwdefaults__",
+            "__closure__",
+            "__annotations__",
+            "__type_params__",
+            "__globals__",
+            "__code__",
+            "__dict__",
+            "__doc__",
+        ],
+    )
+    def test_bound_method_getattr_forwards_to_func(self, attr):
+        # method_getattro reads anything the method type lacks off __func__.
+        if attr == "__type_params__" and sys.version_info < (3, 12):
+            self.skipTest("__type_params__ needs 3.12+")
+
+        class A:
+            def m(self, a: int = 3, *, k=1):
+                "doc"
+                return a
+
+        def fn(x, a):
+            return x + 1 if getattr(a.m, attr) == getattr(A.m, attr) else x - 1
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A())
+        self.assertEqual(res, fn(x, A()))
+
     def test_more_defaults_than_params(self):
         # CPython binds parameter i to __defaults__[i - (argcount - ndefaults)].
         def g(a, b):
@@ -8741,6 +8782,74 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(res, fn(x))
 
+    @parametrize("attr", ["__name__", "__qualname__", "__doc__", "__module__"])
+    def test_live_function_slot_read(self, attr):
+        def g():
+            pass
+
+        @functools.wraps(g)
+        def w():
+            pass
+
+        class A:
+            def m(self):
+                pass
+
+        a = A()
+        for f in (g, w, A.m):
+            setattr(f, attr, "new")
+
+        def fn(x):
+            out = []
+            for f in (g, w, a.m):
+                out.append(x + 1 if getattr(f, attr) == "new" else x - 1)
+            return out
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        setattr(g, attr, "newer")
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("read_first", [False, True])
+    def test_bound_method_sees_class_function_write(self, read_first):
+        class A:
+            def m(self, x=1):
+                return x
+
+        def fn(t, a):
+            bm = a.m if read_first else None
+            A.m.__defaults__ = (5,)
+            return t + (bm or a.m)()
+
+        a = A()
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, a)
+        A.m.__defaults__ = (1,)
+        self.assertEqual(res, fn(t, a))
+
+    def test_bound_method_read_keeps_allow_in_graph(self):
+        @torch._dynamo.allow_in_graph
+        def g(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        class A:
+            pass
+
+        A.g = g
+
+        def fn(t, a):
+            a.g
+            return g(t)
+
+        a = A()
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, a)
+        self.assertEqual(res, fn(t, a))
+
     @parametrize("wrap", [staticmethod, classmethod])
     def test_descriptor_on_new_instance_sees_func_write(self, wrap):
         def m(*args):
@@ -8760,6 +8869,48 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(t)
         m.k = 0
         self.assertEqual(res, fn(t))
+
+    @parametrize(
+        "attr", ["__annotations__", "__type_params__", "__code__", "__defaults__"]
+    )
+    def test_lru_cache_wrapper_attr(self, attr):
+        def g(x: int = 1) -> int:
+            return x
+
+        w = functools.lru_cache(g)
+
+        def fn(t):
+            try:
+                return t + 1, getattr(w, attr), hasattr(w, attr)
+            except AttributeError:
+                return t - 1, None, hasattr(w, attr)
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_lru_cache_wrapper_type(self):
+        w = functools.lru_cache(lambda x: x)
+
+        def fn(t):
+            return t + 1, isinstance(w, types.FunctionType), type(w) is type(w)
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_lru_cache_wrapper_name_write(self):
+        # __name__ lives in the wrapper's instance __dict__, so any value is
+        # accepted (a function's __name__ setter would raise TypeError).
+        def fn(t, w):
+            try:
+                w.__name__ = 5
+                return t + 1, w.__name__
+            except TypeError:
+                return t - 1, None
+
+        t = torch.zeros(1)
+        w = functools.lru_cache(lambda: None)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, w)
+        self.assertEqual(res, fn(t, functools.lru_cache(lambda: None)))
 
     def test_str_handler_for_user_defined_object(self):
         """

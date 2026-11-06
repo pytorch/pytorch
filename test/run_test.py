@@ -2546,6 +2546,7 @@ def run_tests(
             raise RuntimeError(failure.message + keep_going_message)
 
     pool = None
+    serial_report_dir = None
     try:
         for test in selected_tests_serial:
             workers = serial_file_xdist_workers(test, options)
@@ -2561,10 +2562,6 @@ def run_tests(
             finally:
                 del os.environ["NUM_PARALLEL_PROCS"]
             finish(failure)
-
-        # Run tests marked as serial first
-        for test in selected_tests_parallel:
-            finish(run_module(test, "serial"))
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
         # the number of procs is the number of GPUs, so we don't need to do this.
@@ -2588,10 +2585,22 @@ def run_tests(
             ):
                 pool.terminate()
 
-        for test in selected_tests_parallel:
+        # Each parallel pass reports how many @serialTest tests it left out (see
+        # SerialReportPlugin in conftest.py), so the serial passes below run only
+        # where needed instead of starting a process per test file.
+        serial_report_dir = tempfile.mkdtemp(prefix="serial-report-")
+        serial_reports = [
+            os.path.join(serial_report_dir, str(i))
+            for i in range(len(selected_tests_parallel))
+        ]
+        failures_before_pool = len(failures)
+        for test, serial_report in zip(selected_tests_parallel, serial_reports):
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+                options_clone.additional_args.append(
+                    f"--serial-report-file={serial_report}"
+                )
             options_clone.additional_args.extend(marker_args("not serial"))
             pool.apply_async(
                 run_test_module,
@@ -2602,12 +2611,33 @@ def run_tests(
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
 
+        if (
+            len(failures) == failures_before_pool
+            or options.continue_through_error
+            or RERUN_DISABLED_TESTS
+        ):
+            for test, serial_report in zip(selected_tests_parallel, serial_reports):
+                if has_serial_tests(serial_report):
+                    finish(run_module(test, "serial"))
+
     finally:
         if pool:
             pool.terminate()
             pool.join()
+        if serial_report_dir:
+            shutil.rmtree(serial_report_dir, ignore_errors=True)
 
     return
+
+
+def has_serial_tests(serial_report: str) -> bool:
+    """Whether a parallel pass reported @serialTest tests in its shard. A missing
+    report (not run under pytest, or it failed before collection finished) counts
+    as yes, so a serial pass is never skipped without evidence."""
+    if not os.path.exists(serial_report):
+        return True
+    with open(serial_report) as f:
+        return any(int(line) > 0 for line in f if line.strip())
 
 
 def check_pip_packages() -> None:
