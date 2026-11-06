@@ -3370,23 +3370,24 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             fully_shard(module, mesh=mesh)
         groups = [module._get_fsdp_state()._fsdp_param_group for module in model]
         native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
-        # FSDP checks every group before replacing any layout
+        # Layouts, default ones too, change only between iterations, and FSDP
+        # checks every group before replacing any layout
         model[1].unshard()
         rank_major = _ParamContiguousLayout("rank_major", comm_type=None)
-        with self.assertRaisesRegex(RuntimeError, "cannot replace"):
-            model.set_all_gather_layout(rank_major)
-        self.assertIsNot(groups[0]._all_gather_layout, rank_major)
-        # Default layouts' outputs depend on neither the copy-out nor the comm
-        model.set_all_gather_layout(native)  # reaches every nested group
-        # The root has no group of its own
-        model.set_all_gather_layout(DefaultAllGatherLayout(), recurse=False)
-        self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
+        for layout in (rank_major, native):
+            with self.assertRaisesRegex(RuntimeError, "cannot replace"):
+                model.set_all_gather_layout(layout)
+            self.assertIsNot(groups[0]._all_gather_layout, layout)
         comm = DefaultAllGather()
         model[1].set_custom_all_gather(comm)
         self.assertIs(groups[1]._all_gather_comm, comm)
         model[1].reshard()
-        # Replacing a custom layout waits for pending work and reshard, while the
-        # comm, which owns no outputs, can be replaced at any time
+        model.set_all_gather_layout(native)  # reaches every nested group
+        # The root has no group of its own
+        model.set_all_gather_layout(DefaultAllGatherLayout(), recurse=False)
+        self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
+        # Replacing a layout waits for pending work and reshard, while the comm,
+        # which owns no outputs, can be replaced at any time
         model[0].set_all_gather_layout(rank_major, recurse=False)
         handle = model[0].unshard(async_op=True)
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):

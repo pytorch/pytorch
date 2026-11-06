@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._all_gather_layout import AllGatherLayout, DefaultAllGatherLayout
+from ._all_gather_layout import AllGatherLayout
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
@@ -929,11 +929,11 @@ class FSDPModule:
         passes each call's layout metadata: install the comm first with
         :meth:`set_custom_all_gather`. Replacing a layout keeps the installed
         comm. A layout that keeps no per-call state can serve any number of
-        modules. Set custom layouts before the first unshard: since only the
-        layout that created the parameters' outputs can refill them, a custom
-        layout cannot be installed or replaced while an all-gather is pending,
-        while parameters are unsharded, or after they adopt outputs from a
-        custom layout. FSDP checks every group before changing any.
+        modules. Set custom layouts before the first unshard: layouts change only
+        between iterations, while no all-gather is pending and parameters are
+        resharded, and never after parameters adopt outputs from a custom
+        layout, since only the layout that created those outputs can refill
+        them. FSDP checks every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -955,12 +955,7 @@ class FSDPModule:
             for fsdp_param_group in module._get_fsdp_state()._fsdp_param_groups:
                 comm_type = type(fsdp_param_group._all_gather_comm)
                 fsdp_param_group._check_layout_comm(layout, comm_type)
-                old_layout = fsdp_param_group._all_gather_layout
-                # Default layouts' outputs depend on neither the copy-out nor the comm
-                default_swap = all(
-                    isinstance(d, DefaultAllGatherLayout) for d in (old_layout, layout)
-                )
-                if layout is not old_layout and not default_swap:
+                if layout is not fsdp_param_group._all_gather_layout:
                     fsdp_param_group._check_all_gather_replaceable()
                 groups.append(fsdp_param_group)
         for fsdp_param_group in groups:
