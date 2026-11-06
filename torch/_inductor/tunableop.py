@@ -170,20 +170,30 @@ def graph_has_routable_gemm(gm: Any) -> bool:
 
 
 def _every(values: Any, expected: int) -> bool:
-    """Whether every element is known to equal `expected`.
+    """Whether no element is known to differ from `expected`.
 
-    Symbolic elements count as equal: the caller uses this to rule a conv
-    out, and ruling one out wrongly means its tuning silently never happens.
-    Keeping it costs a recompile, which is the cheaper way to be wrong.
+    Not "every element equals": a value that cannot be decided statically
+    counts as matching, because the caller uses this to rule a conv OUT, and
+    ruling one out wrongly means its tuning silently never happens. Keeping
+    it costs a recompile, which is the cheaper way to be wrong.
+
+    Decided without guarding. int() on a backed SymInt specializes it, which
+    a cache validator has no business doing, and on an unbacked one it raises
+    GuardOnDataDependentSymNode -- a RuntimeError, so it would escape this
+    helper and fail the compile.
     """
-    try:
-        return all(int(v) == expected for v in values)
-    except (TypeError, ValueError):
-        return True
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    for v in values:
+        if isinstance(v, torch.fx.Node):
+            continue  # a traced value: nothing static to compare
+        if statically_known_true(v != expected):
+            return False
+    return True
 
 
 def _conv_lowers_to_mm(node: Any) -> bool:
-    """Whether this aten.convolution node becomes an mm during lowering.
+    """Whether this convolution node becomes an mm during lowering.
 
     Mirrors the gate in the convolution lowering (torch/_inductor/kernel/
     conv.py), which rewrites a 1x1 conv as L[aten.mm] or L[aten.addmm] --
@@ -199,9 +209,7 @@ def _conv_lowers_to_mm(node: Any) -> bool:
     it only excludes a degenerate graph, and over-bypassing costs a recompile
     while under-bypassing tunes nothing and says nothing.
     """
-    if not (
-        config.conv_1x1_as_mm or config.max_autotune or config.max_autotune_gemm
-    ):
+    if not (config.conv_1x1_as_mm or config.max_autotune or config.max_autotune_gemm):
         return False
     args = node.args
     if len(args) < 9:
@@ -818,6 +826,7 @@ def note_routing_outcome(status: WorkerStatus) -> None:
             "this compile.",
             _routing_breaker.faults,
         )
+
 
 # Least budget worth giving a bucket. Below this a timeout says more about the
 # deadline than the rung, and it would kill the worker and charge a fault.

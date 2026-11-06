@@ -91,6 +91,18 @@ struct FlagGuard {
   bool tuning_, untuned_, nearest_, borrowed_;
 };
 
+// Bytes out, megabytes in: GetRotatingBufferSize returns a byte count, or
+// the L2 size when unset, while SetRotatingBufferSize multiplies by 1 MiB.
+// Restoring the raw getter's value overflows int and silently turns rotation
+// off for the rest of the binary; rounding it turns "use L2" into a constant,
+// and into no rotation at all below 1 MiB. Any negative value means "use L2".
+int RotatingBufferMb(int bytes) {
+  if (bytes == at::cuda::getCurrentDeviceProperties()->l2CacheSize) {
+    return -1;
+  }
+  return bytes / (1024 * 1024);
+}
+
 // Read an entire file into a string for content assertions.
 std::string ReadFile(const std::string& path) {
   std::ifstream in(path);
@@ -243,11 +255,7 @@ class GlobalManagerGuard {
   GlobalManagerGuard() {
     auto* ctx = getTuningContext();
     numerics_ = ctx->IsNumericsCheckEnabled();
-    // Bytes out, megabytes in: GetRotatingBufferSize returns a byte count
-    // (the L2 size when unset) and SetRotatingBufferSize multiplies by 1 MiB,
-    // so restoring the raw getter's value overflows int and silently turns
-    // rotation off for every later test in this binary.
-    rotating_mb_ = ctx->GetRotatingBufferSize() / (1024 * 1024);
+    rotating_mb_ = RotatingBufferMb(ctx->GetRotatingBufferSize());
     tuning_iters_ = ctx->GetMaxTuningIterations();
     warmup_iters_ = ctx->GetMaxWarmupIterations();
     enabled_ = ctx->IsTunableOpEnabled();

@@ -953,8 +953,17 @@ class TestTunableOpPretune(TestCase):
             torch.ops.aten.convolution.default,
             # input, weight, bias, stride, padding, dilation, transposed,
             # output_padding, groups
-            (x, w, None, [stride, stride], [padding, padding], [1, 1],
-             False, [0, 0], groups),
+            (
+                x,
+                w,
+                None,
+                [stride, stride],
+                [padding, padding],
+                [1, 1],
+                False,
+                [0, 0],
+                groups,
+            ),
         )
         node.meta["val"] = mock.Mock(device=torch.device(device))
         g.output(node)
@@ -1068,7 +1077,7 @@ class TestTunableOpPretune(TestCase):
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
         ):
             timings = PersistentCache().lookup(
-                [winner], "mm", "inputs", lambda cs: {c: 1.0 for c in cs}
+                [winner], "mm", "inputs", lambda cs: dict.fromkeys(cs, 1.0)
             )
         self.assertEqual(timings, {winner: 1.0})
         self.assertEqual(read_cache.called, not routed)
@@ -1094,16 +1103,28 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
     def _tunableop_process_cleanup(self):
-        """Restore the process-global TunableOp knobs a compile leaves set."""
+        """Restore the process-global TunableOp knobs a compile leaves set.
+
+        Leaving one behind makes a later test tune at a single iteration.
+        Cleanups run LIFO, so the worker goes down first.
+        """
         tunable = torch.cuda.tunable
         self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
         for getter, setter in (
             (tunable.is_enabled, tunable.enable),
             (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
             (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
-            (tunable.get_rotating_buffer_size, tunable.set_rotating_buffer_size),
         ):
             self.addCleanup(setter, getter())
+        # Not in the loop: the rotating buffer's getter reports bytes and its
+        # setter takes MiB, so restoring the raw value multiplies by 1 MiB,
+        # overflows int and silently leaves rotation off for every later test
+        # in the process. _rotating_buffer_mb converts, and maps an L2-sized
+        # value back to -1 so "use L2" survives the round trip.
+        self.addCleanup(
+            tunable.set_rotating_buffer_size,
+            tunableop._rotating_buffer_mb(tunable.get_rotating_buffer_size()),
+        )
         self.addCleanup(tunableop.shutdown_worker)
 
     @parametrize("bundled", (False, True))
@@ -1125,6 +1146,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
         than rows in the results file: the first compile tunes the shape, so a
         second one that does lower it records nothing new.
         """
+
         def fn(a, b):
             return a @ b
 
@@ -1157,9 +1179,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
                     }
                 ),
                 torch._functorch.config.patch({"bundled_autograd_cache": bundled}),
-                mock.patch(
-                    "torch._inductor.tunableop.submit", side_effect=_spy
-                ),
+                mock.patch("torch._inductor.tunableop.submit", side_effect=_spy),
             ):
                 a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
                 b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
@@ -1186,17 +1206,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             return a @ b
 
         tunable = torch.cuda.tunable
-        # All process-global: leaving one behind makes a later test tune at
-        # a single iteration. Cleanups run LIFO, so the worker goes first.
-        self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
-        for getter, setter in (
-            (tunable.is_enabled, tunable.enable),
-            (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
-            (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
-            (tunable.get_rotating_buffer_size, tunable.set_rotating_buffer_size),
-        ):
-            self.addCleanup(setter, getter())
-        self.addCleanup(tunableop.shutdown_worker)
+        self._tunableop_process_cleanup()
 
         with tempfile.TemporaryDirectory(prefix="tunableop_pretune_gpu_") as d:
             results = os.path.join(d, "results.csv")
