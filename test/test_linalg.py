@@ -12369,6 +12369,13 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "RR 128x128x16 4w 32x32x4 MNK C1",
         "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
     },
+    ("gfx942", 304, torch.float32): {
+        "RC 128x64x64 4w 16x16x16 ---", "RC 128x128x32 8w 16x16x16 -N-", "RC 256x128x32 4w 16x16x16 -N-",
+        "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 128x128x16 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 ---", "RR 256x128x16 8w 16x16x16 ---",
+        "RR 256x64x32 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 -N-", "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 --K", "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
 }
 
 
@@ -12485,11 +12492,12 @@ class TestGroupedMM(TestCase):
     def test_grouped_gemm_ck_tile_config_coverage(self, device, dtype):
         from torch.profiler import profile, ProfilerActivity
 
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         props = torch.cuda.get_device_properties(device)
         key = (props.gcnArchName.split(":")[0], props.multi_processor_count, dtype)
         if key not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs, dtype) in "
-                          f"{sorted(_GROUPED_MM_CK_TILE_CONFIGS, key=str)}, this is {key}")
+            self.fail(f"no expected ck_tile configs for (arch, CUs, dtype) {key}; add them to _GROUPED_MM_CK_TILE_CONFIGS")
         alignment = 16 // dtype.itemsize
         names = set()
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
