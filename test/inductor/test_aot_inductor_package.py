@@ -88,7 +88,7 @@ def compile(
         {
             "device": "cpu",
             "package_cpp_only": False,
-            "hw_classification": HardwareClassification.GENERIC,
+            "hw_classification": HardwareClassification.CPU,
         },
     ]
     + (
@@ -97,7 +97,7 @@ def compile(
             {
                 "device": "cpu",
                 "package_cpp_only": True,
-                "hw_classification": HardwareClassification.GENERIC,
+                "hw_classification": HardwareClassification.CPU,
             }
         ]
         if not IS_FBCODE
