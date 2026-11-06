@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import inspect
 import math
 import re
 import threading
@@ -428,6 +429,48 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             optim.zero_grad()
         if not tls.ran_pre_all_gather:
             raise AssertionError("Expected tls.ran_pre_all_gather to be True")
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_signature_cache(self):
+        # FSDP inspects each fsdp_pre_all_gather's signature once, not on every
+        # all-gather, and again when the hook is replaced
+        class CountingHook:
+            def __init__(self, fn):
+                self.fn, self.num_inspections = fn, 0
+
+            @property
+            def __signature__(self):  # read once per inspect.signature call
+                self.num_inspections += 1
+                return inspect.signature(self.fn)
+
+            def __call__(self, *args):
+                return self.fn(*args)
+
+        def legacy_fsdp_pre_all_gather(local_tensor, mesh):
+            return (local_tensor,), None
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            return (local_tensor,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            return _finish_post_all_gather(all_gather_outputs[0], out)
+
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model)
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        inp = torch.randn((2, 8), device=device_type)
+        for pre_fn in (legacy_fsdp_pre_all_gather, fsdp_pre_all_gather):
+            hook = CountingHook(pre_fn.__get__(local_weight))
+            local_weight.fsdp_pre_all_gather = hook
+            for _ in range(3):
+                model(inp).sum().backward()
+            self.assertEqual(hook.num_inspections, 1)
 
     @skip_if_lt_x_gpu(1)
     def test_release_all_gather_outputs_after_post_all_gather(self):
