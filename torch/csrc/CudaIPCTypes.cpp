@@ -169,7 +169,8 @@ CudaIPCSentData::CudaIPCSentData(
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
     event_.emplace(
-        acc_type, c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
+        device_.type(),
+        c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
     event_->record(stream);
     cuda_ipc_global_entities.sync_events_used_++;
     event_sync_required_ = true;
