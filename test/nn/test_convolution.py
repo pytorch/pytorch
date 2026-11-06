@@ -4409,6 +4409,44 @@ class TestConvolutionNNCUDA(NNTestCase):
         self.assertEqual(results["cudnn"], results["native"], atol=atol, rtol=1e-3)
         self.assertEqual(results["auto"], results["native"], atol=atol, rtol=1e-3)
 
+    @onlyCUDA
+    @skipCUDAIfNoMiopen
+    @dtypes(torch.float, torch.half)
+    def test_miopen_grouped_dilated_inference_only(self, device, dtype):
+        # Grouped (at least 16 output channels per group) and depthwise 2D convolutions with
+        # dilation go to MIOpen for inference only, on gfx11 / gfx12 with an MIOpen that has the
+        # RDNA solvers for them; with gradients they keep the native kernels.
+        arch = torch.cuda.get_device_properties(device).gcnArchName
+        if torch.backends.cudnn.version() < 3007000 or not arch.startswith(
+            ("gfx110", "gfx115", "gfx120")
+        ):
+            self.skipTest(
+                "needs the MIOpen RDNA grouped dilated solvers on gfx11 / gfx12"
+            )
+        cases = [
+            (64, 4, torch._C._ConvBackend.Miopen, torch._C._ConvBackend.SlowDilated2d),
+            (
+                32,
+                32,
+                torch._C._ConvBackend.MiopenDepthwise,
+                torch._C._ConvBackend.CudaDepthwise2d,
+            ),
+        ]
+        for channels, groups, inference, training in cases:
+            x = torch.randn(1, channels, 20, 20, device=device, dtype=dtype)
+            w = torch.randn(
+                channels, channels // groups, 3, 3, device=device, dtype=dtype
+            )
+            w /= (9 * channels // groups) ** 0.5
+            args = [x, w, None, (1, 1), (2, 2), (2, 2), False, (0, 0), groups]
+            with torch.no_grad():
+                self.assertEqual(torch._C._select_conv_backend(*args), inference)
+                y = F.conv2d(x, w, None, 1, 2, 2, groups)
+            expected = F.conv2d(x.cpu().float(), w.cpu().float(), None, 1, 2, 2, groups)
+            self.assertEqual(y.float().cpu(), expected, atol=1e-2, rtol=1e-2)
+            x.requires_grad_()
+            self.assertEqual(torch._C._select_conv_backend(*args), training)
+
     @dtypes(torch.half)
     def test_Conv3d_depthwise_kernel_flag_native_is_2d_only(self, device, dtype):
         # The native depthwise kernel that depthwise_kernel="native" asks for is 2-D
