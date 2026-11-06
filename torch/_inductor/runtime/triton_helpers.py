@@ -225,9 +225,9 @@ def _aten_bessel_poly(t, coefficients: tl.constexpr):
     # Cephes seeds each Horner chain with 0 and folds coefficients[0] in with an
     # extra fma; that first step is exact for the finite t of the branch it belongs
     # to, so start from the constant instead.
-    result = tl.full(t.shape, coefficients[0], tl.float32)
+    result = tl.full(t.shape, coefficients[0], t.dtype)
     for i in tl.static_range(1, len(coefficients)):
-        result = tl.fma(result, t, coefficients[i])
+        result = tl.fma(result, t, tl.full(t.shape, coefficients[i], t.dtype))
     return result
 
 
@@ -294,25 +294,30 @@ def aten_bessel_j0(x):
     ax = tl.where(x < 0.0, -x, x)
     xx = ax * ax
 
-    small = tl.div_rn(
-        (xx - 5.78318596294678452118)
-        * (xx - 3.04712623436620863991e01)
+    small = libdevice.div_rn(
+        (xx - tl.full(x.shape, 5.78318596294678452118, x.dtype))
+        * (xx - tl.full(x.shape, 3.04712623436620863991e01, x.dtype))
         * _aten_bessel_poly(xx, rp),
         _aten_bessel_poly(xx, rq),
     )
-    small = tl.where(ax < 0.00001, tl.fma(xx, -0.25, 1.0), small)
+    small = tl.where(
+        ax < tl.full(x.shape, 0.00001, x.dtype), tl.fma(xx, -0.25, 1.0), small
+    )
 
-    t = tl.div_rn(tl.full(x.shape, 25.0, tl.float32), xx)
-    w = ax - 0.785398163397448309615660845819875721
-    a = tl.div_rn(_aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)) * libdevice.cos(w)
-    b = tl.div_rn(tl.full(x.shape, 5.0, tl.float32), ax) * tl.div_rn(
+    t = libdevice.div_rn(tl.full(x.shape, 25.0, x.dtype), xx)
+    w = ax - tl.full(x.shape, 0.785398163397448309615660845819875721, x.dtype)
+    a = libdevice.div_rn(
+        _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
+    ) * libdevice.cos(w)
+    b = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), ax) * libdevice.div_rn(
         _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq)
     )
     # ptxas contracts eager's `a - b * sin(w)` into a single FFMA; strict numerics
     # compiles Triton with enable_fp_fusion=False, so spell the fma out.
-    large = tl.div_rn(
-        tl.fma(-b, libdevice.sin(w), a) * 0.797884560802865355879892119868763737,
-        tl.sqrt_rn(ax),
+    large = libdevice.div_rn(
+        tl.fma(-b, libdevice.sin(w), a)
+        * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
+        libdevice.sqrt_rn(ax),
     )
     return tl.where(ax <= 5.0, small, large)
 
@@ -381,33 +386,37 @@ def aten_bessel_j1(x):
     xx = ax * ax
 
     small = (
-        tl.div_rn(_aten_bessel_poly(xx, rp), _aten_bessel_poly(xx, rq))
+        libdevice.div_rn(_aten_bessel_poly(xx, rp), _aten_bessel_poly(xx, rq))
         * ax
-        * (xx - 1.46819706421238932572e01)
-        * (xx - 4.92184563216946036703e01)
+        * (xx - tl.full(x.shape, 1.46819706421238932572e01, x.dtype))
+        * (xx - tl.full(x.shape, 4.92184563216946036703e01, x.dtype))
     )
 
     # j1 reduces in 5/x, j0 in 25/(x*x); the two round differently, so keep both.
-    u = tl.div_rn(tl.full(x.shape, 5.0, tl.float32), ax)
+    u = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), ax)
     t = u * u
-    w = ax - 2.356194490192344928846982537459627163
-    a = tl.div_rn(_aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)) * libdevice.cos(w)
-    b = u * tl.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
-    large = tl.div_rn(
-        tl.fma(-b, libdevice.sin(w), a) * 0.797884560802865355879892119868763737,
-        tl.sqrt_rn(ax),
+    w = ax - tl.full(x.shape, 2.356194490192344928846982537459627163, x.dtype)
+    a = libdevice.div_rn(
+        _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
+    ) * libdevice.cos(w)
+    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
+    large = libdevice.div_rn(
+        tl.fma(-b, libdevice.sin(w), a)
+        * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
+        libdevice.sqrt_rn(ax),
     )
 
     result = tl.where(ax <= 5.0, small, large)
-    # Eager reflects odd-symmetrically with PTX neg.f32, which flips the sign bit and
-    # canonicalizes NaN. Triton's unary minus lowers to `0 - v`, leaving +0.0 positive,
-    # so flip the bit directly and keep the subtraction only for the NaN case.
+    # Eager reflects odd-symmetrically with PTX neg. Triton's unary minus lowers
+    # to `0 - v`, leaving +0.0 positive, so flip the bit directly and keep the
+    # subtraction only for the NaN case.
+    bits: tl.constexpr = tl.uint64 if x.dtype == tl.float64 else tl.uint32
+    sign: tl.constexpr = 0x8000000000000000 if x.dtype == tl.float64 else 0x80000000
     negated = tl.where(
         result == result,
-        (
-            result.to(tl.uint32, bitcast=True)
-            ^ tl.full(result.shape, 0x80000000, tl.uint32)
-        ).to(tl.float32, bitcast=True),
+        (result.to(bits, bitcast=True) ^ tl.full(result.shape, sign, bits)).to(
+            x.dtype, bitcast=True
+        ),
         0.0 - result,
     )
     return tl.where(x < 0.0, negated, result)
@@ -483,21 +492,25 @@ def aten_bessel_y0(x):
     # eager means reproducing that, not the intent. NVVM (not ptxas) contracts
     # the trailing `+ (2/pi * log(x)) * J0(x)`, so spell the fma out.
     small = tl.fma(
-        libdevice.log(x) * 0.636619772367581343075535053490057448,
+        libdevice.log(x)
+        * tl.full(x.shape, 0.636619772367581343075535053490057448, x.dtype),
         aten_bessel_j0(x),
-        tl.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
+        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
     )
     small = tl.where(x == 0.0, float("-inf"), small)
 
-    t = tl.div_rn(tl.full(x.shape, 25.0, tl.float32), xx)
-    w = x - 0.785398163397448309615660845819875721
-    a = tl.div_rn(_aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)) * libdevice.sin(w)
-    b = tl.div_rn(tl.full(x.shape, 5.0, tl.float32), x) * tl.div_rn(
+    t = libdevice.div_rn(tl.full(x.shape, 25.0, x.dtype), xx)
+    w = x - tl.full(x.shape, 0.785398163397448309615660845819875721, x.dtype)
+    a = libdevice.div_rn(
+        _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
+    ) * libdevice.sin(w)
+    b = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), x) * libdevice.div_rn(
         _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq)
     )
-    large = tl.div_rn(
-        tl.fma(b, libdevice.cos(w), a) * 0.797884560802865355879892119868763737,
-        tl.sqrt_rn(x),
+    large = libdevice.div_rn(
+        tl.fma(b, libdevice.cos(w), a)
+        * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
+        libdevice.sqrt_rn(x),
     )
     return tl.where(x <= 5.0, small, large)
 
@@ -566,28 +579,34 @@ def aten_bessel_y1(x):
     )
     xx = x * x
 
-    # Math.cuh:1871 does `return NAN;` for x < 0, unlike y0's dropped return, but
-    # log(x) already yields that same canonical NaN here, so no select is needed.
+    # Unlike y0, Math.cuh returns NAN for x < 0. FP32 log already yields that
+    # encoding; FP64 needs the explicit conversion of the float NAN macro.
     small = tl.fma(
         x,
-        tl.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
+        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
         tl.fma(
             libdevice.log(x),
             aten_bessel_j1(x),
-            tl.div_rn(tl.full(x.shape, -1.0, tl.float32), x),
+            libdevice.div_rn(tl.full(x.shape, -1.0, x.dtype), x),
         )
-        * 0.636619772367581343075535053490057448,
+        * tl.full(x.shape, 0.636619772367581343075535053490057448, x.dtype),
     )
+    if x.dtype == tl.float64:
+        nan = tl.full(x.shape, 0x7FFFFFFF, tl.uint32).to(tl.float32, bitcast=True)
+        small = tl.where(x < 0.0, nan.to(x.dtype), small)
     small = tl.where(x == 0.0, float("-inf"), small)
 
-    u = tl.div_rn(tl.full(x.shape, 5.0, tl.float32), x)
+    u = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), x)
     t = u * u
-    w = x - 2.356194490192344928846982537459627163
-    a = tl.div_rn(_aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)) * libdevice.sin(w)
-    b = u * tl.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
-    large = tl.div_rn(
-        tl.fma(b, libdevice.cos(w), a) * 0.797884560802865355879892119868763737,
-        tl.sqrt_rn(x),
+    w = x - tl.full(x.shape, 2.356194490192344928846982537459627163, x.dtype)
+    a = libdevice.div_rn(
+        _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
+    ) * libdevice.sin(w)
+    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
+    large = libdevice.div_rn(
+        tl.fma(b, libdevice.cos(w), a)
+        * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
+        libdevice.sqrt_rn(x),
     )
     return tl.where(x <= 5.0, small, large)
 
