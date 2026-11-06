@@ -467,20 +467,20 @@ static std::pair<MTLSize, MTLSize> reduction_launch_size(const ReductionPlan& pl
     case ReductionKernel::InnermostChunk:
     case ReductionKernel::ArgCombine: {
       // One simdgroup per row (or segment), several rows per simdgroup for the chunk kernel
-      auto num_simdgroups = static_cast<uint64_t>(layout.outer_size) * plan.num_segments;
+      uint32_t num_simdgroups = layout.outer_size * plan.num_segments;
       if (!is_arg && plan.kernel == ReductionKernel::InnermostChunk) {
-        num_simdgroups = at::ceil_div<uint64_t>(num_simdgroups, c10::metal::simdgroup_size / plan.lanes);
+        num_simdgroups = at::ceil_div(num_simdgroups, c10::metal::simdgroup_size / plan.lanes);
       }
-      const auto num_tgs = at::ceil_div<uint64_t>(num_simdgroups, INNER_TG_SIZE / c10::metal::simdgroup_size);
-      return {MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1), MTLSizeMake(INNER_TG_SIZE, 1, 1)};
+      const auto num_tgs = at::ceil_div(num_simdgroups, INNER_TG_SIZE / c10::metal::simdgroup_size);
+      // 64-bit so callers see grids past 2**32 threads instead of a wrapped size
+      return {MTLSizeMake(static_cast<uint64_t>(num_tgs) * INNER_TG_SIZE, 1, 1), MTLSizeMake(INNER_TG_SIZE, 1, 1)};
     }
     case ReductionKernel::Outer:
     case ReductionKernel::OuterSmallDim: {
       const auto height = plan.kernel == ReductionKernel::OuterSmallDim ? 1u : OUTER_TG_HEIGHT;
       const auto num_tgs = at::ceil_div(layout.inner_size, OUTER_TG_WIDTH);
-      return {
-          MTLSizeMake(static_cast<uint64_t>(num_tgs) * OUTER_TG_WIDTH, plan.num_segments * height, layout.outer_size),
-          MTLSizeMake(OUTER_TG_WIDTH, height, 1)};
+      return {MTLSizeMake(num_tgs * OUTER_TG_WIDTH, plan.num_segments * height, layout.outer_size),
+              MTLSizeMake(OUTER_TG_WIDTH, height, 1)};
     }
     case ReductionKernel::Narrow: {
       const auto active = (NARROW_TG_SIZE / layout.inner_size) * layout.inner_size;
