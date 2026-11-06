@@ -180,6 +180,9 @@ class SuperVariable(VariableTracker):
         type_to_use_source: Source | None = (
             TypeSource(self.objvar.source) if self.objvar.source else None
         )
+        if isinstance(self.objvar, variables.TensorWithTFOverrideVariable):
+            # as_subclass() can retain the input's source while changing its type.
+            type_to_use_source = self.objvar.class_type_var(tx).source
         if issubclass(type_to_use, type):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
@@ -2156,22 +2159,6 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
-
-
-class ObjectVariable(VariableTracker):
-    # PyBaseObject_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
-    _cpython_type = object
-
-    # placeholder for unknown / opaque values
-    def __init__(self, value: object, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.value = value
-
-    def get_real_python_backed_value(self) -> object:
-        return self.value
-
-    def python_type(self) -> type[object]:
-        return object
 
 
 if sys.version_info >= (3, 15):
