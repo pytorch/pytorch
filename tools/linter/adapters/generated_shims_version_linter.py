@@ -28,6 +28,8 @@ from tools.linter.adapters._stable_shim_utils import (
     read_file_at_revision,
 )
 
+from torchgen.aoti.fallback_ops import AOTI_SUPPORTED_DEVICES
+
 
 LINTER_CODE = "GENERATED_SHIMS_VERSION"
 
@@ -156,7 +158,7 @@ def _check_one_dict(
             label = f"'{op_name}'" if ver_id == 1 else f"'{op_name}' v{ver_id}"
             if device is not None:
                 label += f" ({device})"
-                if device not in {"cpu", "cuda", "mps", "xpu", "aten"}:
+                if device not in AOTI_SUPPORTED_DEVICES:
                     messages.append(
                         _msg(
                             filename,
@@ -217,14 +219,19 @@ def _check_one_dict(
     for (op_name, device), variants in base.items():
         if device is None:
             continue
-        for ver_id, (since, _) in variants.items():
+        for ver_id, (since, lineno) in variants.items():
             if ver_id not in current.get((op_name, device), {}):
+                current_variants = current.get((op_name, None), {})
+                _, lineno = current_variants.get(
+                    ver_id, current_variants.get(1, (None, lineno))
+                )
+                label = f"'{op_name}'" if ver_id == 1 else f"'{op_name}' v{ver_id}"
                 messages.append(
                     _msg(
                         filename,
-                        1,
+                        lineno,
                         "op-version-modified",
-                        f"'{op_name}' v{ver_id} lost its 'since_{device}' value {since!r}.",
+                        f"{label} lost its 'since_{device}' value {since!r}.",
                     )
                 )
     return messages

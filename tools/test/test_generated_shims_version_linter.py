@@ -260,6 +260,29 @@ aten_shimified_ops = {
         )
         self.assertEqual([msg.name for msg in msgs], ["wrong-version-on-new-op"])
 
+    def test_removed_backend_version_diagnostic(self):
+        for variant in (1, 2):
+            with self.subTest(variant=variant):
+                metadata = '"since_cuda": "TORCH_VERSION_2_16_0"'
+                if variant != 1:
+                    metadata = f'"v{variant}": {{{metadata}}}'
+                base = f"""
+inductor_fallback_ops = {{
+    "aten.foo.default": {{
+        {metadata}
+    }},
+}}
+"""
+                current = base.replace('"since_cuda": "TORCH_VERSION_2_16_0"', "")
+                msgs = self._check(current, base, current_version=(2, 17, 0))
+                label = "'aten.foo.default'" + (f" v{variant}" if variant != 1 else "")
+                self.assertEqual(len(msgs), 1)
+                self.assertEqual(msgs[0].line, 3 if variant == 1 else 4)
+                self.assertEqual(
+                    msgs[0].description,
+                    f"{label} lost its 'since_cuda' value 'TORCH_VERSION_2_16_0'.",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

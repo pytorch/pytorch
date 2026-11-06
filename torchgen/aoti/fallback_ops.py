@@ -30,6 +30,8 @@
 # The base op's backend version is a lower bound for all variants on that backend;
 # a variant's own version can raise this bound but cannot lower it.
 
+AOTI_SUPPORTED_DEVICES = frozenset({"cpu", "cuda", "mps", "xpu", "aten"})
+
 inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
     "aten._adaptive_avg_pool2d.default": {},
@@ -113,6 +115,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.baddbmm.out": {},
     "aten.bernoulli_.float": {},
     "aten.bernoulli_.Tensor": {},
+    "aten.bmm.dtype_out": {"since": "TORCH_VERSION_2_16_0"},
     "aten.bmm.out": {},
     "aten.bucketize.Tensor": {},
     "aten.cat.default": {},

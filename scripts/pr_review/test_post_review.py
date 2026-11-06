@@ -6,11 +6,13 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
 import sys
 import unittest
+import urllib.parse
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -84,8 +86,10 @@ class FakeGitHub(GitHub):
         reviews=(),
         refuse_inline=False,
         comments=None,
+        files=(),
     ):
         super().__init__("token", "o/r")
+        self.files = list(files)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -114,6 +118,8 @@ class FakeGitHub(GitHub):
             return {}
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
             return [dict(c) for c in self.comments] if page(path) == 1 else []
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+            return self.files if page(path) == 1 else []
         if method == "DELETE" and path.startswith("/repos/o/r/pulls/comments/"):
             cid = int(path.split("/")[-1])
             if not any(c["id"] == cid for c in self.comments):
@@ -294,6 +300,85 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
         self.assertIn("Off by one.", c["body"])
 
+    def test_a_finding_on_a_deleted_file_is_posted_on_the_left_side(self):
+        findings = [
+            {"path": "gone.py", "line": 7, "severity": "major", "message": "Used."},
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "Off."},
+            {"path": "gone.py", "line": 9, "severity": "minor", "message": "Nit."},
+        ]
+        files = [
+            {"filename": "gone.py", "status": "removed"},
+            {"filename": "torch/x.py", "status": "modified"},
+        ]
+        gh = FakeGitHub(files=files)
+        go(gh, row(findings=findings))
+        (body,) = gh.posted()
+        sides = {(c["path"], c["line"]): c["side"] for c in body["comments"]}
+        self.assertEqual(sides, {("gone.py", 7): "LEFT", ("torch/x.py", 3): "RIGHT"})
+        # The folded one links the diff line: the file has no blob at the head.
+        digest = hashlib.sha256(b"gone.py").hexdigest()
+        link = f"https://github.com/o/r/pull/1/files#diff-{digest}L9"
+        self.assertIn(link, body["body"])
+        self.assertNotIn(f"/blob/{SHA}/gone.py", body["body"])
+
+    def test_a_deleted_file_is_matched_and_linked_by_its_real_name(self):
+        # Findings carry neutralize_path's escaped form; GitHub knows the real one.
+        real = "torch/_inductor/@x.py"
+        finding = {
+            "path": neutralize_path(real),
+            "line": 4,
+            "severity": "major",
+            "message": "Used.",
+        }
+        self.assertNotEqual(finding["path"], real)
+        gh = FakeGitHub(files=[{"filename": real, "status": "removed"}])
+        go(gh, row(findings=[finding]))
+        (body,) = gh.posted()
+        (c,) = body["comments"]
+        self.assertEqual((c["path"], c["side"]), (real, "LEFT"))
+        digest = hashlib.sha256(real.encode()).hexdigest()
+        self.assertEqual(
+            post_review.permalink(
+                "o/r", SHA, post_review.with_removed(gh, 1, [finding])[0]
+            ),
+            f"https://github.com/o/r/pull/1/files#diff-{digest}L4",
+        )
+
+    def test_running_out_of_time_listing_files_stops_the_step(self):
+        class SlowFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = SlowFiles()
+        with self.assertRaises(post_review.OutOfTime):
+            post_review.with_removed(gh, 1, [{"path": "a.py", "line": 1}])
+
+    def test_a_discussion_on_the_other_side_is_not_this_finding(self):
+        # A replied-to LEFT thread from when the file was deleted says nothing
+        # about a RIGHT finding at the same number once the file is back.
+        left = {**comment(50, 5, line=3), "side": "LEFT"}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[left, comment(51, 9, author="t", reply_to=50)],
+        )
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual((c["line"], c["side"]), (3, "RIGHT"))
+
+    def test_an_unlisted_file_set_posts_on_the_right_as_before(self):
+        class NoFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoFiles(files=[{"filename": "torch/x.py", "status": "removed"}])
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual(c["side"], "RIGHT")
+
     def test_inline_path_is_the_real_file_name(self):
         path = neutralize_path("node_modules/@babel/x_y.py")
         gh = FakeGitHub()
@@ -409,7 +494,7 @@ class TestWhatIsPosted(unittest.TestCase):
         go(gh, row(findings=[major, dict(major, line=2)]))
         body = gh.posted()[0]
         self.assertIn("\U0001f534 2 blocking findings are attached", body["body"])
-        self.assertEqual(body["comments"][0]["body"], "\U0001f534 Bug.")
+        self.assertTrue(body["comments"][0]["body"].startswith("\U0001f534 Bug.\n"))
 
     def test_the_mark_never_breaks_a_leading_block(self):
         table = "| a | b |" + chr(10) + "| --- | --- |"
@@ -426,7 +511,10 @@ class TestWhatIsPosted(unittest.TestCase):
             lines = gh.posted()[0]["comments"][0]["body"].split(chr(10))
             self.assertEqual(lines[0], first, message)
             if first == "\U0001f534":
-                self.assertEqual(lines[1:], ["", *message.split(chr(10))])
+                # Then a blank line and the report link.
+                self.assertEqual(lines[1:-2], ["", *message.split(chr(10))])
+                self.assertEqual(lines[-2], "")
+                self.assertTrue(lines[-1].startswith("<sub>[Report this finding]"))
 
     def test_permalink_path_is_percent_encoded(self):
         path = neutralize_path("docs/a b/@x#1.md")
@@ -483,6 +571,121 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertEqual([c["path"] for c in gh.posted()[0]["comments"]], ["y.py"])
 
 
+def report_links(text):
+    return [
+        urllib.parse.urlsplit(u)
+        for u in re.findall(r"\[Report [a-z ]+\]\(([^)]*)\)", text)
+    ]
+
+
+RUN77 = "https://github.com/o/r/actions/runs/77/attempts/2"  # @lint-ignore
+
+
+class TestReportLinks(unittest.TestCase):
+    def test_the_review_and_each_inline_finding_link_to_the_feedback_form(self):
+        gh = FakeGitHub()
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
+        (body,) = gh.posted()
+        (link,) = report_links(body["body"])
+        self.assertEqual(
+            f"{link.scheme}://{link.netloc}{link.path}", post_review.REPORT_ISSUE_URL
+        )
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["template"], "ai-pr-review-feedback.yml")
+        self.assertEqual(q["title"], "[AI PR review] o/r#1")
+        self.assertEqual(q["pr"], "https://github.com/o/r/pull/1")  # @lint-ignore
+        self.assertEqual(q["commit"], SHA)
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
+        self.assertNotIn("finding", q)
+        self.assertIn("[Report a bad review]", body["body"].splitlines()[-1])
+        (c,) = body["comments"]
+        (link,) = report_links(c["body"])
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["finding"], "torch/x.py:3")
+        self.assertEqual(q["run"], RUN77)  # @lint-ignore
+
+    def test_the_finding_names_the_real_file(self):
+        f = {
+            "path": neutralize_path("a_b/c.py"),
+            "line": 9,
+            "severity": "major",
+            "message": "Bug.",
+        }
+        gh = FakeGitHub()
+        go(gh, row(findings=[f]))
+        (c,) = gh.posted()[0]["comments"]
+        (link,) = report_links(c["body"])
+        self.assertEqual(
+            dict(urllib.parse.parse_qsl(link.query))["finding"], "a_b/c.py:9"
+        )
+
+    def test_the_run_link_names_the_attempt_that_posted(self):
+        u = post_review.run_url
+        runs = "https://github.com/o/r/actions/runs"  # @lint-ignore
+        self.assertEqual(
+            u("o/r", {"review_run_id": 7, "review_run_attempt": 2}),
+            f"{runs}/7/attempts/2",
+        )
+        for attempt in (None, 0, "2", True):
+            self.assertEqual(
+                u("o/r", {"review_run_id": 7, "review_run_attempt": attempt}),
+                f"{runs}/7",
+            )
+        for run_id in (None, "1)[x](y", True, 0):
+            self.assertEqual(u("o/r", {"review_run_id": run_id}), "")
+        self.assertNotIn("run=", post_review.report_url("o/r", 1, SHA))
+
+    def test_findings_in_the_body_carry_no_extra_links(self):
+        major = {"path": "a.py", "line": 1, "severity": "major", "message": "Bug."}
+        minor = {"path": "b.py", "line": 2, "severity": "minor", "message": "Nit."}
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", findings=[major, minor]))
+        (body,) = gh.posted()
+        self.assertIn("non-blocking finding", body["body"])
+        self.assertEqual(len(report_links(body["body"])), 1)
+
+    def test_a_hostile_path_stays_inside_the_link(self):
+        path = neutralize_path("a)[x](https://evil.example) @pytorchbot merge/<b>.py")
+        url = post_review.report_url(
+            "o/r", 1, SHA, RUN77, {"path": path, "line": 3, "message": "m"}
+        )
+        self.assertNotRegex(url, r"[()\s<>\[\]@]")
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+        self.assertTrue(q["finding"].endswith(".py:3"))
+
+    def test_the_body_fallback_keeps_one_review_link_and_no_finding_links(self):
+        gh = FakeGitHub(refuse_inline=True)
+        go(gh, dict(row(), review_run_id=77, review_run_attempt=2))
+        first, second = gh.posted()
+        self.assertIn("comments", first)
+        self.assertNotIn("comments", second)
+        (link,) = report_links(second["body"])
+        q = dict(urllib.parse.parse_qsl(link.query))
+        self.assertEqual(q["run"], RUN77)
+        self.assertNotIn("finding", q)
+
+    def test_a_fenced_code_block_in_a_finding_is_posted_unchanged(self):
+        message = "Use:\n\n```python\nx = a_b * c\n```"
+        f = {"path": "a.py", "line": 1, "severity": "major", "message": message}
+        gh = FakeGitHub()
+        go(gh, row(findings=[f]))
+        text = gh.posted()[0]["comments"][0]["body"]
+        self.assertTrue(text.startswith("\U0001f534 " + message + "\n\n<sub>[Report"))
+
+
+class TestPushBackHint(unittest.TestCase):
+    def test_only_a_change_request_says_how_to_push_back(self):
+        for verdict, hint in (
+            ("changes_requested", True),
+            ("ready_for_human_review", False),
+        ):
+            gh = FakeGitHub()
+            go(gh, row(verdict=verdict))
+            body = gh.posted()[0]["body"]
+            self.assertEqual(post_review.PUSH_BACK in body.split("\n")[-1], hint)
+            self.assertIsNone(re.search(r"(?m)^ *@pytorch(merge|)bot .+$", body))
+
+
 class TestNothingIsPosted(unittest.TestCase):
     def test_on_a_failed_or_rejected_run(self):
         for status in ("model_error", "sanitizer_rejected", "blocked"):
@@ -504,6 +707,132 @@ class TestNothingIsPosted(unittest.TestCase):
         gh = FakeGitHub(labels=("No Automated Review",))
         go(gh)
         self.assertEqual(gh.writes(), [])
+
+
+TOO_LARGE = {"status": "skipped_too_large"}
+LIMITS = (100, 400_000)
+NOTICE = post_review.too_large_body("no automated review", LIMITS)
+
+
+def decline(gh, limits=LIMITS):
+    return run(gh, TOO_LARGE, 1, SHA, "no automated review", AUTHOR, limits)
+
+
+class TestATooLargePrGetsANotice(unittest.TestCase):
+    def test_one_comment_says_why_and_how_to_proceed(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        self.assertEqual(decline(gh), 0)
+        [posted] = gh.posted()
+        self.assertEqual(posted["event"], "COMMENT")
+        self.assertEqual(posted["commit_id"], SHA)
+        body = posted["body"]
+        self.assertTrue(body.startswith(f"{MARKER}\n{post_review.TOO_LARGE_TAG}\n"))
+        self.assertIn("100 changed files or 400 KB of diff", body)
+        self.assertIn("split it into smaller PRs", body)
+        self.assertIn('`@pytorchbot label "no automated review"`', body)
+        # It replaces the earlier review like any other.
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_without_limits_it_still_posts(self):
+        gh = FakeGitHub()
+        decline(gh, limits=None)
+        self.assertIn("over the automated review's size limit.", gh.posted()[0]["body"])
+
+    def test_the_notice_carries_no_command_pytorch_bot_would_run(self):
+        """pytorch-bot runs `^ *@pytorch(merge|)bot .+$` from review bodies."""
+        for label in ("no automated review", "x\n@pytorchbot merge -f y"):
+            body = post_review.too_large_body(label, LIMITS)
+            self.assertIsNone(re.search(r"(?m)^ *@pytorch(merge|)bot .+$", body))
+            self.assertEqual(len(re.findall(r"(?i)@pytorch", body)), 1, label)
+            self.assertIn('label "no automated review"', body)
+
+    def test_it_is_not_posted_again_while_it_is_the_newest(self):
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6, body=NOTICE)])
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual((folds(gh), minimized(gh)), ([], []))
+
+    def test_nothing_is_posted_when_the_head_moved_or_the_pr_opted_out(self):
+        for gh in (
+            FakeGitHub(head="b" * 40, reviews=[old_review(5)]),
+            FakeGitHub(labels=("no automated review",), reviews=[old_review(5)]),
+        ):
+            decline(gh)
+            self.assertEqual(gh.writes(), [])
+
+    def test_a_standing_change_request_is_neither_dismissed_nor_hidden(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        decline(gh)
+        self.assertEqual(len(gh.posted()), 1)
+        self.assertEqual(dismissed(gh), [])
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_failed_post_warns_and_does_not_fail_the_step(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        real = gh.request
+
+        def refuse(method, path, body=None, idempotent=None):
+            if method == "POST" and path.endswith("/reviews"):
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(decline(gh), 0)
+        self.assertIn("::warning::too-large notice not posted", out.getvalue())
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_marked_notice_gets_its_body_back_instead_of_a_repost(self):
+        """On the diff-size path `announce` marks the notice before `review`
+        finds the PR too large again: no new notice, no defused command."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        self.assertEqual(post_review.pending_run(gh.reviews[0]["body"]), "77")
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+
+    def test_a_marked_verdict_is_replaced_not_overwritten(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_that_cannot_be_put_back_is_replaced(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        real, refused = gh.request, []
+
+        def refuse_once(method, path, body=None, idempotent=None):
+            if method == "PUT" and path.endswith("/reviews/5") and not refused:
+                refused.append(path)
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_once
+        with redirect_stdout(io.StringIO()):
+            decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_put_back_defused_is_replaced(self):
+        """A smaller commit's failed review puts the notice back defused; once
+        the PR is too large again, a working notice replaces it."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertIn("@ pytorchbot", gh.reviews[0]["body"])
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
 
 
 class TestContained(unittest.TestCase):
@@ -1173,6 +1502,24 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         # The discussion stays.
         self.assertEqual(deleted(gh), [])
 
+    def test_a_deleted_files_finding_joins_its_left_side_discussion(self):
+        # A re-review of a delete-only PR, after the author replied on the left.
+        root = {**comment(50, 5, line=3, path="gone.py"), "side": "LEFT"}
+        finding = {"path": "gone.py", "line": 3, "severity": "major", "message": "U."}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, author="tristan", reply_to=50)],
+            files=[{"filename": "gone.py", "status": "removed"}],
+        )
+        go(gh, row(findings=[finding]))
+        body = gh.posted()[0]
+        self.assertNotIn("comments", body)
+        self.assertIn(
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            body["body"],
+        )
+
     def test_other_findings_stay_inline_and_are_counted(self):
         findings = [
             {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
@@ -1479,11 +1826,246 @@ class TestBotCommandsAreDefused(unittest.TestCase):
         gh = FakeGitHub(refuse_inline=True)
         go(gh, row(summary=neutralize("@pytorchbot merge -f now"), findings=[f]))
         for body in gh.posted():
-            for text in [body["body"]] + [c["body"] for c in body.get("comments", [])]:
+            # The push-back hint carries the only mention, mid-line.
+            texts = [body["body"].replace(post_review.PUSH_BACK, "", 1)]
+            for text in texts + [c["body"] for c in body.get("comments", [])]:
                 self.assertNotRegex(text, r"(?i)@pytorch(merge)?bot", text)
 
 
+ORIGINAL = (
+    MARKER
+    + "\n**Automated review** of cccccccccccc: changes requested before human review."
+    + "\n\nOne bug.\n\n<details>\n<summary>x</summary>\n\nminor\n</details>"
+    + "\n\n<sub>f</sub>"
+)
+
+
+def mark(gh, run_id):
+    post_review.mark_pending(gh, 1, SHA, AUTHOR, run_id, "no automated review")
+
+
+def marked_body(gh):
+    return [r for r in gh.reviews if r["id"] == 5][0]["body"]
+
+
+class TestAReviewInProgressIsMarked(unittest.TestCase):
+    def test_the_newest_visible_review_is_collapsed_under_a_status_line(self):
+        old = old_review(4, body=ORIGINAL)
+        hidden = {**old_review(6, body=ORIGINAL), "minimized": True}
+        gh = FakeGitHub(reviews=[old, old_review(5, body=ORIGINAL), hidden])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        body = marked_body(gh)
+        lines = body.split("\n")
+        self.assertEqual(lines[0], MARKER)
+        self.assertEqual(post_review.pending_run(body), "77")
+        self.assertIn("Automated review in progress** for aaaaaaaaaaaa", lines[2])
+        self.assertIn("/o/r/actions/runs/77", lines[2])
+        self.assertTrue(lines[4].startswith("<details><summary>Previous automated"))
+        self.assertTrue(body.endswith("\n</details>"))
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+
+    def test_nothing_is_marked_when_the_head_moved_or_the_review_is_folded(self):
+        gh = FakeGitHub(head="b" * 40, reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+        folded = old_review(5, body=post_review.folded(old_review(5, body=ORIGINAL)))
+        gh = FakeGitHub(reviews=[folded])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [])
+
+    def test_a_newer_run_takes_over_the_mark_without_nesting(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        mark(gh, "77")
+        mark(gh, "88")
+        self.assertEqual(folds(gh), [5, 5])
+        body = marked_body(gh)
+        self.assertEqual(post_review.pending_run(body), "88")
+        self.assertEqual(body.count("in progress"), 1)
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+        # The older run ends without a review: the newer mark stays.
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_older_run_never_takes_over_a_newer_runs_mark(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "88")
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_opted_out_pr_is_not_marked(self):
+        gh = FakeGitHub(
+            labels=["No Automated Review"], reviews=[old_review(5, body=ORIGINAL)]
+        )
+        with redirect_stdout(io.StringIO()):
+            mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_run_that_posts_nothing_puts_the_body_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh, row(status="model_error"))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+        self.assertEqual(gh.posted(), [])
+
+    def test_a_replaced_review_is_folded_from_its_original_body(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh)
+        body = marked_body(gh)
+        self.assertTrue(body.startswith(MARKER + "\n<details><summary>Outdated"))
+        self.assertNotIn("in progress", body)
+        self.assertIsNone(post_review.pending_run(body))
+        self.assertIn("One bug.", body)
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_request_left_standing_after_a_clean_verdict_is_put_back(self):
+        old = old_review(5, body=ORIGINAL, state="CHANGES_REQUESTED")
+        gh = FakeGitHub(reviews=[old])
+        mark(gh, "77")
+        real = gh.request
+
+        def refuse_dismissal(method, path, body=None, idempotent=None):
+            if path.endswith("/dismissals"):
+                raise GitHubError(403, "no")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_dismissal
+        with redirect_stdout(io.StringIO()):
+            go(gh, row(verdict="ready_for_human_review", findings=[]))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+
+    def test_only_this_workflows_reviews_are_put_back(self):
+        theirs = old_review(5, author="someone", body=ORIGINAL)
+        theirs["body"] = post_review.pending(theirs, "77", SHA, "o/r")
+        gh = FakeGitHub(reviews=[theirs])
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_the_marked_body_is_defused(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=MARKER + "\n@pytorchbot merge")])
+        mark(gh, "77")
+        self.assertNotIn("@pytorchbot", marked_body(gh))
+
+    def test_a_body_not_in_our_shape_is_left_as_it_is(self):
+        body = MARKER + "\n<!-- hardened-pr-review-pending run=77 -->\nedited"
+        self.assertEqual(post_review.unwrapped(body), body)
+        gh = FakeGitHub(reviews=[old_review(5, body=body)])
+        with redirect_stdout(io.StringIO()):
+            post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_crlf_line_endings_still_read_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        crlf = marked_body(gh).replace("\n", "\r\n")
+        self.assertEqual(post_review.pending_run(crlf), "77")
+        self.assertEqual(post_review.unwrapped(crlf), ORIGINAL)
+
+
+class TestPendingModesReadTheirInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "RUN_ID": "77",
+        "OPT_OUT_LABEL": "skip me",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", flag]),
+            mock.patch.object(post_review, "mark_pending") as mark_,
+            mock.patch.object(post_review, "restore_pending") as restore,
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            rc = post_review.main()
+        return rc, mark_, restore, out.getvalue()
+
+    def test_each_mode_passes_its_inputs(self):
+        rc, mark_, restore, _ = self.main("--mark-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        mark_.assert_called_once()
+        self.assertEqual(mark_.call_args.args[1:], (1, SHA, AUTHOR, "77", "skip me"))
+        restore.assert_not_called()
+        rc, mark_, restore, _ = self.main("--restore-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        restore.assert_called_once()
+        self.assertEqual(restore.call_args.args[1:], (1, AUTHOR, "77"))
+        mark_.assert_not_called()
+
+    def test_a_missing_or_bad_run_id_warns_and_does_nothing(self):
+        missing = {k: v for k, v in self.ENV.items() if k != "RUN_ID"}
+        for flag in ("--mark-pending", "--restore-pending"):
+            for env in (missing, {**self.ENV, "RUN_ID": "77; rm"}):
+                with self.subTest(flag=flag, run_id=env.get("RUN_ID")):
+                    rc, mark_, restore, out = self.main(flag, env)
+                    self.assertEqual(rc, 0)
+                    mark_.assert_not_called()
+                    restore.assert_not_called()
+                    self.assertIn("::warning::automated review not", out)
+
+
+class TestTooLargeModeReadsItsInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "OPT_OUT_LABEL": "skip me",
+        "MAX_CHANGED_FILES": "100",
+        "MAX_DIFF_BYTES": "400000",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", *flag]),
+            mock.patch.object(post_review, "decline", return_value=0) as decline_,
+            redirect_stdout(io.StringIO()),
+        ):
+            rc = post_review.main()
+        return rc, decline_
+
+    def test_it_passes_the_pr_the_label_and_the_limits(self):
+        rc, decline_ = self.main(["--too-large"], self.ENV)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            decline_.call_args.args[1:], (1, SHA, AUTHOR, "skip me", (100, 400_000))
+        )
+
+    def test_the_row_path_passes_the_limits_too(self):
+        with mock.patch.object(Path, "read_text", return_value='{"status": "x"}'):
+            with mock.patch.object(post_review, "run", return_value=0) as run_:
+                self.main(["--row-file", "terminal.json"], self.ENV)
+        self.assertEqual(run_.call_args.args[-1], (100, 400_000))
+
+    def test_a_bad_limit_drops_the_numbers_not_the_notice(self):
+        _, decline_ = self.main(["--too-large"], {**self.ENV, "MAX_DIFF_BYTES": "4e5"})
+        self.assertIsNone(decline_.call_args.args[-1])
+
+
 class TestWorkflowWiring(unittest.TestCase):
+    def test_announce_runs_the_too_large_mode_with_a_write_token(self):
+        text = WORKFLOW.read_text()
+        announce = text.split("\n  announce:\n", 1)[1].split("\n  review:\n", 1)[0]
+        step = announce.split("- name: Say the PR is too large to review", 1)[1]
+        self.assertIn("python3 scripts/pr_review/post_review.py --too-large", step)
+        self.assertIn("pull-requests: write", announce.split("steps:", 1)[0])
+        header = text.split("\njobs:", 1)[0]
+        for var in ("MAX_CHANGED_FILES", "MAX_DIFF_BYTES"):
+            self.assertRegex(header, rf"(?m)^  {var}: \d+$")
+
     def test_publish_job_runs_the_script_on_the_row_with_a_write_token(self):
         text = WORKFLOW.read_text()
         publish = text.split("\n  publish:\n", 1)[1]

@@ -85,10 +85,12 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
     std::optional<Device> common_device = input.device();
     for (const auto dim : c10::irange(N)) {
         const Tensor& dim_bins = bins[dim];
-        const auto bins_name = dim_bins.scalar_type() == input.scalar_type() && dim_bins.dim() == 1
-                ? "bins" : c10::str("bins[", dim, "]");
+        const auto bins_name = bins.size() == 1 ? "bins" : c10::str("bins[", dim, "]");
         const TensorArg bins_arg(dim_bins, bins_name.c_str(), 0);
-        c10::impl::check_and_update_common_device(common_device, dim_bins, checked_from, bins_name.c_str());
+        // MPS copies bin edges to the input device in its histogram kernel.
+        if (!input.is_mps()) {
+            c10::impl::check_and_update_common_device(common_device, dim_bins, checked_from, bins_name.c_str());
+        }
         checkScalarType(checked_from, bins_arg, input.scalar_type());
         checkDim(checked_from, bins_arg, 1);
 
@@ -121,8 +123,11 @@ void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bi
     checkScalarType(checked_from, TensorArg(hist, "hist", 0), input.scalar_type());
 
     for (const auto dim : c10::irange(N)) {
-        c10::impl::check_and_update_common_device(common_device, bin_edges[dim], checked_from, "bin_edges");
-        checkScalarType(checked_from, TensorArg(bin_edges[dim], "bin_edges", 0), input.scalar_type());
+        const auto edges_name = bin_edges.size() == 1 ? "bin_edges" : c10::str("bin_edges[", dim, "]");
+        if (!input.is_mps()) {
+            c10::impl::check_and_update_common_device(common_device, bin_edges[dim], checked_from, edges_name.c_str());
+        }
+        checkScalarType(checked_from, TensorArg(bin_edges[dim], edges_name.c_str(), 0), input.scalar_type());
 
         TORCH_CHECK(bin_ct[dim] > 0,
                 checked_from, ": bins must be > 0, but got ", bin_ct[dim], " for dimension ", dim);
