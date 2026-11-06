@@ -59,7 +59,6 @@ namespace at::hip::detail {
             static constexpr bool FixedVectorSizeC = VectorSizeC_ != 0;
             static constexpr index_t VectorSizeAB = FixedVectorSizeAB ? VectorSizeAB_ : 1;
             static constexpr index_t VectorSizeC = FixedVectorSizeC ? VectorSizeC_ : 1;
-            // Only a 16-bit C vector width of 1 needs NoSplitKEpilogue; every other config uses CShuffleEpilogue as is.
             static constexpr bool UseNoSplitKEpilogue = FixedVectorSizeC && VectorSizeC == 1;
 
             // GemmSpatiallyLocalTilePartitioner: GroupNum matches the 8 XCDs of gfx942/gfx950.
