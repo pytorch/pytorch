@@ -332,7 +332,6 @@ RUN_PARALLEL_BLOCKLIST = [
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
-    "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
     "test_cpp_extensions_jit",

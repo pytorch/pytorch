@@ -1507,8 +1507,6 @@ ownership:
     section: cpp_runtime_tests
     paths:
       - /test/cpp/
-      - /test/cpp_api_parity/
-      - /test/test_cpp_api_parity.py
   - name: cpp_api_custom_ops
     owners: []
     section: cpp_api_custom_ops
