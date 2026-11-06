@@ -680,7 +680,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
             }
           }
           Tensor out_rows = result.narrow(0, start, n);
-          // Each part now covers <= kCatSplitElems per input, so this does not split again.
+          // Each chunk is under kCatSplitElems or has a single row, so this does not split again.
           at::cat_out(out_rows, parts, dim);
         }
         return;
