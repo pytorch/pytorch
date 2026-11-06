@@ -9,8 +9,10 @@
 // TODO: enable on Windows.
 #ifndef _WIN32
 #include <fmt/format.h>
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -21,6 +23,7 @@
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
@@ -49,26 +52,24 @@ const at::xpu::LevelZero& ze() {
  * memory. Here we use 120 as MAX_ARGS following static_cuda_launcher.cpp which
  * has been tuned before.
  */
-// 120 max args + 1 for global scratch size
+// 120 max args + 1 for the global scratch argument. The fast launcher can add
+// a profile scratch argument on top, so a 120-argument kernel with both falls
+// back to the generic launcher.
 #define MAX_ARGS 121
 typedef void* syclDevicePtr_t;
 
-syclDevicePtr_t getPointer(
-    PyObject* obj,
-    int idx,
-    const sycl::queue* queuePtr) {
-  syclDevicePtr_t data_ptr = nullptr;
+/**
+ * A loaded kernel and the launch properties that are fixed once it is loaded:
+ * the threads per warp used with num_warps to size the work-group, and its
+ * argument count.
+ */
+struct LoadedKernel {
+  sycl::kernel kernel;
+  uint32_t threadsPerWarp = 0;
+  uint32_t numArgs = 0;
+};
 
-  if (THPUtils_checkLong(obj)) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
-
-    return data_ptr;
-  }
-  if (Py_IsNone(obj)) {
-    // valid nullptr
-    return data_ptr;
-  }
+syclDevicePtr_t callDataPtrMethod(PyObject* obj) {
   auto ptr = THPObjectPtr{PyObject_GetAttrString(obj, "data_ptr")};
   TORCH_CHECK(
       ptr != nullptr,
@@ -80,8 +81,22 @@ syclDevicePtr_t getPointer(
       "data_ptr method of Pointer object must return 64-bit int");
 
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  data_ptr = reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(ret));
+  return reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(ret));
+}
 
+syclDevicePtr_t getPointer(
+    PyObject* obj,
+    int idx,
+    const sycl::queue* queuePtr) {
+  if (THPUtils_checkLong(obj)) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
+  }
+  if (Py_IsNone(obj)) {
+    // valid nullptr
+    return nullptr;
+  }
+  syclDevicePtr_t data_ptr = callDataPtrMethod(obj);
   if (!data_ptr)
     return data_ptr;
 
@@ -110,6 +125,34 @@ syclDevicePtr_t getPointer(
   return data_ptr;
 }
 
+// Device pointer of a pointer argument without the zeMemGetAllocProperties
+// validation getPointer() does, reading the tensor's data_ptr() in C++ instead
+// of calling the python method.
+// Anything else takes the same path getPointer() does.
+//
+// A pointer the Level Zero context does not own therefore reaches the device
+// instead of being rejected here; TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER=0
+// brings that diagnostic back.
+inline syclDevicePtr_t getPointerFast(PyObject* obj, int idx) {
+  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+    const at::Tensor& tensor = THPVariable_Unpack(obj);
+    TORCH_CHECK(
+        tensor.defined(),
+        "_FastXpuLauncher: undefined tensor at ",
+        idx,
+        "-th argument");
+    return tensor.data_ptr();
+  }
+  if (THPUtils_checkLong(obj)) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<syclDevicePtr_t>(THPUtils_unpackUInt64(obj));
+  }
+  if (Py_IsNone(obj)) {
+    return nullptr;
+  }
+  return callDataPtrMethod(obj);
+}
+
 // TODO: unify and reuse with static_cuda_launcher.cpp
 template <typename FINAL, typename F>
 void convertType(F converter, const char* name, void* slot, PyObject* item) {
@@ -123,17 +166,75 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
 }
 
 /**
-  Given a list of args and their types (in a string), along with two stack
-  allocated arrays, puts each argument arg_{i} into argStorage[i], and a
-  pointer to the argument in kernelArgs[i]. We then can pass `kernelArgs`
-  directly to launchKernel. Note that some args can be less than 8 bytes, but
-  we'll still allocate 8 bytes on the stack for them.
+  Puts argument `item`, of the type `typeChar` names, into the 8-byte `slot`.
+  Note that some args can be less than 8 bytes, but we'll still allocate 8
+  bytes for them. `getPtr` resolves a pointer argument to a device pointer, so
+  that a caller can choose how much it validates.
 */
+template <typename PointerGetter>
+void packKernelArg(
+    char typeChar,
+    void* slot,
+    PyObject* item,
+    int idx,
+    const PointerGetter& getPtr) {
+  switch (typeChar) {
+    case 'b':
+      convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
+      break;
+    case 'h':
+      convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
+      break;
+    case 'i':
+      convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
+      break;
+    case 'l':
+      convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
+      break;
+    case 'B':
+      convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
+      break;
+    case 'H':
+      convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
+      break;
+    case 'I':
+      convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
+      break;
+    case 'K':
+      convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
+      break;
+    case 'e':
+      convertType<uint16_t>(
+          torch::inductor::static_launcher::unpackTritonFp16,
+          "float16",
+          slot,
+          item);
+      break;
+    case 'y':
+      convertType<uint16_t>(
+          torch::inductor::static_launcher::unpackTritonBf16,
+          "bfloat16",
+          slot,
+          item);
+      break;
+    case 'f':
+      convertType<float>(THPUtils_unpackDouble, "float", slot, item);
+      break;
+    case 'd':
+      convertType<double>(THPUtils_unpackDouble, "double", slot, item);
+      break;
+    case 'O': // pointer
+      *reinterpret_cast<syclDevicePtr_t*>(slot) = getPtr(item, idx);
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
+  }
+}
+
 void parseKernelArgs(
     PyObject* varArgs,
     const char* argTypes,
     uint64_t* argStorage,
-    void** kernelArgs,
     const sycl::queue* queuePtr) {
   int numKernelArgs = static_cast<int>(std::strlen(argTypes));
   TORCH_CHECK(
@@ -142,67 +243,12 @@ void parseKernelArgs(
       PyTuple_Size(varArgs) == static_cast<Py_ssize_t>(numKernelArgs),
       "Mismatch between number of argument types and provided arguments");
 
+  auto getPtr = [queuePtr](PyObject* item, int idx) {
+    return getPointer(item, idx, queuePtr);
+  };
   for (int i = 0; i < numKernelArgs; ++i) {
-    // Get pointer to the ith 8-byte slot.
-    void* slot = static_cast<void*>(&argStorage[i]);
-    PyObject* item = PyTuple_GetItem(varArgs, i);
-    char typeChar = argTypes[i];
-    switch (typeChar) {
-      case 'b':
-        convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
-        break;
-      case 'h':
-        convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
-        break;
-      case 'i':
-        convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
-        break;
-      case 'l':
-        convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
-        break;
-      case 'B':
-        convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
-        break;
-      case 'H':
-        convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
-        break;
-      case 'I':
-        convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
-        break;
-      case 'K':
-        convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
-        break;
-      case 'e':
-        convertType<uint16_t>(
-            torch::inductor::static_launcher::unpackTritonFp16,
-            "float16",
-            slot,
-            item);
-        break;
-      case 'y':
-        convertType<uint16_t>(
-            torch::inductor::static_launcher::unpackTritonBf16,
-            "bfloat16",
-            slot,
-            item);
-        break;
-      case 'f':
-        convertType<float>(THPUtils_unpackDouble, "float", slot, item);
-        break;
-      case 'd':
-        convertType<double>(THPUtils_unpackDouble, "double", slot, item);
-        break;
-      case 'O': { // pointer; using helper getPointer() (which may call
-                  // data_ptr() if needed)
-        syclDevicePtr_t ptr = getPointer(item, i, queuePtr);
-        *reinterpret_cast<syclDevicePtr_t*>(slot) = ptr;
-        break;
-      }
-      default:
-        TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
-    }
-    // Save the pointer to this slot.
-    kernelArgs[i] = slot;
+    packKernelArg(
+        argTypes[i], &argStorage[i], PyTuple_GetItem(varArgs, i), i, getPtr);
   }
 }
 
@@ -273,10 +319,10 @@ inline ZeModulePtr _createModule(
   return module;
 }
 
-inline std::unique_ptr<sycl::kernel> _createKernel(
+inline LoadedKernel _createKernel(
     ZeModulePtr module,
     const char* kernelName,
-    uint32_t* nSpillsPtr = nullptr) {
+    uint32_t& nSpills) {
   assert(module);
   assert(kernelName);
   auto& syclContext = c10::xpu::get_device_context();
@@ -300,40 +346,41 @@ inline std::unique_ptr<sycl::kernel> _createKernel(
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(ze().zeKernelCreate(rawModule, &kernelDescription, &rawKernel));
   ZeKernelPtr kernel(rawKernel);
-  if (nSpillsPtr) {
-    ze_kernel_properties_t props{};
-    props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
-    props.pNext = nullptr;
-    ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
-    // Level Zero reports spillMemSize in bytes per hardware thread, while
-    // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
-    // per lane. Inductor's spill thresholds are calibrated on the latter, so
-    // normalize the same way the Intel triton driver does; otherwise the
-    // statically launched kernel reports a value 4 * SIMD width too large.
-    // requiredSubgroupSize comes from the intel_reqd_sub_group_size attribute
-    // triton always emits; maxSubgroupSize is the compiled SIMD width when
-    // that attribute is absent.
-    const uint32_t subgroupSize = props.requiredSubgroupSize != 0
-        ? props.requiredSubgroupSize
-        : props.maxSubgroupSize;
-    // Truncating division matches CUDA/HIP, so a scratch allocation below one
-    // dword per lane reports 0. With an unknown SIMD width, report the raw
-    // bytes: over-reporting beats hiding an allocation.
-    *nSpillsPtr = subgroupSize != 0 ? props.spillMemSize / (4 * subgroupSize)
-                                    : props.spillMemSize;
-  }
+  ze_kernel_properties_t props{};
+  props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
+  props.pNext = nullptr;
+  ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
+  // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
+  // always emits. If a kernel declares none, the compiler picks its SIMD width;
+  // only for the work-group size do we assume triton's default warp size of 32.
+  const uint32_t requiredSimd = props.requiredSubgroupSize;
+  const uint32_t threadsPerWarp = requiredSimd != 0 ? requiredSimd : 32;
+  // Level Zero reports spillMemSize in bytes per hardware thread, while
+  // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
+  // per lane. Inductor's spill thresholds are calibrated on the latter, so
+  // normalize the same way the Intel triton driver does; otherwise the
+  // statically launched kernel reports a value 4 * SIMD width too large.
+  // maxSubgroupSize is only a best-effort stand-in here: Level Zero documents
+  // it as a maximum, not as the compiled width. Truncating division matches
+  // CUDA/HIP, so a scratch allocation below one dword per lane reports 0. With
+  // an unknown SIMD width, report the raw bytes: over-reporting beats hiding an
+  // allocation.
+  const uint32_t spillSimd =
+      requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
+  nSpills = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
+                           : props.spillMemSize;
   auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
       {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
   kernel.release();
-  return std::make_unique<sycl::kernel>(std::move(fun));
+  return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
-std::unique_ptr<sycl::kernel> loadKernel(
+std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
-    uint32_t* nSpillsPtr,
+    uint32_t& nSpills,
     int device_idx) {
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
@@ -342,7 +389,8 @@ std::unique_ptr<sycl::kernel> loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return _createKernel(std::move(mod), funcName, nSpillsPtr);
+  return std::make_unique<LoadedKernel>(
+      _createKernel(std::move(mod), funcName, nSpills));
 }
 
 template <typename T>
@@ -394,34 +442,52 @@ void setKernelArg(
   }
 }
 
-void launchKernel(
-    sycl::kernel* kernelPtr,
+void submitKernel(
+    const LoadedKernel* loadedKernel,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
     uint32_t numWarps,
     uint32_t sharedMemBytes,
     const char* argTypes,
-    void** params,
-    sycl::queue* queuePtr) {
-  uint32_t threadsPerWarp = kernelPtr->get_info<
-      sycl::info::kernel_device_specific::compile_sub_group_size>(
-      queuePtr->get_device());
-  if (threadsPerWarp == 0) {
-    threadsPerWarp = 32; // default to 32 if not set
-  }
-  const uint32_t kernelNumArgs =
-      kernelPtr->get_info<sycl::info::kernel::num_args>();
-  const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
-  size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
-  size_t globalRangeY = gridY;
-  size_t globalRangeZ = gridZ;
-  size_t localRangeX = static_cast<size_t>(numWarps) * threadsPerWarp;
-  size_t localRangeY = 1;
-  size_t localRangeZ = 1;
-  sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
-  sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
+    uint32_t numParams,
+    const uint64_t* argStorage,
+    sycl::queue* queuePtr,
+    bool bindLocal) {
+  size_t localRangeX =
+      static_cast<size_t>(numWarps) * loadedKernel->threadsPerWarp;
+  sycl::range<3> globalRange(gridZ, gridY, gridX * localRangeX);
+  sycl::range<3> localRange(1, 1, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
+  auto cgf = [&](sycl::handler& cgh) {
+    for (uint32_t i = 0; i < numParams; ++i) {
+      setKernelArg(cgh, static_cast<int>(i), argTypes[i], &argStorage[i]);
+    }
+
+    if (bindLocal) {
+      using share_mem_t = sycl::local_accessor<int8_t, 1>;
+      share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
+      cgh.set_arg(static_cast<int>(numParams), localBuffer);
+      cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
+    } else {
+      cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
+    }
+  };
+  queuePtr->submit(cgf);
+}
+
+void launchKernel(
+    const LoadedKernel* loadedKernel,
+    uint32_t gridX,
+    uint32_t gridY,
+    uint32_t gridZ,
+    uint32_t numWarps,
+    uint32_t sharedMemBytes,
+    const char* argTypes,
+    const uint64_t* argStorage,
+    sycl::queue* queuePtr) {
+  const uint32_t kernelNumArgs = loadedKernel->numArgs;
+  const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
   const bool bindLocal = sharedMemBytes > 0 && kernelNumArgs == numParams + 1;
   TORCH_CHECK(
       kernelNumArgs == numParams + (bindLocal ? 1 : 0),
@@ -430,22 +496,18 @@ void launchKernel(
       " arguments, launcher has ",
       numParams,
       " scalar/pointer arguments");
-  // Submit the imported kernel.
-  auto cgf = [&](sycl::handler& cgh) {
-    for (uint32_t i = 0; i < numParams; ++i) {
-      setKernelArg(cgh, static_cast<int>(i), argTypes[i], params[i]);
-    }
-
-    if (bindLocal) {
-      using share_mem_t = sycl::local_accessor<int8_t, 1>;
-      share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
-      cgh.set_arg(static_cast<int>(numParams), localBuffer);
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
-    } else {
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
-    }
-  };
-  queuePtr->submit(cgf);
+  submitKernel(
+      loadedKernel,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      argTypes,
+      numParams,
+      argStorage,
+      queuePtr,
+      bindLocal);
 }
 
 /* Load the kernel into memory (called during torch.compile), and
@@ -467,13 +529,15 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
-  std::unique_ptr<sycl::kernel> func =
-      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
+  std::unique_ptr<LoadedKernel> func =
+      loadKernel(filePath, funcName, sharedMemBytes, n_spills, device);
 
   PyObject* kernel_py = PyCapsule_New(
-      reinterpret_cast<void*>(func.get()), "sycl_kernel", [](PyObject* cap) {
-        void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
-        delete reinterpret_cast<sycl::kernel*>(ptr);
+      reinterpret_cast<void*>(func.get()),
+      "static_xpu_kernel",
+      [](PyObject* cap) {
+        void* ptr = PyCapsule_GetPointer(cap, "static_xpu_kernel");
+        delete reinterpret_cast<LoadedKernel*>(ptr);
       });
   if (kernel_py == nullptr) {
     return nullptr;
@@ -486,7 +550,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 }
 
 PyObject* launch_kernel_inner(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -496,14 +560,10 @@ PyObject* launch_kernel_inner(
     PyObject* varArgs,
     sycl::queue* queuePtr) {
   // Launch the kernel
-  // Prepare the arguments for the kernel
-  // We allocate 8 bytes per argument on the stack. We then allocate 8 more
-  // bytes to point to each 8 byte slot in argStorage, and pass that array of
-  // pointers to launchKernel.
+  // Prepare the arguments for the kernel: 8 bytes per argument on the stack,
+  // which is what launchKernel reads them from.
   std::array<uint64_t, MAX_ARGS> argStorage = {};
-  std::array<void*, MAX_ARGS> kernelArgs = {};
-  parseKernelArgs(
-      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), queuePtr);
   launchKernel(
       func,
       gridX,
@@ -512,14 +572,14 @@ PyObject* launch_kernel_inner(
       numWarps,
       sharedMemBytes,
       argTypes,
-      kernelArgs.data(),
+      argStorage.data(),
       queuePtr);
 
   Py_RETURN_NONE;
 }
 
 PyObject* launch_kernel_slow(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -531,10 +591,8 @@ PyObject* launch_kernel_slow(
   /* For the slow case, allocate memory on the stack instead of the heap */
   size_t numArgs = std::strlen(argTypes);
   std::vector<uint64_t> argStorage(numArgs);
-  std::vector<void*> kernelArgs(numArgs);
 
-  parseKernelArgs(
-      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), queuePtr);
 
   launchKernel(
       func,
@@ -544,7 +602,7 @@ PyObject* launch_kernel_slow(
       numWarps,
       sharedMemBytes,
       argTypes,
-      kernelArgs.data(),
+      argStorage.data(),
       queuePtr);
   Py_RETURN_NONE;
 }
@@ -593,8 +651,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
   }
 
-  sycl::kernel* func = reinterpret_cast<sycl::kernel*>(
-      PyCapsule_GetPointer(kernel_py, "sycl_kernel")); // NOLINT
+  const LoadedKernel* func = reinterpret_cast<const LoadedKernel*>(
+      PyCapsule_GetPointer(kernel_py, "static_xpu_kernel")); // NOLINT
+  if (func == nullptr) {
+    return nullptr;
+  }
   sycl::queue* queuePtr = reinterpret_cast<sycl::queue*>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
   // Kernels with no arguments should just pass nullptr to cuLaunchKernel
@@ -691,6 +752,260 @@ PyTypeObject StaticXpuLauncherType = {
     nullptr, // tp_alloc
     nullptr, // tp_new
 };
+
+// ---------------------------------------------------------------------------
+// _FastXpuLauncher: pre-bound callable that uses vectorcall (PEP 590) to
+// launch a triton kernel with minimal overhead, the XPU sibling of
+// _FastCudaLauncher in static_launcher/cuda.cpp.
+//
+// Pre-binds: the loaded kernel, the work-group size and argument layout
+//            derived from it, shared memory size, argument types.
+// Per-call:  only grid, stream and kernel args are passed.
+// Skips:     PyArg_ParseTuple, the kernel capsule lookup, the strlen and the
+//            argument count check of argTypes, and the per-pointer
+//            zeMemGetAllocProperties validation.
+// ---------------------------------------------------------------------------
+struct FastXpuLauncherObject {
+  PyObject_HEAD
+  vectorcallfunc vectorcall;
+  // The capsule owns the kernel, and swapping this object into the python
+  // launcher drops that launcher's only reference to the owning
+  // StaticallyLaunchedXpuKernel, so keep the capsule alive ourselves.
+  PyObject* kernelCapsule;
+  const LoadedKernel* kernel;
+  uint32_t numWarps;
+  uint32_t sharedMemBytes;
+  int numKernelArgs; // args passed from python
+  int numTotalArgs; // numKernelArgs + nScratch
+  bool bindLocal;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  char argTypes[MAX_ARGS + 1]; // null-terminated
+};
+
+PyObject* fast_launcher_vectorcall(
+    PyObject* callable,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames);
+
+PyObject* FastXpuLauncher_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwds) {
+  HANDLE_TH_ERRORS
+  PyObject* kernelCapsule = nullptr;
+  int numWarps = 0, shared = 0, nScratch = 0;
+  const char* argTypes = nullptr;
+  if (!PyArg_ParseTuple(
+          args,
+          "Oiisi",
+          &kernelCapsule,
+          &numWarps,
+          &shared,
+          &argTypes,
+          &nScratch)) {
+    return nullptr;
+  }
+  // tp_init is NULL, so without this a keyword argument is silently dropped.
+  if (kwds != nullptr && PyDict_Size(kwds) > 0) {
+    PyErr_SetString(
+        PyExc_TypeError, "_FastXpuLauncher takes no keyword arguments");
+    return nullptr;
+  }
+
+  // Every rejection here raises ValueError, which _build_fast_launcher treats
+  // as an expected failure and answers by keeping the slow launcher.
+  const LoadedKernel* kernel = reinterpret_cast<const LoadedKernel*>(
+      PyCapsule_GetPointer(kernelCapsule, "static_xpu_kernel")); // NOLINT
+  if (kernel == nullptr) {
+    PyErr_Clear();
+    PyErr_SetString(
+        PyExc_ValueError,
+        "_FastXpuLauncher was not passed a loaded XPU kernel");
+    return nullptr;
+  }
+  // A negative count would index argTypes out of bounds below.
+  if (numWarps <= 0 || shared < 0 || nScratch < 0) {
+    PyErr_Format(
+        PyExc_ValueError,
+        "_FastXpuLauncher: num_warps must be positive and shared and the "
+        "scratch argument count non-negative, got %d, %d and %d",
+        numWarps,
+        shared,
+        nScratch);
+    return nullptr;
+  }
+
+  int numKernelArgs = static_cast<int>(std::strlen(argTypes));
+  int numTotalArgs = numKernelArgs + nScratch;
+  if (numTotalArgs > MAX_ARGS) {
+    PyErr_Format(
+        PyExc_ValueError,
+        "_FastXpuLauncher: too many arguments (%d > %d)",
+        numTotalArgs,
+        MAX_ARGS);
+    return nullptr;
+  }
+  const uint32_t numParams = static_cast<uint32_t>(numTotalArgs);
+  const bool bindLocal = shared > 0 && kernel->numArgs == numParams + 1;
+  if (kernel->numArgs != numParams + (bindLocal ? 1 : 0)) {
+    PyErr_Format(
+        PyExc_ValueError,
+        "Kernel argument count mismatch: kernel expects %u arguments, launcher "
+        "has %u scalar/pointer arguments",
+        kernel->numArgs,
+        numParams);
+    return nullptr;
+  }
+
+  auto* self =
+      reinterpret_cast<FastXpuLauncherObject*>(type->tp_alloc(type, 0));
+  if (!self) {
+    return nullptr;
+  }
+  self->kernel = kernel;
+  self->kernelCapsule = Py_NewRef(kernelCapsule);
+  self->numWarps = static_cast<uint32_t>(numWarps);
+  self->sharedMemBytes = static_cast<uint32_t>(shared);
+  self->numKernelArgs = numKernelArgs;
+  self->numTotalArgs = numTotalArgs;
+  self->bindLocal = bindLocal;
+  std::memcpy(self->argTypes, argTypes, numKernelArgs);
+  // Scratch slots are pointer type; inductor codegen always passes None for
+  // them, so each launch binds them as the null pointer.
+  for (int i = numKernelArgs; i < numTotalArgs; ++i) {
+    self->argTypes[i] = 'O';
+  }
+  self->argTypes[numTotalArgs] = '\0';
+  self->vectorcall = fast_launcher_vectorcall;
+  return reinterpret_cast<PyObject*>(self);
+  END_HANDLE_TH_ERRORS
+}
+
+void FastXpuLauncher_dealloc(PyObject* self) {
+  Py_CLEAR(reinterpret_cast<FastXpuLauncherObject*>(self)->kernelCapsule);
+  Py_TYPE(self)->tp_free(self);
+}
+
+// The hot path - called every kernel launch via vectorcall.
+// args layout: [grid_x, grid_y, grid_z, stream, kernel_arg0, ...]
+PyObject* fast_launcher_vectorcall(
+    PyObject* callable,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      kwnames == nullptr,
+      "_FastXpuLauncher: keyword arguments are not supported");
+  auto* self = reinterpret_cast<FastXpuLauncherObject*>(callable);
+  Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+  // Exact, like both launchers this replaces: an extra argument means the
+  // launcher and the kernel signature have drifted apart.
+  TORCH_CHECK(
+      nargs == 4 + self->numKernelArgs,
+      "_FastXpuLauncher: expected ",
+      4 + self->numKernelArgs,
+      " args, got ",
+      nargs);
+
+  // Grid and stream are always integers from inductor codegen.
+  // Debug-only guard; zero cost in release/opt builds.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      PyLong_Check(args[0]) && PyLong_Check(args[1]) && PyLong_Check(args[2]),
+      "_FastXpuLauncher: grid dimensions must be integers");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      PyLong_Check(args[3]), "_FastXpuLauncher: stream must be an integer");
+
+  int64_t gridX = THPUtils_unpackLong(args[0]);
+  int64_t gridY = THPUtils_unpackLong(args[1]);
+  int64_t gridZ = THPUtils_unpackLong(args[2]);
+  if (gridX <= 0 || gridY <= 0 || gridZ <= 0) {
+    // No need to do any work if we're outside of grid bounds
+    Py_RETURN_NONE;
+  }
+  constexpr int64_t maxGrid = std::numeric_limits<uint32_t>::max();
+  TORCH_CHECK(
+      gridX <= maxGrid && gridY <= maxGrid && gridZ <= maxGrid,
+      "_FastXpuLauncher: grid dimensions must fit in 32 bits, got ",
+      gridX,
+      ", ",
+      gridY,
+      ", ",
+      gridZ);
+  sycl::queue* queuePtr =
+      reinterpret_cast<sycl::queue*>(THPUtils_unpackUInt64(args[3])); // NOLINT
+
+  // Per call, not per launcher: packing an argument can run python (a
+  // data_ptr() method, __index__), which can re-enter this launcher and would
+  // otherwise overwrite the arguments packed so far.
+  std::array<uint64_t, MAX_ARGS> argStorage;
+  auto getPtr = [](PyObject* item, int idx) {
+    return getPointerFast(item, idx);
+  };
+  for (int i = 0; i < self->numKernelArgs; ++i) {
+    packKernelArg(self->argTypes[i], &argStorage[i], args[4 + i], i, getPtr);
+  }
+  for (int i = self->numKernelArgs; i < self->numTotalArgs; ++i) {
+    argStorage[i] = 0;
+  }
+
+  submitKernel(
+      self->kernel,
+      static_cast<uint32_t>(gridX),
+      static_cast<uint32_t>(gridY),
+      static_cast<uint32_t>(gridZ),
+      self->numWarps,
+      self->sharedMemBytes,
+      self->argTypes,
+      static_cast<uint32_t>(self->numTotalArgs),
+      argStorage.data(),
+      queuePtr,
+      self->bindLocal);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyTypeObject FastXpuLauncherType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FastXpuLauncher", // tp_name
+    sizeof(FastXpuLauncherObject), // tp_basicsize
+    0, // tp_itemsize
+    FastXpuLauncher_dealloc, // tp_dealloc
+    offsetof(FastXpuLauncherObject, vectorcall), // tp_vectorcall_offset
+    nullptr, // tp_getattr
+    nullptr, // tp_setattr
+    nullptr, // tp_reserved
+    nullptr, // tp_repr
+    nullptr, // tp_as_number
+    nullptr, // tp_as_sequence
+    nullptr, // tp_as_mapping
+    nullptr, // tp_hash
+    PyVectorcall_Call, // tp_call - fallback for non-vectorcall callers
+    nullptr, // tp_str
+    nullptr, // tp_getattro
+    nullptr, // tp_setattro
+    nullptr, // tp_as_buffer
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_VECTORCALL,
+    "Pre-bound fast launcher for triton XPU kernels (vectorcall)", // tp_doc
+    nullptr, // tp_traverse
+    nullptr, // tp_clear
+    nullptr, // tp_richcompare
+    0, // tp_weaklistoffset
+    nullptr, // tp_iter
+    nullptr, // tp_iternext
+    nullptr, // tp_methods
+    nullptr, // tp_members
+    nullptr, // tp_getset
+    nullptr, // tp_base
+    nullptr, // tp_dict
+    nullptr, // tp_descr_get
+    nullptr, // tp_descr_set
+    0, // tp_dictoffset
+    nullptr, // tp_init
+    nullptr, // tp_alloc
+    FastXpuLauncher_new, // tp_new
+};
 } // anonymous namespace
 // Module initialization: add StaticXpuLauncher to the module with our static
 // methods.
@@ -714,6 +1029,13 @@ bool StaticXpuLauncher_init(PyObject* module) {
     Py_DECREF(static_method);
   }
   if (PyModule_AddType(module, &StaticXpuLauncherType) < 0) {
+    return false;
+  }
+  return true;
+}
+
+bool FastXpuLauncher_init(PyObject* module) {
+  if (PyModule_AddType(module, &FastXpuLauncherType) < 0) {
     return false;
   }
   return true;

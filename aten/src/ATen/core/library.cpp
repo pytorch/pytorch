@@ -59,7 +59,7 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
 namespace detail {
   // Insertion of library initializers into torch_library_initializers is not
   // thread-safe as we expect this to be handled by the applications dynamic
