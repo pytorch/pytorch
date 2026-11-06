@@ -38,7 +38,7 @@ class TestAutogradFallback(TestCase):
         self.libraries.append(result)
         return result
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_no_grad(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -61,7 +61,7 @@ class TestAutogradFallback(TestCase):
                 out = op(a, b, 1)
                 self.assertFalse(out.requires_grad)
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_no_autograd_kernel(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -82,10 +82,40 @@ class TestAutogradFallback(TestCase):
                 out.backward()
             self.assertIsNone(b.grad)
 
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_compile_error_deferred_until_backward(self, backend):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        lib = self.get_lib()
+        lib.define("foo(Tensor a) -> Tensor")
+        lib.impl("foo", lambda a: a.sin(), "CPU")
+        lib.impl("foo", lambda a: torch.empty_like(a), "Meta")
+        op = self.get_op("foo")
+
+        def fn(x):
+            return op(x).sum()
+
+        counter = CompileCounterWithBackend(backend)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(3, requires_grad=True)
+        out = compiled(x)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertTrue(out.requires_grad)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"{self.test_ns}::foo: an autograd kernel was not registered",
+        ):
+            out.backward()
+        self.assertIsNone(x.grad)
+
     def _check_ctx(self, mode, *, mode_nothing_raises=False):
         if mode == "warn":
             return self.assertWarnsRegex(
                 UserWarning, "an autograd kernel was not registered"
+            )
+        if mode == "error":
+            return self.assertRaisesRegex(
+                RuntimeError, "an autograd kernel was not registered"
             )
         if mode != "nothing":
             raise AssertionError(f"mode should be 'nothing', got {mode!r}")
@@ -93,7 +123,7 @@ class TestAutogradFallback(TestCase):
             return self.assertRaisesRegex(RuntimeError, "does not require grad")
         return contextlib.nullcontext()
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_no_autograd_kernel_inplace(self, mode):
         with autograd_fallback_mode(mode):
             # input modified in-place gets returned as output
@@ -137,7 +167,7 @@ class TestAutogradFallback(TestCase):
                 y.backward()
                 self.assertEqual(x.grad, torch.ones_like(x))
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_cpu_return_self(self, mode):
         with autograd_fallback_mode(mode):
             # To be clear, none of these situations are OK and will lead
@@ -164,7 +194,7 @@ class TestAutogradFallback(TestCase):
                     y.backward()
                     self.assertEqual(x.grad, torch.ones_like(x))
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_composite_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
             with _scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -178,7 +208,7 @@ class TestAutogradFallback(TestCase):
                     y.backward()
                     self.assertEqual(x.grad, x.cos())
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_autograd_function_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
             with _scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -204,7 +234,7 @@ class TestAutogradFallback(TestCase):
                     y.backward()
                     self.assertEqual(x.grad, x.cos())
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_inplace_autograd_function_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
             with _scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -246,7 +276,7 @@ class TestAutogradFallback(TestCase):
                     (gx,) = torch.autograd.grad(z, x, torch.ones_like(z))
                     self.assertEqual(gx, expected)
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_inplace_on_tensor_that_does_not_require_grad(self, mode):
         # We don't do anything special (that is, we don't rebase history).
         # See NOTE [autograd fallback and in-place operations] for why
@@ -305,7 +335,7 @@ class TestAutogradFallback(TestCase):
                         op(z, y)
                         torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_post_autograd_returns_leaf(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -320,7 +350,7 @@ class TestAutogradFallback(TestCase):
             with self._check_ctx(mode):
                 z.sum().backward()
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_undefined_inputs_outputs(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -338,7 +368,7 @@ class TestAutogradFallback(TestCase):
             with self._check_ctx(mode):
                 z.sum().backward()
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_undefined_grads(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -358,7 +388,7 @@ class TestAutogradFallback(TestCase):
             with self._check_ctx(mode):
                 (z + w).sum().backward()
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_base_does_not_require_grad(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -381,7 +411,7 @@ class TestAutogradFallback(TestCase):
             with self._check_ctx(mode):
                 w.sum().backward()
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_post_autograd_returns_mix_of_requires_grad_tensors(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
@@ -415,7 +445,7 @@ class TestAutogradFallback(TestCase):
                     z, (a, b), torch.ones_like(z), allow_unused=True, retain_graph=True
                 )
 
-    @parametrize("mode", ("nothing", "warn"))
+    @parametrize("mode", ("nothing", "warn", "error"))
     def test_supports_tensor_lists(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()
