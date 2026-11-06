@@ -9421,7 +9421,10 @@ _log_ndtr_default = lowerings[aten.special_log_ndtr.default]
 
 @register_lowering(aten.special_log_ndtr.default, type_promotion_kind=None)
 def log_ndtr(x):
-    if is_strict_cuda_triton(x.get_device()) and x.get_dtype() == torch.float32:
+    if is_strict_cuda_triton(x.get_device()) and x.get_dtype() in (
+        torch.float32,
+        torch.float64,
+    ):
         return make_pointwise(ops_wrapper("log_ndtr"))(x)
     return _log_ndtr_default(x)
 
