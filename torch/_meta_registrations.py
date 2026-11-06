@@ -3243,6 +3243,27 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
+    @register_meta(torch.ops.onednn.qlinear_w4a8_int.default)
+    def meta_qlinear_w4a8_int(
+        mat_a,
+        mat_b,
+        mat_a_scale,
+        mat_b_scale,
+        mat_a_zero_point,
+        mat_b_zero_point,
+        group_size,
+        out_dtype=None,
+        bias=None,
+    ):
+        M = mat_a.shape[0]
+        N = mat_b.shape[0]
+        dst_dtype = torch.float32 if out_dtype is None else out_dtype
+        torch._check(
+            dst_dtype in (torch.float32, torch.bfloat16, torch.float16),
+            lambda: f"output dtype must be one of float32, bfloat16, float16, got {dst_dtype}",
+        )
+        return mat_a.new_empty((M, N), dtype=dst_dtype)
+
     @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
     @register_meta(torch.ops.onednn.linear_relu_dynamic_fp16.default)
     def meta_linear_dynamic_fp16(

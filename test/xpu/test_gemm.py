@@ -1477,6 +1477,7 @@ class TestBasicGEMM(TestCase):
     @parametrize("act_dtype", [torch.int8, torch.uint8])
     @parametrize("out_dtype", [torch.float32, torch.bfloat16, torch.float16])
     @parametrize("use_bias", [True, False])
+    @parametrize("compile", [True, False])
     def test_qlinear_w4a8_int(
         self,
         device,
@@ -1487,6 +1488,7 @@ class TestBasicGEMM(TestCase):
         act_dtype,
         out_dtype,
         use_bias,
+        compile,
     ):
         inner_k_tiles = 2
         torch.manual_seed(1)
@@ -1500,7 +1502,10 @@ class TestBasicGEMM(TestCase):
         )
         mat_b = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
 
-        out = torch.ops.onednn.qlinear_w4a8_int(
+        op = torch.ops.onednn.qlinear_w4a8_int
+        if compile:
+            op = torch.compile(op, fullgraph=True)
+        out = op(
             mat_a,
             mat_b,
             mat_a_scale,
