@@ -976,7 +976,7 @@ jobs:
         with:
           use_bedrock: "true"
           # See stage B for these three.
-          allowed_bots: "pytorch-bot[bot]"
+          allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           github_token: ${{ github.token }}
           allowed_non_write_users: "*"
           # No Write, no hooks, no --add-dir: stage A writes nothing. Its
@@ -1037,11 +1037,14 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
-          # The actor is whoever applied the `in progress` label in Stage 1.
-          # pytorch-bot applies it on `@pytorchbot pre-review accept` once
-          # every assigned reviewer has accepted, and the action rejects bot
-          # actors unless listed here. Name it exactly; never "*".
-          allowed_bots: "pytorch-bot[bot]"
+          # The actor is whoever triggered Stage 1: on `labeled`, whoever
+          # applied `in progress`; on a push, the pusher. The action rejects
+          # bot actors unless listed here. pytorch-bot applies the label on
+          # `@pytorchbot pre-review accept` once every assigned reviewer has
+          # accepted. On a co-dev PR, meta-codesync pushes each re-export of
+          # the internal diff, so it is the actor of the re-reviews those
+          # pushes trigger. Name each bot exactly; never "*".
+          allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           # On a push, the actor is the pusher, usually the PR author, and most
           # contributors lack write access. Without `github_token` the action
           # trades this job's OIDC token for a Claude App token, and that
@@ -1049,10 +1052,11 @@ jobs:
           # before the model ran (pytorch/pytorch#196943). This job's own token
           # skips the exchange and is `contents: read`, so the job that reads PR
           # code holds no repository write permission. `allowed_non_write_users`
-          # works only with `github_token` and skips the action's actor check;
-          # the gate is the `in progress` label, which `prepare` re-reads from
-          # the API. It also turns on a subprocess secret scrub that this job
-          # opts out of; see CLAUDE_CODE_SUBPROCESS_ENV_SCRUB above.
+          # works only with `github_token` and skips the action's write-access
+          # check, not its bot check (`allowed_bots` above); the gate is the
+          # `in progress` label, which `prepare` re-reads from the API. It
+          # also turns on a subprocess secret scrub that this job opts out of;
+          # see CLAUDE_CODE_SUBPROCESS_ENV_SCRUB above.
           github_token: ${{ github.token }}
           allowed_non_write_users: "*"
           # Everything under `claude_args:` is ARGUMENT TEXT - `|` is a literal
