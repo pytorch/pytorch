@@ -330,6 +330,14 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
     easier to reinplace since there is only one use of `self`
     """
 
+    from torch._inductor.lowering import _cuda_mul_mutation_storage_nodes
+
+    # Keep native writeback provenance that canonicalization would discard.
+    native_mutations = (
+        _cuda_mul_mutation_storage_nodes(graph)
+        if config.strict_pointwise
+        else OrderedSet()
+    )
     node_to_view_base: dict[torch.fx.Node, torch.fx.Node] = {}
     node_to_view_op: dict[torch.fx.Node, list[ViewOp]] = defaultdict(list)
 
@@ -414,7 +422,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
     for node in graph.nodes:
         if _is_view_op(node.target):
             handle_views(node)
-        elif node.target in _SCATTER_OP_TO_VIEW:
+        elif node.target in _SCATTER_OP_TO_VIEW and node not in native_mutations:
             handle_view_scatter(node)
 
 
