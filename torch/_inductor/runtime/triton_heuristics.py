@@ -3820,6 +3820,9 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        # Only when set, so configs without a cluster keep their existing hashes.
+        if (ctas_per_cga := getattr(cfg, "ctas_per_cga", None)) is not None:
+            hasher.update(f"ctas_per_cga={tuple(ctas_per_cga)}\n".encode())
         if extra_options := getattr(cfg, "extra_options", None):
             # Preserve existing hashes when no backend-specific options exist.
             hasher.update(
@@ -5490,7 +5493,7 @@ def template(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
-        # Its config carries compile options, such as ctas_per_cga, a table row does not.
+        # Its config can carry TLX-only compile options, which a table row does not.
         pinnable=False,
     )
 
@@ -5502,6 +5505,7 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "num_warps",
         "num_stages",
         "num_ctas",
+        "ctas_per_cga",
         "maxnreg",
         "num_consumer_groups",
         "num_buffers_warp_spec",
@@ -5509,6 +5513,9 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         val = config.pop(key, None)
         if val is not None:
             popped[key] = val
+    # A dict read from JSON (e.g. autotune_lookup_table) holds the cluster shape as a list.
+    if "ctas_per_cga" in popped:
+        popped["ctas_per_cga"] = tuple(popped["ctas_per_cga"])
     return popped
 
 
@@ -5522,6 +5529,9 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     # survive the round trip or a user config's register cap silently vanishes.
     if getattr(config, "maxnreg", None) is not None:
         config_dict["maxnreg"] = config.maxnreg
+    # Likewise ctas_per_cga, or a user config's cluster shape silently vanishes.
+    if getattr(config, "ctas_per_cga", None) is not None:
+        config_dict["ctas_per_cga"] = config.ctas_per_cga
     if HAS_WARP_SPEC:
         config_dict.update(
             {

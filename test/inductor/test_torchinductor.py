@@ -68,6 +68,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_graph_lowering,
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
@@ -17477,6 +17478,40 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn((2, 2), device=self.device),),
             check_lowp=False,
         )
+
+    @config.patch(implicit_fallbacks=True, force_disable_caches=True)
+    def test_custom_op_fixed_layout_shares_input_with_transpose(self):
+        # See Note [Constrain storage inputs before views].
+        op_name = "add_transpose_fixed_layout"
+        if op_name not in ids:
+            libtest.define(
+                f"{op_name}(Tensor a, Tensor b) -> Tensor",
+                tags=[torch._C.Tag.needs_fixed_stride_order],
+            )
+            for key in ("CPU", "CUDA", "XPU", "MPS"):
+                libtest.impl(op_name, lambda a, b: a + b.T, key)
+            libtest.impl(op_name, lambda a, b: torch.empty_like(a), "Meta")
+            ids.add(op_name)
+
+        x = torch.randn(7, 3, device=self.device).T
+        for view_first in (False, True):
+
+            def fn(x, view_first=view_first):
+                z = (x * 2).relu()
+                a, b = (z.T, z) if view_first else (z, z.T)
+                return torch.ops.test.add_transpose_fixed_layout(a, b)
+
+            torch._dynamo.reset()
+            out, (graph,) = run_and_get_graph_lowering(
+                torch.compile(fn, fullgraph=True), x
+            )
+            self.assertEqual(out, fn(x))
+            (kernel,) = [
+                op
+                for op in graph.operations
+                if isinstance(op, torch._inductor.ir.FallbackKernel)
+            ]
+            self.assertEqual(len({inp.get_name() for inp in kernel.inputs}), 1)
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)

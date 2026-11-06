@@ -345,6 +345,9 @@ class AutotuneCache:
         # without it would reload as the uncapped one.
         if (maxnreg := getattr(config, "maxnreg", None)) is not None:
             data["maxnreg"] = maxnreg
+        # Likewise in their cluster shape.
+        if (ctas_per_cga := getattr(config, "ctas_per_cga", None)) is not None:
+            data["ctas_per_cga"] = list(ctas_per_cga)
         # Save extra_options if present on the config. This allows third-party
         # backends to store custom tuned options alongside the standard config.
         if extra_options := getattr(config, "extra_options", None):
@@ -675,6 +678,7 @@ def _reconstruct_triton_config(
     best_config: dict[str, Any],
     extra_options: JsonDataTy | None,
     maxnreg: JsonDataTy = None,
+    ctas_per_cga: tuple[int, ...] | None = None,
 ) -> Config:
     num_warps = best_config.pop("num_warps")
     num_stages = best_config.pop("num_stages")
@@ -684,6 +688,8 @@ def _reconstruct_triton_config(
     }
     if maxnreg is not None:
         config_args["maxnreg"] = maxnreg
+    if ctas_per_cga is not None:
+        config_args["ctas_per_cga"] = ctas_per_cga
     if HAS_WARP_SPEC:
         config_args.update(
             {
@@ -725,6 +731,10 @@ def _load_cached_autotuning(
     # Popped before matching, or it would be compared as (and later rebuilt
     # into) a kernel kwarg.
     maxnreg = best_config.pop("maxnreg", None)
+    # JSON reads the cluster shape back as a list; triton.Config holds a tuple.
+    ctas_per_cga = best_config.pop("ctas_per_cga", None)
+    if ctas_per_cga is not None:
+        ctas_per_cga = tuple(ctas_per_cga)
 
     if not found_by_coordesc:
         matching_configs = [
@@ -737,6 +747,7 @@ def _load_cached_autotuning(
             # pyrefly: ignore [missing-attribute]
             and cfg.num_stages == best_config.get("num_stages")
             and getattr(cfg, "maxnreg", None) == maxnreg
+            and getattr(cfg, "ctas_per_cga", None) == ctas_per_cga
         ]
         if len(matching_configs) > 1:
             extra_options_key = extra_options_to_hashable(extra_options)
@@ -755,7 +766,9 @@ def _load_cached_autotuning(
     # Reconstruct Config when no unique candidate matches, or when the
     # cached config was found by coordinate descent.
     best_config.pop("found_by_coordesc", None)
-    triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
+    triton_config = _reconstruct_triton_config(
+        best_config, extra_options, maxnreg, ctas_per_cga
+    )
     if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
