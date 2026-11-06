@@ -3242,16 +3242,23 @@ class GraphLowering(torch.fx.Interpreter):
                 },
                 payload_fn=lambda: wrapper_code.value,
             )
+        # Each becomes a global of the module, so a name in two would lose a value.
+        attrs: dict[str, Any] = {}
+        for named in (
+            self.constants,
+            self.torchbind_constants,
+            self.opaque_value_type_classes,
+            self.wrapper_code.user_defined_cutedsl_launchers,
+        ):
+            if clash := attrs.keys() & named.keys():
+                raise AssertionError(f"module attributes bound twice: {sorted(clash)}")
+            attrs.update(named)
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
                 linemap=linemap,  # type: ignore[arg-type]
-                attrs={
-                    **self.constants,
-                    **self.torchbind_constants,
-                    **self.opaque_value_type_classes,
-                },
+                attrs=attrs,
                 kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
