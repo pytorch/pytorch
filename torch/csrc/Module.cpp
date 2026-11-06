@@ -3082,6 +3082,14 @@ Call this whenever a new thread is created in order to propagate values from
             mode.allow_unsafe_data_ptr_access_ = value;
           })
       .def_property(
+          "allow_non_fake_inputs",
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_non_fake_inputs_;
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_non_fake_inputs_ = value;
+          })
+      .def_property(
           "epoch",
           [](const c10::FakeTensorMode& mode) { return mode.epoch_; },
           [](c10::FakeTensorMode& mode, uint64_t value) {
