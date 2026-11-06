@@ -1493,17 +1493,47 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     return False
 
 
+def _same_slice_range(
+    scatter: torch.fx.Node, slice_node: torch.fx.Node, base: torch.fx.Node
+) -> bool:
+    """Whether ``scatter`` (slice_scatter) writes exactly the range ``slice_node``
+    (aten.slice of the same base) reads."""
+    base_val = base.meta.get("val")
+    if not isinstance(base_val, torch.Tensor) or base_val.dim() == 0:
+        return False
+    names = ("dim", "start", "end", "step")
+    defaults = (0, 0, 2**63 - 1, 1)
+    ranges = []
+    for node, first in ((scatter, 2), (slice_node, 1)):
+        values = [get_arg_value(node, first + i, name) for i, name in enumerate(names)]
+        values = [d if v is None else v for v, d in zip(values, defaults)]
+        if not isinstance(values[0], int):
+            return False
+        values[0] %= base_val.dim()
+        ranges.append(values)
+    return all(
+        a is b or (isinstance(a, int) and isinstance(b, int) and a == b)
+        for a, b in zip(*ranges)
+    )
+
+
 def _slice_scatter_noop_replacement(node):
     """Return ``self`` when ``src`` is exactly the slice being overwritten.
 
-    Functionalization can produce split/getitem/slice_scatter chains that copy
-    an unmodified view back to the same range of its base.  Replacing such a
+    Functionalization can produce split/getitem/slice_scatter or
+    slice/slice_scatter chains that copy an unmodified view back to the same
+    range of its base.  Replacing such a
     scatter with the base avoids materializing the whole tensor.  Fall back to
     the historical full-replacement behavior (replace with ``src``).
     """
     self = get_arg_value(node, 0)
     src = get_arg_value(node, 1)
     if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
+        return src
+    if src.target is aten.slice.Tensor and get_arg_value(src, 0, "self") is self:
+        # slice_scatter(x, x[a:b:c], d, a, b, c), e.g. from x.copy_(x) on a view.
+        if _same_slice_range(node, src, self):
+            return self
         return src
     if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
         return src

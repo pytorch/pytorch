@@ -968,6 +968,69 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """320""")
 
+    def test_noop_slice_scatter_same_slice(self):
+        def f(a):
+            b = aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_noop_slice_scatter_same_slice_kwargs_negative_dim(self):
+        def f(a):
+            src = aten.slice(a, dim=-1, start=3, end=5, step=1)
+            b = aten.slice_scatter(a, src, dim=-1, start=3, end=5, step=1)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_noop_slice_scatter_self_copy_chain(self):
+        # What x[:, a:b].copy_(x[:, a:b]) over three views of x functionalizes to.
+        def f(a):
+            b = aten.slice_scatter(a, aten.slice(a, 1, 128, 256), 1, 128, 256)
+            c = aten.slice_scatter(b, aten.slice(b, 1, 256, 384), 1, 256, 384)
+            d = aten.slice_scatter(c, aten.slice(c, 1, 0, 128), 1, 0, 128)
+            return unfusible(d)
+
+        inp = T(10, 384, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """7680""")
+
+    def test_slice_scatter_different_slice_is_not_noop(self):
+        def different_start(a):
+            return unfusible(aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 4, 6))
+
+        def different_tensor(a):
+            src = aten.slice(a + 1, 1, 3, 5)
+            return unfusible(aten.slice_scatter(a, src, 1, 3, 5))
+
+        inp = T(10, 8, device="cpu")
+        for f in (different_start, different_tensor):
+            torch._dynamo.reset()
+            self.assertGreater(int(count_numel(f, inp)), 160, f.__name__)
+
+    def test_noop_slice_scatter_self_copy_numerics(self):
+        def f(x, y):
+            x = x * 2
+            x[:, 128:256].copy_(x[:, 128:256])
+            x[:, 0:128].copy_(x[:, 0:128])
+            y.add_(1)
+            return x @ y, x.sum(0)
+
+        x, y = T(64, 384, device="cpu"), T(384, 16, device="cpu")
+        expected = f(x.clone(), y.clone())
+        actual = torch.compile(f)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+
+    def test_slice_scatter_self_copy_does_not_alias_input(self):
+        def f(a):
+            return aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+
+        inp = T(10, 8, device="cpu")
+        out = torch.compile(f)(inp)
+        self.assertEqual(out, inp)
+        self.assertNotEqual(out.data_ptr(), inp.data_ptr())
+
     def test_noop_dtype_conversion(self):
         def f(a):
             b = torch.ops.prims.convert_element_type(a, torch.float32)
