@@ -24,7 +24,7 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch._C._distributed_c10d import FlightRecorderHook
+from torch._C._distributed_c10d import FlightRecorderHook, WorkResult
 from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
@@ -1178,14 +1178,16 @@ class _NoResultWork(dist.Work):
 
 
 class _NoResultBackend(dist.BackendBase):
-    def __init__(self):
+    def __init__(self, new_work=_NoResultWork, name="noresult"):
         super().__init__(0, 1)
+        self._new_work = new_work
+        self._name = name
 
     def getBackendName(self):
-        return "noresult"
+        return self._name
 
     def allreduce(self, tensors, opts):
-        return _NoResultWork()
+        return self._new_work()
 
 
 class FlightRecorderHookNoResultFutureTest(TestCase):
@@ -1194,12 +1196,21 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
         # the entry itself, at issue, because nothing else ever will and an
         # entry nothing retires is indistinguishable from a hang. What it must
         # not do is claim a completion nobody observed, so the entry reads
-        # "scheduled" and carries no duration.
+        # "scheduled" and carries no duration. Other exceptions retire the same
+        # way.
+        calls = []
+
+        class RaisingWork(_NoResultWork):
+            def get_future_result(self):
+                calls.append(1)
+                raise RuntimeError("broken")
+
+        kinds = [_NoResultWork] * 3 + [RaisingWork]
         pg = dist.ProcessGroup(FakeStore(), 0, 1)
         pg._register_backend(
             torch.device("cpu"),
             dist.ProcessGroup.BackendType.CUSTOM,
-            _NoResultBackend(),
+            _NoResultBackend(lambda: kinds.pop(0)()),
         )
         pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
         pg._set_group_name("noresult")
@@ -1219,14 +1230,62 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
             NotImplementedError, "getFutureResult not implemented"
         ):
             work.get_future_result()
+        pg.allreduce(t).wait()
+
+        self.assertEqual(len(calls), 1)
 
         new = entries()[before:]
-        self.assertEqual(len(new), 3, msg=str(new))
+        self.assertEqual(len(new), 4, msg=str(new))
         for e in new:
             self.assertTrue(e["retired"], msg=str(e))
             self.assertEqual(e["state"], "scheduled", msg=str(e))
             self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
             self.assertNotIn("duration_ms", e, msg=str(e))
+        hook.remove()
+
+
+class FlightRecorderHookPythonWorkTest(TestCase):
+    def test_python_work_retires_from_result(self):
+        # A get_future_result override's future is used as is: the op retires
+        # once it completes.
+        futs = []
+
+        class ResultWork(_NoResultWork):
+            def get_future_result(self):
+                futs.append(torch.futures.Future())
+                return futs[-1]
+
+        pg = dist.ProcessGroup(FakeStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"),
+            dist.ProcessGroup.BackendType.CUSTOM,
+            _NoResultBackend(ResultWork, name="pyresult"),
+        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name("pyresult")
+        hook = FlightRecorderHook.attach(pg, [0])
+
+        def entries():
+            trace = torch._C._distributed_c10d._dump_fr_trace_json(backend="pyresult")
+            return json.loads(trace).get("entries", [])
+
+        before = len(entries())
+        pg.allreduce(torch.ones(8))
+        pg.allreduce(torch.ones(8))
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [False, False], msg=str(new))
+        futs[0].set_result(int(WorkResult.SUCCESS))
+
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
+        self.assertEqual(new[0]["state"], "completed", msg=str(new))
+
+        # A torch.futures.Future() can't report failure: set_exception
+        # completes it too.
+        futs[1].set_exception(RuntimeError("failed"))
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [True, True], msg=str(new))
+        self.assertEqual(new[1]["state"], "completed", msg=str(new))
         hook.remove()
 
 
