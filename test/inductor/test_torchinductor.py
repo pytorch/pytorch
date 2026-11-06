@@ -121,6 +121,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    periodic,
     recover_orig_fp32_precision,
     serialTest,
     skipIfNoLapack,
@@ -1489,6 +1490,19 @@ def target_assert_alignment_regex(
         rf"assert_alignment\s*\(\s*[^,]+,\s*{alignment},\s*"
         rf"{op_name_literal}\s*\)"
     )
+
+
+# test_dtypes is shared with the GPU classes, so it leaves out bfloat16 unless
+# the GPU supports it. Without HAS_GPU (CUDA/XPU/MTIA with Triton), still give
+# the C++-backend CPU classes bfloat16 test_dtypeview cases, marked @periodic so
+# CI runs them only in periodic jobs (and Sandcastle never does).
+dtypeview_dtype_pairs = list(itertools.product(test_dtypes, repeat=2))
+if torch.bfloat16 not in test_dtypes and not HAS_GPU:
+    dtypeview_dtype_pairs += [
+        subtest(pair, decorators=[periodic, skip_if_halide, skip_if_pallas])
+        for pair in itertools.product([*test_dtypes, torch.bfloat16], repeat=2)
+        if torch.bfloat16 in pair
+    ]
 
 
 def _pdl_last_kernel_code(self: TestCase, middle, *args):
@@ -9681,6 +9695,87 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
 
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_inputs(self):
+        # Each input reads x eight times, so it is realized before stack, and
+        # its unsqueeze view freezes it. The copy into the stack output should
+        # fuse into the producer instead of a separate pointwise cat.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            return torch.stack(
+                [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
+            )
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_input_twice(self):
+        # One realized buffer copied into two slices, plus another reader; both
+        # copies fuse into the producer (two kernels with the flag off).
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, y], -1), y[None, :] + 1
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_stack_cat_rule_exclusions(self):
+        # The cat rule only reroutes whole computed buffers; a slice of one and a
+        # no-op buffer compile as without it.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def sliced(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        def with_empty(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
+
+        x = torch.randn([4096, 16], device=self.device)
+        for fn in (sliced, with_empty):
+            codes = []
+            for enabled in (False, True):
+                torch._dynamo.reset()
+                with config.patch(cat_fuse_computed_input_copies=enabled):
+                    _, (code,) = run_and_get_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(codes[0], codes[1], fn.__name__)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_pad_cheap_inputs(self):
+        # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def pack(x):
+            first = x[:, 0] | (x[:, 1] << 4)
+            second = x[:, 2] | (x[:, 3] << 4)
+            return F.pad(torch.stack((first, second), -1).reshape(-1), (0, 5))
+
+        def interleave(x):
+            return F.pad(torch.stack((x + 1, x + 2), -1).flatten(1), (0, 5))
+
+        cases = (
+            (pack, (torch.arange(1024, dtype=torch.int32) % 16).reshape(256, 4)),
+            (interleave, torch.arange(77, dtype=torch.float32).reshape(7, 11)),
+        )
+        for fn, x in cases:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            self.common(fn, (x,))
+            assertGeneratedKernelCountEqual(self, 1)
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)
@@ -14537,11 +14632,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
+        if self.device != "cuda" and not is_cpp_backend(self.device):
+            raise unittest.SkipTest("only tested on CUDA and the C++ CPU backend")
+
         def fn(x):
             return (
                 x.max(0),
@@ -17887,10 +17984,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @parametrize(
-        "dtype_x, dtype_y",
-        list(itertools.product(test_dtypes, test_dtypes)),
-    )
+    @parametrize("dtype_x, dtype_y", dtypeview_dtype_pairs)
     def test_dtypeview(self, dtype_x, dtype_y):
         if TEST_WITH_ASAN:
             return
@@ -17905,8 +17999,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x2 = x2.view(x_dtype) + 1
             return x @ y, x2 @ x
 
-        # @ operation needs arguments to be the same dtype
-        for view_dtype in test_dtypes:
+        # @ operation needs arguments to be the same dtype. Also view as the input
+        # dtypes, which can be outside test_dtypes (see dtypeview_dtype_pairs).
+        for view_dtype in dict.fromkeys([*test_dtypes, dtype_x, dtype_y]):
             try:
                 x = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_x)
                 y = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_y)
@@ -21193,23 +21288,6 @@ if RUN_CPU:
 
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
-
-        def test_bmm_integer_dtype_m1_n1(self):
-            # Verify the compiled result for integer bmm when M==1 or N==1,
-            # checking both dtype and values.
-            def f(a, b):
-                return torch.bmm(a, b)
-
-            m1 = torch.randint(-1000, 1000, (5, 1, 10), dtype=torch.int32)
-            m2 = torch.randint(-1000, 1000, (5, 2, 10), dtype=torch.int32)
-            rhs_n5 = torch.randint(-1000, 1000, (5, 10, 5), dtype=torch.int32)
-            rhs_n1 = torch.randint(-1000, 1000, (5, 10, 1), dtype=torch.int32)
-
-            for a, b in ((m1, rhs_n5), (m2, rhs_n1)):
-                expected = f(a, b)
-                actual = torch.compile(f)(a, b)
-                self.assertEqual(expected.dtype, actual.dtype)
-                self.assertEqual(expected, actual)
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 

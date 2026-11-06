@@ -73,11 +73,6 @@ class DistributedVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
 
 def is_from_local(value: object) -> bool:
     if not DistributedVariable.is_available():

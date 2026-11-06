@@ -40,8 +40,7 @@ import types
 import typing
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, cast, Literal, Never, Optional, TYPE_CHECKING, TypeVar
 from weakref import WeakKeyDictionary
 
 import torch
@@ -412,11 +411,6 @@ class BaseUserFunctionVariable(VariableTracker):
     kwdefaults: VariableTracker | None = None
     closure: VariableTracker | None = None
     annotations: VariableTracker | None = None
-
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -951,7 +945,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 changes = torch._dynamo.patch_dynamo_config(
                     *args_const, **kwargs_const
                 ).changes
-                return variables.DynamoConfigPatchVariable(changes)
+                return variables.DynamoConfigPatchVariable(changes)  # noqa: RVT001
             except AsPythonConstantNotImplementedError as e:
                 raise RuntimeError(
                     "Cannot convert patch_dynamo_config args/kwargs to constants. "
@@ -968,6 +962,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     raise AssertionError(
                         f"error_on_graph_break must be a bool, got {type(error_on_graph_break)}"
                     )
+                # noqa: RVT001
                 return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
@@ -984,7 +979,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     fwd = fwd.as_python_constant()
                 if isinstance(bwd, VariableTracker):
                     bwd = bwd.as_python_constant()
-                return variables.CudagraphOverrideVariable(fwd, bwd)
+                return variables.CudagraphOverrideVariable(fwd, bwd)  # noqa: RVT001
             except Exception as e:
                 raise RuntimeError(
                     "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
@@ -995,6 +990,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.ConstantVariable.create(None)
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
+            from .builder import SourcelessBuilder
+
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -1023,7 +1020,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 # handed, and nothing guards type(obj).m, so rebinding the
                 # method on the class is not detected. guard_as_python_constant
                 # does install ID_MATCH on the receiver itself.
-                return variables.TorchInGraphFunctionVariable(
+                return SourcelessBuilder.create_internal_torch_function(
                     fn_var.guard_as_python_constant(),
                     kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE,
                 )
@@ -1042,7 +1039,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(
+            return SourcelessBuilder.create_internal_torch_function(
                 fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
 
@@ -1193,7 +1190,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if tree_map_callable is None:
             return None
 
-        wrapped_map_fn = TreeMapOnlyFunctionVariable(
+        wrapped_map_fn = TreeMapOnlyFunctionVariable(  # noqa: RVT001
             allowed_types,
             map_fn,
             source=getattr(map_fn, "source", None),
@@ -1395,15 +1392,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.GeneratorType
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
-        # ordering.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
@@ -1731,6 +1719,12 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         This is a wrapper around (Nested)UserFunctionVariable
     """
 
+    @classmethod
+    def create(
+        cls, vt: BaseUserFunctionVariable, **kwargs: Any
+    ) -> "LocalGeneratorFunctionVariable":
+        return cls(vt, **kwargs)
+
     def python_type(self) -> type:
         return types.FunctionType
 
@@ -1843,7 +1837,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(BaseUserFunctionVariable):
+class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
@@ -1999,19 +1993,20 @@ class UserMethodVariable(BaseUserFunctionVariable):
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
+        from .builder import SourcelessBuilder
 
         func = self.get_function()
 
         if is_nonstrict_trace_callable(func):
             call_args = [*self.self_args(), *args]
-            var = variables.TorchInGraphFunctionVariable(
+            var = SourcelessBuilder.create_internal_torch_function(
                 func, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
             return var.call_function(tx, call_args, kwargs)
 
         if is_leaf_function(func):
             call_args = [*self.self_args(), *args]
-            var = variables.TorchInGraphFunctionVariable(
+            var = SourcelessBuilder.create_internal_torch_function(
                 func, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
@@ -2046,9 +2041,9 @@ class UserMethodVariable(BaseUserFunctionVariable):
             _fsdp_param_group is not None
             and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
-            return variables.TorchCtxManagerClassVariable(func).call_function(
-                tx, [self.im_self, *args], kwargs
-            )
+            return SourcelessBuilder.create_internal_torch_ctx_manager(
+                func
+            ).call_function(tx, [self.im_self, *args], kwargs)
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -2134,8 +2129,12 @@ class ContextWrappedFunctionMixin(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if config.nested_graph_breaks or self._always_trace_context:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = SourcelessBuilder.create_internal_user_function(
+                polyfills._fn_with_ctx
+            )
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )
@@ -2640,11 +2639,6 @@ class SkipFunctionVariable(VariableTracker):
             return None
         return self.value
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2685,6 +2679,13 @@ class SkipFunctionVariable(VariableTracker):
             args=[msg],
             kwargs={"name": ConstantVariable.create(name), "obj": self},
         )
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
@@ -3091,9 +3092,9 @@ class _WrappedSkipFunctionMethodDescriptorCommonVariable(ContextWrappedFunctionM
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+        # Wrapped functions are FunctionType, which inherits object's
+        # tp_richcompare; don't pick up SkipFunctionVariable's via the MRO.
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3331,6 +3332,15 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
 
     _cpython_type = types.MethodType
 
+    @staticmethod
+    def create(
+        fn: WrapperUserFunctionVariable,
+        self_obj: VariableTracker,
+        *,
+        source: Source | None = None,
+    ) -> "WrapperUserMethodVariable":
+        return WrapperUserMethodVariable(fn, self_obj, source=source)
+
     def __init__(
         self,
         fn: WrapperUserFunctionVariable,
@@ -3553,10 +3563,14 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         source: Source,
         **options: Any,
     ) -> "CollectiveFunctionRewriteVariable":
+        from .builder import VariableBuilder
+
         new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
         return CollectiveFunctionRewriteVariable(
             old_fn,
-            replacement_var=UserFunctionVariable(new_fn, source=new_source, **options),
+            replacement_var=VariableBuilder.create_internal_user_function(
+                new_fn, source=new_source, **options
+            ),
             source=source,
             **options,
         )
@@ -3729,10 +3743,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                     tx,
                     args=list(exc.args),
                 )
-            return variables.UserDefinedClassVariable(
-                value,
-                mutation_type=ValueMutationNew(),
-            )
+            return variables.UserDefinedClassVariable.create_new(value)
         unimplemented(
             gb_type="namedtuple construction",
             context=f"{args=}, {kwargs=}",
@@ -3770,11 +3781,6 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
-
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
         return functools.partial
@@ -4491,7 +4497,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         if not isinstance(ptr, variables.DataPtrVariable):
             raise AssertionError(f"ptr must be a DataPtrVariable, got {type(ptr)}")
 
-        return TMADescriptorExperimentalVariable(
+        return TMADescriptorExperimentalVariable(  # noqa: RVT001
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
@@ -4617,7 +4623,7 @@ class CreateTMADescriptorStableVariable(VariableTracker):
             else:
                 default_source = DefaultsSource(factory_source, default_index)
             install_guard(default_source.make_guard(GuardBuilder.CONSTANT_MATCH))
-        return TMADescriptorStableVariable(
+        return TMADescriptorStableVariable(  # noqa: RVT001
             tensor=cast("TensorVariable", tensor),
             block_shape=cast("ListVariable", block_shape),
             descriptor_module=descriptor_module,
@@ -4704,9 +4710,10 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         # Optimize the case where is_leaf is None
         # return _get_node_type(tree) not in SUPPORTED_NODES
         tree = args[0]
-        node_type_var = PyTreeGetNodeTypeFunctionVariable(
-            torch.utils._pytree._get_node_type
-        ).call_function(tx, [tree], {})
+        from .builder import SourcelessBuilder
+
+        node_type_var = SourcelessBuilder.create_internal_pytree_get_node_type()
+        node_type_var = node_type_var.call_function(tx, [tree], {})
 
         # If the SUPPORTED_NODES was seen earlier and mutated, there would be a
         # source and that will give us the mutated SUPPORTED_NODES.

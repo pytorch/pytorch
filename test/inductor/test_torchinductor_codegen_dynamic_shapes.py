@@ -12,7 +12,6 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
     TEST_WITH_ASAN,
@@ -522,10 +521,11 @@ test_failures = {
 add_test_failures(test_failures, dynamic_shapes_test_failures)
 
 if not TEST_WITH_ROCM:
+    HAS_MKLDNN = torch.backends.mkldnn.is_available()
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda",) if IS_LINUX else ("cpu", "cuda", "xpu")
+                ("cuda",) if HAS_MKLDNN else ("cpu", "cuda", "xpu")
             ),
         }
     )
@@ -762,6 +762,10 @@ if not TEST_WITH_ASAN:
             _cls.test_randint_distribution_dynamic_shapes = skipIfRocmArch(MI350_ARCH)(
                 _cls.test_randint_distribution_dynamic_shapes
             )
+
+    # The loops above leave these module-level names bound to test classes,
+    # which the test loader would collect again under those names.
+    _variant_cls = _cls = None
 
 
 if __name__ == "__main__":

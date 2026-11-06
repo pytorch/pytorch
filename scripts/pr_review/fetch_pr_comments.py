@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Collect a pull request's title, description and conversation for the review.
+"""Collect a pull request's title, description, labels and conversation for the review.
 
 Runs in the trusted `prepare` job, which holds GITHUB_TOKEN; the review job has
 neither the token nor network access to the API. The file is handed over as a
 `prepare` job output and rewritten in the review job from an environment
 variable, so it is one line of compact JSON capped at ``MAX_TOTAL_BYTES``.
+
+``labels`` are the names of the labels on the PR when the file was made, at most
+``MAX_LABELS`` of them; ``labels_truncated`` is set when there were more.
 
 Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above, and this workflow's own
@@ -47,8 +50,9 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import quote
 
 
@@ -59,6 +63,13 @@ MAX_BODY = 4000
 MAX_REVIEW_BODY = 40_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
+# Labels the review is shown, and the JSON-escaped size of each name. A cut name
+# keeps at most MAX_LABEL_BYTES and gains the " [truncated]" marker (12 bytes), so
+# the labels add about MAX_LABELS * (MAX_LABEL_BYTES + 12) bytes plus separators to
+# the file. Real label names are short; the caps only bound what a PR with hundreds
+# of labels can add.
+MAX_LABELS = 50
+MAX_LABEL_BYTES = 120
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -233,10 +244,20 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     pull = api(f"repos/{repo}/pulls/{pr}")
     author = human_login(pull)
     body = cap_encoded(pull.get("body"), MAX_PR_BODY_BYTES)
+    # The review has no network, so this is the only way it learns which labels
+    # (for example the ciflow/* ones that start CI) are already on the PR.
+    names = [
+        label["name"]
+        for label in (pull.get("labels") or [])
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    ]
+    labels = [cap_encoded(name, MAX_LABEL_BYTES) for name in names[:MAX_LABELS]]
     head = {
         "pr_author": author,
         "head_sha": head_sha,
         "title": pull.get("title") or "",
+        "labels": labels,
+        "labels_truncated": len(names) > MAX_LABELS,
         "body": body,
     }
     sources = {
