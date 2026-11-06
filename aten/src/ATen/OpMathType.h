@@ -46,6 +46,10 @@ struct OpMathType<at::Float8_e8m0fnu> {
   using type = float;
 };
 template <>
+struct OpMathType<at::Float8_e5m3fnu> {
+  using type = float;
+};
+template <>
 struct OpMathType<c10::complex<Half>> {
   using type = c10::complex<float>;
 };
