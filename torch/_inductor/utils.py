@@ -3361,6 +3361,38 @@ def use_decompose_k_choice(
     )
 
 
+def use_dynamic_k_decompose_k_choice(
+    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
+) -> bool:
+    """decompose_k for a backed dynamic K, decided on its hint.
+
+    Guards K >= threshold * max(M, N) only when the hint qualifies, so a later
+    K below the threshold recompiles. Not cached: the result installs a guard
+    in the current graph and depends on config.
+    """
+    from torch._inductor.virtualized import V
+
+    if (
+        not config.triton.decompose_k_dynamic_k
+        or not isinstance(k, sympy.Expr)
+        or k.is_number
+        or V.graph.aot_mode
+        or V.graph.cpp_wrapper
+        or config.triton.num_decompose_k_splits <= 0
+    ):
+        return False
+    if any(free_unbacked_symbols(x) for x in (m, n, k) if isinstance(x, sympy.Expr)):
+        return False
+    threshold = config.triton.decompose_k_threshold * threshold_multiple
+    sizevars = V.graph.sizevars
+    m_hint, n_hint, k_hint = (sizevars.guarding_hint_or_throw(x) for x in (m, n, k))
+    if k_hint < threshold * max(m_hint, n_hint):
+        return False
+    return sizevars.guard_or_false(
+        sympy.And(sympy.Ge(k, threshold * m), sympy.Ge(k, threshold * n))
+    )
+
+
 @functools.cache
 def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     """

@@ -70,6 +70,7 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
+    use_dynamic_k_decompose_k_choice,
     use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
@@ -673,7 +674,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
+        if use_decompose_k_choice(m, n, k) or use_dynamic_k_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
         # CUDA drops Triton mm from the default search once decompose_k applies
         # at twice the usual threshold. The exhaustive search still includes it.
@@ -681,7 +682,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         keep_triton_mm = (
             torch.version.hip is not None
             or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-            or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
+            or not (
+                use_decompose_k_choice(m, n, k, threshold_multiple=2)
+                or use_dynamic_k_decompose_k_choice(m, n, k, threshold_multiple=2)
+            )
         )
         if keep_triton_mm:
             templates_to_use.append(mm_template)

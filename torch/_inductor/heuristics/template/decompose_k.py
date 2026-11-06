@@ -85,13 +85,25 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 sympy.Eq(sympy.Mod(k, k_split), 0)
             )
         ]
+        dynamic_k = (
+            config.triton.decompose_k_dynamic_k
+            and isinstance(k, sympy.Expr)
+            and not k.is_number
+        )
 
         if "ATEN" in bmm_backends:
-            for k_split in exact_k_splits:
+            aten_k_splits = exact_k_splits
+            if dynamic_k:
+                # decomposeK runs the K rows a split leaves over as a separate
+                # MM. Like get_k_splits for a static K, keep K / k_split >= 128.
+                k_hint = V.graph.sizevars.optimization_hint(k)
+                aten_k_splits = [s for s in k_splits if k_hint // s >= 128]
+            for k_split in aten_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
-        # Return before the TMA checks below, which install guards.
-        if "TRITON" not in bmm_backends or not exact_k_splits:
+        # Return before the TMA checks below, which install guards. The Triton
+        # partial BMM specializes K, which would recompile for every dynamic K.
+        if "TRITON" not in bmm_backends or not exact_k_splits or dynamic_k:
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()

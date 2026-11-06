@@ -86,7 +86,11 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._prims_common import compute_required_storage_length
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM90OrLater,
+    tf32_off,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2220,6 +2224,71 @@ class TestMaxAutotune(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
             bf16_red_setting
         )
+
+    def test_decompose_k_remainder(self):
+        # A split that does not divide K runs the leftover rows as one MM.
+        from torch._inductor.kernel.decompose_k import decomposeK
+
+        a = torch.randn(32, 4099, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(4099, 64, device=GPU_TYPE, dtype=torch.float32)
+        with tf32_off():
+            ref = a @ b
+            out = decomposeK(a, b, 16)
+        torch.testing.assert_close(out, ref, atol=1e-5 * ref.abs().max(), rtol=1e-5)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @parametrize("dynamic_k", (False, True))
+    def test_decompose_k_dynamic_k(self, dynamic_k):
+        """With decompose_k_dynamic_k, one compile serves every K, including K that
+        no split divides. Without it, a dynamic K gets no decompose_k choice."""
+        M, N = 32, 64
+        names: list[str] = []
+
+        def only_decompose_k(choices):
+            names.extend(c.name for c in choices)
+            kept = [c for c in choices if c.name.startswith("decompose_k")]
+            return kept or choices
+
+        torch._dynamo.reset()
+        cnt = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(lambda x, y: x.t() @ y, backend=cnt)
+        add_preprocessing_fn(only_decompose_k)
+        try:
+            with (
+                tf32_off(),
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "ATEN,TRITON",
+                        "test_configs.max_mm_configs": 1,
+                        "triton.num_decompose_k_splits": 4,
+                        "triton.decompose_k_dynamic_k": dynamic_k,
+                    }
+                ),
+            ):
+                for i, k in enumerate((16384, 16391, 16385, 20011)):
+                    x = torch.randn(k, M, device=GPU_TYPE, dtype=torch.float32)
+                    y = torch.randn(k, N, device=GPU_TYPE, dtype=torch.float32)
+                    if i == 0:
+                        torch._dynamo.mark_dynamic(x, 0)
+                        torch._dynamo.mark_dynamic(y, 0)
+                    out = compiled(x, y)
+                    ref = x.t() @ y
+                    torch.testing.assert_close(
+                        out, ref, atol=1e-5 * ref.abs().max(), rtol=1e-5
+                    )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(cnt.frame_count, 1)
+        offered = any(n.startswith("decompose_k") for n in names)
+        self.assertEqual(offered, dynamic_k, names)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"

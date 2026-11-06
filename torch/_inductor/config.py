@@ -2601,6 +2601,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Offer decompose_k when K is a backed dynamic dimension. The choice uses the
+    # K hint and guards K >= threshold * max(M, N). A split that does not divide K
+    # runs the leftover K rows as a separate MM.
+    decompose_k_dynamic_k = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_DYNAMIC_K", "0") == "1"
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
