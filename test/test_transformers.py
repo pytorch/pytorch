@@ -5951,57 +5951,20 @@ class TestSDPAAccelerator(NNTestCase):
                         self.assertRaises(RuntimeError, lambda:
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
-    @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
+    @onlyCUDA
+    @skipIfRocm  # CK's mem-efficient backward ignores deterministic mode
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     def test_mem_eff_backwards_determinism(self, device):
-        # Need big seq_len to ensure that num_splits > 1
-        dtype = torch.float32
-        batch_size, seq_len, n_heads, head_dim = 1, 1024, 8, 64
-        query = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-        key = torch.rand(batch_size, n_heads, seq_len, head_dim, device=device,
-                         dtype=dtype, requires_grad=True)
-        value = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            # Run once to establish baseline
+        # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
+        shape = (1, 1, 4096, 64)
+        query, key, value = (torch.rand(shape, device=device, requires_grad=True) for _ in range(3))
+        upward_grad = torch.rand(shape, device=device)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]), use_deterministic_algorithims(True, warn_only=False):
             out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # not deterministic
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
+            expected = torch.autograd.grad(out, (query, key, value), upward_grad)
+            for _ in range(20):
                 out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertTrue(diff_anwser_once)
-
-        with use_deterministic_algorithims(True, warn_only=False):
-            query.grad = None
-            out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # deterministic now that we have enforced it
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
-                out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertFalse(diff_anwser_once)
+                self.assertEqual(torch.autograd.grad(out, (query, key, value), upward_grad), expected, atol=0, rtol=0)
 
     # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
