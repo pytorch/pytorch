@@ -26,6 +26,7 @@ from torch._decomp.decompositions import (
     embedding_dense_backward as decomp_embedding_dense_backward,
     gelu_backward as decomp_gelu_backward,
     hardsigmoid as decomp_hardsigmoid,
+    hardsigmoid_backward as decomp_hardsigmoid_backward,
     hardswish as decomp_hardswish,
     hardswish_backward as decomp_hardswish_backward,
     logit_backward as decomp_logit_backward,
@@ -162,6 +163,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.hardswish_backward.default,
     aten.hardswish.default,
     aten.hardsigmoid.default,
+    aten.hardsigmoid_backward.default,
     aten.mish_backward.default,
     aten.logaddexp2.default,
     aten.logit_backward.default,
@@ -930,11 +932,16 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
+# CUDA initializes one_sixth from 1.0f / 6.0f before converting to opmath,
+# including when opmath is float64.
+_CUDA_ONE_SIXTH = struct.unpack("f", struct.pack("f", 1.0 / 6.0))[0]
+
+
 @register_decomposition(aten.hardswish.default)
 @pw_cast_for_opmath
 def hardswish(self: torch.Tensor) -> torch.Tensor:
     if is_strict_cuda_triton(self.device):
-        return self * torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+        return self * torch.clamp(torch.clamp(self + 3, min=0), max=6) * _CUDA_ONE_SIXTH
     return decomp_hardswish(self)
 
 
@@ -942,8 +949,19 @@ def hardswish(self: torch.Tensor) -> torch.Tensor:
 @pw_cast_for_opmath
 def hardsigmoid(self: torch.Tensor) -> torch.Tensor:
     if is_strict_cuda_triton(self.device):
-        return torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+        return torch.clamp(torch.clamp(self + 3, min=0), max=6) * _CUDA_ONE_SIXTH
     return decomp_hardsigmoid(self)
+
+
+@register_decomposition(aten.hardsigmoid_backward.default)
+def hardsigmoid_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(grad_output, self)
+    if inputs is None:
+        return decomp_hardsigmoid_backward(grad_output, self)
+    grad_output, self, dtype = inputs
+    return torch.where((self > -3) & (self < 3), grad_output * _CUDA_ONE_SIXTH, 0.0).to(
+        dtype
+    )
 
 
 def _strict_xlogy_nan(result, a, b):
