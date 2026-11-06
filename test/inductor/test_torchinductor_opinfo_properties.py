@@ -34,6 +34,7 @@ To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
+import functools
 import os
 import sys
 import unittest
@@ -41,8 +42,9 @@ import unittest
 import pytest
 
 import torch
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -50,6 +52,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
+    foreach_binary_op_db,
     op_db,
     unary_ufuncs,
 )
@@ -67,7 +70,13 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils import _pytree as pytree
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -557,7 +566,6 @@ EAGER_EQUIV_XFAILS = {
     "inductor_numerics": {
         "remainder": {ALL},
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -623,7 +631,6 @@ ROCM_EAGER_EQUIV_XFAILS = {
     },
     "inductor_numerics": {
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "log_softmax": {fp32},
     },
@@ -1288,9 +1295,144 @@ class TestOpInfoProperties(TestCase):
         )
 
 
+@requires_cuda_and_triton
+class TestAlphaFMA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name == "sub"], allowed_dtypes=[torch.float32]
+    )
+    @config.patch(emulate_precision_casts=True)
+    @parametrize("alpha", [1.5, -1.5])
+    @parametrize("inplace", [False, True])
+    def test_sub_alpha_fma(self, device, dtype, op, alpha, inplace):
+        # Separate multiply/subtract rounding loses precision under cancellation.
+        a = torch.full([256], alpha, device=device, dtype=dtype)
+        b = torch.full([256], 1 + 2**-23, device=device, dtype=dtype)
+
+        def fn(a, b):
+            if inplace:
+                return op.inplace_variant(a, b, alpha=alpha)
+            return op(a, b, alpha=alpha)
+
+        expected = fn(a.clone(), b)
+        actual, (code,) = run_and_get_code(torch.compile(fn), a, b)
+        self.assertIn("tl.fma", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name == "sub"],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(emulate_precision_casts=True)
+    def test_alpha_fma_intermediate_rounding(self, device, dtype, op):
+        a = torch.full([256], 4, device=device, dtype=dtype)
+        b = torch.full_like(a, 1 / 3)
+        c = torch.full_like(a, 1.6669921875)
+
+        def fn(a, b, c):
+            return op(op(a, b, alpha=2), c, alpha=2)
+
+        actual, (code,) = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertIn("tl.fma", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertEqual(actual, fn(a, b, c), atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name == "sub"],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(emulate_precision_casts=True)
+    @parametrize("other_is_tensor", [False, True])
+    @parametrize("dynamic", [False, True])
+    def test_alpha_fma_scalar_precision(
+        self, device, dtype, op, other_is_tensor, dynamic
+    ):
+        a = torch.full([256], 2, device=device, dtype=dtype)
+        other = 1 / 3
+        if other_is_tensor:
+            other = torch.full_like(a, other)
+
+        def fn(a, other):
+            return op(a, other, alpha=6)
+
+        actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), a, other)
+        self.assertIn("tl.fma", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+        self.assertEqual(actual, fn(a, other), atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in binary_ufuncs if op.name == "sub"],
+        allowed_dtypes=[torch.float16, torch.bfloat16],
+    )
+    @config.patch(
+        emulate_precision_casts=False, emulate_precision_casts_on_saved_tensors=True
+    )
+    def test_alpha_fma_saved_output_rounding(self, device, dtype, op):
+        aten_op = getattr(torch.ops.aten, op.name).Tensor
+
+        def policy(ctx, func, *args, **kwargs):
+            if func == aten_op:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+
+        def inner(a, b, c):
+            return (op(a, b, alpha=2) * c).sum(dtype=torch.float32)
+
+        def fn(a, b, c):
+            return checkpoint(
+                inner, a, b, c, use_reentrant=False, context_fn=context_fn
+            )
+
+        a = torch.full([256], 4, device=device, dtype=dtype)
+        b = torch.full_like(a, 1 / 3)
+        c = torch.ones_like(a, requires_grad=True)
+        compiled_c = c.detach().clone().requires_grad_(True)
+        expected = fn(a, b, c)
+        expected.backward()
+        actual, codes = run_and_get_code(torch.compile(fn), a, b, compiled_c)
+        actual.backward()
+        self.assertTrue(any("tl.fma" in code for code in codes))
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
+        self.assertEqual(compiled_c.grad, c.grad, atol=0, rtol=0, exact_device=True)
+
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @ops(
+        [op for op in foreach_binary_op_db if op.name == "_foreach_sub"],
+        allowed_dtypes=[torch.float32, torch.float64],
+    )
+    @config.patch(emulate_precision_casts=True)
+    @parametrize("alpha", [0, -(2**63)])
+    @parametrize("dynamic", [False, True])
+    def test_foreach_sub_alpha_preserves_eager(self, device, dtype, op, alpha, dynamic):
+        a = [torch.full([256], -0.0, device=device, dtype=dtype)]
+        b = [torch.ones_like(a[0])]
+
+        def fn(a, b, alpha):
+            return op(a, b, alpha=alpha)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), a, b, alpha
+        )
+        self.assertNotIn("tl.fma", code)
+        self.assertIn("'enable_fp_fusion': False", code)
+        expected = fn(a, b, alpha)
+        self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=True)
+        self.assertEqual(torch.signbit(actual[0]), torch.signbit(expected[0]))
+
+
 instantiate_device_type_tests(
     TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
 )
+
+instantiate_device_type_tests(TestAlphaFMA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
