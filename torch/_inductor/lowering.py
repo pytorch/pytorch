@@ -68,7 +68,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import decompositions, get_decompositions, NATIVE_BATCH_NORM_OPS
 from .ir import (
     BaseView,
     DtypeView,
@@ -3725,6 +3725,23 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
+
+
+def constrain_to_fx_exact_strides(fx_node, *args, **kwargs):
+    fake_args, fake_kwargs = pytree.tree_map_only(
+        torch.fx.Node,
+        lambda node: node.meta.get("val"),
+        (fx_node.args, fx_node.kwargs),
+    )
+    return constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs)
+
+
+for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
+    make_fallback(
+        _batch_norm_op,
+        layout_constraint=constrain_to_fx_exact_strides,
+        override_decomp=True,
+    )
 
 
 def constrain_to_fx_strides_if_fallback_random(fx_node, *args, **kwargs):
