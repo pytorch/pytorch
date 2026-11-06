@@ -56,7 +56,7 @@ from .functions import (
     WrappedUserMethodVariable,
 )
 from .object_protocol import python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import build_mro_method, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -212,14 +212,21 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         source = None if self.source is None else AttrSource(self.source, "__enter__")
-        return variables.UserMethodVariable(
-            VariableBuilder.create_internal_user_function(
-                self.cm_obj.__enter__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
-            self,
-            source=source,
-        ).call_function(tx, [], {})
+        fn = self.cm_obj.__enter__.__func__
+        if self.source is None and self.cls_source is not None:
+            # A context manager constructed during tracing: see build_mro_method.
+            method_vt = build_mro_method(
+                tx, fn, self.get_source_by_walking_mro(tx, "__enter__"), self, source
+            )
+        else:
+            method_vt = variables.UserMethodVariable(
+                VariableBuilder.create_internal_user_function(
+                    fn, source=source and AttrSource(source, "__func__")
+                ),
+                self,
+                source=source,
+            )
+        return method_vt.call_function(tx, [], {})
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -227,14 +234,21 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-        x = variables.UserMethodVariable(
-            VariableBuilder.create_internal_user_function(
-                self.cm_obj.__exit__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
-            self,
-            source=source,
-        ).call_function(tx, list(args), {})
+        fn = self.cm_obj.__exit__.__func__
+        if self.source is None and self.cls_source is not None:
+            # A context manager constructed during tracing: see build_mro_method.
+            method_vt = build_mro_method(
+                tx, fn, self.get_source_by_walking_mro(tx, "__exit__"), self, source
+            )
+        else:
+            method_vt = variables.UserMethodVariable(
+                VariableBuilder.create_internal_user_function(
+                    fn, source=source and AttrSource(source, "__func__")
+                ),
+                self,
+                source=source,
+            )
+        x = method_vt.call_function(tx, list(args), {})
         tx.active_generic_context_managers.pop()
         return x
 
