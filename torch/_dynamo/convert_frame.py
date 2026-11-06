@@ -87,7 +87,7 @@ from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .backends.registry import _is_registered_backend
-from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
+from .bytecode_analysis import remove_dead_code
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
@@ -1002,7 +1002,7 @@ def trace_frame(
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        instructions[:] = remove_dead_code(instructions)
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
@@ -1741,13 +1741,6 @@ def _compile(
 
     check_compilation_allowed("Dynamo graph compilation")
 
-    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
-        # Overlap the one-time source hashing for Inductor's cache keys with
-        # Dynamo and AOTAutograd tracing.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
-
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
@@ -1758,12 +1751,13 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
-            # Hold _is_compiling_flag True for the duration of compilation so
-            # torch.compiler.is_compiling() is observable in code that runs
-            # during the compile session but is not directly Dynamo-traced
-            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
-            # make_fx invoked from a custom backend, etc.). Export sets the
-            # flag itself via _compiling_state_context, so skip there.
+            # Hold the current thread's is_compiling flag True for the
+            # duration of compilation so torch.compiler.is_compiling() is
+            # observable in code that runs during the compile session in this
+            # thread but is not directly Dynamo-traced (wrapper-subclass
+            # __torch_dispatch__ invoked by AOTAutograd, make_fx invoked from
+            # a custom backend, etc.). Export sets the flag itself via
+            # _compiling_state_context, so skip there.
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(deferred_full_gc())
@@ -2623,8 +2617,6 @@ def replay(filename: str) -> None:
 
 
 def first_real_inst_idx(code: CodeType) -> int:
-    if sys.version_info < (3, 11):
-        return 0
     for inst in dis.get_instructions(code):
         if inst.opname == "RESUME":
             return inst.offset // 2
