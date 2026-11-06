@@ -5142,6 +5142,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
+        if config.native_matmul_helion:
+            filtered_nodes = [
+                node for node in filtered_nodes if not node.is_native_matmul()
+            ]
+
         # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
         filtered_nodes = [
             node for node in filtered_nodes if not node.has_strict_reduction()
@@ -7408,6 +7413,12 @@ class Scheduler:
             return FusionResult.fuse(False)
 
         if not config.benchmark_fusion and not is_multi_template:
+            return FusionResult.fuse(True)
+
+        if config.native_matmul_helion and (
+            node1.is_native_matmul() or node2.is_native_matmul()
+        ):
+            # Triton's benchmark emitter does not measure executable Helion kernels.
             return FusionResult.fuse(True)
 
         # Staged reductions cannot be represented by generic benchmark codegen.

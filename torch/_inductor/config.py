@@ -3129,6 +3129,16 @@ class rocm:
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
 cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 
+# Route CUDA MM/BMM through native matmul IR and execute matmul schedules with
+# Helion. Other CUDA schedules still use Triton.
+native_matmul_helion: bool = False
+
+# Codegen backend for Helion native matmul kernels.
+helion_backend: Literal["triton", "cutedsl"] = "triton"
+
+# Autotuning search effort for executable Helion native matmul kernels.
+helion_autotune_effort: Literal["none", "quick", "full"] = "none"
+
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
@@ -3214,6 +3224,9 @@ class trace:
 
     # Copy generated code to trace dir
     output_code = True
+
+    # Generate Helion source previews for native matmul kernels.
+    helion_code = False
 
     # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
     # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
