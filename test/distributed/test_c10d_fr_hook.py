@@ -1260,8 +1260,11 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
         # not do is claim a completion nobody observed, so the entry reads
         # "scheduled" and carries no duration. Other exceptions retire the same
         # way.
+        calls = []
+
         class RaisingWork(_NoResultWork):
             def get_future_result(self):
+                calls.append(1)
                 raise RuntimeError("broken")
 
         kinds = [_NoResultWork] * 3 + [RaisingWork]
@@ -1290,6 +1293,8 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
         ):
             work.get_future_result()
         pg.allreduce(t).wait()
+
+        self.assertEqual(len(calls), 1)
 
         new = entries()[before:]
         self.assertEqual(len(new), 4, msg=str(new))

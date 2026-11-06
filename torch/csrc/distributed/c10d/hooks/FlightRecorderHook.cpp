@@ -64,11 +64,11 @@ std::string_view hookOpName(HookOpName name) {
       return "scatter";
     case HookOpName::GATHER:
       return "gather";
-    case HookOpName::UNKNOWN:
     // Lifecycle ops are never recorded.
     case HookOpName::SPLIT:
     case HookOpName::NEW_WINDOW:
     case HookOpName::RECONFIGURE:
+    case HookOpName::UNKNOWN:
       break;
   }
   return "unknown";
