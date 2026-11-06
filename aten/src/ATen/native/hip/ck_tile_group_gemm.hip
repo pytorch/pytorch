@@ -427,9 +427,9 @@ namespace at::hip::detail {
             using GroupArg = ck_tile::GemmTransKernelArg<>;
             static_assert(std::is_trivially_copyable_v<GroupArg> && std::is_standard_layout_v<GroupArg>);
             const ck_tile::UniversalGemmKernelArgs<> karg{
-                    .as_ptr = {a_ptr}, .bs_ptr = {b_ptr}, .e_ptr = output_ptr, .M = M, .N = N, .K = K,
+                    .as_ptr = {a_ptr}, .bs_ptr = {b_ptr}, .ds_ptr = {}, .e_ptr = output_ptr, .M = M, .N = N, .K = K,
                     .stride_As = {static_cast<index_t>(lda)}, .stride_Bs = {static_cast<index_t>(ldb)},
-                    .stride_E = static_cast<index_t>(ldc), .k_batch = 1};
+                    .stride_Ds = {}, .stride_E = static_cast<index_t>(ldc), .k_batch = 1};
             const index_t no_blocks = 0;
             char* arg = static_cast<char*>(group_args) + thread_id * sizeof(GroupArg);
             __builtin_memcpy(arg + offsetof(GroupArg, group_karg), &karg, sizeof(karg));
