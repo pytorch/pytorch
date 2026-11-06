@@ -48,6 +48,15 @@ def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
     )
 
 
+# Sets the flag is_in_torch_dispatch_mode() reads and returns its previous value,
+# for CppFakeTensorMode, which TorchDispatchMode.__enter__/__exit__ do not run for
+def _set_is_in_torch_dispatch_mode(value: bool, /) -> bool:
+    global _is_in_torch_dispatch_mode
+    prev = _is_in_torch_dispatch_mode
+    _is_in_torch_dispatch_mode = value
+    return prev
+
+
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
 

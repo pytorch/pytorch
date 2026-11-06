@@ -6094,6 +6094,7 @@ class TestCppFakeTensorModeBindings(TestCase):
     def test_cpp_fake_tensor_mode_rebuild(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
+        self.addCleanup(self._restore_fake_mode_state)
         shape_env = ShapeEnv()
         mode = CppFakeTensorMode(shape_env=shape_env)
         cpp_mode, converter = mode._cpp_mode, mode.fake_tensor_converter
@@ -6114,6 +6115,9 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(rebuilt.shape_env, shape_env)
         self.assertEqual(rebuilt.epoch, epoch)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
+        with rebuilt:
+            self.assertEqual(self._installed(), (rebuilt, True))
+        self.assertEqual(self._installed(), (None, False))
 
     def _rebuild_with_nested_lookup(self, keep_inner):
         # Looks up a fake whose wrapper was collected, with a nested lookup in a
@@ -6161,6 +6165,175 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(inner_ref())
         self.assertIsNotNone(outer)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), outer)
+
+    def _restore_fake_mode_state(self):
+        # Undoes a manual enter whose exit failed partway, so the failure does
+        # not leak into later tests
+        from torch._subclasses.fake_tensor import fake_tensor_tls
+        from torch.utils._python_dispatch import _set_is_in_torch_dispatch_mode
+
+        _set_is_in_torch_dispatch_mode(False)
+        torch._C._set_only_lift_cpu_tensors(False)
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        if torch._C._get_dispatch_mode(fake_key) is not None:
+            torch._C._unset_dispatch_mode(fake_key)
+        fake_tensor_tls.entered_cpp_fake_modes.clear()
+
+    def test_cpp_fake_tensor_mode_enter_exit(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, fake_tensor_tls
+        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+
+        self.addCleanup(self._restore_fake_mode_state)
+        self.assertFalse(is_in_torch_dispatch_mode())
+        mode = CppFakeTensorMode()
+        self.assertFalse(torch._C._only_lift_cpu_tensors())
+        # Without a device, a fake mode only lifts CPU tensors while active
+        with patch.object(CppFakeTensorMode, "avoid_device_init", True):
+            with mode:
+                self.assertEqual(self._installed(), (mode, True))
+                self.assertTrue(torch._C._only_lift_cpu_tensors())
+                self.assertTrue(is_in_torch_dispatch_mode())
+                # Re-entering the active mode is a no-op
+                with mode:
+                    self.assertEqual(self._installed(), (mode, True))
+                    self.assertFalse(mode.enter_stack[-1][0])
+                    self.assertEqual(len(mode.old_dispatch_mode_flags), 1)
+                    tls_modes = fake_tensor_tls.entered_cpp_fake_modes
+                    self.assertEqual(tls_modes.count(mode), 1)
+                self.assertEqual(self._installed(), (mode, True))
+                # Entering another one suspends it until that one exits
+                with CppFakeTensorMode() as inner:
+                    self.assertEqual(self._installed(), (inner, True))
+                self.assertEqual(self._installed(), (mode, True))
+                self.assertTrue(torch._C._only_lift_cpu_tensors())
+                self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertEqual(self._installed(), (None, False))
+            self.assertFalse(torch._C._only_lift_cpu_tensors())
+            self.assertFalse(is_in_torch_dispatch_mode())
+
+        # Exiting restores the flag rather than clearing it
+        with BaseTorchDispatchMode():
+            with mode:
+                pass
+            self.assertTrue(is_in_torch_dispatch_mode())
+
+        # A Python FakeTensorMode cannot be entered inside a C++ one, or the
+        # reverse
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        for outer, inner in ((mode, python_mode), (python_mode, mode)):
+            with outer:
+                with self.assertRaisesRegex(AssertionError, "cannot enter"):
+                    inner.__enter__()
+                self.assertEqual(self._installed(), (outer, outer is mode))
+
+        # An entered mode is kept alive until it exits, so exiting it through
+        # the FAKE slot still finds its enter_stack
+        mode = CppFakeTensorMode()
+        ref = weakref.ref(mode)
+        mode.__enter__()
+        del mode
+        gc.collect()
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        torch._C._get_dispatch_mode(fake_key).__exit__(None, None, None)
+        self.assertEqual(self._installed(), (None, False))
+        gc.collect()
+        self.assertIsNone(ref())
+
+        # A failed exit still releases the mode. It skips restoring
+        # only_lift_cpu_tensors, so the mode must not set it.
+        msg = "Attempted to unset FakeTensorMode"
+        with patch.object(CppFakeTensorMode, "avoid_device_init", False):
+            mode = CppFakeTensorMode()
+            ref = weakref.ref(mode)
+            mode.__enter__()
+            torch._C._unset_dispatch_mode(fake_key)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                mode.__exit__(None, None, None)
+        self.assertFalse(is_in_torch_dispatch_mode())
+        self.assertFalse(torch._C._only_lift_cpu_tensors())
+        del mode
+        gc.collect()
+        self.assertIsNone(ref())
+
+    def test_cpp_fake_tensor_mode_exit_on_another_thread(self):
+        # Exiting on a thread that did not enter the mode raises before changing
+        # anything, whether or not that thread has a fake mode of its own; a
+        # thread that inherited the C++ mode can still re-enter it as a no-op
+        import threading
+
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        self.addCleanup(self._restore_fake_mode_state)
+        errors, kept, reentered = [], [], []
+
+        def exit_mode(own_mode):
+            with own_mode or contextlib.nullcontext():
+                try:
+                    mode.__exit__(None, None, None)
+                except RuntimeError as e:
+                    errors.append(str(e))
+                kept.append(self._installed() == (own_mode, own_mode is not None))
+
+        def reenter_inherited():
+            # Installs the C++ mode directly, as ThreadLocalState does on a
+            # worker thread
+            torch._C._set_dispatch_mode(mode)
+            try:
+                with mode:
+                    reentered.append(self._installed() == (mode, True))
+            finally:
+                torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+
+        with patch.object(CppFakeTensorMode, "avoid_device_init", False):
+            mode = CppFakeTensorMode()
+            with mode:
+                targets = [(exit_mode, (None,)), (exit_mode, (CppFakeTensorMode(),))]
+                for target, args in [*targets, (reenter_inherited, ())]:
+                    thread = threading.Thread(target=target, args=args)
+                    thread.start()
+                    thread.join()
+                self.assertEqual(self._installed(), (mode, True))
+                self.assertEqual(len(mode.enter_stack), 1)
+                self.assertEqual(len(mode.old_dispatch_mode_flags), 1)
+        self.assertEqual(self._installed(), (None, False))
+        msg = "CppFakeTensorMode exited without a matching enter on this thread"
+        self.assertEqual(errors, [msg, msg])
+        self.assertEqual(kept, [True, True])
+        self.assertEqual(reentered, [True])
+
+    def test_cpp_fake_tensor_mode_thread_exit_without_exiting(self):
+        # The mode slot is per thread, and so is what keeps an entered mode
+        # alive: a thread that ends without exiting its mode releases it
+        import threading
+
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, fake_tensor_tls
+        from torch.utils._python_dispatch import _set_is_in_torch_dispatch_mode
+
+        refs, entered, errors = [], [], []
+
+        def enter_only():
+            try:
+                mode = CppFakeTensorMode()
+                refs.append(weakref.ref(mode))
+                mode.__enter__()
+                installed = self._installed() == (mode, True)
+                tls_modes = fake_tensor_tls.entered_cpp_fake_modes
+                entered.append((installed, mode in tls_modes))
+            except Exception as e:
+                errors.append(repr(e))
+
+        # The thread never exits its mode, so restore the process-wide flag
+        prev = _set_is_in_torch_dispatch_mode(False)
+        try:
+            thread = threading.Thread(target=enter_only)
+            thread.start()
+            thread.join()
+        finally:
+            _set_is_in_torch_dispatch_mode(prev)
+        self.assertEqual(errors, [])
+        self.assertEqual(entered, [(True, True)])
+        gc.collect()
+        self.assertIsNone(refs[0]())
 
 
 if __name__ == "__main__":
