@@ -1,3 +1,6 @@
+from contextlib import contextmanager, ExitStack
+from unittest.mock import patch
+
 import torch
 from torch.profiler import (
     kineto_available,
@@ -5,6 +8,19 @@ from torch.profiler import (
     ProfilerActivity,
     supported_activities,
 )
+
+
+@contextmanager
+def forbid_profiler_capture():
+    with ExitStack() as stack:
+        for operation in ("_prepare_profiler", "_enable_profiler", "_disable_profiler"):
+            stack.enter_context(
+                patch(
+                    f"torch.autograd.profiler.{operation}",
+                    side_effect=AssertionError(f"Unexpected native call: {operation}"),
+                )
+            )
+        yield
 
 
 def initialize_kineto_with_cuda():

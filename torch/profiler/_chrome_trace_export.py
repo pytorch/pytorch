@@ -287,8 +287,7 @@ def export_chrome_trace(
     def _rel(ns: int) -> str:
         return _ns_to_us(max(ns - base_ns, 0))
 
-    encoding = "utf-8" if path.endswith(".zst") else None
-    with trace_file_opener(path, "wt", encoding=encoding) as f:
+    with trace_file_opener(path, "wt", encoding="utf-8") as f:
         f.write("{\n")
         f.write('"schemaVersion": 1,\n')
         f.write(f'"deviceProperties": {json.dumps(_device_properties())},\n')

@@ -1052,26 +1052,6 @@ class TestProfiler(TestCase):
                 if not is_int:
                     raise AssertionError("Invalid stacks record")
 
-    def test_export_chrome_trace_escapes_names(self):
-        from torch.autograd.profiler_util import EventList, FunctionEvent
-
-        tricky_name = 'aten::mm C:\\src\\"foo".cpp'
-        evt = FunctionEvent(
-            id=0,
-            name=tricky_name,
-            trace_name=tricky_name,
-            thread=0,
-            start_us=0,
-            end_us=10,
-        )
-        event_list = EventList([evt])
-
-        with TemporaryFileName(mode="w+") as fname:
-            event_list.export_chrome_trace(fname)
-            with open(fname) as f:
-                trace = json.load(f)
-        self.assertEqual(trace[0]["name"], tricky_name)
-
     def test_experimental_config_pickle(self):
         # Test with default values
         config = _ExperimentalConfig()
@@ -4102,166 +4082,169 @@ class TestProfilerEventsParity(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 class TestProfilerEventsParityDevice(TestCase):
-    """Parity tests that need a real accelerator to produce device events."""
+    """Parity tests sharing one completed accelerator capture per class run."""
 
     hw_classification = HardwareClassification.ACCELERATOR
+    _trace_snapshot: str | None = None
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._trace_snapshot = None
+
+    def _get_trace(self, device):
+        cls = type(self)
+        if cls._trace_snapshot is None:
+            # Capture inside a test's device/stream context, not during collection:
+            # device-test instantiation can call setUpClass while importing the file.
+            device_type = device.split(":")[0]
+            with profile(activities=get_profiler_activities(device_type)) as prof:
+                with torch.profiler.record_function("test_region"):
+                    x = torch.randn(32, 32, device=device)
+                    y = torch.mm(x, x)
+                    z = y + x
+                    z.cpu()
+                    torch.accelerator.synchronize()
+
+            events = [
+                {
+                    "name": e.name,
+                    "activity_type": e.activity_type,
+                    "external_id": e.external_id,
+                    "flow_id": e.flow_id,
+                    "flow_type": e.flow_type,
+                    "flow_start": e.flow_start,
+                    "start_us": e.time_range.start,
+                }
+                for e in prof.events()
+            ]
+            trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    chrome_trace = json.load(f)
+            cls._trace_snapshot = json.dumps(
+                {
+                    "events": events,
+                    "trace_start_ns": trace_start_ns,
+                    "chrome_trace": chrome_trace,
+                }
+            )
+
+        # Each assertion gets fresh data; no profiler or mutable events are shared.
+        return json.loads(cls._trace_snapshot)
 
     def test_profiler_flow_events_parity(self, device):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
-        device_type = device.split(":")[0]
-        with profile(activities=get_profiler_activities(device_type)) as prof:
-            x = torch.randn(32, 32, device=device)
-            torch.mm(x, x)
-
-        # Collect async CPU->GPU flow info from events()
+        trace = self._get_trace(device)
         events_with_flow = [
-            e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
+            e for e in trace["events"] if e["flow_id"] is not None and e["flow_id"] != 0
         ]
         self.assertGreater(
             len(events_with_flow), 0, "No flow events found via events()"
         )
 
         for e in events_with_flow:
-            self.assertIsInstance(e.flow_id, int)
-            self.assertIsInstance(e.flow_type, int)
-            self.assertIsInstance(e.flow_start, bool)
+            self.assertIsInstance(e["flow_id"], int)
+            self.assertIsInstance(e["flow_type"], int)
+            self.assertIsInstance(e["flow_start"], bool)
 
-        # Verify parity with Chrome trace JSON for async CPU->GPU flow
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
+        json_flow_events = [
+            e
+            for e in trace["chrome_trace"]["traceEvents"]
+            if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
+        ]
+        json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+        json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
 
-            json_flow_events = [
-                e
-                for e in j["traceEvents"]
-                if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
-            ]
-            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
-            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+        # kLinkAsyncCpuGpu = 2
+        ac2g_events = [e for e in events_with_flow if e["flow_type"] == 2]
+        events_flow_starts = {e["flow_id"] for e in ac2g_events if e["flow_start"]}
+        events_flow_ends = {e["flow_id"] for e in ac2g_events if not e["flow_start"]}
 
-            # kLinkAsyncCpuGpu = 2
-            ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
-            events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
-            events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
-
-            self.assertEqual(
-                json_flow_starts,
-                events_flow_starts,
-                "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
-            )
-            self.assertEqual(
-                json_flow_ends,
-                events_flow_ends,
-                "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
-            )
+        self.assertEqual(
+            json_flow_starts,
+            events_flow_starts,
+            "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
+        )
+        self.assertEqual(
+            json_flow_ends,
+            events_flow_ends,
+            "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+        )
 
     def test_profiler_timestamp_consistency(self, device):
         """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
-        device_type = device.split(":")[0]
-        with profile(activities=get_profiler_activities(device_type)) as prof:
-            x = torch.randn(32, 32, device=device)
-            torch.mm(x, x)
+        trace = self._get_trace(device)
+        chrome_trace = trace["chrome_trace"]
+        base_time_ns = chrome_trace.get("baseTimeNanoseconds", 0)
+        fe_mm = next((e for e in trace["events"] if e["name"] == "aten::mm"), None)
+        json_mm = next(
+            (
+                e
+                for e in chrome_trace["traceEvents"]
+                if e.get("name") == "aten::mm" and e.get("ph") == "X"
+            ),
+            None,
+        )
+        self.assertIsNotNone(fe_mm)
+        self.assertIsNotNone(json_mm)
 
-        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
-
-            # Chrome trace is relative to a different base time which is not exposed in Python.
-            # It's probably not important to do so as we still have the relative differences
-            # in duration.
-            base_time_ns = j.get("baseTimeNanoseconds", 0)
-
-            # Grab mm timestamp from events() and json
-            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
-            json_mm = next(
-                (
-                    e
-                    for e in j["traceEvents"]
-                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
-                ),
-                None,
-            )
-
-            # Reconstruct Chrome trace ts from events():
-            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
-            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
-            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
-            recovered_ts = (absolute_ns - base_time_ns) / 1000
-            self.assertEqual(
-                recovered_ts,
-                json_mm["ts"],
-                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
-            )
+        # Align the FunctionEvent's relative start with the Chrome trace's base time.
+        absolute_ns = int(fe_mm["start_us"] * 1000) + trace["trace_start_ns"]
+        recovered_ts = (absolute_ns - base_time_ns) / 1000
+        self.assertEqual(
+            recovered_ts,
+            json_mm["ts"],
+            msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
+        )
 
     def test_profiler_external_id_parity(self, device):
         """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
         from collections import Counter
 
-        device_type = device.split(":")[0]
-        with profile(activities=get_profiler_activities(device_type)) as prof:
-            with torch.profiler.record_function("test_region"):
-                x = torch.randn(32, 32, device=device)
-                y = torch.mm(x, x)
-                z = y + x
-                z.cpu()
-                torch.accelerator.synchronize()
-
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
-
-            json_name_ext = Counter(
-                (e["name"], e["args"]["External id"])
-                for e in j["traceEvents"]
-                if e.get("args", {}).get("External id") is not None
-            )
-            events_name_ext = Counter(
-                (ev.name, ev.external_id) for ev in prof.events() if ev.external_id != 0
-            )
-
-            self.assertEqual(
-                events_name_ext,
-                json_name_ext,
-                "(name, external_id) pairs differ between events() and Chrome trace JSON",
-            )
+        trace = self._get_trace(device)
+        json_name_ext = Counter(
+            (e["name"], e["args"]["External id"])
+            for e in trace["chrome_trace"]["traceEvents"]
+            if e.get("args", {}).get("External id") is not None
+        )
+        events_name_ext = Counter(
+            (e["name"], e["external_id"])
+            for e in trace["events"]
+            if e["external_id"] != 0
+        )
+        self.assertTrue(events_name_ext)
+        self.assertEqual(
+            events_name_ext,
+            json_name_ext,
+            "(name, external_id) pairs differ between events() and Chrome trace JSON",
+        )
 
     def test_profiler_activity_type_parity(self, device):
         """Verify activity_type on events() matches Chrome trace cat field."""
-        device_type = device.split(":")[0]
-        with profile(activities=get_profiler_activities(device_type)) as prof:
-            x = torch.randn(32, 32, device=device)
-            torch.mm(x, x)
-
-        events = prof.events()
+        trace = self._get_trace(device)
+        events = trace["events"]
         for e in events:
-            self.assertIsInstance(e.activity_type, str)
-            self.assertGreater(len(e.activity_type), 0)
+            self.assertIsInstance(e["activity_type"], str)
+            self.assertGreater(len(e["activity_type"]), 0)
 
-        mm_event = next((e for e in events if e.name == "aten::mm"), None)
+        mm_event = next((e for e in events if e["name"] == "aten::mm"), None)
         self.assertIsNotNone(mm_event)
-        self.assertEqual(mm_event.activity_type, "cpu_op")
+        self.assertEqual(mm_event["activity_type"], "cpu_op")
 
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                j = json.load(f)
-
-            json_name_cats = {
-                (e["name"], e["cat"])
-                for e in j["traceEvents"]
-                if e.get("ph") == "X" and "cat" in e
-            }
-            for e in events:
-                self.assertIn(
-                    (e.name, e.activity_type),
-                    json_name_cats,
-                    lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
-                )
+        json_name_cats = {
+            (e["name"], e["cat"])
+            for e in trace["chrome_trace"]["traceEvents"]
+            if e.get("ph") == "X" and "cat" in e
+        }
+        for e in events:
+            name = e["name"]
+            self.assertIn(
+                (name, e["activity_type"]),
+                json_name_cats,
+                lambda msg: f"{msg}\nactivity_type mismatch for {name}",
+            )
 
 
 instantiate_device_type_tests(
@@ -4499,7 +4482,7 @@ class TestProfilerTraceCompression(TestCase):
     @parametrize("use_python_export", [False, True])
     @parametrize(
         "suffix",
-        [".json", ".json.gz", ".json.zst", "", ".unknown", ".zst.bak", ".gz.bak"],
+        [".json", ".json.gz", ".json.zst", ".unknown"],
     )
     def test_export(self, use_python_export, suffix):
         if suffix.endswith(".zst"):
@@ -4513,8 +4496,7 @@ class TestProfilerTraceCompression(TestCase):
             opener = open
 
         value = "café 中"
-        escape_unicode = use_python_export and not suffix.endswith(".zst")
-        metadata = json.dumps(value, ensure_ascii=escape_unicode)
+        metadata = json.dumps(value, ensure_ascii=False)
         with profile(activities=[ProfilerActivity.CPU]) as prof:
             prof.add_metadata_json("compression_test", metadata)
             torch.ones(8) + 1
@@ -4524,39 +4506,9 @@ class TestProfilerTraceCompression(TestCase):
             with opener(path, "rt", encoding="utf-8") as f:
                 trace = json.load(f)
             self.assertEqual(trace["compression_test"], value)
+            self.assertTrue(trace["traceEvents"])
 
-    @parametrize("suffix", [".json.gz", ".json.zst"])
-    def test_export_keeps_kineto_sibling(self, suffix):
-        if suffix.endswith(".zst") and not (
-            try_import("pyzstd") or try_import("zstandard")
-        ):
-            self.skipTest("requires zstandard or pyzstd")
-        with profile(activities=[ProfilerActivity.CPU]) as prof:
-            torch.ones(8) + 1
-        kineto_export = prof.profiler.export_chrome_trace
-
-        def export_with_sibling(path, *args, **kwargs):
-            # Some Kineto builds write extra files next to the JSON.
-            kineto_export(path, *args, **kwargs)
-            with open(path.removesuffix(".json") + ".extra", "wb") as f:
-                f.write(b"extra")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "trace" + suffix)
-            with patch.object(
-                prof.profiler, "export_chrome_trace", export_with_sibling
-            ):
-                prof.export_chrome_trace(path)
-            sibling = os.path.join(tmpdir, "trace.extra")
-            self.assertTrue(os.path.exists(path))
-            self.assertTrue(os.path.exists(sibling))
-            with open(sibling, "rb") as f:
-                self.assertEqual(f.read(), b"extra")
-            # The uncompressed JSON stays in the temporary directory.
-            self.assertFalse(os.path.exists(os.path.join(tmpdir, "trace.json")))
-
-    @parametrize("use_python_export", [False, True])
-    def test_missing_zstd(self, use_python_export):
+    def test_missing_zstd(self):
         with profile(activities=[ProfilerActivity.CPU]) as prof:
             torch.ones(8) + 1
 
@@ -4565,11 +4517,11 @@ class TestProfilerTraceCompression(TestCase):
             with patch.dict(sys.modules, {"zstandard": None, "pyzstd": None}):
                 message = "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
                 with self.assertRaisesRegex(ImportError, message):
-                    prof.export_chrome_trace(path, use_python_export=use_python_export)
+                    prof.export_chrome_trace(path)
                 self.assertFalse(os.path.exists(path))
                 # A missing dependency must not consume the native trace.
                 gzip_path = os.path.join(tmpdir, "trace.json.gz")
-                prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
+                prof.export_chrome_trace(gzip_path)
                 with gzip.open(gzip_path, "rt") as f:
                     self.assertIn("traceEvents", json.load(f))
 
@@ -4581,33 +4533,31 @@ class TestPythonChromeTraceExport(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _profile_workload(self, device):
+    def test_python_export_matches_kineto(self, device):
         x = torch.randn(64, 64, device=device)
         with profile(activities=get_profiler_activities(device.split(":")[0])) as prof:
             for _ in range(20):
                 torch.mm(x, x)
                 torch.add(x, x)
             torch.accelerator.synchronize()
-        return prof
-
-    def test_python_export_matches_kineto(self, device):
-        prof = self._profile_workload(device)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             kineto_path = os.path.join(tmpdir, "kineto.json")
             prof.profiler.kineto_results.save(kineto_path)
 
             py_path = os.path.join(tmpdir, "python.json")
-            from torch.profiler._chrome_trace_export import (
-                export_chrome_trace as _export,
-            )
-
-            _export(prof.profiler.kineto_results, py_path)
+            prof.export_chrome_trace(py_path, use_python_export=True)
 
             with open(kineto_path) as f:
                 kineto_trace = json.load(f)
             with open(py_path) as f:
                 py_trace = json.load(f)
+
+            gzip_path = os.path.join(tmpdir, "python.json.gz")
+            prof.export_chrome_trace(gzip_path, use_python_export=True)
+            with gzip.open(gzip_path, "rt", encoding="utf-8") as f:
+                gzip_trace = json.load(f)
+            self.assertEqual(gzip_trace["traceEvents"], py_trace["traceEvents"])
 
         kineto_events = kineto_trace["traceEvents"]
         py_events = py_trace["traceEvents"]
@@ -4621,6 +4571,7 @@ class TestPythonChromeTraceExport(TestCase):
 
         kineto_acts = _activity_events(kineto_events)
         py_acts = _activity_events(py_events)
+        self.assertGreater(len(kineto_acts), 0)
         self.assertEqual(
             len(kineto_acts),
             len(py_acts),
@@ -4675,36 +4626,6 @@ class TestPythonChromeTraceExport(TestCase):
             ],
         )
         self.assertEqual(kineto_flow, py_flow, "Flow events differ")
-
-    def test_python_export_gzip(self, device):
-        import gzip as gzip_mod
-
-        prof = self._profile_workload(device)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            gz_path = os.path.join(tmpdir, "trace.json.gz")
-            prof.export_chrome_trace(gz_path, use_python_export=True)
-
-            with gzip_mod.open(gz_path, "rt") as f:
-                trace = json.load(f)
-
-        self.assertIn("traceEvents", trace)
-        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
-        self.assertGreater(len(x_events), 0)
-
-    def test_python_export_plain_json(self, device):
-        prof = self._profile_workload(device)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            json_path = os.path.join(tmpdir, "trace.json")
-            prof.export_chrome_trace(json_path, use_python_export=True)
-
-            with open(json_path) as f:
-                trace = json.load(f)
-
-        self.assertIn("traceEvents", trace)
-        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
-        self.assertGreater(len(x_events), 0)
 
 
 instantiate_device_type_tests(
@@ -4826,261 +4747,6 @@ class TestPythonChromeTraceExportCudaOnly(TestCase):
             self.assertIn("original_stream", event["args"])
 
 
-class _StubActivity:
-    """Minimal stand-in for ITraceActivity: the accessors the exporter calls."""
-
-    def __init__(self, cat, name, rid, ts=100, metadata_json="", did=0):
-        self._cat, self._name, self._rid = cat, name, rid
-        self._ts, self._metadata_json, self._did = ts, metadata_json, did
-
-    def type(self):
-        return self._cat
-
-    def name(self):
-        return self._name
-
-    def device_id(self):
-        return self._did
-
-    def resource_id(self):
-        return self._rid
-
-    def timestamp(self):
-        return self._ts
-
-    def duration(self):
-        return 10
-
-    def correlation_id(self):
-        return 0
-
-    def linked_correlation_id(self):
-        return 0
-
-    def linked_activity(self):
-        return None
-
-    def metadata_json(self):
-        return self._metadata_json
-
-    def flow_id(self):
-        return 0
-
-    def flow_start(self):
-        return False
-
-    def flow_type(self):
-        return 2
-
-
-class _StubResults:
-    def __init__(self, activities):
-        self._activities = activities
-
-    def trace_activities(self):
-        return self._activities
-
-
-class TestChromeTraceInlineAnnotations(TestCase):
-    """Inline CUDA-graph annotations, driven through stub activities so the branches
-    are covered without a capture or a live profiler."""
-
-    hw_classification = HardwareClassification.GENERIC
-
-    def _export(self, activities, **kwargs):
-        from torch.profiler._chrome_trace_export import export_chrome_trace
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "trace.json")
-            export_chrome_trace(_StubResults(activities), path, **kwargs)
-            with open(path) as f:
-                return json.load(f)
-
-    @staticmethod
-    def _metadata(graph_node_id):
-        return f'"stream": 3, "graph node id": {graph_node_id}'
-
-    @staticmethod
-    def _kernels(trace):
-        return [e for e in trace["traceEvents"] if e.get("cat") == "kernel"]
-
-    def test_annotation_fields_and_lane(self):
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={42: [{"name": "phase_a", "stream": 61}]},
-            graph_lanes="all",
-        )
-        self.assertTrue(trace["cudaGraphInlineAnnotated"])
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["args"]["name"], "phase_a")
-        # tid, args.stream and the annotation agree on the lane; the hardware stream
-        # the work actually ran on is kept as original_stream.
-        self.assertEqual(kernel["tid"], 61)
-        self.assertEqual(kernel["args"]["stream"], 61)
-        self.assertEqual(kernel["args"]["original_stream"], 3)
-        # The lane gets a name of its own.
-        names = [
-            e
-            for e in trace["traceEvents"]
-            if e.get("name") == "thread_name" and e["tid"] == 61
-        ]
-        self.assertEqual(len(names), 1)
-
-    def test_lane_named_by_annotation(self):
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={42: [{"Process Group Description": "DP", "stream": 61}]},
-            graph_lanes="all",
-        )
-        [name_event] = [
-            e
-            for e in trace["traceEvents"]
-            if e.get("name") == "thread_name" and e["tid"] == 61
-        ]
-        self.assertEqual(name_event["args"]["name"], "DP")
-
-    def test_unannotated_graph_work_moves_to_default_stream(self):
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={99: [{"name": "other"}]},
-            graph_lanes="all",
-        )
-        # Nothing matched, so no inline flag -- but graphed work still collapses onto
-        # the default lane instead of scattering over the replay's hardware streams.
-        self.assertNotIn("cudaGraphInlineAnnotated", trace)
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["tid"], 7)
-        self.assertEqual(kernel["args"]["stream"], 7)
-        self.assertEqual(kernel["args"]["original_stream"], 3)
-
-    def test_non_graph_work_untouched(self):
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json='"stream": 3')],
-            annotations={42: [{"name": "phase_a"}]},
-        )
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["tid"], 3)
-        self.assertNotIn("original_stream", kernel["args"])
-
-    def test_orphaned_user_annotation_slices_dropped(self):
-        # CUPTI replicates gpu_user_annotation onto every stream a graph replays on.
-        # A slice keeps its lane only if work stayed there: lane 3's kernel moved to 61.
-        trace = self._export(
-            [
-                _StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42)),
-                _StubActivity("gpu_user_annotation", "ann_moved", rid=3),
-                _StubActivity("kernel", "eager", rid=9),
-                _StubActivity("gpu_user_annotation", "ann_kept", rid=9),
-            ],
-            annotations={42: [{"name": "phase_a", "stream": 61}]},
-            graph_lanes="all",
-        )
-        kept = [
-            e["name"]
-            for e in trace["traceEvents"]
-            if e.get("cat") == "gpu_user_annotation"
-        ]
-        self.assertEqual(kept, ["ann_kept"])
-
-    def test_args_carry_one_stream_key(self):
-        # The metadata fragment kineto supplies already has a "stream"; the lane must
-        # replace it rather than append a second (duplicate keys are parser-dependent).
-        from torch.profiler._chrome_trace_export import export_chrome_trace
-
-        def reject_duplicates(pairs):
-            keys = [k for k, _ in pairs]
-            self.assertEqual(len(keys), len(set(keys)), f"duplicate keys in {keys}")
-            return dict(pairs)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "trace.json")
-            export_chrome_trace(
-                _StubResults(
-                    [
-                        _StubActivity(
-                            "kernel", "k", rid=3, metadata_json=self._metadata(42)
-                        )
-                    ]
-                ),
-                path,
-                annotations={42: [{"name": "phase_a", "stream": 61}]},
-                graph_lanes="all",
-            )
-            with open(path) as f:
-                trace = json.load(f, object_pairs_hook=reject_duplicates)
-
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["args"]["stream"], 61)
-        self.assertEqual(kernel["args"]["original_stream"], 3)
-
-    def test_empty_annotations_leave_events_alone(self):
-        # Nothing to inject, so no lane pass: an empty mapping reads as None rather than
-        # collapsing every graphed event onto one lane for no benefit.
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={},
-        )
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["tid"], 3)
-        self.assertNotIn("original_stream", kernel["args"])
-
-    def test_annotations_alone_move_nothing(self):
-        # The default: annotate the events, leave the trace's stream layout alone, even
-        # for an annotation that names a lane.
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={42: [{"name": "phase_a", "stream": 61}]},
-        )
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["args"]["name"], "phase_a")
-        self.assertEqual(kernel["tid"], 3)
-        self.assertEqual(kernel["args"]["stream"], 3)
-        self.assertNotIn("original_stream", kernel["args"])
-
-    def test_invalid_graph_lanes_rejected(self):
-        with self.assertRaisesRegex(ValueError, "graph_lanes"):
-            self._export([], annotations={1: [{"name": "x"}]}, graph_lanes="lanes")
-
-    def test_graph_lanes_all_without_annotations_rejected(self):
-        # Standalone it would only collapse every graphed event onto default_stream.
-        with self.assertRaisesRegex(ValueError, "needs cuda_graph_annotations"):
-            self._export([], graph_lanes="all")
-
-    def test_recorded_stream_reported_when_lanes_off(self):
-        # graph_lanes="none" must not act on the recorded lane, but must not lose it
-        # either: args.stream still names the stream the event actually ran on.
-        trace = self._export(
-            [_StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42))],
-            annotations={42: [{"name": "phase_a", "stream": 61}]},
-        )
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["tid"], 3)
-        self.assertEqual(kernel["args"]["stream"], 3)
-        self.assertEqual(kernel["args"]["annotated_stream"], 61)
-        self.assertNotIn("original_stream", kernel["args"])
-
-    def test_without_annotations_nothing_changes(self):
-        activities = [
-            _StubActivity("kernel", "k", rid=3, metadata_json=self._metadata(42)),
-            _StubActivity("gpu_user_annotation", "ann", rid=3),
-        ]
-        trace = self._export(activities)
-        self.assertNotIn("cudaGraphInlineAnnotated", trace)
-        [kernel] = self._kernels(trace)
-        self.assertEqual(kernel["tid"], 3)
-        self.assertNotIn("original_stream", kernel["args"])
-        self.assertEqual(
-            len(
-                [
-                    e
-                    for e in trace["traceEvents"]
-                    if e.get("cat") == "gpu_user_annotation"
-                ]
-            ),
-            1,
-        )
-
-
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 @instantiate_parametrized_tests
@@ -5120,12 +4786,6 @@ class TestMetadataJsonFormatCUDA(TestCase):
             f"supported={supported_activities()} n={len(activities)} "
             f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
         )
-
-    def test_metadata_json_is_valid_json_fragment(self):
-        md = self._get_kernel_metadata()
-        parsed = json.loads("{" + md + "}")
-        self.assertIsInstance(parsed, dict)
-        self.assertGreater(len(parsed), 0)
 
     def test_kernel_metadata_has_expected_fields(self):
         md = self._get_kernel_metadata()

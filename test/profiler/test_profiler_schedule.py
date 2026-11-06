@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import torch
 from torch.profiler import profile, ProfilerAction, ProfilerActivity
+from torch.testing._internal.common_profiler import forbid_profiler_capture
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -43,13 +44,7 @@ class TestProfilerSchedule(TestCase):
     def setUp(self):
         super().setUp()
         # Fail if a test accidentally uses a real capture instead of the fake.
-        for operation in ("_prepare_profiler", "_enable_profiler", "_disable_profiler"):
-            self.enterContext(
-                patch(
-                    f"torch.autograd.profiler.{operation}",
-                    side_effect=AssertionError(f"Unexpected native call: {operation}"),
-                )
-            )
+        self.enterContext(forbid_profiler_capture())
         self.enterContext(patch(self.PATCH_TARGET, return_value=False))
         self.enterContext(patch("torch.profiler.profiler.prof.KinetoStepTracker"))
         self.enterContext(patch("torch.profiler.profiler.prof.record_function"))
