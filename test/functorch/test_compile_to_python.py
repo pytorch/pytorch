@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import unittest
+import unittest.mock
 
 import torch
 import torch._functorch.config as functorch_config
@@ -497,6 +498,60 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn("isnan", src)
         with torch.no_grad():
             self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
+
+    def test_options_reach_both_steps_under_the_standalone_pins(self):
+        # Both steps (step 1's compile_fx, capturing the dense graph, and step 2's
+        # compile_fx_inner, the lowering) run under the options with the pins over
+        # them, so cpp_wrapper=True or fx_wrapper=True cannot send step 1 down the
+        # wrapper branch that step 2 then compiles without (it loses the aliasing
+        # between inputs), and freezing, from the options or the ambient config,
+        # cannot route it through freezing's compiler.
+        import torch._inductor.compile_fx as compile_fx_module
+
+        seen = {"compile_fx": [], "compile_fx_inner": []}
+
+        def spy(name):
+            real = getattr(compile_fx_module, name)
+
+            def wrapper(*args, **kwargs):
+                c = torch._inductor.config
+                seen[name].append(
+                    (c.cpp_wrapper, c.fx_wrapper, c.freezing, c.nan_asserts)
+                )
+                return real(*args, **kwargs)
+
+            return unittest.mock.patch.object(compile_fx_module, name, wrapper)
+
+        def alias_step(x, y):
+            x.add_(1)
+            return (y * 2,)
+
+        m = _Pointwise().eval()
+        x = torch.randn(8, 4)
+        pointwise = _capture(m, x), _flat_inputs(m, x)
+        aliased = make_fx(alias_step)(torch.zeros(4, 4), torch.zeros(4))
+        pinned = {"cpp_wrapper": True, "fx_wrapper": True, "freezing": True}
+        want = (False, False, False, True)
+        for options in ({**pinned, "nan_asserts": True}, {"nan_asserts": True}):
+            for k in seen:
+                seen[k].clear()
+            with (
+                torch._inductor.config.patch(freezing=True),
+                spy("compile_fx"),
+                spy("compile_fx_inner"),
+            ):
+                src, _ = compile_to_python(*pointwise, options=options)
+            self.assertEqual(seen["compile_fx"], [want])
+            self.assertEqual(set(seen["compile_fx_inner"]), {want})
+            with torch.no_grad():
+                self.assertEqual(load_from_python(src)(pointwise[1])[0], m(x))
+
+            base = torch.zeros(4, 4)
+            src, _ = compile_to_python(aliased, [base, base[0]], options=options)
+            base = torch.zeros(4, 4)
+            out = load_from_python(src)([base, base[0]])[0]
+            self.assertEqual(out, torch.full((4,), 2.0))
+            self.assertEqual(base, torch.ones(4, 4))
 
     def test_orchestration_inlined_as_real_def(self):
         # The orchestration is spliced as a real top-level ``def _runtime_wrapper`` that the
