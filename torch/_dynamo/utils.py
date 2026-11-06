@@ -195,7 +195,6 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 
-# Abstraction on top of counters.
 class ReInplaceTrigger(enum.Enum):
     AUTO_FUNC_V1 = 1
     AUTO_FUNC_V2 = 2

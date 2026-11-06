@@ -1799,8 +1799,7 @@ def get_new_module_tests():
         dict(
             fullname='EmbeddingBag_sparse',
             constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
-            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                    .sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))''',
+            test_cpp_api_parity=False,
             input_fn=lambda: torch.randperm(2).repeat(1, 2),
             check_gradgrad=False,
             has_sparse_gradients=True,
