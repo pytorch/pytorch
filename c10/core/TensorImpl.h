@@ -249,9 +249,11 @@ struct C10_API FakeTensorMode {
   // torch/csrc/FakeTensorMode.cpp.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
-  // when false, disallow a fake tensor from having a 'meta' device. Atomic, as
-  // Python can assign it while another thread reads it.
-  std::atomic<bool> allow_meta_{true};
+  // The fields below are plain, like a Python FakeTensorMode's attributes, and
+  // must not be changed while another thread is using the mode.
+
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
 
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
@@ -261,9 +263,8 @@ struct C10_API FakeTensorMode {
 
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
-  // Python's _allow_unsafe_data_ptr_access, exposed under that name. Atomic,
-  // like allow_meta_.
-  std::atomic<bool> allow_unsafe_data_ptr_access_{true};
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
+  bool allow_unsafe_data_ptr_access_ = true;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,

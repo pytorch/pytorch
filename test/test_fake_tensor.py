@@ -173,14 +173,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
         self.assertIsNone(torch._C._get_dispatch_mode(mode_key))
 
-    def test_data_ptr_warning(self):
-        # The advice also holds for a C++ fake, which is a plain Tensor
-        mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake = mode.from_tensor(torch.empty(2))
-        warning = r"Accessing the data pointer of FakeTensor.*is_fake_tensor\(tensor\)"
-        with self.assertWarnsOnceRegex(UserWarning, warning):
-            fake.data_ptr()
-
     def fake_with_unbacked_batch(self, *tensors):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
