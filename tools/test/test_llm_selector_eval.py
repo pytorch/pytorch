@@ -4,9 +4,12 @@ import argparse
 import collections
 import contextlib
 import datetime as dt
+import fnmatch
 import functools
+import importlib.util
 import io
 import json
+import math
 import os
 import random
 import re
@@ -31,12 +34,16 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.llm_selector import select_tests, selection
 from tools.testing.llm_selector.eval import (
     build_dataset as bd,
+    chart,
     clickhouse,
+    dollars,
+    intervals,
+    land_time,
     score,
     td_replay,
 )
 from tools.testing.llm_selector.eval.build_dataset import strip_trailers
-from tools.testing.llm_selector.eval.run_eval import run_one
+from tools.testing.llm_selector.eval.run_eval import run_one, TIMED_OUT
 from tools.testing.llm_selector.eval.score import (
     Choice,
     ci_jobs,
@@ -52,6 +59,7 @@ from tools.testing.test_run import TestRun
 
 
 sys.path.remove(str(REPO_ROOT))
+
 
 # config -> file -> [cpu, gpu] seconds
 SECONDS = {
@@ -207,8 +215,6 @@ class TestRunEval(unittest.TestCase):
 
     def test_timeout_is_final(self) -> None:
         from subprocess import TimeoutExpired
-
-        from tools.testing.llm_selector.eval.run_eval import TIMED_OUT
 
         r, query, _ = self.run_one([TimeoutExpired("claude", 1)])
         self.assertEqual((r["out"], r["error"], r["transient"], query.call_count), (None, TIMED_OUT, False, 1))  # fmt: skip
@@ -1600,6 +1606,751 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             cost_fraction(Choice(Selection(run_all=True)), cands, SECONDS), (1.0, 1.0)
         )
+
+
+class TestChart(unittest.TestCase):
+    def test_frontier(self) -> None:
+        points: list[tuple[float, float]] = [(1, 50), (3, 70), (1, 60), (2, 55), (0.5, 40), (3, 70)]  # fmt: skip
+        self.assertEqual(chart.frontier(points), [(0.5, 40), (1, 60), (3, 70)])
+
+    def test_caught(self) -> None:
+        row = {"tag": "t", "policy": "p", "kind": "k", "files": 1, "run_all": False, "cpu": 0.1, "gpu": 0.1, "cost_usd": 0.1, "error": False}  # fmt: skip
+        rows = [{**row, "pairs": p, "hit": h} for p, h in [(2, 1), (1, 1), (0, 0)]]
+        (s,) = score.summarize(rows)
+        # A revert is caught by any selected failure, a PR push only by all of them.
+        self.assertEqual(chart.caught(s, "revert"), (100.0, 2))
+        self.assertEqual(chart.caught(s, "head"), (50.0, 2))
+        (empty,) = score.summarize(rows[2:])
+        with self.assertRaisesRegex(SystemExit, "^no failing head rows for t$"):
+            chart.caught(empty, "head")
+
+    def test_committed_svg(self) -> None:
+        # chart.main needs matplotlib, which CI's tools tests lack (TestChartMain), so check its committed output here.
+        svg = (REPO_ROOT / "tools/testing/llm_selector/report_tradeoff.svg").read_text()
+        report = (REPO_ROOT / "tools/testing/llm_selector/REPORT.md").read_text()
+        for name in ("Reverted commits caught", "Failing PR pushes with every real failure selected"):  # fmt: skip
+            (n,) = re.findall(rf">{name} \(n=(\d+)\)<", svg)
+            self.assertIn(f"| {name} (n={n}) |", report)
+        self.assertNotIn("Matplotlib v", svg)
+
+    def test_production_hedge(self) -> None:
+        self.assertAlmostEqual(chart.HEDGES[chart.PRODUCTION[1]], 100 * selection.HEDGE_SHARE)  # fmt: skip
+
+    def test_panels(self) -> None:
+        base = {"files": 1, "run_all": False, "gpu": 0.0, "cost_usd": 0.1, "error": False}  # fmt: skip
+        opus, haiku = chart.PRODUCTION[0], "v3_haiku45_low"
+        # (tag, policy) -> neutral cpu share, revert hits, head hits, each of 2 pairs.
+        cells = {
+            (opus, "final"): (0.125, [1, 0], [2, 1]),
+            (opus, "final+td20"): (0.25, [1, 1], [2, 2]),
+            (haiku, "final"): (0.0625, [0, 0], [1, 0]),
+            (haiku, "final+td20"): (0.375, [1, 0], [2, 0]),
+            ("td", "td25"): (0.1875, [1, 0], [2, 0, 0]),
+            # Neither is plotted, and neither has a color.
+            (f"{opus}_r2", "final"): (0.0, [2, 2], [2, 2]),
+            ("v3_sonnet5_medium_agentic", "final"): (0.0, [2, 2], [2, 2]),
+        }  # fmt: skip
+        rows = []
+        for (t, pol), (cpu, reverts, heads) in cells.items():
+            rows.append({**base, "tag": t, "policy": pol, "kind": "neutral", "cpu": cpu, "pairs": 0, "hit": 0})  # fmt: skip
+            # The cost axis is the neutral samples', not the failing ones'.
+            rows += [{**base, "tag": t, "policy": pol, "kind": "revert", "cpu": 0.9, "pairs": 2, "hit": h} for h in reverts]  # fmt: skip
+            rows += [{**base, "tag": t, "policy": pol, "kind": "head", "cpu": 0.9, "pairs": 2, "hit": h} for h in heads]  # fmt: skip
+        lines = {
+            "revert": [("Haiku 4.5 low", "o", [(6.25, 0.0), (37.5, 50.0)]), ("Opus 5.5 medium", "s", [(12.5, 50.0), (25.0, 100.0)])],
+            "head": [("Haiku 4.5 low", "o", [(6.25, 0.0), (37.5, 50.0)]), ("Opus 5.5 medium", "s", [(12.5, 50.0), (25.0, 100.0)])],
+        }  # fmt: skip
+        out = chart.panels(rows)
+        self.assertEqual(list(out), ["revert", "head"])
+        for kind, d in out.items():
+            self.assertEqual([(x["label"], x["marker"], x["xy"]) for x in d["lines"]], lines[kind])  # fmt: skip
+            self.assertEqual(d["star"], (25.0, 100.0))
+            # TD and Haiku's hedged point are dominated.
+            self.assertEqual(d["frontier"], [(6.25, 0.0), (12.5, 50.0), (25.0, 100.0)])
+            self.assertEqual(d["xmax"], 37.5)
+        self.assertEqual((out["revert"]["td"], out["revert"]["n"]), ((18.75, 50.0), 2))
+        head = out["head"]
+        self.assertEqual((head["td"], head["n"]), ((18.75, 100 * (1 / 3)), 3))
+        self.assertEqual(out["revert"]["labels"], [])
+        self.assertEqual(out["head"]["labels"], [("no hedge", (12.5, 50.0)), ("+20% hedge", (25.0, 100.0))])  # fmt: skip
+        no_star = [r for r in rows if (r["tag"], r["policy"], r["kind"]) != (*chart.PRODUCTION, "head")]  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, f"^no head rows for {opus} final\\+td20 in the rows$"):  # fmt: skip
+            chart.panels(no_star)
+        with self.assertRaisesRegex(SystemExit, r"no name, color or marker for \['v3_opus55_xhigh'\]"):  # fmt: skip
+            chart.panels([*rows, {**rows[0], "tag": "v3_opus55_xhigh"}])
+
+
+LABELER = """\
+"ciflow/inductor":
+- torch/_inductor/**
+
+- c10/core/Sym*
+- "**/fx/*.py"
+- torch/_dynamo/?.py
+"ciflow/other":
+- torch/foo.py
+"""
+# config -> file -> seconds; test_seconds counts linux-cuda as GPU time.
+TIMES = {
+    "linux": {"default": {"test_a": 80.0, "test_b": 20.0}, "inductor_core": {"test_c": 60.0, "test_d": 10.0}, "inductor_extra": {"test_c": 1000.0}},
+    "linux-cuda": {"default": {"test_a": 30.0, "test_b": 70.0}, "inductor_core": {"test_c": 30.0}},
+}  # fmt: skip
+# inductor_extra is no inductor unit-test job's, and the unit-test job's default runs TD.
+DOLLAR_JOBS = {
+    True: {("pull", "linux", "default")},
+    False: {("inductor", "unit-test / inductor", "inductor_core"), ("inductor", "unit-test / inductor", "default"), ("periodic", "unit-test / periodic", "inductor_extra")},
+}  # fmt: skip
+
+
+class TestDollars(unittest.TestCase):
+    def setUp(self) -> None:
+        has_head = mock.patch.object(score, "has_head", lambda sha: sha != "gone")
+        self.enterContext(has_head)
+
+    def write(self, files: Mapping[str, object]) -> Path:
+        return write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {"labeler.yml": LABELER, **files})  # fmt: skip
+
+    def test_inductor_globs(self) -> None:
+        data = self.write({})
+        globs = dollars.inductor_globs(data / "labeler.yml")
+        for path, match in [
+            ("torch/_inductor/codegen/a.py", True),
+            ("c10/core/SymInt.h", True),
+            ("c10/core/Sym/x.h", False),
+            ("c10/core/impl/SymInt.h", False),
+            ("torch/fx/a.py", True),
+            ("fx/a.py", True),
+            ("torch/fx/sub/a.py", False),
+            ("torch/_dynamo/a.py", True),
+            ("torch/_dynamo/ab.py", False),
+            ("torch/foo.py", False),
+        ]:
+            self.assertEqual(bool(globs.fullmatch(path)), match, path)
+        for text, msg in [
+            ('"ciflow/x":\n- y\n', "has no list of ciflow/inductor globs"),
+            ('"ciflow/inductor": torch/**\n', "has no list of ciflow/inductor globs"),
+            ("- torch/**\n", "has no list of ciflow/inductor globs"),
+            (
+                '"ciflow/inductor":\n- torch/{a,b}.py\n',
+                r"unsupported syntax: \['torch/\{a,b\}.py'\]",
+            ),
+        ]:
+            (data / "bad.yml").write_text(text)
+            with self.assertRaisesRegex(SystemExit, msg):
+                dollars.inductor_globs(data / "bad.yml")
+
+    def test_real_labeler(self) -> None:
+        real = dollars.inductor_globs(dollars.LABELER)
+        msg = "the ciflow/inductor globs in .github/labeler.yml changed; update this test's paths or dollars.inductor_globs"
+        self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"), msg)
+        self.assertFalse(real.fullmatch("torch/nn/functional.py"), msg)
+
+    def data(self) -> Path:
+        sample = {"kind": "neutral", "sha": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a", "test_b", "test_c", "test_d"], "changed_files": ["torch/foo.py"], "truth": []}  # fmt: skip
+        td = {"scored": ["test_d", "test_a"], "top25": ["test_a", "test_c"], "top25_cfg": {"default": ["test_a"], "inductor_core": ["test_c"]}}  # fmt: skip
+        result = {"out": answer(tests=[{"file": "test_b"}]), "error": None}
+        data = self.write({
+            "test-times.json": TIMES,
+            "samples/a.json": {**sample, "changed_files": ["torch/_inductor/x.py"]},
+            "samples/b.json": sample, "samples/c.json": sample, "samples/d.json": sample, "samples/t.json": sample,
+            "samples/e.json": {**sample, "sha": "gone", "changed_files": ["test/test_b.py"]},
+            # select_tests runs everything on a test-infra change without asking the model.
+            "samples/u.json": {**sample, "changed_files": ["test/run_test.py"]},
+            **{f"td/{i}.json": td for i in "abcdeu"},
+            "results/m/a.json": {**result, "cost_usd": 0.2}, "results/m/b.json": {**result, "cost_usd": 0.4},
+            "results/m/d.json": result, "results/m/e.json": result,
+            "results/m/t.json": {"out": None, "error": TIMED_OUT, "cost_usd": 0.0},
+        })  # fmt: skip
+        # d's replay is of another sample, and e's head is not in this clone.
+        (data / "td/d.json").write_text(json.dumps({**td, "inputs": "stale"}))
+        self.enterContext(patch_ci_jobs(DOLLAR_JOBS))
+        self.enterContext(mock.patch.object(score, "grep_at", return_value=[]))
+        return data
+
+    def model(self, data: Path, tag: str, pol: str, ids: str, workflows: list[tuple[str, str, float, float, float, bool]] = dollars.WORKFLOWS) -> tuple[dict, str]:  # fmt: skip
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d = dollars.model(data, tag, pol, overhead=0.2, ids=list(ids), cost_ids=list("abut"), samples=data / "samples", td_dir=data / "td", stats="", labeler=data / "labeler.yml", workflows=workflows)  # fmt: skip
+        return d, err.getvalue()
+
+    def test_model(self) -> None:
+        data = self.data()
+        workflows = [
+            ("pull", "cpu", 100.0, 0.5, 0.2, True),
+            ("trunk", "gpu", 50.0, 1.0, 0.5, True),
+            ("inductor", "ind_cpu", 10.0, 1.0, 0.0, False),
+            ("inductor", "ind_gpu", 20.0, 1.0, 0.0, False),
+        ]
+        d, err = self.model(data, "m", "final+td20", "abcdeu", workflows=workflows)
+        # As in score.score: c has no m result, d no current replay, e no git
+        # grep, and u is unasked, so it runs everything at no model cost.
+        self.assertEqual(err, "dropped 1 of 6 ids with no m result\ndropped 1 of 6 ids with no td replay of the current test-times.json, sample, STATS and TD code\ndropped 1 of 6 ids with no working git grep at their head (not in this clone?)\nleft out 1 of 3 m calls that timed out\n")  # fmt: skip
+        # a and b run test_b in default; only a matches the inductor globs, and
+        # the 20% hedge adds test_d (10 of its 100 inductor_core seconds) there.
+        f, ftd = d["fractions"], d["td_fractions"]
+        self.assertEqual({k: round(v, 4) for k, v in f.items()}, {"cpu": round(1.4 / 3, 4), "gpu": 0.8, "ind_cpu": round(1 / 7, 4), "ind_gpu": 0.0, "n": 3, "n_ind": 1})  # fmt: skip
+        self.assertEqual({k: round(v, 4) for k, v in ftd.items()}, {"cpu": 0.8, "gpu": 0.3, "ind_cpu": round(6 / 7, 4), "ind_gpu": 1.0, "n": 3, "n_ind": 1})  # fmt: skip
+        pull, trunk, ind_cpu, ind_gpu = (r["save_k"] for r in d["rows"])
+        # pull: 100 * 0.5 PR * 0.8 same-repo, rescaled by (0.2 + 0.8 * new) / (0.2 + 0.8 * TD).
+        self.assertAlmostEqual(pull, 40 * (1 - (0.2 + 0.8 * 1.4 / 3) / 0.84))
+        self.assertAlmostEqual(trunk, 25 * (1 - 0.84 / 0.44))
+        # Without TD, the inductor jobs run everything today.
+        self.assertAlmostEqual(ind_cpu, 10 * (1 - (0.2 + 0.8 / 7)))
+        self.assertAlmostEqual(ind_gpu, 20 * 0.8)
+        self.assertAlmostEqual(d["stack_k_per_month"], pull + trunk)
+        self.assertAlmostEqual(d["total_k_per_month"]["cpu"], pull + ind_cpu)
+        self.assertAlmostEqual(d["total_k_per_month"]["gpu"], trunk + ind_gpu)
+        # u is never asked and t timed out, so $/call is the mean of a and b.
+        self.assertAlmostEqual(d["usd_per_call"], 0.3)
+        self.assertAlmostEqual(
+            d["llm_k_per_month"], 0.3 * dollars.PR_PUSHES_PER_MONTH_K
+        )
+
+        today, _ = self.model(data, "td", "td25", "abcdeu", workflows=workflows)
+        # TD's own cut needs no result, so only d and e (no head) are dropped,
+        # and c runs what b does.
+        self.assertEqual({k: round(v, 4) for k, v in today["fractions"].items()}, {**{k: round(v, 4) for k, v in ftd.items()}, "n": 4})  # fmt: skip
+        # TD makes no model call, and runs its cut in the inductor jobs too.
+        self.assertEqual(today["llm_k_per_month"], 0.0)
+        self.assertAlmostEqual(today["rows"][2]["save_k"], 10 * 0.8 * (1 - 6 / 7))
+
+    def test_model_errors(self) -> None:
+        data = self.data()
+        for ids, msg in [("c", "no scored m final rows"), ("b", "no scored m sample matches the ciflow/inductor globs")]:  # fmt: skip
+            with self.assertRaisesRegex(SystemExit, msg):
+                self.model(data, "m", "final", ids)
+        with patch_ci_jobs({True: DOLLAR_JOBS[True], False: set()}), self.assertRaisesRegex(SystemExit, "no inductor unit-test configs"):  # fmt: skip
+            self.model(data, "m", "final", "a")
+        with self.assertRaisesRegex(SystemExit, "no m results that did not time out"):
+            dollars.mean_call_usd(data, "m", ["t", "u", "c"], data / "samples")
+
+    def test_fractions_find_importers(self) -> None:
+        # The change edits test_b, which test_a imports, so final runs test_a too, as score.score does.
+        data = self.write({
+            "test-times.json": {"linux": {"default": {"test_a": 80.0, "test_b": 20.0}, "inductor_core": {"test_a": 50.0, "test_b": 50.0}}},
+            "samples/a.json": {"kind": "neutral", "sha": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a", "test_b"], "changed_files": ["test/test_b.py", "torch/_inductor/x.py"], "truth": []},
+            "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
+            "results/m/a.json": {"out": answer(tests=[{"file": "test_b"}]), "error": None},
+        })  # fmt: skip
+        with (
+            patch_ci_jobs(DOLLAR_JOBS),
+            mock.patch.object(score, "grep_at", return_value=["test/test_a.py"]) as grep,
+        ):  # fmt: skip
+            f, _ = dollars.fractions(data, "m", "final", ids=["a"], samples=data / "samples", td_dir=data / "td", stats="", labeler=data / "labeler.yml")  # fmt: skip
+        self.assertEqual({c.args[1] for c in grep.call_args_list}, {"x"})
+        self.assertEqual((f["cpu"], f["ind_cpu"]), (1.0, 1.0))
+
+    def test_main(self) -> None:
+        data = self.data()
+        stats = data / "stats"
+        argv = ["dollars", "--data", str(data), "--ids", str(data / "ids"), "--cost-ids", str(data / "ids"), "--stats", str(stats), "--labeler", str(data / "labeler.yml")]  # fmt: skip
+        with mock.patch.object(sys, "argv", [*argv, "m", "final"]), contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):  # fmt: skip
+            dollars.main()
+        self.assertIn("lacks", err.getvalue())
+        stats.mkdir()
+        for a in score.STATS_ARTIFACTS:
+            (stats / a).write_text("{}")
+        (data / "ids").write_text("a b u\n")
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", [*argv, "--json", str(data / "d.json"), "m", "final"]),
+            mock.patch.object(score, "replay_stats", return_value=""),
+            contextlib.redirect_stdout(out),
+        ):  # fmt: skip
+            dollars.main()
+        llm = re.escape(f"{0.3 * dollars.PR_PUSHES_PER_MONTH_K:.1f}")
+        self.assertRegex(out.getvalue(), rf"^m final overhead=0.2 n=3 n_ind=1 run cpu=0.467 gpu=0.800 .* \$/call=0.300 llm=\${llm}k/month\n$")  # fmt: skip
+        self.assertEqual(json.loads((data / "d.json").read_text())["fractions"]["n"], 3)
+        for bad in ("1", "-0.1"):
+            with mock.patch.object(sys, "argv", [*argv, "--overhead", bad, "m", "final"]), contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):  # fmt: skip
+                dollars.main()
+            self.assertIn("--overhead must be in [0, 1)", err.getvalue())
+
+    PRICE = [4.0, 5.0, 0.2, 20.0]
+
+    def cold(self, usage: dict[str, list[int]], extra: dict[str, dict]) -> tuple[float, list[float], str]:  # fmt: skip
+        files: dict[str, object] = {f"results/m/{i}.json": {"cost_usd": sum(p * n for p, n in zip(self.PRICE, u)) / 1e6, "error": None, "usage": dict(zip(dollars.USAGE, u))} for i, u in usage.items()}  # fmt: skip
+        files.update({f"results/m/{i}.json": r for i, r in extra.items()})
+        ids = [*usage, *extra]
+        sample = {"title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        data = self.write({**files, **{f"samples/{i}.json": sample for i in ids}, "samples/u.json": {**sample, "changed_files": ["test/run_test.py"]}, "test-times.json": {}})  # fmt: skip
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            cold, fitted = dollars.cold_call_usd(data, "m", [*ids, "u"], data / "samples")  # fmt: skip
+        return cold, fitted, err.getvalue()
+
+    def test_cold_call_usd(self) -> None:
+        usage = {f"g{i}": [100 * (i + 1), 1000 * (i % 3), 500 * (i % 5), 10 * (i % 7) + 5] for i in range(16)}  # fmt: skip
+        extra = {
+            "t": {"cost_usd": 9.0, "error": TIMED_OUT, "usage": None},
+            # A retried call's cost sums its attempts but its usage is the last one's, so it is neither fitted nor priced cold.
+            "r": {
+                "cost_usd": 1.0,
+                "error": None,
+                "attempts": 2,
+                "usage": dict(zip(dollars.USAGE, usage["g4"])),
+            },  # fmt: skip
+            "n": {"cost_usd": 3.0, "error": None, "usage": None},
+            "s": {"cost_usd": 5.0, "error": None, "usage": None, "prompt_sha": "old"},
+        }
+        cold, fitted, err = self.cold(usage, extra)
+        self.assertIn("left out 1 m results of another prompt", err)
+        self.assertIn("m: price fit relative residual", err)
+        reads = sum(u[2] for u in usage.values())
+        inputs = sum(sum(u[:3]) for u in usage.values())
+        self.assertIn(f"on 16 of 18 results, cache-read share of their input tokens {reads / inputs:.2f}", err)  # fmt: skip
+        for got, want in zip(fitted, self.PRICE):
+            self.assertAlmostEqual(got, want)
+        # Every cache-read token re-priced at the cache-write rate.
+        recorded = sum(sum(p * n for p, n in zip(self.PRICE, u)) / 1e6 for u in usage.values())  # fmt: skip
+        self.assertAlmostEqual(cold, (recorded + reads * (5.0 - 0.2) / 1e6) / 16)
+
+    def test_cold_call_usd_refuses_a_weak_fit(self) -> None:
+        no_writes = {f"g{i}": [100 * (i + 1), 0, 500 * (i % 5), 10 * (i % 7) + 5] for i in range(16)}  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 16 results of rank 3"):  # fmt: skip
+            self.cold(no_writes, {})
+        few = {f"g{i}": [100 * (i + 1), 1000 * (i % 3), 500 * (i % 5), 10 * (i % 7) + 5] for i in range(15)}  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 15 results$"):
+            self.cold(few, {})
+        retried = {"r": {"cost_usd": 1.0, "error": None, "usage": dict.fromkeys(dollars.USAGE, 1), "attempts": 2}}  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 0 results$"):
+            self.cold({}, retried)
+
+    def test_report_spend_matches_workflows(self) -> None:
+        report = (REPO_ROOT / "tools/testing/llm_selector/REPORT.md").read_text()
+        table = report[report.index("| Workflow | Old $k/mo | New $k/mo |") :].split("\n| **total**")[0]  # fmt: skip
+        old = [float(line.split("|")[2]) for line in table.splitlines()[2:]]
+        self.assertEqual(old, [round(w[2], 1) for w in dollars.WORKFLOWS])  # fmt: skip
+        self.assertIn(f"| **total** | **{sum(w[2] for w in dollars.WORKFLOWS):.0f}** |", report)  # fmt: skip
+
+    def test_constants(self) -> None:
+        cost = [
+            {"wf": "pull", "gpu": 0, "name": "pull / test (default, l)", "k": 10.0},
+            {"wf": "pull", "gpu": 0, "name": "pull / test (docs_test, l)", "k": 5.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_core, g.nvidia)", "k": 4.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_huggingface, g.nvidia)", "k": 9.0},
+            # No WORKFLOWS row, and its runner_cost GPU flag disagrees with GPU_LABEL.
+            {"wf": "periodic", "gpu": 0, "name": "periodic / test (default, x-l4)", "k": 2.0},
+        ]  # fmt: skip
+        hours = [
+            {"wf": "pull", "name": "pull / test (default, 1, 2, l)", "gpu": False, "pr": True, "same": True, "h": 6.0},
+            {"wf": "pull", "name": "pull / test (default, 2, 2, l)", "gpu": False, "pr": True, "same": False, "h": 2.0},
+            {"wf": "pull", "name": "pull / test (default, 1, 2, l)", "gpu": False, "pr": False, "same": True, "h": 2.0},
+            {"wf": "pull", "name": "pull / test (docs_test, 1, 1, l)", "gpu": False, "pr": False, "same": True, "h": 100.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_core, 1, 1, g)", "gpu": True, "pr": True, "same": True, "h": 3.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_core, 1, 1, g)", "gpu": True, "pr": False, "same": True, "h": 1.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_huggingface, 1, 1, g)", "gpu": True, "pr": False, "same": True, "h": 50.0},
+        ]  # fmt: skip
+        sqls = []
+
+        def query(sql: str) -> list[dict]:
+            sqls.append(sql)
+            return cost if "runner_cost" in sql else hours if "workflow_job" in sql else [{"heads": 12345}]  # fmt: skip
+
+        workflows = [("pull", "cpu", 0.0, 0.0, 0.0, True), ("inductor (unit tests)", "ind_gpu", 0.0, 0.0, 0.0, False)]  # fmt: skip
+        with patch_ci_jobs({True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}), mock.patch.object(clickhouse, "query", side_effect=query):  # fmt: skip
+            with mock.patch.object(dollars, "WORKFLOWS", workflows), contextlib.redirect_stderr(io.StringIO()) as err:  # fmt: skip
+                got = dollars.constants(1000)
+            self.assertEqual(err.getvalue(), "left out ('periodic', 'cpu'), which has no WORKFLOWS row: $2.0k, 0 test hours, 0 of them PR\n$2.0k of ('periodic', 'cpu') is on runners misc.runner_cost and land_time.GPU_LABEL classify differently\n")  # fmt: skip
+            # docs_test runs no run_test.py and the benchmark is no unit test, so neither counts.
+            self.assertEqual(got, ([("pull", "cpu", 10.0, 0.8, 0.25, True), ("inductor (unit tests)", "ind_gpu", 4.0, 0.75, 0.0, False)], 12.3))  # fmt: skip
+            self.assertIn(f"match(l, '{land_time.GPU_LABEL}')", sqls[1])
+            self.assertIn("toDateTime(1000)", sqls[2])
+            with mock.patch.object(dollars, "WORKFLOWS", [("slow", "cpu", 0.0, 0.0, 0.0, False)]), self.assertRaisesRegex(SystemExit, "no PR test hours for"):  # fmt: skip
+                dollars.constants(1000)
+            del cost[2:4]
+            with mock.patch.object(dollars, "WORKFLOWS", workflows), self.assertRaisesRegex(SystemExit, r"^\('inductor', 'ind_gpu'\) has 4 test hours but no misc.runner_cost$"):  # fmt: skip
+                dollars.constants(1000)
+
+    def test_current_results_without_base(self) -> None:
+        # As in score.score, a sample whose prompt needs a base the clone lacks is left out.
+        data = self.data()
+        prompt = score.sample_prompt
+
+        def no_base(s: dict, minutes: dict) -> str:
+            if s["changed_files"] == ["torch/_inductor/x.py"]:
+                raise subprocess.CalledProcessError(128, "git ls-tree")
+            return prompt(s, minutes)
+
+        with mock.patch.object(score, "sample_prompt", no_base), contextlib.redirect_stderr(io.StringIO()) as err:  # fmt: skip
+            got = dollars.current_results(data, "m", ["a", "b"], data / "samples")
+        self.assertEqual([r["cost_usd"] for r in got], [0.4])
+        self.assertEqual(err.getvalue(), "left out 1 m results whose sample's base is not in the clone\n")  # fmt: skip
+
+
+def no_run_test_configs(test_sh: str, configs: set[str]) -> set[str]:
+    """The `configs` whose test.sh branch does not run run_test.py: the first earlier TEST_CONFIG branch a config matches that exits, else the main (longest) dispatch's."""
+    func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
+    cond = re.compile(r'(el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
+    func, bodies, chains, body = None, {}, [], None
+    for line in test_sh.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if m := func_def.match(line):
+            func = m.group(1) or m.group(2)
+            bodies[func] = set()
+        elif line.startswith("}"):
+            func = None
+        elif func:
+            bodies[func].update(re.findall(r"[\w.]+", line))
+        elif m := cond.match(line):
+            if not m.group(1):
+                chains.append([])
+            chains[-1].append((m.group(2), body := set()))
+        elif re.match(r"el(se|if)\b", line):
+            chains[-1].append(("*" if line.startswith("else") else None, body := set()))  # fmt: skip
+        elif line.startswith("fi"):
+            body = None
+        elif body is not None:
+            body.update(re.findall(r"[\w.]+", line))
+    main = max(chains, key=len)
+
+    def runs_run_test(words: set[str], seen: frozenset[str] = frozenset()) -> bool:
+        return "run_test.py" in words or any(runs_run_test(bodies[w], seen | {w}) for w in words - seen if w in bodies)  # fmt: skip
+
+    out = set()
+    for cfg in configs:
+        branches = (ws for chain in chains for p, ws in chain if p and fnmatch.fnmatchcase(cfg, p) and (chain is main or "exit" in ws))  # fmt: skip
+        if not runs_run_test(next(branches)):
+            out.add(cfg)
+    return out
+
+
+class TestLandTime(unittest.TestCase):
+    def test_replay(self) -> None:
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default"), ("trunk", "linux", "default")}, False: {("trunk", "b200", "smoke_b200")}}))  # fmt: skip
+        end = 100 * 86400
+        c = end - 86400
+        runs = [{"id": i, "name": "pull", "event": "pull_request", "head_branch": "b", "head_sha": f"s{i}", "created": c, "run_attempt": 1, "conclusion": "success"} for i in (1, 2, 3)]  # fmt: skip
+        runs.append({**runs[0], "id": 4, "name": "trunk", "event": "push", "head_branch": "ciflow/trunk/7"})  # fmt: skip
+        runs += [{**runs[0], "id": 5}, {**runs[3], "id": 6}]
+        # smoke_b200 is TD-off through force-no-td, not by name.
+        b200 = [c + 1800, 1000, "b200 / test (smoke_b200, 1, 1, nv)", True, 1200, 60, "nv-l-arm64grace-16-200-gb300"]  # fmt: skip
+        # (end, Test step seconds, job name, GPU, job seconds, queue seconds, labels): a CPU and a TD-off job.
+        tests = [[c + 3600, 3000, "linux / test (default, 1, 1, l)", False, 3500, 60, "l"], [c + 1800, 1000, "linux / test (docs_test, 1, 1, l)", False, 1200, 60, "l"]]  # fmt: skip
+        job = {"ncancel": 0, "last_build": c + 300, "last_other": 0}
+        # run_test.py runs every test in dynamo_cpython and on macOS, so those jobs do not shrink.
+        cpython, mac = [[c + 3600, 3000, "linux / test (dynamo_cpython, 1, 1, l)", False, 3500, 60, "l"]], [[c + 3600, 3000, "macos-14-py3-arm64 / test (default, 1, 1, macos-m1-14)", False, 3500, 60, "macos-m1-14"]]  # fmt: skip
+        files = {
+            "meta.json": {"end": end},
+            "wfruns.json": runs,
+            "fork.json": {
+                "run_head_repo": {
+                    "1": "pytorch/pytorch",
+                    "2": "someone/pytorch",
+                    "5": "pytorch/pytorch",
+                },
+                "pr_head_repo": {"7": "pytorch/pytorch"},
+            },  # fmt: skip
+            "runs_pull.json": [
+                {**job, "run_id": i, "tests": json.loads(json.dumps(tests))}
+                for i in (1, 2, 3)
+            ]
+            + [{**job, "run_id": 5, "tests": cpython}],  # fmt: skip
+            "runs_trunk.json": [
+                {**job, "run_id": 4, "tests": [*json.loads(json.dumps(tests)), b200]},
+                {**job, "run_id": 6, "tests": mac},
+            ],  # fmt: skip
+            "runs_inductor.json": [],
+            "runs_rocm-mi300.json": [],
+        }
+        cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        keep = land_time.fork_runs(cache, runs)
+        # Run 3's head repository is unknown, so it is a fork PR's too.
+        self.assertEqual(keep, {2, 3})
+        out = land_time.replay(cache, {"cpu": 0.5, "gpu": 0.8, "ind_cpu": 1.0, "ind_gpu": 1.0}, keep)  # fmt: skip
+        self.assertEqual([(x["old"], x["new"]) for x in out["pull"]], [(60, 35), (60, 60), (60, 60), (60, 60)])  # fmt: skip
+        self.assertEqual([(x["old"], x["new"]) for x in out["trunk"]], [(60, 35), (60, 60)])  # fmt: skip
+        # The TD-off jobs end before the shrunk one does, so check their ratios.
+        self.assertEqual([t[-1] for t in out["pull"][0]["tests"]], [0.5, 1.0])
+        self.assertEqual([t[-1] for t in out["trunk"][0]["tests"]], [0.5, 1.0, 1.0])
+        self.assertAlmostEqual(land_time.pct([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90), 9.1)
+        self.assertEqual(land_time.pct([7], 90), 7)
+        self.assertTrue(math.isnan(land_time.pct([], 50)))
+
+    def test_selectable(self) -> None:
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default"), ("pull", "linux", "docs_test")}, False: {("trunk", "b200", "smoke_b200"), *DOLLAR_JOBS[False]}}))  # fmt: skip
+        unit = land_time.inductor_unit_configs()
+        self.assertEqual(unit, {"inductor_core"})
+        for wf, job, want in [
+            ("pull", "linux / test (default, 1, 2, l)", True),
+            # misc.runner_cost's job names have no shard numbers.
+            ("pull", "linux / test (default, l)", True),
+            ("pull", "linux / test (docs_test, 1, 1, l)", False),
+            ("pull", "linux / test (dynamo_cpython, 1, 1, l)", False),
+            ("trunk", "b200 / test (smoke_b200, 1, 1, nv)", False),
+            ("trunk", "macos-14-py3-arm64 / test (default, 1, 1, macos-m1-14)", False),
+            ("pull", "linux / build", False),
+            # TD is off in periodic and slow, so only run_test.py's config and build-environment rules apply.
+            ("slow", "linux / test (slow, 1, 1, l)", True),
+            ("periodic", "linux / test (dynamo_cpython, 1, 1, l)", False),
+            ("periodic", "macos-14 / test (default, 1, 1, macos-m1-14)", False),
+            ("inductor", "unit-test / inductor / test (inductor_core, 1, 2, g)", True),
+            ("inductor", "inductor / test (inductor_huggingface, 1, 1, g)", False),
+        ]:
+            self.assertEqual(land_time.selectable(wf, job, unit), want, (wf, job))
+
+    def test_no_run_test_configs(self) -> None:
+        test_sh = textwrap.dedent("""\
+            run_docs() {
+              build_docs
+            }
+            run_unit() {
+              python test/run_test.py "$@"
+            }
+            # if [[ "${TEST_CONFIG}" == *commented* ]]; then
+            if [[ "${TEST_CONFIG}" == *early* ]]; then
+              run_docs
+              exit 0
+            fi
+            if [[ "${TEST_CONFIG}" == *late* ]]; then
+              run_docs
+            fi
+            if [[ "${TEST_CONFIG}" == docs* ]]; then
+              run_docs
+            elif [[ "$TEST_CONFIG" == bench ]]; then
+              python benchmarks/run.py
+            elif [[ "${TEST_CONFIG}" == *_run* ]]; then
+              run_unit
+            else
+              run_unit
+            fi
+            """)
+        # early_run matches the earlier, exiting *early* branch first; late_run's *late* branch does not exit, so the main dispatch decides.
+        configs = {"docs_test", "bench", "default", "early_run", "late_run", "x_run"}
+        self.assertEqual(no_run_test_configs(test_sh, configs), {"docs_test", "bench", "early_run"})  # fmt: skip
+
+    def test_no_run_test_matches_test_sh(self) -> None:
+        configs = {c for w, _, c in ci_jobs()[True] if w in ("pull", "trunk")}
+        msg = "the pull/trunk configs whose .ci/pytorch/test.sh branch skips run_test.py changed; update land_time.NO_RUN_TEST"
+        self.assertEqual(no_run_test_configs((REPO_ROOT / ".ci/pytorch/test.sh").read_text(), configs), land_time.NO_RUN_TEST, msg)  # fmt: skip
+
+    def test_rules_match_workflows(self) -> None:
+        jobs = ci_jobs()
+        td_configs = {c for w, _, c in jobs[True] | jobs[False] if w in ("pull", "trunk")}  # fmt: skip
+        self.assertLessEqual(land_time.NO_RUN_TEST, td_configs, "land_time.NO_RUN_TEST names a config pull/trunk no longer run; drop it")  # fmt: skip
+        unit = land_time.inductor_unit_configs()
+        b200 = {n for w, n, c in jobs[False] if w == "trunk" and c == "smoke_b200"}
+        self.assertTrue(b200, "trunk has no smoke_b200 job; update this test's config")
+        for n in b200:
+            self.assertFalse(land_time.selectable("trunk", f"{n} / test (smoke_b200, 1, 1, x)", unit), f"{n}: score.job_runs_td now says TD runs smoke_b200; check land_time.selectable")  # fmt: skip
+        # The config split dollars.fractions times is the job split the replay shrinks.
+        inductor = {(n, c) for w, n, c in jobs[False] if w == "inductor"}
+        self.assertTrue(unit, "inductor has no 'unit-test / ' job TD skips; update land_time.inductor_unit_configs")  # fmt: skip
+        for n, c in inductor:
+            self.assertEqual(c in unit, n.startswith("unit-test / "), f"{(n, c)}: land_time.inductor_unit_configs (configs of inductor's 'unit-test / ' jobs) no longer matches inductor's job names")  # fmt: skip
+
+    def test_ratios_and_wait(self) -> None:
+        dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
+        self.assertEqual(land_time.ratios(dollars_json), {"cpu": 0.5, "gpu": 0.75, "ind_cpu": 0.5, "ind_gpu": 0.4})  # fmt: skip
+        head = [{"c": 60, "end_old": 600, "end_new": 300}, {"c": 0, "end_old": 1200, "end_new": 240}]  # fmt: skip
+        self.assertEqual(land_time.wait([head], "end_old"), [20.0])
+        self.assertEqual(land_time.wait([head], "end_new"), [5.0])
+
+    def test_report(self) -> None:
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}))  # fmt: skip
+        end = 100 * 86400
+        c0 = end - 86400
+        # id -> (workflow, sha, creation offset).
+        spec = {1: ("pull", "a", 0), 4: ("pull", "a", 5000), 5: ("pull", "b", 0), 8: ("pull", "d", 0), 13: ("pull", "e", 0), 14: ("pull", "f", 0),
+                2: ("trunk", "a", 300), 6: ("trunk", "b", 3600), 9: ("trunk", "d", 100), 15: ("trunk", "f", 50),
+                3: ("inductor", "a", 100), 10: ("inductor", "d", 5000), 16: ("inductor", "f", 400), 11: ("rocm-mi300", "a", 0), 12: ("rocm-mi300", "b", 0),
+                # A trunk run with no job rows, so the replay leaves it out.
+                17: ("trunk", "g", 300)}  # fmt: skip
+        runs = [{"id": i, "name": wf, "event": "pull_request" if wf == "pull" else "push", "head_branch": "b" if wf == "pull" else f"ciflow/{wf}/7", "head_sha": sha, "created": c0 + o, "run_attempt": 1, "conclusion": "success"} for i, (wf, sha, o) in spec.items()]  # fmt: skip
+
+        def job(i: int, tests: list[tuple[int, int, str, bool]], **kw: int) -> dict:
+            c = c0 + spec[i][2]
+            return {"run_id": i, "ncancel": 0, "last_build": c + 300, "last_other": 0, **kw, "tests": [[c + e, t, f"linux / test ({cfg}, 1, 1, g)", gpu, t + 500, 60, "g" if gpu else "l"] for e, t, cfg, gpu in tests]}  # fmt: skip
+
+        cpu = [(3600, 3000, "default", False)]  # 60 -> 35 min
+        gpu = [(7200, 6000, "default", True)]  # 120 -> 95 min
+        # The benchmark keeps r = 1 and bounds the run; the unit-test config shrinks by ind_cpu.
+        ind = [(9000, 6000, "inductor_huggingface", True), (6000, 3000, "inductor_core", False)]  # fmt: skip
+        files = {
+            "meta.json": {"end": end},
+            "wfruns.json": runs,
+            "fork.json": {"run_head_repo": {str(i): "pytorch/pytorch" for i, (wf, _, _) in spec.items() if wf == "pull"}, "pr_head_repo": {"7": "pytorch/pytorch"}},  # fmt: skip
+            # Run 13's cancelled job is in a second chunk of its rows.
+            "runs_pull.json": [job(i, cpu) for i in (1, 4, 5, 8, 13, 14)] + [job(13, [], ncancel=1)],  # fmt: skip
+            # Run 2's rows come in two chunks: its last non-test job (110 min) bounds its new TTS.
+            "runs_trunk.json": [job(2, gpu), job(2, [(3000, 1000, "default", False)], last_other=c0 + 300 + 6600)] + [job(i, gpu) for i in (6, 9, 15)],  # fmt: skip
+            "runs_inductor.json": [job(3, ind), job(10, ind), job(16, [(3000, 2000, "inductor_core", False)])],  # fmt: skip
+            "runs_rocm-mi300.json": [job(11, cpu), job(12, cpu)],
+            "merges.json": [
+                # Started trunk run 2 (saved 10 min) and run 9 (saved 25 min).
+                {"pr": 1, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 130 * 60, "pt": c0, "sha": "a"},
+                {"pr": 2, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 140 * 60, "pt": c0, "sha": "d"},
+                # Trunk ran before the comment.
+                {"pr": 3, "f": 0, "i": 0, "cc": c0 + 1300, "mt": c0 + 1300 + 3 * 60, "pt": c0, "sha": "a"},
+                {"pr": 4, "f": 0, "i": 0, "cc": c0 + 1300, "mt": c0 + 1300 + 10 * 60, "pt": c0, "sha": "d"},
+                # Trunk run 6 started 400 s after the comment: neither.
+                {"pr": 5, "f": 0, "i": 0, "cc": c0 + 3200, "mt": c0 + 3200 + 600, "pt": c0, "sha": "b"},
+                # Forced, ignore-current and merged-before-comment rows.
+                {"pr": 6, "f": 1, "i": 0, "cc": c0, "mt": c0 + 60, "pt": c0, "sha": "a"},
+                {"pr": 7, "f": 0, "i": 1, "cc": c0 + 300, "mt": c0 + 300 + 60, "pt": c0, "sha": "a"},
+                {"pr": 8, "f": 0, "i": 0, "cc": c0 + 600, "mt": c0 + 300, "pt": None, "sha": "a"},
+                # Started trunk run 17, which has no new time, so it is left out of both old and new.
+                {"pr": 9, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 10 * 60, "pt": c0, "sha": "g"},
+            ],
+        }  # fmt: skip
+        cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        r = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
+        out = land_time.report(cache, r, all_prs=False)
+        # fmt: off
+        for line in [
+            "| pull | 5 | 60 | 35 | 60 | 35 | 25 | 0.0% | 0.0% |",
+            "| trunk | 4 | 120 | 95 | 120 | 106 | 21 | 0.0% | 25.0% |",
+            "| inductor | 3 | 150 | 150 | 150 | 150 | 6 | 0.0% | 0.0% |",
+            # Heads a (first pull run, not run 4), d and f; b's trunk run is an hour later and e's pull run was cancelled.
+            "| pull and trunk | 3 | 122 | 124 | 122 | 97 | 111 | 102 |",
+            # Heads a and f; d's inductor run is 5000 s after its pull run.
+            "| pull, trunk and inductor | 2 | 136 | 149 | 136 | 124 | 146 | 124 |",
+            "Inductor ends last for 50% of the pull, trunk and inductor heads, 50% after.",
+            "Merges without -f (n=7): comment to merge p50 10 / p90 134 min; first PR pull run to merge p50 0.5 / p90 2.3 h.",
+            "Merge comment started trunk (n=2, 1 more whose trunk run was not replayed left out): comment to merge p50 135 / p90 139 min, new p50 118 / p90 120 min. Trunk ran before the comment (n=2): p50 6 / p90 9 min.",
+            "Test job-hours: 21 -> 15",
+            "Trunk ends last for 100% of the pull and trunk heads, 100% after.",
+            "| Runner labels | Jobs | Queue p50 (min) | Queue p90 (min) | Job-hours | Test-step share |",
+            "| g | 6 | 1.0 | 1.0 | 11 | 92% |",
+            "| l | 11 | 1.0 | 1.0 | 10 | 85% |",
+        ]:
+            self.assertIn(line, out)
+        # fmt: on
+        self.assertEqual(out[0], "r {'cpu': 0.5, 'gpu': 0.75, 'ind_cpu': 0.5, 'ind_gpu': 0.4}, 0 fork runs kept")  # fmt: skip
+        # With run 14 a fork PR's, it keeps r = 1 unless all_prs shrinks it too.
+        files["fork.json"]["run_head_repo"]["14"] = "someone/pytorch"
+        forked = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        kept = land_time.report(forked, r, all_prs=False)
+        self.assertTrue(kept[0].endswith(", 1 fork runs kept"), kept[0])
+        self.assertIn("| pull | 5 | 60 | 35 | 60 | 50 | 20 | 0.0% | 0.0% |", kept)
+        self.assertEqual(land_time.report(forked, r, all_prs=True), out)
+        files["runs_inductor.json"] = []
+        cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "^no included inductor runs in "):
+            land_time.report(cache, r, all_prs=False)
+
+    def test_fetch(self) -> None:
+        calls = []
+
+        def query(sql: str) -> list[dict]:
+            calls.append(sql)
+            if "default.pull_request" in sql or "head_repository.full_name repo" in sql:
+                return [{"k": "1", "repo": "pytorch/pytorch"}]
+            return [{"sql": len(calls)}]
+
+        cache = Path(self.enterContext(tempfile.TemporaryDirectory[str]())) / "c"
+        with mock.patch.object(clickhouse, "query", side_effect=query):
+            land_time.fetch(cache, 1000)
+        # The runs, ten 3-day job chunks per workflow, the two head-repository queries and the merges.
+        self.assertEqual(len(calls), 1 + 10 * len(land_time.WORKFLOWS) + 3)
+        pull = [c for c in calls if "workflow_name = 'pull'" in c]
+        self.assertEqual(len(pull), 10)
+        self.assertIn("INTERVAL 3 DAY AND created_at < toDateTime(1000) - INTERVAL 0 DAY", pull[0])  # fmt: skip
+        self.assertIn("INTERVAL 30 DAY AND created_at < toDateTime(1000) - INTERVAL 27 DAY", pull[-1])  # fmt: skip
+        self.assertIn("head_branch NOT LIKE 'release/%'", pull[0])
+        self.assertIn("head_branch LIKE 'ciflow/%'", calls[11])
+        self.assertEqual(len(json.loads((cache / "runs_pull.json").read_text())), 10)
+        self.assertEqual(json.loads((cache / "fork.json").read_text()), {"run_head_repo": {"1": "pytorch/pytorch"}, "pr_head_repo": {"1": "pytorch/pytorch"}})  # fmt: skip
+        self.assertEqual(json.loads((cache / "meta.json").read_text()), {"end": 1000})
+        with mock.patch.object(clickhouse, "query", side_effect=[[], RuntimeError("down")]), self.assertRaises(RuntimeError):  # fmt: skip
+            land_time.fetch(cache, 2000)
+        self.assertFalse((cache / "meta.json").exists())
+
+
+@unittest.skipUnless(importlib.util.find_spec("matplotlib"), "needs matplotlib")
+class TestChartMain(unittest.TestCase):
+    def run_chart(self, rows: list[dict]) -> str:
+        d = Path(self.enterContext(tempfile.TemporaryDirectory[str]()))
+        (d / "rows.json").write_text(json.dumps(rows))
+        with mock.patch.object(sys, "argv", ["chart", str(d / "rows.json"), str(d / "out.svg")]):  # fmt: skip
+            chart.main()
+        return (d / "out.svg").read_text()
+
+    def test_main(self) -> None:
+        base = {"pairs": 1, "hit": 1, "cpu": 0.1, "gpu": 0.1, "run_all": False, "files": 1, "cost_usd": 0.1, "error": False}  # fmt: skip
+        cells = [("td", "td25"), *((chart.PRODUCTION[0], p) for p in chart.HEDGES)]
+        rows = [{**base, "tag": t, "policy": p, "kind": k, "id": "x"} for t, p in cells for k in ("neutral", "revert", "head")]  # fmt: skip
+        svg = self.run_chart(rows)
+        # As text, not only the comment matplotlib writes before a glyph path.
+        self.assertIn(">Reverted commits caught (n=1)</text>", svg)
+        self.assertNotIn("Matplotlib v", svg)
+
+
+class TestIntervals(unittest.TestCase):
+    def test_main_rejects_few_resamples(self) -> None:
+        with (
+            mock.patch.object(sys, "argv", ["intervals", "rows.json", "--b", "0"]),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+            self.assertRaises(SystemExit),
+        ):  # fmt: skip
+            intervals.main()
+        self.assertIn("at least 40 resamples", err.getvalue())
+
+    def test_compare(self) -> None:
+        def row(tag: str, kind: str, sid: str, pairs: int, hit: int) -> dict:
+            return {"tag": tag, "policy": "p", "kind": kind, "id": sid, "pairs": pairs, "hit": hit}  # fmt: skip
+
+        rows = [
+            # A revert is caught by any of its failures, a push only by all of them.
+            row("new", "revert", "r1", 2, 1), row("old", "revert", "r1", 2, 0),
+            row("new", "revert", "r2", 1, 1), row("old", "revert", "r2", 1, 1),
+            row("new", "revert", "r3", 0, 0), row("old", "revert", "r3", 0, 0),
+            row("new", "head", "head_1_a", 2, 1), row("old", "head", "head_1_a", 2, 2),
+            row("new", "head", "head_1_b", 1, 0), row("old", "head", "head_1_b", 1, 1),
+            row("new", "head", "head_2_c", 1, 1),
+        ]  # fmt: skip
+        self.assertEqual(intervals.outcomes(rows, "new", "p", "revert"), {"r1": True, "r2": True})  # fmt: skip
+        revert, head = intervals.compare(rows, ["new", "p"], ["old", "p"], 200, 0)
+        self.assertTrue(revert.startswith("reverts caught: n=2 new=100.0% old=50.0% new-old=+50.0 pts discordant new-only=1 old-only=0 McNemar p=1.000"), revert)  # fmt: skip
+        # Resampling the two commits gives 0, 50 or 100 points.
+        self.assertRegex(revert, r"\| 95% CI per commit \[\+0\.0, \+100\.0\]$")
+        # head_2_c has no old row, so it is not paired; both pushes are of PR 1.
+        self.assertTrue(head.startswith("failing pushes, every failure: n=2 new=0.0% old=100.0% new-old=-100.0 pts"), head)  # fmt: skip
+        self.assertTrue(head.endswith("| per PR (1 PRs) [-100.0, -100.0]"), head)
+        with self.assertRaisesRegex(SystemExit, "no paired failing revert rows of x:p and old:p"):  # fmt: skip
+            intervals.compare(rows, ["x", "p"], ["old", "p"], 10, 0)
+
+    def test_bootstrap_percentiles(self) -> None:
+        # Clusters 0 and 1 are misses, 2 and 3 hits; the resamples score 0, 25, 75, 100 and then 36 times 50.
+        draws = iter([0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 2, 2, 2, 2, 2, 2] + [0, 1, 2, 3] * 36)  # fmt: skip
+        rng = mock.Mock(randrange=lambda n: next(draws))
+        self.assertEqual(intervals.bootstrap({"a": [0], "b": [0], "c": [1], "d": [1]}, 40, rng), (25.0, 75.0))  # fmt: skip
+
+    def test_main(self) -> None:
+        rows = [{"tag": t, "policy": p, "kind": k, "id": i, "pairs": 1, "hit": int(t != "td")} for t, p in (intervals.PRODUCTION, ("td", "td25")) for k, i in (("revert", "r1"), ("head", "head_1_a"))]  # fmt: skip
+        # Revert and head rows come in separate files, as score.py writes them.
+        d = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {"a.json": rows[::2], "b.json": rows[1::2], "results/m/x.json": {"wall_s": 1}, "results/m/y.json": {"wall_s": 3}, "samples/x.json": SAMPLE, "samples/y.json": SAMPLE, "test-times.json": {}, "ids": "x y"})  # fmt: skip
+
+        def run(*argv: str) -> tuple[str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(sys, "argv", ["intervals", *argv]), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):  # fmt: skip
+                try:
+                    intervals.main()
+                except SystemExit:
+                    pass
+            return out.getvalue(), err.getvalue()
+
+        out, _ = run(str(d / "a.json"), str(d / "b.json"), "--b", "40")
+        self.assertEqual([x.split(":")[0] for x in out.splitlines()], ["reverts caught", "failing pushes, every failure"])  # fmt: skip
+        self.assertEqual(run("--data", str(d), "--latency", "m", "--ids", str(d / "ids"))[0], "m latency: n=2 p50=2s p90=3s\n")  # fmt: skip
+        self.assertIn("--latency needs --data", run("--latency", "m")[1])
+        self.assertIn("no rows", run()[1])
+        self.assertIn("are TAG:POLICY, got 'td'", run(str(d / "a.json"), "--old", "td")[1])  # fmt: skip
+
+    def test_mcnemar(self) -> None:
+        self.assertEqual(intervals.mcnemar(0, 0), 1.0)
+        self.assertAlmostEqual(intervals.mcnemar(0, 5), 2 / 32)
+        self.assertAlmostEqual(intervals.mcnemar(1, 5), 2 * 7 / 64)
+
+    def test_latency(self) -> None:
+        # s is of another prompt and u is never asked, so like $/call their latency does not count; z has no result.
+        results = {f"results/m/{i}.json": {"wall_s": w, "error": TIMED_OUT if i == "d" else None} for i, w in zip("abcdsu", (10, 20, 30, 40, 1, 1))}  # fmt: skip
+        samples = {f"samples/{i}.json": SAMPLE for i in "abcdsz"}
+        data = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {**samples, "samples/u.json": {**SAMPLE, "changed_files": ["test/run_test.py"]}, "test-times.json": {}, **results, "results/m/s.json": {"wall_s": 1, "prompt_sha": "old"}})  # fmt: skip
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(intervals.latency(data, "m", list("abcdsuz")), "m latency: n=4 p50=25s p90=37s")  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "fewer than 2 m results"):
+            intervals.latency(data, "m", ["a"])
 
 
 @contextlib.contextmanager
