@@ -82,12 +82,14 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x" and p
 
 # Only mkl-static and mkl-include are needed; the mkl package contains
 # dynamic libraries that are not discoverable by our build scripts.
-mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
-mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-static==2026.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-include==2026.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 # Cap mkl-static's OpenMP dependency to avoid pulling in incompatible UR (#201218).
 intel-openmp<2026.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
-#Pinned versions: 2024.2.0
+#Pinned versions: 2026.2.0 (keep in sync with .ci/docker/common/install_mkl.sh,
+#.ci/pytorch/win-test-helpers/build_pytorch.bat and
+#.ci/wheel/windows/build_install_deps.py; dependabot ignores these packages)
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
