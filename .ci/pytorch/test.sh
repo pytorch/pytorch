@@ -1011,6 +1011,22 @@ test_inductor_cpp_wrapper_shard() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
+# Re-enable these CPU Inductor models after https://github.com/pytorch/pytorch/issues/203757.
+CPU_INDUCTOR_TORCHBENCH_MIGRATION_MODELS=(
+  BERT_pytorch
+  detectron2_fasterrcnn_r_101_c4
+  detectron2_fasterrcnn_r_101_dc5
+  detectron2_fasterrcnn_r_101_fpn
+  detectron2_fasterrcnn_r_50_c4
+  detectron2_fasterrcnn_r_50_dc5
+  detectron2_fasterrcnn_r_50_fpn
+  detectron2_fcos_r_50_fpn
+  detectron2_maskrcnn_r_101_c4
+  detectron2_maskrcnn_r_101_fpn
+  detectron2_maskrcnn_r_50_c4
+  detectron2_maskrcnn_r_50_fpn
+)
+
 pr_time_benchmarks() {
 
   pip_install "fbscribelogger"
@@ -1115,6 +1131,15 @@ test_perf_for_dashboard() {
   shift
 
   local backend=inductor
+  local cpu_inductor_model_args=()
+  if [[ "$suite" == "torchbench" && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --device cpu "* &&
+        " ${DYNAMO_BENCHMARK_FLAGS[*]} " != *" --backend "* &&
+        " ${DYNAMO_BENCHMARK_FLAGS[*]} " != *" --export-aot-inductor "* ]]; then
+    local model
+    for model in "${CPU_INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
+      cpu_inductor_model_args+=(--exclude-exact "$model")
+    done
+  fi
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
     modes+=(training)
@@ -1175,7 +1200,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" --disable-cudagraphs "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1185,7 +1210,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1195,7 +1220,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" --dynamic-shapes \
             --dynamic-batch-only "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -1206,7 +1231,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" --disable-cudagraphs "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1216,7 +1241,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" "$@" --freezing \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1226,7 +1251,7 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" "$@" --freezing \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1252,18 +1277,18 @@ test_perf_for_dashboard() {
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --deterministic "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" --disable-cudagraphs --deterministic "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_deterministic_perf_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --batch-invariant "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${cpu_inductor_model_args[@]}" --disable-cudagraphs --batch-invariant "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
     done
@@ -1450,6 +1475,15 @@ test_dynamo_benchmark() {
   local extra_args=()
   if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
     extra_args=(--exclude-exact torchrec_dlrm)
+  fi
+
+  if [[ "$suite" == "torchbench" && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --device cpu "* &&
+        ( "${TEST_CONFIG}" == *perf_compare* ||
+          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+    local model
+    for model in "${CPU_INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
+      extra_args+=(--exclude-exact "$model")
+    done
   fi
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
