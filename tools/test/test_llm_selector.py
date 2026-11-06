@@ -1507,7 +1507,8 @@ class TestPrompt(unittest.TestCase):
         diff = "\n".join(
             f"diff --git a/f{i} b/f{i}\n" + "+x\n" * 1000 for i in range(500)
         )
-        # A cap of 59 keeps less than a header, so each file keeps just its header.
+        # cap - TRUNCATION_MARKER (19) is shorter than any header, so each file
+        # keeps just its header.
         short = select_tests.truncate_diff(diff, budget=30_000)
         self.assertLessEqual(len(short), 30_000)
         self.assertIn("diff --git a/f0 b/f0\n... [3001 chars truncated]\n", short)
@@ -1791,6 +1792,7 @@ class TestMain(unittest.TestCase):
         ):
             output = Path(tmp) / "out.json"
             select_tests.main(["--title", "t", "--output", str(output)])
+            self.assertIsNotNone(selection.Selection.load(output))
             return json.loads(output.read_text()), stdout.getvalue()
 
     def test_cli_error_ignores_its_structured_output(self) -> None:

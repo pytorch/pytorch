@@ -787,7 +787,9 @@ class Selection:
             or d["version"] != SELECTION_VERSION
         ):
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
-        if unknown := set(d) - {"version", *(f.name for f in fields(cls))}:
+        # select_tests.py's diagnostics are for humans and the shadow metrics.
+        known = {"version", "diagnostics", *(f.name for f in fields(cls))}
+        if unknown := set(d) - known:
             raise ValueError(f"unknown keys {sorted(unknown)}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = (
