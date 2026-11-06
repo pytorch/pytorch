@@ -33,6 +33,7 @@ from torch.utils._triton import (
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
+    PrivateUse1TestBase,
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -147,6 +148,9 @@ RUN_TPU = LazyVal(
         if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
         else True
     )
+)
+RUN_PRIVATEUSE1 = any(
+    issubclass(x, PrivateUse1TestBase) for x in _desired_test_bases
 )
 
 

@@ -45,6 +45,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_MPS,
     patch_inductor_backend,
     RUN_CPU,
+    RUN_PRIVATEUSE1,
+    RUN_TPU,
 )
 
 
@@ -1642,5 +1644,7 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (RUN_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+    if (
+        RUN_CPU or HAS_GPU or HAS_MPS or RUN_TPU or RUN_PRIVATEUSE1
+    ) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
