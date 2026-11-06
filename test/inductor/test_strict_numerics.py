@@ -671,6 +671,65 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("@triton.jit", "\n".join(code))
         self._assert_bitwise_equal(actual, fn(x, y))
 
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("conjugated", (False, True))
+    @parametrize("alpha", (None, 3.14))
+    def test_complex_add_alpha(self, device, dtype, numerics, conjugated, alpha):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        zeros = torch.tensor(
+            [[-0.0, -0.0], [-0.0, 0.0], [0.0, -0.0], [0.0, 0.0]],
+            dtype=real_dtype,
+            device=device,
+        )
+        components = torch.cat((torch.stack((values, values.flip(0)), dim=-1), zeros))
+        values = torch.view_as_complex(components)
+        x = values.repeat_interleave(values.numel())
+        y = values.repeat(values.numel())
+        if conjugated:
+            x, y = x.conj(), y.conj()
+
+        def fn(x, y):
+            return x + y if alpha is None else torch.add(x, y, alpha=alpha)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}), x, y
+        )
+        code = "\n".join(code)
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(x, y))
+        )
+        self.assertIn("@triton.jit", code)
+        self.assertNotIn("= torch.ops.aten.add.", code)
+
+    @dtypes(torch.complex64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_add_mixed_nan_payload(self, device, dtype, numerics):
+        bits = torch.tensor([[0, 0x7FFFFFFF]], dtype=torch.int32, device=device)
+        x = torch.view_as_complex(bits.view(torch.float32))
+        y = torch.tensor(
+            [complex(float("inf"), 0)], dtype=torch.complex128, device=device
+        )
+
+        def fn(x, y):
+            return (
+                x + y,
+                y + x,
+                torch.add(x, y, alpha=3.14),
+                torch.add(y, x, alpha=3.14),
+            )
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}), x, y
+        )
+        self._assert_bitwise_equal(
+            tree_map(torch.view_as_real, actual), tree_map(torch.view_as_real, fn(x, y))
+        )
+        code = "\n".join(code)
+        self.assertIn("@triton.jit", code)
+        self.assertNotIn("= torch.ops.aten.add.", code)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @torch._dynamo.config.patch(specialize_float=False)
