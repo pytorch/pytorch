@@ -7141,7 +7141,12 @@ class TestTorchDeviceType(TestCase):
     def test_bmm_matmul_mixed_dtype_error(self, device):
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
-        msg = "expected scalar type .* but found|batch1 and batch2 to have the same dtype"
+        msg = (
+            "expected scalar type .* but found"  # CUDA
+            "|batch1 and batch2 to have the same dtype"  # XPU
+            "|same dtype"  # MPS baddbmm
+            "|Expected arguments of same type"  # MPS bmm/matmul
+        )
 
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.bmm(a, b)
@@ -7160,7 +7165,12 @@ class TestTorchDeviceType(TestCase):
         inp = torch.randn(2, 8, 64, device=device, dtype=torch.float16)
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
-        msg = "expected scalar type .* but found|batch1 and batch2 to have the same dtype"
+        msg = (
+            "expected scalar type .* but found"  # CUDA
+            "|batch1 and batch2 to have the same dtype"  # XPU
+            "|same dtype"  # MPS baddbmm
+            "|Expected arguments of same type"  # MPS bmm/matmul
+        )
 
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.baddbmm(inp, a, b)
