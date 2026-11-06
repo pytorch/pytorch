@@ -127,11 +127,13 @@ def _backend_features(device_type: str | None) -> OrderedSet[BackendFeature] | N
         init_backend_registration,
     )
 
-    init_backend_registration()
+    # the graph registers the backends and caches the lookup; decompositions
+    # run before there is a graph
+    cached = getattr(V.graph, "get_backend_features", None)
+    if cached is None:
+        init_backend_registration()
     if get_scheduling_for_device(device_type) is None:
         return None  # no Inductor backend, e.g. meta tensors during tracing
-    # the graph caches the lookup; decompositions run before there is a graph
-    cached = getattr(V.graph, "get_backend_features", None)
     return cached(device_type) if cached else get_backend_features(device_type)
 
 
@@ -507,23 +509,30 @@ class InductorChoices:
         (View.create classifies a view by tracing its loads) is only called
         when the answer depends on it.
 
-        Index arithmetic on a backend without indirect indexing has no affine
-        form and is always inlined. Otherwise config.avoid_modular_indexing
-        forces the answer, backends that declare
-        BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get affine
-        indices, everything that is not a Triton GPU backend (including a
-        device without an Inductor backend, such as meta tensors during
-        tracing) inlines as before, and Triton GPU backends, out-of-tree ones
-        included, follow what benchmarks on CUDA showed: splitting a reduction
-        at a dim boundary and iterating a strided slice_scatter in split space
-        are faster at nearly every size, realizing a merged view only pays off
-        for large tensors of fresh compute (a copy of an existing buffer never
-        does), and the alternatives to %, // for repeat, roll, index
-        arithmetic and loop reindexing are slower than the modular index.
+        config.avoid_modular_indexing forces the answer. Otherwise backends
+        that declare BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get
+        affine indices, everything that is not a Triton GPU backend
+        (including a device without an Inductor backend, such as meta tensors
+        during tracing) inlines as before, and Triton GPU backends (CUDA,
+        ROCm, XPU and out-of-tree ones) follow what benchmarks on CUDA
+        showed: splitting a reduction at a dim boundary and iterating a
+        strided slice_scatter in split space are faster at nearly every size,
+        realizing a merged view only pays off for large tensors of fresh
+        compute (a copy of an existing buffer never does), and the
+        alternatives to %, // for repeat, roll, index arithmetic and loop
+        reindexing are slower than the modular index. The one exception that
+        holds in every mode: index arithmetic on an affine-preferring backend
+        without indirect indexing (Pallas) has no affine form there and stays
+        inlined. TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores inlining on
+        every backend; with the heuristic, split reductions on Triton GPUs
+        regroup partial sums and no longer match the previous release
+        bitwise.
         """
         from .codegen.common import BackendFeature
         from .ir import get_device_type, is_triton
 
+        if config.avoid_modular_indexing is not None and kind != "index":
+            return not config.avoid_modular_indexing
         if isinstance(device, str):
             device = torch.device(device)
         device_type = get_device_type(device)
@@ -531,6 +540,7 @@ class InductorChoices:
         if (
             kind == "index"
             and features is not None
+            and BackendFeature.PREFER_AFFINE_INDEXING in features
             and BackendFeature.INDIRECT_INDEXING not in features
         ):
             return True  # a gather can only be expressed as a direct index here

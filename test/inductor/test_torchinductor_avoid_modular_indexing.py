@@ -6,7 +6,7 @@ import sys
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.common_utils import HardwareClassification, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -34,6 +34,7 @@ AvoidModularIndexingCommonTemplate = make_test_cls_with_patches(
 if HAS_CPU:
 
     class AvoidModularIndexingCpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -42,6 +43,7 @@ if HAS_CPU:
 if HAS_GPU and not TEST_WITH_ASAN:
 
     class AvoidModularIndexingGPUTests(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
 

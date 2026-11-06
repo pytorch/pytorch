@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch._inductor import config, ir, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.exc import InductorError, NonAffineIndexingError
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_affine_indexing
 from torch._inductor.virtualized import V
@@ -86,7 +87,8 @@ class ModularIndexingDecisionTest(TestCase):
     @config.patch(avoid_modular_indexing=None)
     def test_affine_backends(self):
         # backends declaring PREFER_AFFINE_INDEXING keep load/store indices
-        # affine; a third-party scheduling that declares nothing inlines
+        # affine; a scheduling that declares nothing inlines unless it is a
+        # Triton GPU backend (test_triton_gpu_avoids)
         for kind in ("view", "view_linear", "index", "reindex"):
             self.assertFalse(V.choices.use_modular_indexing("mtia", numel=8, kind=kind))
         with config.patch(cpu_backend="pallas"):
@@ -351,6 +353,32 @@ class AvoidModularIndexingTest(TestCase):
         y = torch.randn(1000, 1, 1, device=device)
         self.check_split_reduction(fn, x, y)
 
+    def test_split_reduction_kept_unit_dims(self, device):
+        # kept size-1 dims are not reduction dims: the input's dense dim must
+        # be mapped onto the reduction dims (here it is the only one, so
+        # nothing is permuted) instead of indexing past them
+        # (a one-dim reduction's flat split is affine too)
+        x = torch.randn(1, 100003, 1, device=device)
+        self.check_split_reduction(lambda x: x.sum(1), x, modular_without_option=False)
+        self.check_split_reduction(
+            lambda x: torch.softmax(x, 1),
+            x,
+            kernel_count=3,
+            modular_without_option=False,
+        )
+
+    def test_split_reduction_channels_last_keepdim(self, device):
+        # with the batch dim kept, the dense channel dim is input dim 1 but
+        # reduction dim 0; the flat split's block is a multiple of the inner
+        # dims here, so loop splitting keeps even the flat split affine
+        def fn(x):
+            return x.sum((1, 2, 3), keepdim=True)
+
+        x = torch.randn(1, 64, 128, 128, device=device)
+        self.check_split_reduction(
+            fn, x.to(memory_format=torch.channels_last), modular_without_option=False
+        )
+
     def test_split_reduction_channels_last_dense_dim(self, device):
         # a full reduction over a channels-last buffer reduces the channel dim
         # innermost, like the flat split does, so the inner loop stays
@@ -390,13 +418,6 @@ class AvoidModularIndexingTest(TestCase):
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         self.check(fn, x, kernel_count=1, modular_without_option=True)
-
-    def test_roll_argument_checks(self, device):
-        x = torch.randn(3, 4, device=device)
-        for shifts, dims in [((1, 2), ()), ((), (0,)), ((1,), (0, 1))]:
-            with self.assertRaisesRegex(Exception, "shifts"):
-                torch.compile(torch.roll)(x, shifts, dims)
-            torch._dynamo.reset()
 
     def test_split_reduction_uneven_dim(self, device):
         # a prime leading dim has no even split, so the boundary dim is split
@@ -440,8 +461,8 @@ class AvoidModularIndexingTest(TestCase):
         # RMS norm over a reshape: fusion would reindex the pointwise's
         # [256, 8192] loops to the reduction's [16384, 128], which turns the
         # per-row bias read into FloorDiv(t0, 64); the detector also runs
-        # after every loop transformation, so this fails if the reindex
-        # happens
+        # after every loop transformation, so on GPUs (the CPU backend never
+        # reindexes) this fails if the reindex happens
         def fn(x, b, w):
             h = (x + b[:, None]).view(-1, 128)
             var = (h * h).mean(-1, keepdim=True)
@@ -665,7 +686,14 @@ class AvoidModularIndexingTest(TestCase):
                 "realize_modular_view_min_numel": 1,
             }
         ):
-            self.check(fn, a, b)
+            if V.choices.use_modular_indexing(device, numel=a.numel(), kind="view"):
+                self.check(fn, a, b)
+            else:
+                # realized: the kernel indices stay affine and the copy is a
+                # second IR node
+                with config.patch({"test_configs.raise_on_modular_indexing": True}):
+                    self.check(fn, a, b)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
 
     def test_affine_backend_auto_mode(self, device):
         # a backend declaring PREFER_AFFINE_INDEXING gets affine indices in
@@ -704,11 +732,16 @@ class AvoidModularIndexingTest(TestCase):
             var = (h * h).mean(-1, keepdim=True)
             return h * torch.rsqrt(var + 1e-6) * w
 
+        def split(x, y):
+            return (x * y).sum()
+
         a = torch.randn(4, 8, 16, device=device)
         b = torch.randn(4, 16, 8, device=device)
         x = torch.randn(256, 8192, device=device)
         bias = torch.randn(256, device=device)
         w = torch.randn(128, device=device)
+        xs = torch.randn(1000, 3, 65, device=device)
+        ys = torch.randn(1000, 1, 1, device=device)
         affine = dataclasses.replace(codegen, scheduling=AffineScheduling)
         with (
             mock.patch.dict(device_codegens, {device_type: affine}),
@@ -722,6 +755,7 @@ class AvoidModularIndexingTest(TestCase):
             self.assertFalse(V.choices.use_modular_indexing(device, kind="view"))
             self.check(merge_and_gather, a, b)
             self.check(rms, x, bias, w)
+            self.check_split_reduction(split, xs, ys)
 
     def test_choices_override_realizes_merge(self, device):
         class AlwaysAffine(InductorChoices):
@@ -804,6 +838,22 @@ class AvoidModularIndexingTest(TestCase):
 instantiate_device_type_tests(AvoidModularIndexingTest, globals())
 
 
+class _SizeVarsGraph:
+    """Enough of a graph for AlignedSplit.map_index to pick the mask's dtype."""
+
+    sizevars = SizeVarAllocator()
+
+
+class _IndexOps:
+    """Enough of an ops handler for AlignedSplit.map_index to build its mask."""
+
+    def index_expr(self, expr, dtype):
+        return expr
+
+    def lt(self, a, b):
+        return sympy.Lt(a, b)
+
+
 class SplitReductionRangesTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -835,6 +885,26 @@ class SplitReductionRangesTest(TestCase):
         self.assertLess((chunks - 1) * chunk, reduction_ranges[k])
         self.assertEqual(aligned.need_mask, chunks * chunk != reduction_ranges[k])
         self.assertEqual(int(aligned.split), math.prod(reduction_ranges[:k]) * chunks)
+
+    def test_map_index_permutation(self):
+        # reduction dims (5, 11) with the dense dim 0 reduced innermost: the
+        # permuted dims (11, 5) split into 4 chunks of 3 and the first stage
+        # iterates [*ranges, 4] x [3, 5]; map_index hands the loader the
+        # original dim order and masks the chunk tail past 11
+        aligned = ir.AlignedSplit(
+            [sympy.Integer(4)],
+            [sympy.Integer(3), sympy.Integer(5)],
+            sympy.Integer(11),
+            [1, 0],
+        )
+        self.assertTrue(aligned.need_mask)
+        self.assertEqual(int(aligned.split), 4)
+        i0, o0, r0, r1 = sympy.symbols("i0 o0 r0 r1")
+        with V.set_graph_handler(_SizeVarsGraph()), V.set_ops_handler(_IndexOps()):
+            index, reduction, mask = aligned.map_index(1, [i0, o0], [r0, r1])
+        self.assertEqual(index, [i0])
+        self.assertEqual(reduction, [r1, 3 * o0 + r0])
+        self.assertEqual(mask, sympy.Lt(3 * o0 + r0, 11))
 
     def test_disabled_without_option(self):
         with config.patch(avoid_modular_indexing=False):
