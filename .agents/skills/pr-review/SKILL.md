@@ -119,9 +119,9 @@ A single line of code can have deep cross-cutting implications: a missing device
 2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
 3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
 4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test patterns, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time. Exceptions are marked where they apply; on a re-review, "Re-reviews converge" makes some points non-blocking.
+5. **Separate blocking from non-blocking** — A point is blocking when the PR should not land until it is fixed: a correctness or security bug, a backward-compatibility break, a design problem that needs another look once addressed, an unaddressed maintainer comment, or anything a rule in this skill's files or an applicable `REVIEW.md` says always blocks or defaults to **Request Changes** (for example a non-exempt CI install, or a runner label that breaks the naming standard and no other CI uses). A performance regression on a hot path is blocking; a missing test is blocking only when the checklist or an applicable `REVIEW.md` requires that test. Everything else worth mentioning (naming, small refactors, consistency with nearby code, wording of comments and docs) is non-blocking: write "non-blocking" in it. Do not stretch a point to make it blocking.
 6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
-7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
+7. **Match the immediate context** — Read how similar features are already implemented in the same file. A pattern mismatch within a file is always worth raising; it is blocking only when principle 5 says so.
 8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
 9. **No repetition** — Each observation appears in exactly one section of the review output.
 
@@ -268,7 +268,7 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-An unaddressed maintainer comment always means **Request Changes**.
+Recommend **Request Changes** only for a blocking point. Recommend **Needs Discussion** when the decision depends on maintainers rather than on a fix: an open design question, or a potentially breaking change (bc-guidelines.md). Otherwise, with only non-blocking points, recommend **Approve**; those points stay in their own sections. The Time Budget's rules for early posts come first. An unaddressed maintainer comment always means **Request Changes**.
 
 [Brief justification — focus on what blocks approval, if anything]
 ```
