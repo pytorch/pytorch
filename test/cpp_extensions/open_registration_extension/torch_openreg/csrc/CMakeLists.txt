@@ -1,13 +1,63 @@
 set(LIBRARY_NAME torch_openreg)
 
+# Generate the PrivateUse1 dispatch registrations and native-function
+# declarations from the backend YAML using torchgen (gen_backend_stubs). This
+# exercises the structured-kernel + out-as-primary codegen path end to end: the
+# generated RegisterPrivateUse1.cpp is compiled into the backend library, and the
+# generated PrivateUse1NativeFunctions.h is consumed by aten/OpenRegStructured.cpp.
+set(OPENREG_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(OPENREG_BACKEND_YAML
+    "${CMAKE_CURRENT_SOURCE_DIR}/aten/openreg_native_functions.yaml")
+file(MAKE_DIRECTORY ${OPENREG_GEN_DIR})
+# Rerun the codegen when torchgen, native_functions.yaml or the templates change,
+# not only when the backend YAML does. Mirror gen_backend_stubs.run(): it reads
+# aten/src next to torchgen in a source tree, torchgen/packaged otherwise.
+execute_process(
+    COMMAND ${PYTHON_EXECUTABLE} -c
+        "import os, torchgen; print(os.path.dirname(torchgen.__file__))"
+    OUTPUT_VARIABLE TORCHGEN_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+get_filename_component(TORCHGEN_ROOT "${TORCHGEN_DIR}" DIRECTORY)
+if(EXISTS "${TORCHGEN_ROOT}/aten/src")
+  set(TORCHGEN_COMMON_DIR "${TORCHGEN_ROOT}/aten/src")
+else()
+  set(TORCHGEN_COMMON_DIR "${TORCHGEN_DIR}/packaged")
+endif()
+file(GLOB_RECURSE TORCHGEN_INPUTS CONFIGURE_DEPENDS
+    "${TORCHGEN_DIR}/*.py"
+    "${TORCHGEN_COMMON_DIR}/ATen/native/native_functions.yaml"
+    "${TORCHGEN_COMMON_DIR}/ATen/native/tags.yaml"
+    "${TORCHGEN_COMMON_DIR}/ATen/templates/*")
+add_custom_command(
+    OUTPUT
+        "${OPENREG_GEN_DIR}/RegisterPrivateUse1.cpp"
+        "${OPENREG_GEN_DIR}/PrivateUse1NativeFunctions.h"
+    COMMAND ${PYTHON_EXECUTABLE} -m torchgen.gen_backend_stubs
+        --source-yaml "${OPENREG_BACKEND_YAML}"
+        --output-dir "${OPENREG_GEN_DIR}"
+    DEPENDS "${OPENREG_BACKEND_YAML}" ${TORCHGEN_INPUTS}
+    COMMENT "torchgen: generating PrivateUse1 stubs for openreg"
+    VERBATIM
+)
+add_custom_target(openreg_codegen
+    DEPENDS
+        "${OPENREG_GEN_DIR}/RegisterPrivateUse1.cpp"
+        "${OPENREG_GEN_DIR}/PrivateUse1NativeFunctions.h"
+)
+
 file(GLOB_RECURSE SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
+list(APPEND SOURCE_FILES "${OPENREG_GEN_DIR}/RegisterPrivateUse1.cpp")
 
 add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
+add_dependencies(${LIBRARY_NAME} openreg_codegen)
 
 target_link_libraries(${LIBRARY_NAME} PRIVATE torch_cpu_library openreg)
-target_include_directories(${LIBRARY_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(${LIBRARY_NAME} PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${OPENREG_GEN_DIR}
+)
 
 if(kineto_LIBRARY)
     if(NOT TARGET kineto)
