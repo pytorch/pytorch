@@ -734,6 +734,60 @@ class PadMMTest(TestCase):
         self.assertEqual(compiled, expected)
         self.assertEqual(compiled.stride(), expected.stride())
 
+    @torch.no_grad()
+    def _check_padded_input_memory(self, producer):
+        # The padded copy of the mm input should replace the unpadded
+        # activation, not be allocated next to it.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(533, 68)
+
+            def forward(self, x):
+                return self.lin(producer(x))
+
+        model = Model().to(GPU_TYPE, torch.bfloat16)
+        x = torch.randn(1024, 533, 160, device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = model(x)
+        device = torch.get_device_module(GPU_TYPE)
+
+        def compiled_peak(**config):
+            torch.compiler.reset()
+            counters.clear()
+            torch._dynamo.mark_dynamic(x, 0)
+            with inductor_config.patch(config):
+                compiled = torch.compile(model)
+                out, codes = run_and_get_code(compiled, x)
+                self.assertEqual(out, expected, atol=5e-2, rtol=5e-2)
+            device.synchronize()
+            device.reset_peak_memory_stats()
+            base = device.memory_allocated()
+            self.assertEqual(compiled(x), expected, atol=5e-2, rtol=5e-2)
+            device.synchronize()
+            return device.max_memory_allocated() - base, "\n".join(codes)
+
+        unpadded, _ = compiled_peak(shape_padding=False)
+        self.assertEqual(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        padded, code = compiled_peak(
+            shape_padding=True,
+            force_shape_pad=True,
+            inplace_padding=True,
+            comprehensive_padding=False,
+        )
+        # K = 533 is padded to 536 through the fallback of the in-place pad.
+        FileCheck().check("536").run(code)
+        self.assertEqual(counters["inductor"]["inplace_padding"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        self.assertLess(padded, 1.1 * unpadded)
+
+    def test_pad_mm_input_produced_through_view(self):
+        self._check_padded_input_memory(
+            lambda x: x.permute(0, 2, 1).contiguous().reshape(-1, 533)
+        )
+
+    def test_pad_mm_input_produced_by_pointwise(self):
+        self._check_padded_input_memory(lambda x: torch.relu(x.view(-1, 533)))
+
 
 @instantiate_parametrized_tests
 class PadMMDeviceAgnosticTest(TestCase):

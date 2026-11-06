@@ -5632,33 +5632,6 @@ def inplace_constant_pad_nd(
     if len(padding) != 4 or len(x.get_size()) != 2:
         return None
 
-    # No harm to realize since we already know that
-    # the op can not be fused into the single user.
-    # It need to be realized later anyways.
-    x.realize()
-
-    # If x is a view (e.g. a SliceView), realizing it just realizing the
-    # underlying storage. x itself is still a view.
-    if (
-        not isinstance(x, ir.TensorBox)
-        or not isinstance(x.data, ir.StorageBox)
-        or not (
-            isinstance(x.data.data, ir.ComputedBuffer)
-            or (
-                config.can_inplace_pad_graph_input
-                and isinstance(x.data.data, ir.InputBuffer)
-            )
-        )
-        or not x.data.data.name
-    ):
-        return None
-    x.freeze_layout()
-
-    _, layout = ir.as_storage_and_layout(x)
-    strides = layout.stride
-    if strides[1] != 1:
-        return None
-
     if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
         return None
 
@@ -5666,13 +5639,38 @@ def inplace_constant_pad_nd(
     if not V.graph.sizevars.statically_known_gt(npad, 0):
         return None
 
-    stride0 = strides[0]
-    rowsize = layout.size[1]
-
-    if stride0 < rowsize + npad:
+    # Realize only once in-place padding is certain: a realized input with a
+    # frozen layout can neither be fused into the fallback pad nor computed
+    # directly into its padded buffer, so the fallback would copy it.
+    if not isinstance(x, ir.TensorBox) or not isinstance(x.data, ir.StorageBox):
+        return None
+    data = x.data.data
+    if isinstance(data, (ir.Pointwise, ir.Reduction, ir.Scan, ir.Sort)):
+        # realize() gives it a FlexibleLayout with contiguous strides
+        layout = ir.FlexibleLayout(
+            device=data.get_device_or_error(),
+            dtype=data.get_dtype(),
+            size=data.get_size(),
+        )
+    elif isinstance(data, ir.ComputedBuffer) or (
+        config.can_inplace_pad_graph_input and isinstance(data, ir.InputBuffer)
+    ):
+        layout = data.get_layout()
+    else:
         return None
 
-    bufname = x.data.data.name
+    strides = layout.stride
+    if isinstance(layout, ir.FlexibleLayout) and layout.should_pad_strides():
+        strides = ir.Layout._pad_strides(strides, layout.size, layout.dtype)
+    rowsize = layout.size[1]
+    if strides[1] != 1 or strides[0] < rowsize + npad:
+        return None
+
+    x.realize()
+    x.freeze_layout()
+    _, layout = ir.as_storage_and_layout(x)
+
+    bufname = x.get_name()
     padded_size = [layout.size[0], layout.size[1] + npad]
     V.graph.buffer_to_padded_size[bufname] = padded_size
     resized_x = as_strided(
