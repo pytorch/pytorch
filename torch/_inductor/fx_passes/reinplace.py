@@ -14,9 +14,9 @@ from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops.triton_kernel_wrap import (
-    get_triton_kernel_name,
-    triton_kernel_wrapper_functional,
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_functional_hop,
 )
 from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import (
@@ -462,9 +462,6 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
 
-inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
-
-
 # Operators that don't depend on the tensor data
 META_ONLY_OPS = OrderedSet(
     [
@@ -560,7 +557,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # then skip over it
             if src.target is operator.getitem and (
                 (
-                    src.args[0].target == triton_kernel_wrapper_functional
+                    is_user_kernel_functional_hop(src.args[0].target)
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
@@ -821,7 +818,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
-                        # if it was needed for inplaceable_triton_ops?
+                        # if it was needed for user-kernel functional HOPs?
                         if user.target is operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
 
@@ -1029,10 +1026,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                             continue
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
-        elif node.target in inplaceable_triton_ops:
-            kernel_name = get_triton_kernel_name(node.kwargs)
+        elif user_kernel_hop := get_user_kernel_hop_info(node.target, "functional"):
+            kernel_name = user_kernel_hop.get_kernel_name(node.kwargs)
 
-            # inplaceable_triton_ops take an additional argument called
+            # User-kernel functional HOPs take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
@@ -1040,7 +1037,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
                 kernel_name,
-                ReInplaceTrigger.TRITON_OPS,
+                user_kernel_hop.reinplace_trigger,
             )
 
             kwargs = dict(node.kwargs)
