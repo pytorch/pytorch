@@ -2826,6 +2826,25 @@ class SIMDScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
 
+        helion_matmuls = V.graph.helion_matmul_inputs.keys()
+        if (
+            helion_matmuls
+            and (node1.get_buffer_names() | node2.get_buffer_names()) & helion_matmuls
+        ):
+            operand_names = OrderedSet(
+                operand.get_name()
+                for name in (node1.get_buffer_names() | node2.get_buffer_names())
+                & helion_matmuls
+                for operand in V.graph.helion_matmul_inputs[name]
+            )
+            if (node1.get_buffer_names() | node2.get_buffer_names()) & operand_names:
+                # (a + 1) @ b: keep the addition in the input producer kernel.
+                # Metadata views have no producer kernel to fuse.
+                why("Helion matmul preview does not support input producer fusion")
+                return False
+            # (a @ b) + (c @ d): allow two dots, then their shared epilogue.
+            # Unrelated pointwise work may also fuse if the usual SIMD checks pass.
+
         if isinstance(node1, scheduler.FusedNestedReductions):
             # The scheduler already validated this vertical append. The normal
             # SIMD ladder cannot represent its two iteration spaces.
@@ -4335,6 +4354,16 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
+        if config.trace.helion_code and kernel_features.is_native_matmul():
+            from .helion import HelionKernel
+
+            helion_code = HelionKernel(kernel_features, tiling).codegen_kernel()
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {"name": "helion_code", "encoding": "string"},
+                payload_fn=lambda: helion_code,
+            )
+            V.debug.helion_code(helion_code)
         kernels = self.create_kernel_choices(
             kernel_features,
             [tiling],

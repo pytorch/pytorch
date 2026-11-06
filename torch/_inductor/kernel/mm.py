@@ -580,6 +580,15 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     # are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
     # combination, but are lowered to `tl.dot` during the code generation phase.
     if use_native_matmul(mat1, mat2):
+        helion_inputs = None
+        if inductor_config.trace.helion_code:
+            # a.reshape(M, R): keep a 2D view of the same storage, without a copy.
+            # (a + 1).reshape(M, R): realize the computation, then keep its 2D view.
+            # If a view cannot be expressed by strides, mm_args creates a copy.
+            _, _, _, _, mat1, mat2 = mm_args(
+                mat1, mat2, layout=layout, out_dtype=out_dtype
+            )
+            helion_inputs = (mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 0)
         args, kwargs = transform_args(
@@ -601,6 +610,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             args = [make_pointwise(_to_dtype)(x) for x in args]
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 1)
+
+        if helion_inputs is not None:
+            dot_reduction.realize()
+            V.graph.helion_matmul_inputs[dot_reduction.get_name()] = helion_inputs
 
         return dot_reduction
 
