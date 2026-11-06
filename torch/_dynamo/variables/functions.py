@@ -2823,6 +2823,7 @@ class SkipFunctionVariable(VariableTracker):
         elif self.value is torch.compiler.disable:
             unimplemented_direct_disable_call("torch.compiler.disable")
         elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            tx.retain_conditional_retry_guards()
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
@@ -2855,6 +2856,7 @@ class SkipFunctionVariable(VariableTracker):
                 ],
             )
         elif self.value is torch._dynamo.graph_break:
+            tx.retain_conditional_retry_guards()
             graph_break_msg = kwargs.get("msg")
             if graph_break_msg:
                 graph_break_msg = graph_break_msg.as_python_constant()
