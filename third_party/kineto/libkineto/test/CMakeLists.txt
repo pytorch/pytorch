@@ -160,6 +160,19 @@ target_include_directories(CuptiPMSamplingProfilerTest PRIVATE
 gtest_discover_tests(CuptiPMSamplingProfilerTest)
 endif()
 
+if(KINETO_ENABLE_AON)
+# AonActivityProfilerTest
+add_executable(AonActivityProfilerTest AonActivityProfilerTest.cpp)
+target_link_libraries(AonActivityProfilerTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(AonActivityProfilerTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(AonActivityProfilerTest)
+endif()
+
 # CuptiCallbackApiTest
 add_executable(CuptiCallbackApiTest CuptiCallbackApiTest.cpp)
 target_link_libraries(CuptiCallbackApiTest PRIVATE

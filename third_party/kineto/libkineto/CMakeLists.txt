@@ -28,6 +28,11 @@ set_property(CACHE KINETO_LIBRARY_TYPE PROPERTY STRINGS default shared static)
 option(KINETO_BUILD_TESTS "Build kineto unit tests" ON)
 option(KINETO_BUILD_BENCHMARKS "Build kineto benchmarks" OFF)
 option(KINETO_ENABLE_CUPTI_PM_SAMPLING "Build CUPTI PM sampling support" OFF)
+option(KINETO_ENABLE_AON "Build NVIDIA Nsight Perf (AON) support" OFF)
+set(KINETO_AON_SDK_SOURCE_DIR "" CACHE PATH
+  "Path to the public Nsight Perf SDK for AI source tree")
+set(KINETO_AON_FLATBUFFERS_INCLUDE_DIR "" CACHE PATH
+  "Optional FlatBuffers include path matching the NvTrace generated headers")
 
 # When Kineto is embedded in a larger project, that project's test runner
 # usually discovers C++ test binaries in the install tree rather than the
@@ -88,6 +93,51 @@ if(KINETO_ENABLE_CUPTI_PM_SAMPLING AND
    NOT KINETO_BACKEND STREQUAL "cuda")
   message(FATAL_ERROR
     "KINETO_ENABLE_CUPTI_PM_SAMPLING requires KINETO_BACKEND=cuda.")
+endif()
+
+if(KINETO_ENABLE_AON)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "KINETO_ENABLE_AON is supported only on Linux.")
+  endif()
+  if(NOT KINETO_BACKEND STREQUAL "cuda")
+    message(FATAL_ERROR "KINETO_ENABLE_AON requires KINETO_BACKEND=cuda.")
+  endif()
+  if(KINETO_ENABLE_CUPTI_PM_SAMPLING)
+    message(FATAL_ERROR
+      "KINETO_ENABLE_AON cannot be combined with "
+      "KINETO_ENABLE_CUPTI_PM_SAMPLING; both own GPU PM collection.")
+  endif()
+  if(NOT TARGET nvtrace_client OR NOT TARGET nvtrace_client_offline)
+    if(NOT KINETO_AON_SDK_SOURCE_DIR)
+      message(FATAL_ERROR
+        "KINETO_ENABLE_AON requires KINETO_AON_SDK_SOURCE_DIR, unless "
+        "nvtrace_client and nvtrace_client_offline already exist.")
+    endif()
+    if(NOT EXISTS "${KINETO_AON_SDK_SOURCE_DIR}/CMakeLists.txt")
+      message(FATAL_ERROR
+        "KINETO_AON_SDK_SOURCE_DIR does not contain CMakeLists.txt: "
+        "${KINETO_AON_SDK_SOURCE_DIR}")
+    endif()
+    # The SDK configures CUDA sample targets even when added EXCLUDE_FROM_ALL.
+    # Enabling the language here lets CMake generate those targets; only the
+    # public interface libraries are linked into Kineto.
+    enable_language(CUDA)
+    add_subdirectory(
+      "${KINETO_AON_SDK_SOURCE_DIR}"
+      "${CMAKE_CURRENT_BINARY_DIR}/aon-sdk"
+      EXCLUDE_FROM_ALL)
+  endif()
+  if(KINETO_AON_FLATBUFFERS_INCLUDE_DIR AND
+     NOT EXISTS "${KINETO_AON_FLATBUFFERS_INCLUDE_DIR}/flatbuffers/flatbuffers.h")
+    message(FATAL_ERROR
+      "KINETO_AON_FLATBUFFERS_INCLUDE_DIR does not contain "
+      "flatbuffers/flatbuffers.h: ${KINETO_AON_FLATBUFFERS_INCLUDE_DIR}")
+  endif()
+  if(NOT TARGET nvtrace_client OR NOT TARGET nvtrace_client_offline)
+    message(FATAL_ERROR
+      "The Nsight Perf SDK must define nvtrace_client and "
+      "nvtrace_client_offline targets.")
+  endif()
 endif()
 
 if(NOT _kineto_backend_explicit)
@@ -183,6 +233,10 @@ elseif(KINETO_BACKEND STREQUAL "cuda")
     get_filelist("get_libkineto_cupti_pm_sampling_srcs()" CUPTI_PM_SAMPLING_SRCS)
     list(APPEND LIBKINETO_SRCS ${CUPTI_PM_SAMPLING_SRCS})
   endif()
+  if(KINETO_ENABLE_AON)
+    get_filelist("get_libkineto_aon_srcs()" AON_SRCS)
+    list(APPEND LIBKINETO_SRCS ${AON_SRCS})
+  endif()
   message(STATUS " Building with cupti")
 elseif(KINETO_BACKEND STREQUAL "rocm")
   get_filelist("get_libkineto_rocprofiler_srcs(with_api=False)" LIBKINETO_SRCS)
@@ -233,6 +287,11 @@ target_compile_definitions(kineto_base PUBLIC "${KINETO_DEFINITIONS}")
 target_compile_options(kineto_base PRIVATE "${KINETO_COMPILE_OPTIONS}")
 target_compile_definitions(kineto_api PUBLIC "${KINETO_DEFINITIONS}")
 target_compile_options(kineto_api PRIVATE "${KINETO_COMPILE_OPTIONS}")
+if(KINETO_ENABLE_AON)
+  # AON only guards Kineto-internal implementation and registration code. Do
+  # not propagate it to every downstream translation unit that links Kineto.
+  target_compile_definitions(kineto_base PRIVATE HAS_AON)
+endif()
 
 # dynolog's ipcfabric is header-only and vendored under third_party/dynolog_headers
 # (pinned in version.txt), so only its include paths are needed below -- there
@@ -312,6 +371,27 @@ target_include_directories(kineto PUBLIC
 if(KINETO_BACKEND STREQUAL "cuda")
   target_link_libraries(kineto PUBLIC CUDA::cupti CUDA::cudart)
   target_link_libraries(kineto_base PUBLIC CUDA::cupti CUDA::cudart)
+  if(KINETO_ENABLE_AON)
+    get_target_property(
+      KINETO_AON_CLIENT_INCLUDE_DIRS
+      nvtrace_client INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(kineto_base SYSTEM PRIVATE
+      ${KINETO_AON_CLIENT_INCLUDE_DIRS})
+    # NvTrace's generated serialization headers carry an exact FlatBuffers
+    # version guard. Larger parent projects such as PyTorch may already expose
+    # another FlatBuffers version under the same target name, so allow NvTrace
+    # to compile against its pinned headers without changing the parent's
+    # dependency. BEFORE is intentional: <flatbuffers/...> must resolve here.
+    if(KINETO_AON_FLATBUFFERS_INCLUDE_DIR)
+      target_include_directories(kineto_base BEFORE PRIVATE
+        "${KINETO_AON_FLATBUFFERS_INCLUDE_DIR}")
+    endif()
+    target_link_libraries(kineto PRIVATE
+      $<BUILD_INTERFACE:nvtrace_client>
+      $<BUILD_INTERFACE:nvtrace_client_offline>)
+    target_link_libraries(kineto_base PRIVATE
+      nvtrace_client nvtrace_client_offline)
+  endif()
 elseif(KINETO_BACKEND STREQUAL "rocm")
   target_include_directories(kineto_base SYSTEM PUBLIC
         $<BUILD_INTERFACE:${ROCM_INCLUDE_DIRS}>)
@@ -335,6 +415,24 @@ endif()
 target_compile_definitions(kineto PUBLIC "${KINETO_DEFINITIONS}")
 
 if(KINETO_BUILD_TESTS)
+  # The NvTrace SDK intentionally builds GoogleTest without GoogleMock. Kineto
+  # has CUDA tests that require gmock, so complete that existing dependency
+  # without configuring a second, conflicting GoogleTest target set.
+  if(TARGET gtest AND NOT TARGET gmock)
+    get_filename_component(
+      KINETO_GTEST_ROOT "${gtest_SOURCE_DIR}" DIRECTORY)
+    if(NOT EXISTS "${KINETO_GTEST_ROOT}/googlemock/src/gmock-all.cc")
+      message(FATAL_ERROR
+        "Kineto tests require GoogleMock, but it was not found beside the "
+        "existing GoogleTest source at ${KINETO_GTEST_ROOT}.")
+    endif()
+    add_library(gmock STATIC
+      "${KINETO_GTEST_ROOT}/googlemock/src/gmock-all.cc")
+    target_include_directories(gmock SYSTEM PUBLIC
+      "${KINETO_GTEST_ROOT}/googlemock"
+      "${KINETO_GTEST_ROOT}/googlemock/include")
+    target_link_libraries(gmock PUBLIC gtest)
+  endif()
   if(NOT TARGET gtest)
     set(INSTALL_GTEST OFF)
     set(TMP_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")

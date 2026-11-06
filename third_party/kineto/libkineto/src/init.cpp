@@ -11,6 +11,9 @@
 // TODO(T90238193)
 // @lint-ignore-every CLANGTIDY facebook-hte-RelativeInclude
 #include "ActivityProfilerProxy.h"
+#ifdef HAS_AON
+#include "AonActivityProfiler.h"
+#endif
 #include "ConfigLoader.h"
 #include "DaemonConfigLoader.h"
 #ifdef HAS_CUPTI
@@ -90,8 +93,21 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 
   auto& api = libkineto::api();
   ConfigLoader& config_loader = api.configLoader();
+#ifdef HAS_AON
+  const bool aonMode = !cpuOnly && isAonGpuProfilerSelected();
+#else
+  constexpr bool aonMode = false;
+#endif
   api.registerProfiler(
-      std::make_unique<ActivityProfilerProxy>(cpuOnly, config_loader));
+      std::make_unique<ActivityProfilerProxy>(cpuOnly || aonMode, config_loader));
+
+#ifdef HAS_AON
+  if (aonMode) {
+    api.registerProfilerFactory([]() -> std::unique_ptr<IActivityProfiler> {
+      return std::make_unique<AonActivityProfiler>();
+    });
+  }
+#endif
 
 #ifdef HAS_CUPTI_PM_SAMPLING
   if (!cpuOnly) {

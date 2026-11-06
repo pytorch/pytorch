@@ -112,6 +112,11 @@ CUPTI_PM_SAMPLING_PROFILER_SRCS = [
     "src/CuptiPMSamplingProfiler.cpp",
 ]
 
+# --- NVIDIA Nsight Perf / AON child profiler ---
+AON_ACTIVITY_PROFILER_SRCS = [
+    "src/AonActivityProfiler.cpp",
+]
+
 WEAK_SYMBOLS_SRCS = [
     "src/WeakSymbols.cpp",
 ]
@@ -169,6 +174,9 @@ def get_libkineto_cupti_srcs(with_api = True):
 
 def get_libkineto_cupti_pm_sampling_srcs():
     return CUPTI_PM_SAMPLING_API_SRCS + CUPTI_PM_SAMPLING_PROFILER_SRCS
+
+def get_libkineto_aon_srcs():
+    return AON_ACTIVITY_PROFILER_SRCS
 
 def get_libkineto_rocprofiler_srcs(with_api = True):
     return ROCM_ACTIVITY_PROFILER_SRCS + ROCM_API_SRCS + get_libkineto_cpu_only_srcs(with_api)

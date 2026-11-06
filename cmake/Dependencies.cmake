@@ -1776,12 +1776,25 @@ if(USE_KINETO)
                      "${CMAKE_BINARY_DIR}/third_party/nlohmann")
   endif()
 
+  # The AON SDK exposes NvTrace through interface targets that depend on a
+  # target named flatbuffers. Define PyTorch's pinned FlatBuffers target before
+  # adding Kineto so the SDK reuses it instead of creating a second,
+  # conflicting target from its standalone dependency bundle.
+  if(KINETO_ENABLE_AON AND NOT TARGET flatbuffers)
+    include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+  endif()
+
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
   message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
+  message(STATUS "  KINETO_ENABLE_AON = ${KINETO_ENABLE_AON}")
+  if(KINETO_ENABLE_AON)
+    message(STATUS "  KINETO_AON_SDK_SOURCE_DIR = ${KINETO_AON_SDK_SOURCE_DIR}")
+    message(STATUS "  KINETO_AON_FLATBUFFERS_INCLUDE_DIR = ${KINETO_AON_FLATBUFFERS_INCLUDE_DIR}")
+  endif()
 
   if(KINETO_BACKEND STREQUAL "rocm")
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
@@ -1828,8 +1841,11 @@ if(USE_KINETO)
   endif()
 endif()
 
-# Include google/FlatBuffers
-include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+# Include google/FlatBuffers. An AON-enabled Kineto configuration creates this
+# target earlier so NvTrace can reuse PyTorch's pinned headers.
+if(NOT TARGET flatbuffers)
+  include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+endif()
 
 # Include cpp-httplib
 add_library(httplib INTERFACE IMPORTED)
