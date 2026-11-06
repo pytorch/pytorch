@@ -1,7 +1,7 @@
 import math
 from collections.abc import Callable, Sequence
-from itertools import chain, groupby
-from typing import Any, cast, Literal, NamedTuple
+from itertools import chain
+from typing import Any, Literal, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -9,7 +9,6 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
-from torch.distributed.tensor import DTensor
 
 from ._all_gather_layout import (
     _adopt_layout_outputs,
@@ -17,15 +16,13 @@ from ._all_gather_layout import (
     _DefaultAllGatherCopyPlan,
     _PersistentBuffers,
     AllGatherFinalizeMetadata,
-    AllGatherInputMetadata,
     AllGatherLayout,
     AllGatherParamMetadata,
     DEFAULT_ALL_GATHER_LAYOUT,
     DefaultAllGatherLayout,
 )
 from ._fsdp_api import _ReduceOp
-from ._fsdp_common import _to_dtype_if_needed
-from ._fsdp_param import FSDPParam, ShardedState
+from ._fsdp_param import FSDPParam
 
 
 class AllGatherResult(NamedTuple):
@@ -343,7 +340,7 @@ def _record_grad_output_stream_default(
 ) -> None:
     # No-op default. Where free is host-side bookkeeping (e.g. CUDA) the block
     # stays mapped, so no read-before-free edge is needed. A backend whose free
-    # releases device memory registers its own impl. See foreach_reduce.
+    # releases device memory registers its own impl. See BucketRuntime.reduce_grads.
     return
 
 
@@ -355,141 +352,6 @@ def record_grad_output_stream(buffer: torch.Tensor, stream: torch.Stream) -> Non
     torch.ops.fsdp.record_grad_output_stream(
         buffer, stream.stream_id, stream.device_index, stream.device_type
     )
-
-
-@torch.no_grad()
-def foreach_all_gather(
-    fsdp_params: list[FSDPParam],
-    group: dist.ProcessGroup,
-    async_op: bool,
-    all_gather_copy_in_stream: torch.Stream,
-    all_gather_stream: torch.Stream,
-    device: torch.device,
-    all_gather_comm: AllGather,
-    layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT,
-) -> AllGatherResult:
-    world_size, rank = group.size(), group.rank()
-    device_handle = _get_device_handle(device.type)
-    with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        # Extension layouts are set by the all_gather_inputs call above
-        outer_sizes = [
-            layout.outer_size
-            for fsdp_param in fsdp_params
-            for layout in fsdp_param.all_gather_output_layouts
-        ]
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        if isinstance(layout, DefaultAllGatherLayout):
-            # It always packs with its copy_in into rank-major output
-            copy_in, call_layout, output_metadata = layout.copy_in, layout, None
-        else:  # copies, since copy_in and the default copy-out read these lists
-            copy_in, call_layout, output_metadata = layout.prepare(
-                AllGatherInputMetadata(
-                    input_split_sizes=list(inp_split_sizes),
-                    input_outer_sizes=list(outer_sizes),
-                    input_numel=all_gather_input_numel,
-                    world_size=world_size,
-                    dtype=dtype,
-                    device=device,
-                )
-            )
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input, all_gather_output = copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs, all_gather_inputs
-    all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    comm_kwargs = {}
-    if layout.comm_type is not None:  # its comm selects the output with the metadata
-        comm_kwargs["output_metadata"] = output_metadata
-    with device_handle.stream(all_gather_stream):
-        all_gather_work = all_gather_comm(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
-            **comm_kwargs,
-        )
-        all_gather_event = all_gather_stream.record_event()
-    return AllGatherResult(
-        all_gather_output,
-        all_gather_event,
-        all_gather_work,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        inp_split_sizes,
-        outer_sizes,
-        call_layout,
-        output_metadata,
-        all_gather_input,
-    )
-
-
-@torch.no_grad()
-def _get_param_all_gather_inputs(
-    fsdp_params: list[FSDPParam],
-) -> list[list[torch.Tensor]]:
-    # Intentionally try to run a fast-path that bypasses abstractions for the
-    # common FSDP case of bf16/fp32 mixed precision in order to use foreach
-    # copy for lower CPU overhead and more efficient copying in eager
-    def use_foreach_copy(fsdp_param: FSDPParam) -> bool:
-        return (
-            fsdp_param.param_dtype is not None
-            and not fsdp_param.offload_to_cpu
-            and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-        )
-
-    param_all_gather_inputs: list[list[torch.Tensor]] = [[] for _ in fsdp_params]
-    foreach_copy_indices: list[int] = []
-    foreach_copy_inputs: list[torch.Tensor] = []
-    foreach_copy_input_numels: list[int] = []
-
-    # 1st pass: for foreach-copy parameters, get inputs and metadata for the
-    # foreach copy, and for the others, actually get their all-gather inputs
-    for i, fsdp_param in enumerate(fsdp_params):
-        if use_foreach_copy(fsdp_param):
-            foreach_copy_indices.append(i)
-            all_gather_input = (
-                fsdp_param._sharded_param_data
-                if fsdp_param.sharded_state == ShardedState.SHARDED
-                else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
-            )
-            foreach_copy_inputs.append(all_gather_input)
-            foreach_copy_input_numels.append(all_gather_input.numel())
-        else:
-            param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
-
-    # 2nd pass: use foreach copy to compute the remaining all-gather inputs
-    if foreach_copy_inputs:
-        fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
-        param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
-        flat_foreach_copy_input = torch.empty(
-            (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
-        )
-        splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
-        torch._foreach_copy_(splits, foreach_copy_inputs)
-        for i, split in zip(foreach_copy_indices, splits):
-            param_all_gather_inputs[i] = [split]
-
-    return param_all_gather_inputs
 
 
 def _prepare_default_all_gather_outputs(
@@ -664,306 +526,6 @@ def _default_reduce_scatter_input_fn(
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
-
-
-@torch.no_grad()
-def foreach_reduce(
-    fsdp_params: list[FSDPParam],
-    unsharded_grads: list[torch.Tensor],
-    reduce_scatter_group: dist.ProcessGroup,
-    reduce_scatter_stream: torch.Stream,
-    reduce_scatter_comm: ReduceScatter,
-    reduce_dtype: torch.dtype,
-    device: torch.device,
-    gradient_divide_factor: float | None,
-    all_reduce_group: dist.ProcessGroup | None,  # HSDP or replication
-    all_reduce_stream: torch.Stream,
-    all_reduce_grads: bool,
-    # Gradients awaiting all-reduce (HSDP or replication)
-    partial_reduce_output: torch.Tensor | None,
-    all_reduce_hook: Callable[[torch.Tensor], None] | None,
-    force_sum_reduction_for_comms: bool = False,
-    *,
-    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
-) -> tuple[
-    torch.Tensor,
-    torch.Event,
-    torch.Stream,
-    torch.Event,
-    torch.Tensor | None,
-    torch.Event | None,
-    torch.Tensor | None,
-]:
-    """
-    ``unsharded_grads`` owns the references to the gradients computed by
-    autograd, so clearing the list frees the gradients.
-    """
-
-    (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
-        _get_gradient_divide_factors(
-            reduce_scatter_group,
-            all_reduce_group,
-            reduce_dtype,
-            device.type,
-            gradient_divide_factor,
-            force_sum_reduction_for_comms,
-        )
-    )
-
-    if reduce_scatter_group is None:
-        world_size = 1
-    else:
-        world_size = reduce_scatter_group.size()
-    device_handle = _get_device_handle(device.type)
-    current_stream = device_handle.current_stream()
-
-    shard_dims = [p.fsdp_placement.dim for p in fsdp_params]
-    padded_sharded_numels = [p.padded_sharded_param_size.numel() for p in fsdp_params]
-    # See Note [Reduce-scatter input fn]
-    copy_in = prepare_reduce_scatter_inputs(
-        unsharded_grads, shard_dims=shard_dims, world_size=world_size
-    )
-    reduce_scatter_output_numel = sum(padded_sharded_numels)
-    reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_output_numel * world_size,),
-        dtype=reduce_dtype,
-        device=device,
-    )
-
-    copy_in(reduce_scatter_input)
-    # Only after the copy-in finishes can we free the gradients, including any
-    # that copy_in holds
-    del copy_in
-    unsharded_grads.clear()
-    reduce_scatter_stream.wait_stream(current_stream)
-    all_reduce_input = None
-    all_reduce_event = None
-
-    with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_comm.allocate(
-            (reduce_scatter_output_numel,),
-            dtype=reduce_dtype,
-            device=device,
-        )
-        _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
-            reduce_scatter_comm(
-                output_tensor=reduce_output,
-                input_tensor=reduce_scatter_input,
-                group=reduce_scatter_group,
-                op=reduce_scatter_op,
-            )
-        else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
-            # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
-                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
-            else:
-                reduce_output.copy_(reduce_scatter_input)
-        reduce_scatter_event = reduce_scatter_stream.record_event()
-        post_reduce_stream = reduce_scatter_stream
-        if all_reduce_group is not None:  # HSDP or DDP/replicate
-            # Accumulations must run in the reduce-scatter stream
-            if not all_reduce_grads:
-                if partial_reduce_output is not None:
-                    partial_reduce_output += reduce_output
-                else:
-                    partial_reduce_output = reduce_output
-                return (
-                    reduce_scatter_input,
-                    reduce_scatter_event,
-                    post_reduce_stream,
-                    post_reduce_stream.record_event(),
-                    all_reduce_input,
-                    all_reduce_event,
-                    partial_reduce_output,
-                )
-            if partial_reduce_output is not None:
-                reduce_output += partial_reduce_output
-            post_reduce_stream = all_reduce_stream
-            if world_size >= 1:
-                all_reduce_stream.wait_stream(reduce_scatter_stream)
-            else:
-                all_reduce_stream.wait_stream(current_stream)
-            with device_handle.stream(all_reduce_stream):
-                dist.all_reduce(
-                    reduce_output,
-                    group=all_reduce_group,
-                    op=all_reduce_op,
-                )
-                # Keep refs to the reduce-dtype AR buffer + completion
-                # event so FSDPParamGroup._all_reduce_state can hold them
-                # across layers. This keeps the buffer off the caching
-                # allocator's free list; otherwise the next layer's
-                # reduce-scatter can reuse the same physical block while
-                # this layer's AR is still in flight, causing cross-layer
-                # gradient aliasing under slow AR. See PR #140044,
-                # regression test PR #180900.
-                all_reduce_input = reduce_output
-                all_reduce_event = all_reduce_stream.record_event()
-    # -- END: ops in reduce_scatter stream
-
-    if all_reduce_hook is not None:
-        # Execute user-specified all reduce hook.
-        # If native HSDP is used, this is executed after the HSDP all reduce.
-        # If 1-d FSDP is used, this is executed post reduce-scatter.
-        post_reduce_stream = all_reduce_stream
-        all_reduce_stream.wait_stream(reduce_scatter_stream)
-        with device_handle.stream(all_reduce_stream):
-            all_reduce_hook(reduce_output)
-            # The hook and the post-reduce ops below read the RS output off
-            # the RS stream. Without native HSDP nothing else holds it, so
-            # hold it the same way as the HSDP AR buffer (see AllReduceState).
-            all_reduce_input = reduce_output
-            all_reduce_event = all_reduce_stream.record_event()
-    # -- END: ops post reduce_scatter
-
-    with device_handle.stream(post_reduce_stream):
-        _div_if_needed(reduce_output, postdivide_factor)
-        # Casting may rebind to a new tensor. Do NOT rely on this rebind to manage
-        # the old reduce-dtype buffer's lifetime: the rebind orders the
-        # cast before the free-event on AR stream, but the freed block
-        # lands on the caching allocator's free list and the next layer's
-        # RS on RS stream can reuse it without waiting for this layer's
-        # AR to finish. The reduce-dtype buffer is held across layers by
-        # FSDPParamGroup._all_reduce_state (captured above) to prevent
-        # this. See PR #140044, regression test PR #180900.
-        # reduce_output backs the sharded gradients (via the views below):
-        # produced on the reduce-scatter / all-reduce stream but consumed on the
-        # caller's stream. The op is a no-op by default; a backend whose free is
-        # a device op that releases the memory registers an impl that records
-        # the consumer stream, so the free is ordered behind that read.
-        record_grad_output_stream(reduce_output, current_stream)
-        sharded_grads = _cast_and_view_sharded_grads(
-            reduce_output, fsdp_params, padded_sharded_numels, current_stream
-        )
-
-        # Accumulate the reduced gradients in each parameter's sharded dtype.
-        for fsdp_param, new_sharded_grad in zip(fsdp_params, sharded_grads):
-            to_accumulate_grad = fsdp_param.sharded_param.grad is not None
-            if fsdp_param.offload_to_cpu:
-                # Only overlap the D2H copy (copying to pinned memory) when no
-                # in-backward CPU consumer of the grad exists. Two such
-                # consumers suppress the overlap:
-                #   - Accumulating grads: the CPU add kernel depends on the
-                #     copy result and we cannot run the add as a callback.
-                #   - Post-accumulate-grad hooks: user code (e.g.
-                #     optimizer-in-backward) reads ``param.grad`` on CPU
-                #     synchronously. With ``non_blocking=True`` the hook would
-                #     observe in-flight pinned memory — silently wrong
-                #     optimizer updates.
-                has_post_acc_grad_hook = bool(
-                    getattr(
-                        fsdp_param.sharded_param,
-                        "_post_accumulate_grad_hooks",
-                        None,
-                    )
-                )
-                non_blocking = (
-                    fsdp_param.pin_memory
-                    and not to_accumulate_grad
-                    and not has_post_acc_grad_hook
-                )
-                # Since the GPU sharded gradient is allocated in the RS stream,
-                # we can free it here by not keeping a ref without waiting for
-                # the D2H copy since future RS-stream ops run after the copy
-                new_sharded_grad = new_sharded_grad.to(
-                    torch.device("cpu"), non_blocking=non_blocking
-                )
-                if non_blocking:
-                    # Record an event on which to block the CPU thread to
-                    # ensure that the D2H copy finishes before the optimizer
-                    fsdp_param.grad_offload_event = post_reduce_stream.record_event()
-            if to_accumulate_grad:
-                if not isinstance(fsdp_param.sharded_param.grad, DTensor):
-                    raise AssertionError(
-                        f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
-                    )
-                fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
-            else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
-                    new_sharded_grad
-                )
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            for hook in (
-                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
-                or {}
-            ).values():
-                hook(fsdp_param.sharded_param)
-        post_reduce_event = post_reduce_stream.record_event()
-    # The RS output is allocated in the RS stream and used in the default
-    # stream (for optimizer). To ensure its memory is not reused for later
-    # RSs, we do not need extra synchronization since the sharded parameters
-    # hold refs through the end of backward.
-    return (
-        reduce_scatter_input,
-        reduce_scatter_event,
-        post_reduce_stream,
-        post_reduce_event,
-        all_reduce_input,
-        all_reduce_event,
-        None,
-    )
-
-
-def _cast_and_view_sharded_grads(
-    reduce_output: torch.Tensor,
-    fsdp_params: list[FSDPParam],
-    padded_sharded_numels: Sequence[int],
-    consumer_stream: torch.Stream,
-) -> list[torch.Tensor]:
-    # Inputs follow the sharded gradient dtype order cached at lazy init.
-    # Each contiguous region needs at most one flat cast/allocation after
-    # RS/AR; parameter gradients become views. Reduction uses one dtype.
-    # A fused heterogeneous cast kernel could combine per-dtype launches
-    # and fuse accumulation to avoid temporary buffers while preserving
-    # cast-before-add rounding.
-    sharded_grads: list[torch.Tensor] = []
-    reduce_output_numel = reduce_output.numel()
-    runs = [
-        (grad_dtype, list(group))
-        for grad_dtype, group in groupby(
-            zip(fsdp_params, padded_sharded_numels),
-            key=lambda param_and_numel: param_and_numel[0].sharded_grad_dtype,
-        )
-    ]
-    cast_numel = sum(
-        sum(numel for _, numel in param_group)
-        for grad_dtype, param_group in runs
-        if grad_dtype is not None and grad_dtype != reduce_output.dtype
-    )
-    # Views of an uncast run keep all of reduce_output alive, including the
-    # regions of runs cast into their own buffers, so copy the uncast runs when
-    # those regions are larger.
-    copy_uncast = cast_numel > reduce_output_numel - cast_numel
-    flat_grad_offset = 0  # [0, reduce_output_numel - 1]
-    for grad_dtype, param_group in runs:
-        group_numel = sum(numel for _, numel in param_group)
-        group_output = reduce_output
-        if group_numel != reduce_output_numel:
-            group_output = group_output.narrow(0, flat_grad_offset, group_numel)
-        new_output = _to_dtype_if_needed(group_output, grad_dtype)
-        if new_output is group_output and copy_uncast:
-            new_output = group_output.clone()
-        if new_output is not group_output:
-            # These sharded gradients alias the new buffer instead
-            record_grad_output_stream(new_output, consumer_stream)
-        group_output = new_output
-        group_offset = group_output.storage_offset()
-        for fsdp_param, padded_sharded_numel in param_group:
-            # Assume even sharding for Shard(i), i > 0; otherwise would
-            # require copy-out for contiguous strides.
-            sharded_grads.append(
-                torch.as_strided(
-                    group_output,
-                    size=fsdp_param.sharded_size,
-                    stride=fsdp_param.contiguous_sharded_stride,
-                    storage_offset=group_offset,
-                )
-            )
-            group_offset += padded_sharded_numel
-        flat_grad_offset += group_numel
-    return sharded_grads
 
 
 def foreach_reduce_scatter_copy_in(

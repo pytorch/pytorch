@@ -1014,8 +1014,8 @@ class TestDistributedBuckets(FSDPTest):
 
         with mock.patch.object(
             dist,
-            "reduce_scatter_tensor",
-            wraps=dist.reduce_scatter_tensor,
+            "reduce_scatter_single",
+            wraps=dist.reduce_scatter_single,
         ) as reduce_scatter:
             reduced = mixed.reduce_prepared_grad(prepared_reduce, GradientReduction())
         self.assertEqual(reduce_scatter.call_count, 1)

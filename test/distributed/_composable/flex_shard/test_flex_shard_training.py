@@ -433,10 +433,10 @@ class TestFlexShardTraining(FSDPTest):
 
         packed_ptrs: list[int] = []
         original_pack = Shard._pack_reduce_scatter_grad
-        original_reduce_scatter = dist.reduce_scatter_tensor
+        original_reduce_scatter = dist.reduce_scatter_single
 
-        def record_packed_buffer(placement, tensors, infos, world_size):
-            packed, layout = original_pack(placement, tensors, infos, world_size)
+        def record_packed_buffer(placement, tensors, infos, world_size, *args):
+            packed, layout = original_pack(placement, tensors, infos, world_size, *args)
             packed_ptrs.append(packed.data_ptr())
             if len(packed_ptrs) == 2:
                 # The fix orders this producer stream after the first consumer.
@@ -459,7 +459,7 @@ class TestFlexShardTraining(FSDPTest):
             ),
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
+                "reduce_scatter_single",
                 delayed_reduce_scatter,
             ),
         ):
@@ -832,7 +832,7 @@ class TestFlexShardTraining(FSDPTest):
             "all_gather",
             "all_gather_into_tensor",
             "reduce_scatter",
-            "reduce_scatter_tensor",
+            "reduce_scatter_single",
         )
         for out_features, gradient_bucket in ((8, False), (8, True), (16, False)):
             # Linear(16, 16) then Linear(16, out_features) on 2 ranks: largest
@@ -911,7 +911,7 @@ class TestFlexShardTraining(FSDPTest):
                 self.assertEqual(calls["all_gather"] > 0, uneven, calls)
                 self.assertEqual(calls["reduce_scatter"] > 0, uneven, calls)
                 self.assertEqual(calls["all_gather_into_tensor"] > 0, not uneven, calls)
-                self.assertEqual(calls["reduce_scatter_tensor"] > 0, not uneven, calls)
+                self.assertEqual(calls["reduce_scatter_single"] > 0, not uneven, calls)
 
     @skip_if_lt_x_gpu(2)
     def test_owner_rows_reduce_grads_in_param_layout(self):
@@ -1041,7 +1041,7 @@ class TestFlexShardTraining(FSDPTest):
                 dist, "all_gather_single", wraps=dist.all_gather_single
             ) as all_gather,
             mock.patch.object(
-                dist, "reduce_scatter_tensor", wraps=dist.reduce_scatter_tensor
+                dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
             ) as reduce_scatter,
         ):
             model(x).sum().backward()
@@ -1432,7 +1432,7 @@ class TestFlexShardTraining(FSDPTest):
             ),
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
+                "reduce_scatter_single",
                 side_effect=AssertionError("reduce-scatter on a 1-rank mesh"),
             ),
         ):
@@ -1719,13 +1719,17 @@ class TestFlexShardTraining(FSDPTest):
         # grad reaches the reduce-scatter, whose copy-in widens it, and
         # grad_dtype is restored afterwards.
         runtime = bucket_runtime.BucketRuntime
-        with mock.patch.object(
-            runtime, "reduce_grads", autospec=True, side_effect=runtime.reduce_grads
-        ) as reduces:
+        reduced_dtypes = []
+        orig_reduce_grads = runtime.reduce_grads
+
+        def record_reduce_grads(self, grads, *args, **kwargs):
+            # The reduce frees its list's grads once copied in
+            reduced_dtypes.append([grad.dtype for grad in grads])
+            return orig_reduce_grads(self, grads, *args, **kwargs)
+
+        with mock.patch.object(runtime, "reduce_grads", record_reduce_grads):
             model.tok_embeddings(x).float().sum().backward()
-        self.assertEqual(
-            [grad.dtype for grad in reduces.call_args.args[1]], [torch.bfloat16]
-        )
+        self.assertEqual(reduced_dtypes, [[torch.bfloat16]])
         self.assertEqual(unsharded_param.grad_dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
@@ -1814,8 +1818,8 @@ class TestFlexShardTraining(FSDPTest):
             ) as all_gather,
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
-                wraps=dist.reduce_scatter_tensor,
+                "reduce_scatter_single",
+                wraps=dist.reduce_scatter_single,
             ) as reduce_scatter,
         ):
             output = model(x)

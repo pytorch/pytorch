@@ -70,6 +70,12 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     return ret
 
 
+def _has_null_storage(tensor) -> bool:
+    # A wrapper subclass has no storage data, but its data_ptr() still adds its
+    # storage offset (e.g. a DTensor whose local tensor is a view)
+    return tensor.data_ptr() == tensor.storage_offset() * tensor.element_size()
+
+
 def _dtype_to_typestr(dtype):
     # CUDA devices are little-endian and tensors are stored in native byte
     # order. 1-byte entries are endian-agnostic.
@@ -158,7 +164,7 @@ class Tensor(torch._C.TensorBase):
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
-                or (type(self) is not Tensor and self.data_ptr() == 0)
+                or (type(self) is not Tensor and _has_null_storage(self))
             ):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
@@ -459,7 +465,7 @@ class Tensor(torch._C.TensorBase):
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
                     not torch._subclasses.fake_tensor.is_fake_tensor(self)
-                    and self.data_ptr() == 0
+                    and _has_null_storage(self)
                 )
             )
         ):

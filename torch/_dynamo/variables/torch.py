@@ -140,11 +140,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
 
 if TYPE_CHECKING:
     from torch._custom_class_base import CustomClassBase
@@ -740,7 +735,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             CUDAMemPoolContextVariable,
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
-            FSDPParamGroupUseTrainingStateVariable,
             FxTracebackAnnotateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
@@ -989,17 +983,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 )
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
-            )
-        elif (
-            _fsdp_param_group is not None
-            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
-        ):
-            if len(args) != 2:
-                raise AssertionError(
-                    f"FSDPParamGroup.use_training_state expects 2 args, got {len(args)}"
-                )
-            return FSDPParamGroupUseTrainingStateVariable.create(
-                tx, args[0], args[1].as_python_constant()
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(

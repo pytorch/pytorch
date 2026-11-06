@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from types import ModuleType
@@ -24,7 +25,9 @@ from torch.utils.hooks import RemovableHandle
 from .bucket_comm import (
     begin_bucket_unshard,
     begin_explicit_bucket_unshard,
+    begin_post_forward_unshard,
     begin_reduce_grad,
+    PostReduceScatter,
     ReduceGradHandle,
     UnshardHandle,
 )
@@ -40,6 +43,23 @@ from .utils import (
 
 _EAGER_COMM_CONTEXTS_ATTR = "_flex_shard_eager_comm_contexts"
 _MAX_PENDING_REDUCE_GRADS_ATTR = "_flex_shard_max_pending_reduce_grads"
+
+logger = logging.getLogger("torch.distributed.fsdp.flex_shard")
+
+
+def _outside_functorch(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Run ``fn`` with functorch transforms disabled, so that unshard buffers
+    are plain tensors when a forward first runs under e.g. ``jvp``, as FSDP2's
+    unshard does."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if torch._C._are_functorch_transforms_active():
+            with torch._C._DisableFuncTorch():
+                return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 @dataclass
@@ -86,6 +106,71 @@ class BucketParam:
     param_info: ParamInfo
     sharded_param: nn.Parameter
     shared_owners: tuple[ParamOwnerRef, ...] = ()
+
+
+class ParamRepresentation:
+    """How a frontend exposes a bucket's parameters to modules and optimizers.
+
+    The engine all-gathers, reduces and stores plain local tensors. This
+    default, which ``flex_shard`` uses, exposes them as they are. ``fully_shard``
+    wraps them in DTensors. ``index`` is the parameter's position in the bucket.
+    """
+
+    def local_shard(
+        self, index: int, sharded_param: nn.Parameter, *, use_autograd: bool
+    ) -> torch.Tensor:
+        """The local shard to all-gather, a view of the bucket storage."""
+        return sharded_param if use_autograd else sharded_param.detach()
+
+    def unsharded_param(self, index: int, full_param: torch.Tensor) -> torch.Tensor:
+        """The tensor the persistent unsharded parameter wraps."""
+        return full_param
+
+    def unsharded_local(self, index: int, unsharded_param: nn.Parameter) -> torch.Tensor:
+        """The local tensor of an unsharded parameter, whose grad is reduced."""
+        return unsharded_param
+
+    def unsharded_grad(self, index: int, grad: torch.Tensor) -> torch.Tensor:
+        """The local tensor to reduce for an unsharded parameter's grad."""
+        return grad
+
+    def accumulate_sharded_grads(
+        self,
+        indices: list[int],
+        sharded_params: list[nn.Parameter],
+        sharded_grads: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
+        """Store the reduced local grads on the sharded parameters and return
+        the tensors stored, whose memory the reduce must keep alive."""
+        return _accumulate_sharded_grads(sharded_params, sharded_grads)
+
+    def check_post_forward_reshard(self) -> None:
+        """Raise if the frontend does not support a reshard after forward to a
+        smaller group (see ``BucketRuntime.reshard``)."""
+
+    def check_reduce_unused_params(self) -> None:
+        """Raise if the frontend cannot reduce zero grads for unused params
+        (``ShardedBucketStorage._reduce_scatter_unused_params``)."""
+
+    def adopt_unsharded_params(self, unsharded_params: list[nn.Parameter]) -> None:
+        """Called with the persistent unsharded params once created."""
+
+    def defers_grad_upcast(self, index: int) -> bool | None:
+        """Whether the param's grads may stay in the compute dtype until the
+        reduce (see ``BucketRuntime._set_unsharded_grad_dtypes``), or None for
+        the engine's rule."""
+        return None
+
+    def on_sharded_state(self, state: str) -> None:
+        """Called when the bucket becomes ``"unsharded"``, ``"sharded"`` or
+        ``"sharded_post_forward"``."""
+
+    def check_post_forward_unshard(self) -> None:
+        """Raise if the frontend does not support an unshard from the chunks a
+        reshard after forward kept."""
+
+
+_PLAIN_REPRESENTATION = ParamRepresentation()
 
 
 def _in_backward() -> bool:
@@ -233,6 +318,39 @@ class BucketCommContext:
     # See FlexShardModule.set_manual_backward_finalization and finalize_backward.
     manual_backward_finalization: bool = False
     pending_finalization: GradientReductionHandle | None = None
+    # Whether the end of backward waits for the reductions, as FSDP2's
+    # set_is_last_backward; without, they stay pending until the next one, and
+    # with fsdp2_prefetch_release, so do unused prefetches.
+    wait_reductions_at_backward_end: bool = True
+    fsdp2_prefetch_release: bool = False
+    # Frontend callbacks run at the end of each backward's final callback.
+    backward_end_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    # Run by every bucket's pre-backward hook, i.e. as each backward starts
+    backward_start_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    # Runs the steps after a reduce-scatter (see PostReduceScatter); created
+    # on first use.
+    _all_reduce_stream: torch.Stream | None = None
+
+    @property
+    def all_reduce_stream(self) -> torch.Stream:
+        if self._all_reduce_stream is None:
+            self._all_reduce_stream = self.device_handle.Stream(priority=-1)
+        return self._all_reduce_stream
+
+    @classmethod
+    def for_device(
+        cls, device: torch.device, max_pending_reduce_grads: int = 1
+    ) -> BucketCommContext:
+        """A context not attached to a module, for a frontend that groups its
+        buckets itself (``fully_shard``)."""
+        device_handle = _get_device_handle(device.type)
+        return cls(
+            device_handle=device_handle,
+            unshard_stream=device_handle.Stream(priority=-1),
+            reduce_grad_stream=device_handle.Stream(priority=-1),
+            reduce_grad_release_stream=device_handle.Stream(priority=-1),
+            max_pending_reduce_grads=max_pending_reduce_grads,
+        )
 
     @classmethod
     def get(
@@ -289,6 +407,10 @@ class BucketCommContext:
         idx = bucket.post_forward_index
         if idx is None:
             return None
+        if bucket.bucket_storage._fsdp2_semantics:
+            # As FSDP2: the previous bucket in post-forward order, a no-op if
+            # it is unsharded already
+            return self.post_forward_order[idx - 1] if idx > 0 else None
         for candidate in reversed(self.post_forward_order[:idx]):
             if (
                 candidate.bucket_storage._reshard_after_forward
@@ -314,6 +436,7 @@ class BucketCommContext:
             or any(pending.bucket is bucket for pending in self.pending_unshards)
             or (
                 not explicit
+                and not bucket.bucket_storage._fsdp2_semantics
                 and any(not pending.explicit for pending in self.pending_unshards)
             )
         ):
@@ -388,7 +511,10 @@ class BucketCommContext:
         for pending in self.pending_unshards:
             if bucket is not None and pending.bucket is bucket:
                 result = pending.result
-            elif bucket is not None and pending.explicit:
+            elif bucket is not None and (
+                # FSDP2 keeps a group's prefetch until the group takes it
+                pending.explicit or pending.bucket.bucket_storage._fsdp2_semantics
+            ):
                 kept.append(pending)
             else:
                 self._release_prefetch(pending)
@@ -429,11 +555,17 @@ class BucketCommContext:
                 finish = self.finish_at_backward_end
                 if finish:
                     self.finish_buckets()
-                self.wait_and_clear_reduce_grad_states(debug_fqn=None)
-                if finish:
+                if self.wait_reductions_at_backward_end:
+                    self.wait_and_clear_reduce_grad_states(debug_fqn=None)
+                if finish and (
+                    self.wait_reductions_at_backward_end
+                    or not self.fsdp2_prefetch_release
+                ):
                     self.take_pending_unshard(None)
                 self.finish_at_backward_end = False
                 self.post_backward_callback_queued = False
+                for callback in self.backward_end_callbacks:
+                    callback()
 
         torch.autograd.Variable._execution_engine.queue_callback(
             _post_backward_callback
@@ -456,7 +588,11 @@ class BucketCommContext:
             else self.buckets
         )
         for bucket in buckets:
-            if bucket.needs_finish():
+            # FSDP2's final callback runs every post-backward this backward did
+            # not, a no-op for buckets it did not reach
+            if bucket.needs_finish() or (
+                bucket.bucket_storage._fsdp2_semantics and not bucket.post_backward_ran
+            ):
                 if (
                     bucket.bucket_storage._defer_post_backward
                     and bucket.bucket_storage._requires_gradient_sync
@@ -486,6 +622,15 @@ class BucketCommContext:
         # a block's routed experts reduce before its dense bucket, whose smaller
         # buffers then reuse the memory they freed.
         self.finish_buckets(reverse_module_order=True)
+        # FSDP2's finalize_backward also reshards the buckets that reduced in
+        # backward but kept their params, if they reshard after backward now
+        for bucket in self.buckets:
+            if (
+                bucket.bucket_storage._fsdp2_semantics
+                and bucket.is_unsharded
+                and bucket.bucket_storage._reshard_after_backward
+            ):
+                bucket.reshard()
         self.take_pending_unshard(None)
 
     def check_no_raised_backward(self) -> None:
@@ -568,9 +713,15 @@ class BucketCommContext:
                 "FlexShard::post_backward_reduce_grad_retire",
                 debug_fqn,
             ):
+                # As FSDP2: a current stream other than the one that copied in
+                # (e.g. finalize_backward on its own stream) also waits, so its
+                # copy-in cannot reuse the input early (a custom comm may
+                # allocate one persistent input) and the cap bounds memory
+                current_stream = self.device_handle.current_stream()
                 self.wait_and_release_reduce_grad_state(
                     pending,
-                    wait_current_stream=False,
+                    wait_current_stream=current_stream
+                    not in pending.result.allocation_streams,
                 )
                 self.retired_reduce_grad_states.append(pending)
 
@@ -623,6 +774,18 @@ class BucketRuntime:
     # last reduce-scatter, so the next syncing backward reduces it even if it
     # does not use the bucket. Unlike grad presence, the same on every rank.
     needs_sync: bool = False
+    # A pre-backward hook ran without unsharding (see
+    # ShardedBucketStorage._unshard_in_backward): the end of backward must
+    # still run this bucket's post-backward, as FSDP2's final callback does.
+    backward_without_unshard: bool = False
+    # This backward ran the post-backward: a bucket that stays unsharded after
+    # it (FSDP2's reshard_after_backward=False) needs no finish
+    post_backward_ran: bool = False
+    # Whether this bucket's reduce first retires pending reductions over the
+    # context's cap. fully_shard's modules with buckets on several meshes
+    # retire them once, at the bucket that reduces first, as FSDP2 does, so
+    # that their reductions overlap.
+    retires_pending_reductions: bool = True
     # Persistent unsharded params, created from the first unshard, and the
     # placement's persistent buffers backing them with their allocated storage
     # size in bytes. Left out of repr: their storage is freed while resharded,
@@ -637,6 +800,39 @@ class BucketRuntime:
     # Whether the placement's gradient reduction reads grads in the parameter
     # layout as is (see _run_pre_backward_hook). Set at the first backward.
     grads_in_param_layout: bool | None = None
+    # How the frontend exposes the parameters (see ParamRepresentation).
+    representation: ParamRepresentation = field(
+        default=_PLAIN_REPRESENTATION, repr=False
+    )
+    # Whether reshard keeps the persistent storage, so its data pointers stay
+    # fixed (e.g. for CUDA graphs), as FSDP2's set_keep_unsharded_storage.
+    keep_persistent_storage: bool = False
+    # The frontend's logger and name in debug logs, e.g.
+    # "FSDP::pre_forward (layers.0)"
+    logger: logging.Logger = field(default=logger, repr=False)
+    log_name: str = "FlexShard"
+    # Reduce-scatter outputs accumulated while the bucket skips its all-reduce
+    # (see ShardedBucketStorage._requires_all_reduce).
+    partial_reduce_output: torch.Tensor | None = None
+    partial_reduce_indices: frozenset[int] = frozenset()
+    # This rank's chunk of each persistent buffer, packed, kept by a reshard
+    # after forward to a smaller group (ShardedBucketStorage._post_forward_group)
+    # for the next unshard to all-gather over that group only.
+    post_forward_storage: torch.Tensor | None = None
+    post_forward_chunk_nbytes: list[int] = field(default_factory=list)
+    post_forward_group: dist.ProcessGroup | None = None
+
+    def _post_reduce_scatter(self) -> PostReduceScatter | None:
+        storage = self.bucket_storage
+        if storage._replicate_group is None and storage._all_reduce_hook is None:
+            return None
+        return PostReduceScatter(
+            stream=storage._all_reduce_hook_stream or self.context.all_reduce_stream,
+            replicate_group=storage._replicate_group,
+            requires_all_reduce=storage._requires_all_reduce,
+            partial_output=self.partial_reduce_output,
+            hook=storage._all_reduce_hook,
+        )
 
     @classmethod
     def from_bucket_storage(
@@ -684,8 +880,10 @@ class BucketRuntime:
     def _local_shards(self, *, use_autograd: bool) -> list[torch.Tensor]:
         # detach() shares the parameter version counter, which versioned
         # placement caches need for optimizer-update invalidation.
+        representation = self.representation
         return [
-            param if use_autograd else param.detach() for param in self.sharded_params
+            representation.local_shard(index, param, use_autograd=use_autograd)
+            for index, param in enumerate(self.sharded_params)
         ]
 
     def reset_sharded_params(self) -> None:
@@ -746,6 +944,8 @@ class BucketRuntime:
         )
         return getattr(target, "_checkpoint_wrapped_module", target)
 
+    @_outside_functorch
+    @torch.inference_mode(False)
     def begin_unshard(
         self,
         local_shards: list[torch.Tensor] | None = None,
@@ -766,6 +966,24 @@ class BucketRuntime:
         allocates its unsharded parameters at copy-out; otherwise this does,
         before the unshard stream waits on it.
         """
+        if (
+            self.post_forward_storage is not None
+            and self.unsharded_params is not None
+            and not torch.compiler.is_compiling()
+        ):
+            group = self.post_forward_group
+            if group is None:
+                raise AssertionError("Expected a post-forward group")
+            self.representation.check_post_forward_unshard()
+            return begin_post_forward_unshard(
+                self.post_forward_storage,
+                self.post_forward_chunk_nbytes,
+                self.persistent_buffers,
+                group,
+                self.context.device_handle.current_stream()
+                if on_current_stream
+                else self.context.unshard_stream,
+            )
         if local_shards is None:
             local_shards = self._local_shards(use_autograd=False)
         persistent_buffers = None
@@ -773,22 +991,31 @@ class BucketRuntime:
             if not self.infos[0].placement.refills_persistent_buffers_in_finish:
                 self._alloc_persistent_storage()
             persistent_buffers = self.persistent_buffers
+        storage = self.bucket_storage
+        prepare_kwargs = {
+            "comm": storage._all_gather_comm,
+            "device": storage._compute_device,
+        }
+        if storage._unshard_async_op and not on_current_stream:
+            on_current_stream = async_op = True
         if on_current_stream:
             return begin_explicit_bucket_unshard(
                 local_shards,
                 self.infos,
-                self.bucket_storage._mesh,
+                storage._mesh,
                 async_op=async_op,
                 debug_fqn=self.debug_fqn,
                 persistent_buffers=persistent_buffers,
+                **prepare_kwargs,
             )
         return begin_bucket_unshard(
             local_shards,
             self.infos,
-            self.bucket_storage._mesh,
+            storage._mesh,
             self.context.unshard_stream,
             debug_fqn=self.debug_fqn,
             persistent_buffers=persistent_buffers,
+            **prepare_kwargs,
         )
 
     def reduce_grads(
@@ -796,22 +1023,27 @@ class BucketRuntime:
         grads: list[torch.Tensor],
         infos: list[ParamInfo],
         sharded_params: list[nn.Parameter],
+        indices: list[int] | None = None,
     ) -> None:
-        """Reduce full-parameter grads and accumulate local sharded grads."""
+        """Reduce full-parameter grads and accumulate local sharded grads. The
+        placement may clear ``grads`` once it copied them in."""
         if not grads:
             return
+        device = grads[0].device
         with torch.no_grad():
-            self.context.drain_reduce_grad_states_if_needed(self.debug_fqn)
+            if self.retires_pending_reductions:
+                self.context.drain_reduce_grad_states_if_needed(self.debug_fqn)
             # A 1-rank mesh has nothing to communicate, so it reduces on the
             # current stream, as FSDP2 does for a 1-rank group. On the reduce-grad
             # stream, its cast sharded grads would come from that stream's
             # allocator pool, which memory freed on the current stream cannot
             # refill, and with one rank they are full size.
             reduce_grad_stream = (
-                self.context.device_handle.current_stream(grads[0].device)
+                self.context.device_handle.current_stream(device)
                 if self.bucket_storage._mesh.size() == 1
                 else self.context.reduce_grad_stream
             )
+            post_reduce_scatter = self._post_reduce_scatter()
             result = begin_reduce_grad(
                 grads,
                 infos,
@@ -819,20 +1051,44 @@ class BucketRuntime:
                 self.bucket_storage.gradient_reduction,
                 reduce_grad_stream,
                 debug_fqn=self.debug_fqn,
+                post_reduce_scatter=post_reduce_scatter,
+                comm=self.bucket_storage._reduce_scatter_comm,
+                copy_in_fn=self.bucket_storage._reduce_scatter_input_fn,
             )
-            with self.context.device_handle.stream(reduce_grad_stream):
-                with _record_function_if_eager(
-                    "FlexShard::reduce_grad_accumulate",
-                    self.debug_fqn,
-                ):
-                    sharded_grads = result.finish()
-                    result.record_sharded_grads(
-                        _accumulate_sharded_grads(
+            if post_reduce_scatter is not None:
+                self.partial_reduce_output = post_reduce_scatter.partial_output
+                self.partial_reduce_indices = (
+                    frozenset(range(len(sharded_params)) if indices is None else indices)
+                    if self.partial_reduce_output is not None
+                    else frozenset()
+                )
+            post_stream = result.post_stream or reduce_grad_stream
+            if not result.partial:
+                consumer_stream = self.context.device_handle.current_stream(device)
+                with self.context.device_handle.stream(post_stream):
+                    with _record_function_if_eager(
+                        "FlexShard::reduce_grad_accumulate",
+                        self.debug_fqn,
+                    ):
+                        sharded_grads = result.finish()
+                        new_grads = self.representation.accumulate_sharded_grads(
+                            list(range(len(sharded_params)))
+                            if indices is None
+                            else indices,
                             sharded_params,
                             sharded_grads,
-                        ),
-                        reduce_grad_stream,
-                    )
+                        )
+                        if post_stream != consumer_stream:
+                            _record_grad_output_stream(
+                                sharded_grads + new_grads, consumer_stream
+                            )
+                        # Grads made on the reduce-grad stream need no tracking:
+                        # its next reduce waits for the current stream, so for
+                        # all reads of grads freed there, as in FSDP2
+                        result.record_sharded_grads(
+                            [] if post_stream is reduce_grad_stream else new_grads,
+                            post_stream,
+                        )
             self.context.reduce_grad_states.append(PendingReduceGrad(result))
             self.context.queue_post_backward_callback(finish=False)
 
@@ -840,6 +1096,7 @@ class BucketRuntime:
     # Eager: persistent unsharded parameters
     # ------------------------------------------------------------------
 
+    @_outside_functorch
     def unshard(
         self, *, finish_other_prefetch: bool = False, on_current_stream: bool = False
     ) -> None:
@@ -884,6 +1141,7 @@ class BucketRuntime:
                     tuple(self.persistent_buffers)
                 ):
                     refill = result.finish()
+                self.post_forward_storage = None
                 if len(refill.persistent_buffers) != len(
                     self.persistent_buffers
                 ) or any(
@@ -896,6 +1154,7 @@ class BucketRuntime:
                     )
             self._sync_requires_grad()
         self.is_unsharded = True
+        self.representation.on_sharded_state("unsharded")
 
     def _create_unsharded_params(
         self,
@@ -912,6 +1171,10 @@ class BucketRuntime:
         for bucket_param, full_param in zip(
             self.bucket_params, full_params, strict=True
         ):
+            if isinstance(full_param, nn.Parameter):
+                # The placement made the unsharded param and refills it itself
+                unsharded_params.append(full_param)
+                continue
             # Refills write into the persistent buffers, so the params (or a
             # tensor subclass's inner tensors) must view them.
             if any(
@@ -924,7 +1187,8 @@ class BucketRuntime:
                     "persistent buffers, so refills would not reach it."
                 )
             unsharded_param = nn.Parameter(
-                full_param, requires_grad=bucket_param.sharded_param.requires_grad
+                self.representation.unsharded_param(len(unsharded_params), full_param),
+                requires_grad=bucket_param.sharded_param.requires_grad,
             )
             for name, value in bucket_param.param_info.param_attrs.items():
                 setattr(unsharded_param, name, value)
@@ -933,6 +1197,7 @@ class BucketRuntime:
             unsharded_param.grad_dtype = bucket_param.param_info.unsharded_grad_dtype
             unsharded_params.append(unsharded_param)
         self.unsharded_params = unsharded_params
+        self.representation.adopt_unsharded_params(unsharded_params)
         self.persistent_buffers = list(persistent_buffers)
         self.persistent_buffer_nbytes = [
             persistent_buffer.untyped_storage().size()
@@ -954,11 +1219,35 @@ class BucketRuntime:
             for owner in (bucket_param.param_owner, *bucket_param.shared_owners):
                 owner.module._parameters[owner.param_name] = param
 
-    def reshard(self) -> None:
-        """Swap the local shards back in and free the persistent storage."""
+    def reshard(self, *, after_forward: bool = False) -> None:
+        """Swap the local shards back in and free the persistent storage.
+
+        ``after_forward`` first keeps this rank's chunk for the post-forward
+        group, if any (see ``post_forward_storage``)."""
+        group = self.bucket_storage._post_forward_group
+        self.post_forward_storage = None
+        if (
+            after_forward
+            and group is not None
+            and self.unsharded_params is not None
+            and not torch.compiler.is_compiling()
+        ):
+            self.representation.check_post_forward_reshard()
+            world_size, rank = group.size(), group.rank()
+            chunks = []
+            for buffer in self.persistent_buffers:
+                flat = buffer.view(-1).view(torch.uint8)
+                nbytes = flat.numel() // world_size
+                chunks.append(flat[rank * nbytes : (rank + 1) * nbytes])
+            self.post_forward_chunk_nbytes = [chunk.numel() for chunk in chunks]
+            self.post_forward_storage = torch.cat(chunks)
+            self.post_forward_group = group
         self._swap_in_params(self.sharded_params)
         self.free_persistent_storage()
         self.is_unsharded = False
+        self.representation.on_sharded_state(
+            "sharded" if self.post_forward_storage is None else "sharded_post_forward"
+        )
 
     def _alloc_persistent_storage(self) -> None:
         """Re-allocate the storage behind the unsharded params for a refill,
@@ -976,6 +1265,8 @@ class BucketRuntime:
         allocated it (a refill's unshard stream writes it only after waiting on
         this stream), so the caching allocator orders the reuse.
         """
+        if self.keep_persistent_storage:
+            return
         for persistent_buffer in self.persistent_buffers:
             _free_storage(persistent_buffer)
 
@@ -985,13 +1276,16 @@ class BucketRuntime:
         self.backward_calls = self.input_triggers = self.input_triggers_run = 0
         self.modules_to_run.clear()
         self.group_pass = None
+        self.post_backward_ran = False
 
     def needs_finish(self) -> bool:
         """Whether backwards left this bucket to finish: still unsharded (no
         post-backward trigger fired) or, with gradient sync on, holding grads
         that backwards without sync accumulated since its last reduce-scatter."""
-        return self.is_unsharded or (
-            self.needs_sync and self.bucket_storage._requires_gradient_sync
+        return (
+            (self.is_unsharded and not self.post_backward_ran)
+            or self.backward_without_unshard
+            or (self.needs_sync and self.bucket_storage._requires_gradient_sync)
         )
 
     @_outside_selective_checkpoint
@@ -1010,17 +1304,28 @@ class BucketRuntime:
         ones, so it reduce-scatters the kept grads alone and this backward's
         in a second reduce-scatter.
         """
+        if not torch.compiler.is_compiling():
+            self.logger.debug("%s::pre_backward (%s)", self.log_name, self.debug_fqn)
         with dist._spmd_no_typecheck():
+            for callback in self.context.backward_start_callbacks:
+                callback()
             self.context.queue_post_backward_callback(finish=True)
-            self.unshard()
+            if self.bucket_storage._unshard_in_backward:
+                self.unshard()
+                # A later call's backward re-gathers after an earlier post-backward
+                self.post_backward_ran = False
+            else:
+                self.backward_without_unshard = True
             if (
                 self.backward_calls > 1
                 and self.needs_sync
                 and self.bucket_storage._requires_gradient_sync
                 and not self.bucket_storage._defer_post_backward
+                and not self.bucket_storage._fsdp2_semantics
             ):
                 self._post_backward(reshard=False)
-            self._set_unsharded_grad_dtypes(defer_upcast=True)
+            if not self.bucket_storage._fsdp2_semantics:
+                self._set_unsharded_grad_dtypes(defer_upcast=True)
             self._run_pre_backward_hook()
             self._prefetch(forward=False)
 
@@ -1077,20 +1382,22 @@ class BucketRuntime:
         a partial-grad group keeps autograd's upcast, so its all-reduce runs in
         the wider dtype too.
         """
-        for bucket_param, param in zip(
-            self.bucket_params, self.unsharded_params or [], strict=False
+        for index, (bucket_param, param) in enumerate(
+            zip(self.bucket_params, self.unsharded_params or [], strict=False)
         ):
             info = bucket_param.param_info
             dtype = info.unsharded_grad_dtype
             compute_dtype = info.unsharded_dtype
-            if (
-                dtype is None
-                or not param.requires_grad
-                or not dtype.is_floating_point
-                or not compute_dtype.is_floating_point
-                or dtype.itemsize <= compute_dtype.itemsize
-                or info.partial_grad_group is not None
-            ):
+            defers = self.representation.defers_grad_upcast(index)
+            if defers is None:
+                defers = not (
+                    dtype is None
+                    or not dtype.is_floating_point
+                    or not compute_dtype.is_floating_point
+                    or dtype.itemsize <= compute_dtype.itemsize
+                    or info.partial_grad_group is not None
+                )
+            if not defers or not param.requires_grad:
                 continue
             if defer_upcast:
                 # As FSDP2: a backward without sync that starts the grad keeps
@@ -1137,8 +1444,13 @@ class BucketRuntime:
         self.input_triggers_run += 1
         if self.bucket_storage._defer_post_backward:
             return
-        if self.backward_calls == self.input_triggers == self.input_triggers_run:
+        all_ran = self.backward_calls == self.input_triggers == self.input_triggers_run
+        # FSDP2 (_fsdp2_semantics) runs a post-backward per call: it reshards
+        # after each call's backward, whose grads autograd may not have
+        # accumulated yet, and the next call's backward re-gathers
+        if all_ran or self.bucket_storage._fsdp2_semantics:
             self.post_backward()
+        if all_ran:
             self.backward_calls = self.input_triggers = self.input_triggers_run = 0
 
     def on_partial_input_grads(self, forward_pass: GroupForwardPass) -> None:
@@ -1170,11 +1482,27 @@ class BucketRuntime:
         ``reshard_after_backward`` is set. A syncing backward always reshards,
         since the optimizer step then changes the local shards.
         """
+        if not torch.compiler.is_compiling():
+            self.logger.debug("%s::post_backward (%s)", self.log_name, self.debug_fqn)
         with dist._spmd_no_typecheck():
             self._post_backward()
 
     def _post_backward(self, *, reshard: bool = True) -> None:
         # reshard=False keeps the unsharded params for a backward still to run.
+        self.backward_without_unshard = False
+        self.post_backward_ran = reshard
+        if (
+            reshard
+            and self.bucket_storage._fsdp2_semantics
+            and not self.is_unsharded
+            and self.post_forward_storage is not None
+        ):
+            # FSDP2 reshards a group that backward did not reach from the
+            # post-forward group to the full one, dropping any prefetch over the
+            # post-forward group
+            self.context.release_pending_unshard(self)
+            self.post_forward_storage = None
+            self.representation.on_sharded_state("sharded")
         if not self.bucket_storage._requires_gradient_sync:
             self.needs_sync = True
             if (
@@ -1188,61 +1516,99 @@ class BucketRuntime:
             self._set_unsharded_grad_dtypes(defer_upcast=False)
             return
         self.needs_sync = False
+        keep_unused = self.bucket_storage._reduce_scatter_unused_params
+        if keep_unused:
+            self.representation.check_reduce_unused_params()
         grads: list[torch.Tensor | None] = []
-        params: list[nn.Parameter] = []
+        params: list[torch.Tensor] = []
         infos: list[ParamInfo] = []
         sharded_params: list[nn.Parameter] = []
+        indices: list[int] = []
+        representation = self.representation
         fsdp2_compatible = self.bucket_storage._fsdp2_compatible
         param_pairs = list(
-            zip(self.bucket_params, self.unsharded_params or [], strict=False)
+            enumerate(zip(self.bucket_params, self.unsharded_params or [], strict=False))
         )
         if fsdp2_compatible and param_pairs:
             param_pairs = [
                 param_pairs[idx] for idx in self._fsdp2_reduce_scatter_order()
             ]
-        for bucket_param, unsharded_param in param_pairs:
+        # Params in a partial reduce output (see partial_reduce_output) stay in
+        # the reduce-scatter, as FSDP2 keeps its partial layout. A reduce-scatter
+        # into the partial output takes every trainable param, so that a param
+        # whose first grad comes later needs no repack of the output (FSDP2
+        # repacks it, to the same values).
+        partial_indices = self.partial_reduce_indices
+        into_partial = (
+            self.bucket_storage._replicate_group is not None
+            and not self.bucket_storage._requires_all_reduce
+        )
+        for index, (bucket_param, unsharded_param) in param_pairs:
             # A param frozen since its grad was kept drops it, on every rank.
             grad, unsharded_param.grad = unsharded_param.grad, None
             if not unsharded_param.requires_grad:
                 continue
-            if grad is None and fsdp2_compatible:
+            if (
+                grad is None
+                and fsdp2_compatible
+                and not keep_unused
+                and not into_partial
+                and index not in partial_indices
+            ):
                 continue
+            if grad is not None:
+                grad = representation.unsharded_grad(index, grad)
             grads.append(grad)
-            params.append(unsharded_param)
+            params.append(representation.unsharded_local(index, unsharded_param))
             infos.append(bucket_param.param_info)
             sharded_params.append(bucket_param.sharded_param)
+            indices.append(index)
+        # Only the list may hold the grads, which the reduce frees once copied in
+        grad = None
         self._run_post_reduce_hook()
-        if reshard and self.is_unsharded:
+        storage = self.bucket_storage
+        if (
+            reshard
+            and self.is_unsharded
+            and (storage._reshard_after_backward or not storage._fsdp2_semantics)
+        ):
             self.reshard()
         if not grads:
             return
         # Promote over the real grads before the zeros exist, so zeros never
         # pick the reduce dtype.
         infos = _promote_reduce_dtype_over_grads(grads, infos)
+        partial = self.partial_reduce_output
+        if partial is not None and partial.dtype != infos[0].grad_reduce_dtype:
+            # As FSDP2: a pending partial reduction keeps its wider dtype
+            dtype = torch.promote_types(partial.dtype, infos[0].grad_reduce_dtype)
+            infos = [replace(info, bucket_reduce_dtype=dtype) for info in infos]
         # Zeros fill missing grads after resharding, so they never coexist
         # with the unsharded params, in the dtype autograd would produce, as
         # FSDP2's unsharded_zero_grad_data does.
         grads = [
             torch.zeros(
-                param.shape, dtype=param.grad_dtype or param.dtype, device=param.device
+                local.shape,
+                dtype=self.unsharded_params[index].grad_dtype or local.dtype,
+                device=local.device,
             )
             if grad is None
             else grad
-            for grad, param in zip(grads, params, strict=True)
+            for grad, local, index in zip(grads, params, indices, strict=True)
         ]
         # In the grad's dtype, which keeps autograd's upcast for these params,
         # before the copy-in casts to the reduce dtype, as FSDP2 redistributes a
         # Partial grad when it takes it.
-        for grad, info in zip(grads, infos, strict=True):
+        for idx, info in enumerate(infos):
             if info.partial_grad_group is not None:
-                dist.all_reduce(grad, group=info.partial_grad_group)
+                dist.all_reduce(grads[idx], group=info.partial_grad_group)
         # After the zeros, which take the forward dtype while the upcast is
         # deferred. The grads are already taken, so this only resets grad_dtype.
         self._set_unsharded_grad_dtypes(defer_upcast=False)
         # Per-parameter grad dtypes meet in the bucket's reduce dtype in the
         # placement's copy-in, which casts as it copies, rather than one cast
         # kernel per param here.
-        self.reduce_grads(grads, infos, sharded_params)
+        self.reduce_grads(grads, infos, sharded_params, indices)
 
     def _fsdp2_reduce_scatter_order(self) -> list[int]:
         """FSDP2's reduce-scatter order: the params grouped by sharded grad
@@ -1272,6 +1638,7 @@ class BucketRuntime:
         if torch.compiler.is_compiling():
             self._pre_forward_compile()
             return None
+        self.logger.debug("%s::pre_forward (%s)", self.log_name, self.debug_fqn)
         # As FSDP2's pre-forward, the unshard runs outside spmd_types' type
         # checker, since FlexShard's buffers carry no SPMD types; the trigger
         # wraps the typed inputs, so it stays checked.
@@ -1285,6 +1652,7 @@ class BucketRuntime:
                 self.forward_index = len(self.context.forward_order)
                 self.context.forward_order.append(self)
             self.unshard()
+            self._choose_grad_dtypes_in_forward()
             self._prefetch(forward=True)
         args, kwargs, has_trigger = self._register_input_grad_hook(args, kwargs)
         self.call_has_trigger.append(has_trigger)
@@ -1305,6 +1673,7 @@ class BucketRuntime:
         if torch.compiler.is_compiling():
             self._pre_forward_compile()
             return None
+        self.logger.debug("%s::pre_forward (%s)", self.log_name, self.debug_fqn)
         with dist._spmd_no_typecheck():
             if _in_backward():
                 self._unshard_for_recompute()
@@ -1317,6 +1686,7 @@ class BucketRuntime:
                 self.forward_index = len(self.context.forward_order)
                 self.context.forward_order.append(self)
             self.unshard()
+            self._choose_grad_dtypes_in_forward()
             if not opens_pass:
                 return None
             self._prefetch(forward=True)
@@ -1326,6 +1696,13 @@ class BucketRuntime:
         )
         self.group_pass = forward_pass
         return args, kwargs
+
+    def _choose_grad_dtypes_in_forward(self) -> None:
+        # FSDP2 (_fsdp2_semantics) chooses the unsharded grad dtypes in
+        # pre-forward and keeps them until post-backward, so that a compiled
+        # backward can use the grad_dtype its forward was traced with
+        if self.bucket_storage._fsdp2_semantics and torch.is_grad_enabled():
+            self._set_unsharded_grad_dtypes(defer_upcast=True)
 
     def _unshard_for_recompute(self) -> None:
         """Unshard for an activation-checkpoint recompute in backward.
@@ -1434,6 +1811,7 @@ class BucketRuntime:
         if torch.compiler.is_compiling():
             self._swap_in_params(self.sharded_params)
             return
+        self.logger.debug("%s::post_forward (%s)", self.log_name, self.debug_fqn)
         has_trigger = self.call_has_trigger.pop() if self.call_has_trigger else False
         if _in_backward():
             # Activation-checkpoint recompute inside backward: this bucket's
@@ -1451,6 +1829,7 @@ class BucketRuntime:
         if torch.compiler.is_compiling():
             self._swap_in_params(self.sharded_params)
             return
+        self.logger.debug("%s::post_forward (%s)", self.log_name, self.debug_fqn)
         if _in_backward() or mod not in self.modules_to_run:
             return
         self.modules_to_run.discard(mod)
@@ -1485,9 +1864,14 @@ class BucketRuntime:
             or (tensors and not grad_outputs)
         ):
             # No backward will reach these params through this forward.
-            self.reshard()
+            storage = self.bucket_storage
+            if not storage._fsdp2_semantics:
+                self.reshard()
+            elif storage._reshard_after_forward:
+                self.reshard(after_forward=True)
             return
         self.backward_calls += 1
+        self.post_backward_ran = False
         if not grad_outputs:
             # Outputs without visible tensors: no pre-backward hook can re-gather,
             # so keep the params until post-backward.
@@ -1509,7 +1893,7 @@ class BucketRuntime:
             persistent = {_storage_ptr(buffer) for buffer in self.persistent_buffers}
             # An output viewing the persistent storage would see it freed.
             if not any(_storage_ptr(value) in persistent for value in grad_outputs):
-                self.reshard()
+                self.reshard(after_forward=True)
 
     def _pre_forward_compile(self) -> None:
         """Trace the bucket unshard and expose its outputs via ``_parameters``.
@@ -1546,23 +1930,55 @@ class BucketRuntime:
         self._swap_in_params(list(full_params))
 
 
+def _record_grad_output_stream(
+    sharded_grads: list[torch.Tensor], stream: torch.Stream
+) -> None:
+    """As FSDP2: the reduce output backing the sharded grads is produced on a
+    reduce stream but read on ``stream``. ``fsdp::record_grad_output_stream``,
+    a no-op unless the backend's free releases device memory, orders the free
+    of each backing buffer behind that read."""
+    storages = set()
+    for grad in sharded_grads:
+        if grad.device.type == "cpu":
+            continue
+        storage = grad.untyped_storage().data_ptr()
+        if storage not in storages:
+            storages.add(storage)
+            torch.ops.fsdp.record_grad_output_stream(
+                grad, stream.stream_id, stream.device_index, stream.device_type
+            )
+
+
 class _InputGradsTrigger(torch.autograd.Function):
     """Identity on a forward call's grad-requiring inputs whose backward runs
     ``callback`` once their grads are computed, as FSDP2's
     ``RegisterPostBackwardFunction`` runs its post-backward. Unlike hooks on
     the inputs, it holds nothing that refers back to the graph."""
 
+    # As FSDP2's, it supports functorch transforms (e.g. jvp, vmap)
+    generate_vmap_rule = True
+
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
-        ctx: Any, callback: Callable[[], None], *inputs: torch.Tensor
+        callback: Callable[[], None], *inputs: torch.Tensor
     ) -> tuple[torch.Tensor, ...]:
-        ctx.callback = callback
         return inputs
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+        ctx.callback = inputs[0]
 
     @staticmethod
     def backward(ctx: Any, *grads: torch.Tensor) -> tuple[Any, ...]:
         ctx.callback()
         return (None, *grads)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def jvp(ctx: Any, callback_tangent: object, *grad_inputs: Any) -> tuple[Any, ...]:
+        # Drop the non-tensor callback's tangent
+        return grad_inputs
 
 
 if dist._is_spmd_types_available():

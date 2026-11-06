@@ -392,6 +392,35 @@ class ShardedBucketStorage:
         self._reshard_after_backward = True
         # See set_separate_reduce_scatter_group.
         self._reduce_mesh: DeviceMesh | None = None
+        # The group over the replicas of the mesh that gradients are all-reduced
+        # over after the reduce-scatter (HSDP), whether they are, and a hook on
+        # the reduced shard, as FSDP2's set_requires_all_reduce and
+        # set_all_reduce_hook.
+        self._replicate_group: dist.ProcessGroup | None = None
+        self._requires_all_reduce = True
+        self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
+        # The smaller group a reshard after forward keeps chunks for, as
+        # FSDP2's reshard_after_forward=int (see BucketRuntime.reshard).
+        self._post_forward_group: dist.ProcessGroup | None = None
+        # The all-gather replacing the placement's (FSDP2's custom AllGather),
+        # and where to gather a storage kept on another device (CPU offload).
+        self._all_gather_comm: Any = None
+        self._compute_device: torch.device | None = None
+        # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
+        self._reduce_scatter_comm: Any = None
+        self._reduce_scatter_input_fn: Any = None
+        # FSDP2's set_unshard_in_backward and set_reduce_scatter_unused_params.
+        self._unshard_in_backward = True
+        self._reduce_scatter_unused_params = False
+        # FSDP2's resharding rules (fully_shard): set_reshard_after_backward
+        # also applies to backwards with gradient sync, a forward without a
+        # backward reshards only as reshard_after_forward says, and each forward
+        # call's backward runs a post-backward
+        self._fsdp2_semantics = False
+        # FSDP2's _set_unshard_async_op: unshards run as asynchronous
+        # collectives on the current stream instead of on the unshard stream
+        self._unshard_async_op = False
         # See set_buckets_to_forward_prefetch and set_buckets_to_backward_prefetch.
         self._forward_prefetch: list[ShardedBucketStorage] | None = None
         self._backward_prefetch: list[ShardedBucketStorage] | None = None
@@ -791,6 +820,21 @@ class ShardedBucketStorage:
         self._gradient_reduction = replace(
             self._gradient_reduction, divide_factor=factor
         )
+
+    def set_replicate_group(self, group: dist.ProcessGroup | None) -> None:
+        """All-reduce this bucket's reduced gradients over ``group``, the
+        replicas of its mesh (HSDP); the default divide factor then counts
+        them too."""
+        self._replicate_group = group
+        self._gradient_reduction = replace(
+            self._gradient_reduction,
+            replicate_size=1 if group is None else group.size(),
+        )
+
+    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+        """Make the gradient collectives sum and divide separately, as FSDP2's
+        ``set_force_sum_reduction_for_comms``."""
+        self._gradient_reduction = replace(self._gradient_reduction, force_sum=enable)
 
     @property
     def reduce_mesh(self) -> DeviceMesh:

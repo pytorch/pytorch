@@ -428,6 +428,7 @@ class TestBlockShardRuntime(FSDPTest):
                     all_gather_single=mock.DEFAULT,
                     all_gather_into_tensor=mock.DEFAULT,
                     reduce_scatter_tensor=mock.DEFAULT,
+                    reduce_scatter_single=mock.DEFAULT,
                 ) as collectives:
                     optimizer.step()
                 self.assertTrue(

@@ -26,6 +26,7 @@ if dist._is_spmd_types_available():
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -171,6 +172,37 @@ class ParamModuleInfo:
     param_name: str
     shared_modules: list[nn.Module] = field(default_factory=list)
     shared_param_names: list[str] = field(default_factory=list)
+
+
+def _get_param_module_infos(
+    params: list[nn.Parameter], modules: tuple[nn.Module, ...]
+) -> list[ParamModuleInfo]:
+    """
+    Shared parameter: lin1.weight = lin2.weight
+    Shared module: mlp.lin1 = mlp.lin2
+    We do not remove duplicates when traversing both modules and parameters to
+    find shared modules' parameters and shared parameters within a module.
+    """
+    params_set = set(params)
+    param_to_module_info: dict[nn.Parameter, ParamModuleInfo] = {}
+    for module in modules:
+        for _, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
+                if param in params_set:
+                    if param not in param_to_module_info:
+                        param_to_module_info[param] = ParamModuleInfo(
+                            submodule, param_name
+                        )
+                    else:
+                        param_to_module_info[param].shared_modules.append(submodule)
+                        param_to_module_info[param].shared_param_names.append(
+                            param_name
+                        )
+    if len(param_to_module_info) != len(params):
+        raise AssertionError(f"Some parameters are not in the module tree of {modules}")
+    return [param_to_module_info[param] for param in params]
 
 
 class _AllGatherOutputLayout(NamedTuple):
@@ -1001,12 +1033,6 @@ class FSDPParam:
             return layouts
         return self._default_all_gather_output_layouts
 
-    def to_sharded(self) -> None:
-        self._setattr_on_modules(self.sharded_param)
-        if not self.keep_unsharded_storage:
-            self.free_unsharded_param()
-        self.sharded_state = ShardedState.SHARDED
-
     def check_post_forward_reshard(self) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
@@ -1053,60 +1079,6 @@ class FSDPParam:
                     f"gradients, but its output has dtype {output.dtype}"
                 )
 
-    def to_sharded_post_forward(self) -> None:
-        if self.is_dtensor:
-            raise NotImplementedError(
-                "Resharding to smaller mesh is not supported for DTensor parameters yet"
-            )
-        self._assert_in_states(ShardedState.UNSHARDED)
-        if self.post_forward_mesh_info is None:
-            raise AssertionError("Expected post_forward_mesh_info to not be None")
-        if len(self.all_gather_outputs) != 1:
-            raise AssertionError(
-                f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
-            )
-        shard_world_size = self.post_forward_mesh_info.shard_mesh_size
-        if (numel := self.all_gather_outputs[0].numel()) % shard_world_size != 0:
-            _raise_assert_with_print(
-                f"All-gather output size ({numel}) must be divisible by the shard "
-                f"world size ({shard_world_size})"
-            )
-        shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        sharded_numel = numel // shard_world_size
-        self._sharded_post_forward_param_data = (
-            self.all_gather_outputs[0].narrow(
-                0, sharded_numel * shard_rank, sharded_numel
-            )
-        ).clone()  # clone to be able to free all-gather output
-        sharded_post_forward_tensor = torch.as_strided(
-            self._sharded_post_forward_param_data,
-            size=self.sharded_post_forward_size,
-            stride=self.contiguous_sharded_post_forward_stride,
-            storage_offset=0,
-        )
-        self._sharded_post_forward_param = nn.Parameter(
-            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
-            requires_grad=self.sharded_param.requires_grad,
-        )
-        self._sharded_post_forward_param.grad_dtype = self.sharded_grad_dtype
-        self._setattr_on_modules(self._sharded_post_forward_param)
-        if not self.keep_unsharded_storage:
-            self.free_unsharded_param()
-        self.sharded_state = ShardedState.SHARDED_POST_FORWARD
-
-    def to_unsharded(self) -> None:
-        # Assume that the data has been allocated and all-gathered
-        set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
-        self._setattr_on_modules(self._unsharded_param)
-        if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            # The data is allocated in the default stream via the post-forward
-            # reshard and must be kept alive for the next all-gather copy-in.
-            # Since we call this method after the copy-out, the data's lifetime
-            # is ensured without further synchronization.
-            self._sharded_post_forward_param = None
-            self._sharded_post_forward_param_data = None  # free
-        self.sharded_state = ShardedState.UNSHARDED
-
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
             self._module_info.module, self._module_info.param_name, param
@@ -1131,24 +1103,6 @@ class FSDPParam:
             self._sharding_spec_by_dtype[tensor.dtype] = spec
         return _from_local_no_grad(tensor, spec)
 
-    def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
-        if tensor.shape != self.sharded_post_forward_size:
-            _raise_assert_with_print(
-                f"Expects size {self.sharded_post_forward_size} but got {tensor.shape}"
-            )
-        if not isinstance(self.post_forward_mesh_info, HSDPMeshInfo):
-            raise AssertionError(
-                f"Expected HSDPMeshInfo, got {type(self.post_forward_mesh_info)}"
-            )
-        # TODO: Prefer this DTensor to be read-only and generalize the
-        # placement once we support TP.
-        post_forward_sharding_spec = DTensorSpec(
-            self.post_forward_mesh_info.mesh,
-            (Replicate(), Shard(0)),
-            tensor_meta=self._sharding_spec.tensor_meta,
-        )
-        return _from_local_no_grad(tensor, post_forward_sharding_spec)
-
     def alloc_all_gather_outputs(self) -> None:
         if self._keep_all_gather_output_storage:
             return
@@ -1159,11 +1113,6 @@ class FSDPParam:
         if self._keep_all_gather_output_storage:
             return
         for tensor in self.all_gather_outputs:
-            free_storage(tensor)
-
-    def free_unsharded_param(self) -> None:
-        self.free_all_gather_outputs()
-        for tensor in self._unsharded_inner_tensors:
             free_storage(tensor)
 
     @property
@@ -1295,13 +1244,6 @@ class FSDPParam:
             return self.sharded_grad_dtype
         # Use the original parameter dtype recorded at lazy initialization.
         return self.orig_dtype
-
-    @property
-    def unsharded_grad_data(self) -> torch.Tensor:
-        grad = self.unsharded_param.grad
-        if grad is None:
-            raise AssertionError("Expects unsharded_param.grad to not be None")
-        return self._get_grad_inner_tensor(grad)
 
     @property
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:

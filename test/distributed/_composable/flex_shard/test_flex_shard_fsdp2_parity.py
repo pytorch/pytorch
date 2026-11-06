@@ -212,8 +212,7 @@ def _apply_flex_shard(
 def _record_collective_inputs() -> Iterator[dict[str, list[torch.Tensor]]]:
     """Record every all-gather and reduce-scatter input, by collective.
 
-    FSDP2 calls ``dist.reduce_scatter_single``; FlexShard calls
-    ``dist.reduce_scatter_tensor``, which forwards to c10d's module global.
+    Both call ``dist.reduce_scatter_single``.
     """
     recorded: dict[str, list[torch.Tensor]] = defaultdict(list)
     all_gather_single = dist.all_gather_single

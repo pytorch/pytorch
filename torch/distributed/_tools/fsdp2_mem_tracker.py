@@ -11,7 +11,6 @@ from torch import nn, optim
 from torch._guards import active_fake_mode
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
@@ -19,6 +18,7 @@ from torch.utils.weak import WeakIdKeyDictionary, weakref
 
 
 if TYPE_CHECKING:
+    from torch.distributed.fsdp._fully_shard._fsdp_engine import FullyShardBucket
     from torch.utils.hooks import RemovableHandle
 
 _TOTAL_KEY = "Total"
@@ -174,7 +174,7 @@ class FSDPMemTracker(MemTracker):
         self._ref_class: type[_RefType] = _FSDPRefType
 
     def _instrument_fsdp_sharded_params_grads(
-        self, fsdp_param_group: FSDPParamGroup
+        self, fsdp_param_group: "FullyShardBucket"
     ) -> None:
         # Track sharded params and grads after initialization
         for fsdp_param in fsdp_param_group.fsdp_params:
@@ -300,8 +300,8 @@ class FSDPMemTracker(MemTracker):
         fsdp_mod: FSDPModule,
         orig_fsdp_param_group_pre_backward: Callable[_P, Any],
     ) -> Callable[_P, None]:
-        # We capture memory snapshots before and after ``FSDPParamGroup.pre_backward`` to capture the pre-fetching
-        # and unsharding of params. We also initialize ``local_peak`` and ``PEAK_BW`` snapshot for the module.
+        # We capture memory snapshots before and after the bucket's ``pre_backward_hook`` to capture the
+        # pre-fetching and unsharding of params. We also initialize ``local_peak`` and ``PEAK_BW`` snapshot for the module.
         @wraps(orig_fsdp_param_group_pre_backward)
         def inner(*args: _P.args, **kwargs: _P.kwargs) -> None:
             self._fsdp_state = _FSDPState.PRE_BW
@@ -328,7 +328,7 @@ class FSDPMemTracker(MemTracker):
         fsdp_mod: FSDPModule,
         orig_fsdp_param_group_post_backward: Callable[_P, Any],
     ) -> Callable[_P, None]:
-        # We capture the memory snapshots before and after ``FSDPParamGroup.post_backward`` to track and attribute
+        # We capture the memory snapshots before and after the bucket's ``post_backward`` to track and attribute
         # the `unsharded` grads before the post backward and then `sharded` grads and `reduce_scatter`  buffers
         # after the post backward.
         @wraps(orig_fsdp_param_group_post_backward)
@@ -368,10 +368,8 @@ class FSDPMemTracker(MemTracker):
 
     def _instrument_fsdp_module(self) -> None:
         # We uninstall the existing `FSDPState._pre_forward` and `FSDPState._post_forward` hooks and install
-        # our own hooks that wrap them. We choose this over monkey-patching `FSDPParamGroup.pre_forward` and
-        # `FSDPParamGroup.post_forward` because during AC these won't be called.
-        # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
-        # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
+        # our own hooks that wrap them, since they also run during AC recomputation. For backward we
+        # monkey-patch the engine bucket runtime's `pre_backward_hook` and `post_backward`.
 
         # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
         # the _MultiHandlers object will only need to be grabbed once.
@@ -409,17 +407,16 @@ class FSDPMemTracker(MemTracker):
                         prepend=False,
                         always_call=True,
                     )
+                    runtime = fsdp_param_group.bucket
                     self._fsdp_mod_to_saved_methods[module] = _SavedFSDPMethods(
-                        fsdp_param_group.pre_backward,
-                        fsdp_param_group.post_backward,
+                        runtime.pre_backward_hook,
+                        runtime.post_backward,
                     )
-                    fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(  # type: ignore[assignment]
-                        module, fsdp_param_group.pre_backward
+                    runtime.pre_backward_hook = self._fsdp_param_group_pre_backward(  # type: ignore[method-assign]
+                        module, runtime.pre_backward_hook
                     )
-                    fsdp_param_group.post_backward = (  # type: ignore[assignment]
-                        self._fsdp_param_group_post_backward(
-                            module, fsdp_param_group.post_backward
-                        )
+                    runtime.post_backward = self._fsdp_param_group_post_backward(  # type: ignore[method-assign]
+                        module, runtime.post_backward
                     )
 
         for buffer in self._root_mod.buffers():
@@ -467,11 +464,14 @@ class FSDPMemTracker(MemTracker):
                 fsdp_state._pre_forward, prepend=True, with_kwargs=True
             )
             fsdp_state._post_forward_hook_handle = fsdp_mod.register_forward_hook(
-                fsdp_state._post_forward, prepend=False
+                fsdp_state._post_forward,
+                prepend=False,
+                always_call=len(fsdp_state._modules) > 1,
             )
             if fsdp_param_group := fsdp_state._fsdp_param_group:
-                fsdp_param_group.pre_backward = saved_methods.pre_backward
-                fsdp_param_group.post_backward = saved_methods.post_backward
+                runtime = fsdp_param_group.bucket
+                runtime.pre_backward_hook = saved_methods.pre_backward  # type: ignore[method-assign]
+                runtime.post_backward = saved_methods.post_backward  # type: ignore[method-assign]
         self._fsdp_mod_to_saved_methods.clear()
 
         if self._optimizer_hook_handles is not None:

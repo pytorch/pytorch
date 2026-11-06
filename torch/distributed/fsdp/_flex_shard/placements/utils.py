@@ -114,35 +114,71 @@ def _to_dist_reduce_op(op: GradientReduceOp) -> dist.ReduceOp.RedOpType:
     raise ValueError(f"Unsupported gradient reduce op: {op!r}")
 
 
+def _gradient_reduce_ops(
+    reduction: GradientReduction,
+    group_size: int,
+    dtype: torch.dtype,
+) -> tuple[Any, float | None, float | None, Any, float | None]:
+    """Return ``(reduce-scatter op, pre-divide factor, post-reduce-scatter divide
+    factor, all-reduce op, post-all-reduce divide factor)`` that make a
+    reduce-scatter over ``group_size`` ranks, then an all-reduce over
+    ``reduction.replicate_size`` replicas if more than one, produce
+    ``reduction``, as FSDP2's ``_get_gradient_divide_factors``."""
+    sum_op = dist.ReduceOp.SUM
+    if _to_dist_reduce_op(reduction.op) == sum_op:
+        return sum_op, None, None, sum_op, None
+    replicate_size = reduction.replicate_size
+    data_parallel_size = group_size * replicate_size
+    factor = reduction.divide_factor
+    if dtype in (torch.float32, torch.bfloat16) and not reduction.force_sum:
+        if factor is None:
+            if data_parallel_size == 1:
+                return sum_op, None, None, sum_op, None
+            # NCCL's AVG may produce incorrect results with world size 1 (FSDP2).
+            avg = dist.ReduceOp.AVG
+            return (
+                avg if group_size > 1 else sum_op,
+                None,
+                None,
+                avg if replicate_size > 1 else sum_op,
+                None,
+            )
+        if group_size == 1:
+            # No reduce-scatter on one rank: divide its copy, as FSDP2 does
+            return sum_op, None, None if factor == 1 else factor, sum_op, None
+        if factor == group_size:
+            return dist.ReduceOp.AVG, None, None, sum_op, None
+        # One NCCL call, which multiplies each input by 1/factor before summing.
+        return dist._make_nccl_premul_sum(1.0 / factor), None, None, sum_op, None
+    if factor is None:
+        factor = float(data_parallel_size)
+    pre_factor: float | None = None
+    if dtype not in (torch.float32, torch.bfloat16):
+        # fp16 has a narrow range: divide by about sqrt(factor) before the sum
+        # and by the rest after it.
+        pre_factor = 1
+        while factor % pre_factor == 0 and factor / pre_factor > pre_factor:
+            pre_factor *= 2
+        post_factor = factor / pre_factor
+    else:
+        post_factor = factor
+    if pre_factor == 1:
+        pre_factor = None
+    if post_factor == 1:
+        post_factor = None
+    if replicate_size > 1:
+        return sum_op, pre_factor, None, sum_op, post_factor
+    return sum_op, pre_factor, post_factor, sum_op, None
+
+
 def _gradient_reduce_scatter_op(
     reduction: GradientReduction,
     group_size: int,
     dtype: torch.dtype,
 ) -> tuple[Any, float | None, float | None]:
-    """Return ``(reduce op, pre-divide factor, post-divide factor)`` that make one
-    reduce-scatter produce ``reduction``, following FSDP2's
-    ``_get_gradient_divide_factors``."""
-    if _to_dist_reduce_op(reduction.op) == dist.ReduceOp.SUM:
-        return dist.ReduceOp.SUM, None, None
-    factor = group_size if reduction.divide_factor is None else reduction.divide_factor
-    if group_size == 1:
-        # NCCL's AVG may produce incorrect results with world size 1 (FSDP2).
-        return dist.ReduceOp.SUM, None, None if factor == 1 else factor
-    if factor == group_size:
-        return dist.ReduceOp.AVG, None, None
-    if dtype in (torch.float32, torch.bfloat16):
-        # One NCCL call, which multiplies each input by 1/factor before summing.
-        return dist._make_nccl_premul_sum(1.0 / factor), None, None
-    # fp16 has a narrow range: divide by about sqrt(factor) before the sum and by
-    # the rest after it.
-    pre_factor = 1
-    while factor % pre_factor == 0 and factor / pre_factor > pre_factor:
-        pre_factor *= 2
-    return (
-        dist.ReduceOp.SUM,
-        None if pre_factor == 1 else pre_factor,
-        factor / pre_factor,
-    )
+    """Return ``(reduce op, pre-divide factor, post-divide factor)`` of the
+    reduce-scatter step of ``_gradient_reduce_ops``."""
+    return _gradient_reduce_ops(reduction, group_size, dtype)[:3]
 
 
 def reduce_grads_on_one_rank(grads: torch.Tensor, reduction: GradientReduction) -> None:
@@ -150,7 +186,7 @@ def reduce_grads_on_one_rank(grads: torch.Tensor, reduction: GradientReduction) 
     the same result as ``reduce_scatter_grads`` without the collective."""
     _, pre_factor, post_factor = _gradient_reduce_scatter_op(reduction, 1, grads.dtype)
     if pre_factor is not None:
-        raise AssertionError("A 1-rank gradient reduction has no pre-divide factor.")
+        grads.div_(pre_factor)
     if post_factor is not None:
         grads.div_(post_factor)
 
@@ -160,15 +196,26 @@ def reduce_scatter_grads(
     input: torch.Tensor,
     reduction: GradientReduction,
     group: Any,
+    comm: Any = None,
 ) -> None:
     """Reduce-scatter packed gradients into ``output`` as ``reduction`` specifies,
-    for placements whose gradient reduction is one reduce-scatter."""
+    for placements whose gradient reduction is one reduce-scatter. ``comm``
+    replaces the collective, as FSDP2's custom ``ReduceScatter``."""
     reduce_op, pre_factor, post_factor = _gradient_reduce_scatter_op(
         reduction, group.size(), input.dtype
     )
     if pre_factor is not None:
-        input = input / pre_factor
-    dist.reduce_scatter_tensor(output=output, input=input, op=reduce_op, group=group)
+        input.div_(pre_factor)
+    if comm is not None:
+        comm(
+            output_tensor=output,
+            input_tensor=input,
+            group=group,
+            op=reduce_op,
+            async_op=False,
+        )
+    else:
+        dist.reduce_scatter_single(output=output, input=input, op=reduce_op, group=group)
     if post_factor is not None:
         output.div_(post_factor)
 
@@ -262,6 +309,7 @@ __all__ = [
     "pack_tensors_into_flat_buffer",
     "pack_tensors_into_flat_buffer_with_scratch",
     "reduce_scatter_grads",
+    "_gradient_reduce_ops",
     "_gradient_reduce_scatter_op",
     "_to_dist_reduce_op",
 ]

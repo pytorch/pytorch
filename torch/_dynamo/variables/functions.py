@@ -113,12 +113,6 @@ from .user_defined import (
 )
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
@@ -2052,13 +2046,6 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
                 return self.im_self.call_method(
                     tx, func.__name__, list(args), kwargs, constant=self.is_constant
                 )
-        elif (
-            _fsdp_param_group is not None
-            and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
-        ):
-            return SourcelessBuilder.create_internal_torch_ctx_manager(
-                func
-            ).call_function(tx, [self.im_self, *args], kwargs)
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)

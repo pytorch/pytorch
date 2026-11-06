@@ -17,8 +17,6 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     ShardingStrategy,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -84,7 +82,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         For MLP(4) with a single fully_shard, the compiled autograd backward
         graph has 2 graph breaks from _dynamo_disable on FSDP hooks:
           1. _pre_backward tensor hook (registered on FSDP module output)
-          2. post_backward (called from RegisterPostBackwardFunction.backward)
+          2. post_backward (called from the post-backward trigger, _InputGradsTrigger.backward)
         _root_post_backward_final_callback runs outside the compiled autograd
         scope as a queued engine callback.
         """
@@ -120,7 +118,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         # 2 graph breaks from _dynamo_disable on FSDP hooks split the
         # compiled autograd graph into 2 sub-graphs compiled by the backend:
         #   graph break 1: _pre_backward tensor hook
-        #   graph break 2: post_backward (from RegisterPostBackwardFunction)
+        #   graph break 2: post_backward (from _InputGradsTrigger)
         self.assertEqual(backend_count, 2)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -223,43 +221,6 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFullyShardCompile(FSDPTest):
-    def test_dynamo_trace_use_training_state(self):
-        torch._dynamo.reset()
-        # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
-        param_group = FSDPParamGroup(
-            [],  # params: List[nn.Parameter],
-            (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
-            None,  # mesh_info: FSDPMeshInfo,
-            None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            device_type,  # device: torch.device,
-            None,  # shard_placement_fn: Optional[Callable],
-            None,  # mp_policy: MixedPrecisionPolicy,
-            None,  # offload_policy: OffloadPolicy,
-        )
-
-        def f(x):
-            param_group._training_state = TrainingState.IDLE
-            with param_group.use_training_state(TrainingState.FORWARD):
-                if param_group._training_state == TrainingState.FORWARD:
-                    return x + 1
-                else:
-                    return x
-
-        inp = torch.zeros(1)
-        self.assertEqual(param_group._training_state, TrainingState.IDLE)
-
-        eager_out = f(inp)
-        self.assertEqual(param_group._training_state, TrainingState.IDLE)
-        self.assertEqual(eager_out, inp + 1)
-
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled_out = torch.compile(f, backend=cnt, fullgraph=True)(inp)
-        self.assertEqual(param_group._training_state, TrainingState.IDLE)
-        self.assertEqual(eager_out, compiled_out)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-        self.assertEqual(len(cnt.graphs), 1)
-
     def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:

@@ -2,14 +2,11 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-import warnings
-from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 from torch.autograd.graph import _MultiHandle
 from torch.distributed import _spmd_no_typecheck
 from torch.distributed._composable_state import (
@@ -18,15 +15,15 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, DDPMeshInfo, TrainingState
-from ._fsdp_param_group import _GradientReductionState, FSDPCommContext, FSDPParamGroup
+from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
 
 
 if TYPE_CHECKING:
+    from .._flex_shard.bucket_runtime import BucketCommContext
+    from ._fsdp_engine import FullyShardBucket
     from ._fsdp_param import FSDPParam
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -39,17 +36,15 @@ class FSDPStateContext(Generic[_StateType]):
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree, in
-        # ``named_modules()`` pre-order. ``_force_complete_incomplete_states``
-        # iterates ``reversed`` so within a nesting chain the deepest
-        # state's ``output_dtype`` cast applies first, matching the order
+        # ``named_modules()`` pre-order. The root post-forward completes
+        # incomplete group forwards in ``reversed`` order so that within a
+        # nesting chain the deepest group finishes first, matching the order
         # ``_post_forward`` would unwind in the non-partial case.
         self.all_states: list[_StateType] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
         self.iter_forward_root: _StateType | None = None
-        # Final callback should only be queued once per backward
-        self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
         # Whether backward finalization is owned by the caller
@@ -70,26 +65,30 @@ class FSDPState(_State):
 
     def __init__(self) -> None:
         super().__init__()
-        # Support multiple param groups for per-param mesh support.
-        # Each group has params with the same mesh_info.
-        self._fsdp_param_groups: list[FSDPParamGroup] = []
+        # The engine buckets (``FullyShardBucket``) of this state's
+        # ``fully_shard`` call, one per mesh (per-param mesh support), run by
+        # the root's FlexShard engine context
+        self._fsdp_param_groups: list[FullyShardBucket] = []
+        self._engine_context: BucketCommContext | None = None
+        # The context share_comm_ctx gave this root, for its lazy init
+        self._shared_engine_context: BucketCommContext | None = None
         self._is_root: bool | None = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
-        self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._states_to_forward_prefetch: list[FSDPState] = []
-        self._states_to_backward_prefetch: list[FSDPState] = []
-        self._modules_to_run_forward: set[nn.Module] = set()
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
+
+    @property
+    def _engine_buckets(self) -> "list[FullyShardBucket]":
+        return self._fsdp_param_groups
 
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
         return _get_module_fsdp_state(module)
 
     @property
-    def _fsdp_param_group(self) -> FSDPParamGroup | None:
+    def _fsdp_param_group(self) -> "FullyShardBucket | None":
         """
         Returns the param group for backward compatibility.
         This property is only valid when there is at most one param group.
@@ -124,23 +123,23 @@ class FSDPState(_State):
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = replace(mp_policy, param_dtype_override_fn=None)
         self._auto_reshard_after_forward = auto_reshard_after_forward
-        if len(modules) == 1:
-            self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
+        # The engine's group hooks run per module and track the group's
+        # forward pass themselves
+        pre_handles = [
+            module.register_forward_pre_hook(
                 self._pre_forward, prepend=True, with_kwargs=True
             )
-            self._post_forward_hook_handle = modules[0].register_forward_hook(
-                self._post_forward, prepend=False
+            for module in modules
+        ]
+        post_handles = [
+            module.register_forward_hook(
+                self._post_forward, prepend=False, always_call=len(modules) > 1
             )
-        else:
-            hook_handle = _register_group_forward_hooks(
-                modules,
-                self._pre_forward,
-                self._post_forward,
-                self._modules_to_run_forward,
-                self._cast_output_dtype,
-            )
-            self._pre_forward_hook_handle = hook_handle
-            self._post_forward_hook_handle = hook_handle
+            for module in modules
+        ]
+        handle = _MultiHandle(tuple(pre_handles + post_handles))
+        self._pre_forward_hook_handle = handle
+        self._post_forward_hook_handle = handle
 
     def _root_pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -151,15 +150,20 @@ class FSDPState(_State):
         logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
-            # Wait for optimizer before implicitly prefetched all-gathers
-            if (event := self._state_ctx.post_optim_event) is not None:
-                self._comm_ctx.all_gather_copy_in_stream.wait_event(event)
-                self._comm_ctx.all_gather_stream.wait_event(event)
-                self._state_ctx.post_optim_event = None
-            else:
-                current_stream = self._device_handle.current_stream()
-                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            # The engine's all-gathers wait for the current stream when issued,
+            # so for the optimizer; a post-optimizer event can make them wait
+            # for that point instead.
+            context = self._engine_context
+            if context is not None:
+                context.wait_reductions_at_backward_end = (
+                    self._state_ctx.is_last_backward
+                )
+                context.manual_backward_finalization = (
+                    self._state_ctx.manual_backward_finalization
+                )
+                if (event := self._state_ctx.post_optim_event) is not None:
+                    context.unshard_stream.wait_event(event)
+                    self._state_ctx.post_optim_event = None
             if self._device.type in [
                 "cuda",
                 "hpu",
@@ -219,19 +223,56 @@ class FSDPState(_State):
             if state not in visited_states:
                 self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        # For the root, do not reshard after forward since for training,
-        # the parameters would be freed and all-gathered immediately
-        if self._auto_reshard_after_forward:
-            for fsdp_param_group in self._fsdp_param_groups:
-                fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
-        self._init_shared_state()
         self._validate_no_duplicate_params()
-        # Run parameter group lazy inits after initializing FQNs for improved
-        # error messages
+        self._lazy_init_engine()
+
+    def _lazy_init_engine(self) -> None:
+        """Join every state's engine buckets to one engine context, as FSDP2
+        shares the root's comm context."""
+        from .._flex_shard.bucket_runtime import BucketCommContext
+
+        context = self._shared_engine_context
+        if context is None:
+            context = BucketCommContext.for_device(self._device)
+            context.fsdp2_prefetch_release = True
+        context.backward_start_callbacks.append(self._engine_backward_start)
+        context.backward_end_callbacks.append(self._engine_backward_end)
         for state in self._state_ctx.all_states:
-            for fsdp_param_group in state._fsdp_param_groups:
-                fsdp_param_group.lazy_init()
+            state._state_ctx = self._state_ctx
+            state._engine_context = context
+            buckets = state._engine_buckets
+            for bucket in buckets:
+                # For the root, do not reshard after forward since for
+                # training, the parameters would be all-gathered right away
+                reshard = bucket.storage._reshard_after_forward and not (
+                    state is self and self._auto_reshard_after_forward
+                )
+                bucket.join(context, reshard_after_forward=reshard)
+                # The last bucket's post-backward trigger wraps the others', so
+                # it reduces first
+                bucket.bucket.retires_pending_reductions = bucket is buckets[-1]
+
+    def _engine_backward_start(self) -> None:
+        """Fix the manual backward finalization mode until the backward
+        iteration ends, as FSDP2's pre-backward does."""
+        state_ctx = self._state_ctx
+        if state_ctx.manual_backward_finalization_active is None:
+            state_ctx.manual_backward_finalization_active = (
+                state_ctx.manual_backward_finalization
+            )
+
+    def _engine_backward_end(self) -> None:
+        """End of a backward on the engine: reset the frontend's per-iteration
+        state, as FSDP2's root post-backward callback does."""
+        logger.debug("FSDP::root_post_backward")
+        self._state_ctx.iter_forward_root = None
+        if self._state_ctx.is_last_backward:
+            self._state_ctx.manual_backward_finalization_active = None
+        for state in self._state_ctx.all_states:
+            state._training_state = TrainingState.IDLE
+            for bucket in state._engine_buckets:
+                bucket.wait_for_grad_offload()
 
     def _validate_no_duplicate_params(self) -> None:
         seen: set[int] = set()
@@ -248,37 +289,14 @@ class FSDPState(_State):
                         )
                     seen.add(fsdp_param._orig_param_uid)
 
-    def _init_shared_state(self) -> None:
-        self._comm_ctx.lazy_init(self._device)
-        for state in self._state_ctx.all_states:
-            state._state_ctx = self._state_ctx
-            state._comm_ctx = self._comm_ctx
-            num_groups = len(state._fsdp_param_groups)
-            for i, fsdp_param_group in enumerate(state._fsdp_param_groups):
-                fsdp_param_group.comm_ctx = self._comm_ctx
-                fsdp_param_group._param_group_index = i
-                fsdp_param_group._num_param_groups = num_groups
-        # The reduce-scatter input-buffer cap governs the single shared
-        # reduce_scatter_states list, so resolve the per-group caps into one
-        # effective value (the most aggressive); a lower-cap group must not
-        # silently undo a higher-cap group's retention.
-        self._comm_ctx.reduce_scatter_max_input_buffers = max(
-            (
-                fsdp_param_group.reduce_scatter_max_input_buffers
-                for state in self._state_ctx.all_states
-                for fsdp_param_group in state._fsdp_param_groups
-            ),
-            default=1,
-        )
-
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
         if not self._is_root:
             raise AssertionError("Expected _is_root to be True")
         root_module = self._modules[0]
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
-        # Build a mapping from module to all its FSDPParamGroups (not just one)
-        module_to_fsdp_param_groups: dict[nn.Module, list[FSDPParamGroup]] = {}
+        # Build a mapping from module to all its buckets (not just one)
+        module_to_fsdp_param_groups: dict[nn.Module, list[FullyShardBucket]] = {}
         for state in self._state_ctx.all_states:
             for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
@@ -293,81 +311,93 @@ class FSDPState(_State):
         for module_name, module in root_module.named_modules():
             if module in module_to_fsdp_param_groups:
                 # Set FQN for all param groups associated with this module
-                for fsdp_param_group in module_to_fsdp_param_groups[module]:
-                    module_fqn = fsdp_param_group._module_fqn
-                    if module_fqn is None:
-                        fsdp_param_group._module_fqn = module_name
+                for bucket in module_to_fsdp_param_groups[module]:
+                    if bucket.module_fqn is None:
+                        bucket.module_fqn = module_name
                     else:
-                        if not isinstance(module_fqn, str):
-                            raise AssertionError(
-                                f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
-                            )
-                        module_fqn += f", {module_name}"
-                        fsdp_param_group._module_fqn = module_fqn
+                        bucket.module_fqn += f", {module_name}"
 
     @_dynamo_disable
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if (
-            self._state_ctx.gradient_reduction_pending
-            or self._comm_ctx.active_gradient_reduction is not None
+        from .._flex_shard.bucket_runtime import _in_backward
+
+        context = self._engine_context
+        if self._state_ctx.gradient_reduction_pending or (
+            context is not None and context.pending_finalization is not None
         ):
             raise RuntimeError(
                 "The previous gradient reduction must be waited on before forward"
             )
-        # When composing with module-hook-based activation checkpointing, the
-        # pre-backward hook is responsible for the unshard
-        if self._training_state == TrainingState.PRE_BACKWARD:
+        # In an activation checkpointing recompute, the buckets' hooks unshard
+        if not _in_backward():
             with _spmd_no_typecheck():
-                # With nested FSDP and multiple forward passes before backward,
-                # the params might have been resharded by a previous post_backward.
-                # We need to ensure params are unsharded for AC recomputation.
-                for fsdp_param_group in self._fsdp_param_groups:
-                    if not fsdp_param_group.is_unsharded:
-                        fsdp_param_group.unshard()
-                        fsdp_param_group.wait_for_unshard()
-            return self._cast_forward_inputs(args, kwargs)
-
-        # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
-        # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
-        # run for each). Root setup and forward prefetch are one-shot, gated
-        # on the first module's entry.
-        with _spmd_no_typecheck():
-            state_first_in_pass = self._training_state != TrainingState.FORWARD
-            self._training_state = TrainingState.FORWARD
-            if state_first_in_pass:
-                args, kwargs = self._root_pre_forward(module, args, kwargs)
+                # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires
+                # per module; root setup runs on the first module's entry
+                state_first_in_pass = self._training_state != TrainingState.FORWARD
+                self._training_state = TrainingState.FORWARD
+                if state_first_in_pass:
+                    args, kwargs = self._root_pre_forward(module, args, kwargs)
         args, kwargs = self._cast_forward_inputs(args, kwargs)
-        for fsdp_param_group in self._fsdp_param_groups:
-            args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
-        with _spmd_no_typecheck():
-            if state_first_in_pass:
-                for fsdp_state in self._states_to_forward_prefetch:
-                    # Forward order (not reversed) to match forward execution
-                    # order; contrast with reversed() in _pre_backward.
-                    for target_param_group in fsdp_state._fsdp_param_groups:
-                        FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
-            return args, kwargs
+        # The buckets' hooks unshard outside spmd_types' type checker
+        # themselves; the post-backward trigger they wrap the typed inputs in
+        # stays checked
+        for bucket in self._engine_buckets:
+            runtime = bucket.bucket
+            hook = (
+                runtime.group_pre_forward_hook
+                if runtime.group_modules
+                else runtime.pre_forward_hook
+            )
+            if (result := hook(module, args, kwargs)) is not None:
+                args, kwargs = result
+            if bucket.has_spmd_types:
+                for fsdp_param in bucket.fsdp_params:
+                    fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
+        return args, kwargs
 
     @_dynamo_disable
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
+        from .._flex_shard.bucket_runtime import _in_backward
+
         with _spmd_no_typecheck():
-            # When composing with module-hook-based activation checkpointing, the
-            # post-backward hook is responsible for the reshard
-            if self._training_state == TrainingState.PRE_BACKWARD:
+            for bucket in self._engine_buckets:
+                runtime = bucket.bucket
+                if runtime.group_modules:
+                    runtime.group_post_forward_hook(module, input, output)
+                else:
+                    runtime.post_forward_hook(module, input, output)
+            if _in_backward():
                 return self._cast_output_dtype(output)
-            for fsdp_param_group in self._fsdp_param_groups:
-                output = fsdp_param_group.post_forward(module, input, output)
-            output = self._register_pre_backward_hook(output)
-            self._training_state = TrainingState.IDLE
+            if not any(b.bucket.group_pass is not None for b in self._engine_buckets):
+                self._training_state = TrainingState.IDLE
             if self._state_ctx.iter_forward_root is self:
-                output = self._force_complete_incomplete_states(output)
-                # Free the last result retained for forward copy-in overlap; see
-                # [Note: Overlapping all-gather copy-in and all-gather].
-                self._comm_ctx.release_all_gather_state_for_comm_reuse()
+                # Complete the forward of groups whose modules did not all run,
+                # e.g. a decoder that leaves its output projection to the loss.
+                # See ``all_states`` for why this iterates ``reversed``.
+                for state in reversed(self._state_ctx.all_states):
+                    if state is self:
+                        continue
+                    for bucket in state._engine_buckets:
+                        if bucket.bucket.group_pass is not None:
+                            bucket.bucket.complete_group_pass(output)
+                            state._training_state = TrainingState.IDLE
                 self._state_ctx.iter_forward_root = None
+            if torch._C._are_functorch_transforms_active():
+                # Under functorch, outputs that outer autograd differentiates can
+                # report requires_grad=False, so the buckets hooked none of them
+                output = _apply_to_tensors(
+                    lambda t: _FunctorchPreBackward.apply(self, t)
+                    if not t.requires_grad and (t.is_floating_point() or t.is_complex())
+                    else t,
+                    output,
+                )
             return self._cast_output_dtype(output)
+
+    def _functorch_pre_backward(self, grad: torch.Tensor) -> None:
+        for bucket in self._engine_buckets:
+            bucket.bucket.pre_backward_hook((grad,))
 
     def _cast_forward_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -387,284 +417,33 @@ class FSDPState(_State):
                 output,
             )
 
-    def _force_complete_incomplete_states(self, output: Any) -> Any:
-        # Complete post-forward for any state whose group forward did not
-        # run all modules (e.g. chunked loss where model.forward skips
-        # head). See ``all_states`` init for why we iterate ``reversed``.
-        for state in reversed(self._state_ctx.all_states):
-            if state is self or not state._modules_to_run_forward:
-                continue
-            logger.debug("FSDP::force_complete_post_forward")
-            for fsdp_param_group in state._fsdp_param_groups:
-                output = fsdp_param_group.post_forward(None, None, output)
-            output = state._register_pre_backward_hook(output)
-            state._training_state = TrainingState.IDLE
-            output = state._cast_output_dtype(output)
-            state._modules_to_run_forward.clear()
+
+class _FunctorchPreBackward(torch.autograd.Function):
+    """Runs the buckets' pre-backward hooks for an output under functorch
+    transforms (e.g. vmap, jvp)."""
+
+    generate_vmap_rule = True
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def forward(state: FSDPState, output: torch.Tensor) -> torch.Tensor:
         return output
 
-    @_dynamo_disable
-    def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
-        with _spmd_no_typecheck():
-            self._training_state = TrainingState.PRE_BACKWARD
-            self._register_root_post_backward_final_callback()
-            default_prefetch = len(self._states_to_backward_prefetch) == 0
-            for fsdp_param_group in self._fsdp_param_groups:
-                fsdp_param_group.pre_backward(default_prefetch)
-            for fsdp_state in self._states_to_backward_prefetch:
-                # Reverse so higher-indexed groups are prefetched first,
-                # matching backward execution order (reverse of forward).
-                for target_param_group in reversed(fsdp_state._fsdp_param_groups):
-                    FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
-            return grad
+    @staticmethod
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+        ctx.state = inputs[0]
 
-    @_dynamo_disable
-    def _root_post_backward_final_callback(self) -> None:
-        logger.debug("FSDP::root_post_backward")
-        with torch.profiler.record_function("FSDP::root_post_backward_callback"):
-            manual_finalization = self._state_ctx.manual_backward_finalization_active
-            if manual_finalization is None:
-                raise AssertionError(
-                    "Expected manual backward finalization mode to be set"
-                )
-            # Reset per-iteration state. With chunked loss, each standalone
-            # per-chunk call repopulates an inner state's
-            # ``_modules_to_run_forward`` (and claims ``iter_forward_root``)
-            # but the group post-hook never empties it because not all
-            # modules run; clear both here so the next iteration starts
-            # fresh.
-            self._state_ctx.iter_forward_root = None
-            for state in self._state_ctx.all_states:
-                state._modules_to_run_forward.clear()
-                # Reverse so that the last param group (which gates the
-                # reduce-scatter wait/clear) fires first, matching the
-                # autograd backward order and preserving RS overlap for
-                # per-param-mesh modules whose inputs lack gradients.
-                for fsdp_param_group in reversed(state._fsdp_param_groups):
-                    if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
-                        if manual_finalization and fsdp_param_group.reduce_grads:
-                            fsdp_param_group._post_backward_pending = True
-                        else:
-                            # Run post-backward in case forward inputs did not require
-                            # gradient so the autograd backward did not run
-                            fsdp_param_group.post_backward()
-                    fsdp_param_group._training_state = TrainingState.IDLE
-                state._training_state = TrainingState.IDLE
-            if self._state_ctx.is_last_backward and not manual_finalization:
-                self.wait_for_gradient_reduction()
-            else:
-                # A partial grouped forward can retain the last all-gather result
-                # until backward. Release it at every non-finalized boundary so
-                # gradient accumulation does not retain the buffer.
-                self._comm_ctx.release_all_gather_state_on_current_stream()
-            self._state_ctx.post_backward_final_callback_queued = False
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> tuple[None, torch.Tensor]:
+        ctx.state._functorch_pre_backward(grad)
+        return None, grad
 
-    def finalize_backward(self, *, wait_for_gradient_reduction: bool = True) -> None:
-        if self._is_root is None:
-            return
-        logger.debug("%s::finalize_backward", self._state_name)
-        with torch.profiler.record_function(f"{self._state_name}::finalize_backward"):
-            self._validate_finalize_backward()
-            # Autograd has completed, and wait_for_gradient_reduction waits for
-            # these reductions, so no inter-autograd wait is needed.
-            for fsdp_state in reversed(self._state_ctx.all_states):
-                for group in reversed(fsdp_state._fsdp_param_groups):
-                    if group._post_backward_pending:
-                        group.post_backward()
-                    elif group.reshard_after_backward:
-                        with _spmd_no_typecheck():
-                            group.reshard()
-                    group._training_state = TrainingState.IDLE
-            if wait_for_gradient_reduction:
-                self.wait_for_gradient_reduction()
-
-    def _validate_finalize_backward(self) -> None:
-        if self._is_root is None:
-            raise RuntimeError(
-                "finalize_backward must be called after the first forward"
-            )
-        if self._state_ctx.gradient_reduction_pending:
-            raise RuntimeError(
-                "The previous gradient reduction must be waited on before "
-                "finalizing backward again"
-            )
-        if not self._is_root:
-            raise RuntimeError(
-                "finalize_backward must be called on the root "
-                f"{self._state_name} module"
-            )
-        manual_finalization = self._state_ctx.manual_backward_finalization_active
-        if manual_finalization is None:
-            manual_finalization = self._state_ctx.manual_backward_finalization
-        if not manual_finalization:
-            raise RuntimeError(
-                f"{self._state_name} finalize_backward requires manual backward "
-                "finalization. Call "
-                "set_manual_backward_finalization(True) before forward"
-            )
-        if self._state_ctx.post_backward_final_callback_queued:
-            raise RuntimeError(
-                f"{self._state_name} finalize_backward must be called after "
-                "backward completes"
-            )
-        param_groups = [
-            group
-            for fsdp_state in self._state_ctx.all_states
-            for group in fsdp_state._fsdp_param_groups
-        ]
-        if partial_group := next(
-            (
-                group
-                for group in param_groups
-                if group._partial_reduce_output is not None
-            ),
-            None,
-        ):
-            group_name = partial_group._module_fqn or "<root>"
-            raise RuntimeError(
-                f"{self._state_name} manual backward finalization does not support "
-                f"partial gradient reductions for parameter group {group_name!r}. "
-                "Use automatic backward finalization for this configuration"
-            )
-        if no_all_reduce_group := next(
-            (
-                group
-                for group in param_groups
-                if group._post_backward_pending
-                and group.reduce_grads
-                and isinstance(group.mesh_info, DDPMeshInfo)
-                and not group.all_reduce_grads
-            ),
-            None,
-        ):
-            group_name = no_all_reduce_group._module_fqn or "<root>"
-            raise RuntimeError(
-                f"{self._state_name} manual backward finalization requires "
-                f"all-reduce for parameter group {group_name!r}. Call "
-                "set_requires_all_reduce(True) before finalization"
-            )
-
-    def _end_backward_iteration(self) -> None:
-        current_stream = self._device_handle.current_stream()
-        for event in self._comm_ctx._last_post_reduce_events.values():
-            current_stream.wait_event(event)
-        self._comm_ctx._last_post_reduce_events.clear()
-        for state in self._state_ctx.all_states:
-            for fsdp_param_group in state._fsdp_param_groups:
-                fsdp_param_group.finalize_backward()
-        self._comm_ctx.release_all_gather_state_on_current_stream()
-        self._comm_ctx.post_forward_order.clear()
-        # Wait on and release any retained reduce-scatter input buffers:
-        # the last module's (which no later module's rs_wait clears) and,
-        # when set_reduce_scatter_max_input_buffers retains more than
-        # one in flight, the rest. The compute stream (which reuses the
-        # memory) is ordered past each reduce-scatter first.
-        for rs_state in self._comm_ctx.reduce_scatter_states:
-            if rs_state.event is not None:
-                rs_state.allocation_stream.wait_event(rs_state.event)
-        self._comm_ctx.reduce_scatter_states.clear()
-        self._state_ctx.manual_backward_finalization_active = None
-
-    def wait_for_gradient_reduction(
-        self, reduction: _GradientReductionState | None = None
-    ) -> None:
-        """Wait for gradient reduction and finish the backward iteration."""
-        if reduction is not None:
-            if self._comm_ctx.active_gradient_reduction is not reduction:
-                raise RuntimeError("This gradient reduction handle was invalidated")
-
-        self._end_backward_iteration()
-        if reduction is not None:
-            self._state_ctx.gradient_reduction_pending = False
-            self._comm_ctx.active_gradient_reduction = None
-
-    def _register_pre_backward_hook(self, output: Any) -> Any:
-        if not torch.is_grad_enabled():
-            return output
-        # In eager, register hooks directly on grad-requiring outputs.
-        tensors = collect_grad_tensors(output)
-        for t in tensors:
-            if t._base is not None:
-                cls = ", ".join(type(m).__name__ for m in self._modules) or "?"
-                warnings.warn(
-                    f"FSDP2-wrapped module ({cls}) returned a view tensor. "
-                    "An in-place op on this view (e.g., `x += y`) will silently "
-                    "drop the pre-backward hook and skip the all-gather, which "
-                    "can cause backward to fail or produce wrong gradients. "
-                    "Use out-of-place ops (`out = out + y`, not `out += y`) or "
-                    "`.clone()` the output before any in-place op.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            t.register_hook(self._pre_backward)
-        if torch._C._are_functorch_transforms_active():
-            # Under functorch, some differentiable outputs report
-            # requires_grad=False inside the transform even when returned
-            # primals participate in outer autograd.
-            return _apply_to_tensors(
-                lambda t: RegisterPreBackwardFunction.apply(self, t)
-                if not t.requires_grad
-                and (torch.is_floating_point(t) or torch.is_complex(t))
-                else t,
-                output,
-            )
-        return output
-
-    def _register_root_post_backward_final_callback(self):
-        if self._state_ctx.post_backward_final_callback_queued:
-            return
-        if self._state_ctx.manual_backward_finalization_active is None:
-            self._state_ctx.manual_backward_finalization_active = (
-                self._state_ctx.manual_backward_finalization
-            )
-        self._state_ctx.post_backward_final_callback_queued = True
-        # TODO: To support modifying the sharded parameters between forward and
-        # backward, make the all-gather copy-in and all-gather streams
-        # wait_stream(current_stream) here, as _root_pre_forward does. This runs
-        # once per backward before any backward all-gather. The cost is that the
-        # first backward all-gather cannot overlap the forward tail.
-        Variable._execution_engine.queue_callback(
-            self._root_post_backward_final_callback
-        )
-
-    def _reset_iter_state(self) -> None:
-        # Iteration-wide recovery after a mid-forward or mid-backward
-        # exception. Waits on in-flight collectives, reshards every param
-        # group, and clears per-iteration trackers so the next forward can
-        # start from a clean state. Any in-flight gradients (reduce-scatter
-        # results, HSDP partial reduce outputs, grad-accum state) are
-        # discarded: the failed iteration is treated as lost.
-        if self._is_root is False:
-            raise RuntimeError(
-                "reset_iter_state must be called on the root FSDP module"
-            )
-        if (
-            reduction := self._comm_ctx.active_gradient_reduction
-        ) is not None and reduction.owner is not self._state_ctx:
-            raise RuntimeError(
-                "reset_iter_state cannot reset a gradient reduction owned by "
-                "another FSDP root sharing the communication context"
-            )
-        current_stream = self._device_handle.current_stream()
-        self._comm_ctx.release_all_gather_state_on_current_stream()
-        for rs_state in self._comm_ctx.reduce_scatter_states:
-            if rs_state.event is not None:
-                rs_state.allocation_stream.wait_event(rs_state.event)
-        self._comm_ctx.reduce_scatter_states.clear()
-        for event in self._comm_ctx._last_post_reduce_events.values():
-            current_stream.wait_event(event)
-        self._comm_ctx._last_post_reduce_events.clear()
-        self._comm_ctx.post_forward_order.clear()
-        for state in self._state_ctx.all_states:
-            state._modules_to_run_forward.clear()
-            state._training_state = TrainingState.IDLE
-            for fsdp_param_group in state._fsdp_param_groups:
-                fsdp_param_group._reset_iter_state()
-        self._state_ctx.iter_forward_root = None
-        self._state_ctx.post_backward_final_callback_queued = False
-        self._state_ctx.manual_backward_finalization_active = None
-        self._state_ctx.gradient_reduction_pending = False
-        self._comm_ctx.active_gradient_reduction = None
+    @staticmethod
+    def jvp(ctx: Any, state_tangent: Any, tangent: torch.Tensor | None) -> Any:
+        # Keep the tangent's backward on the pre-backward path
+        if tangent is None:
+            return None
+        return _FunctorchPreBackward.apply(ctx.state, tangent)
 
 
 def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
@@ -672,93 +451,3 @@ def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
     if isinstance(state, FSDPState):
         return state
     return None
-
-
-class RegisterPreBackwardFunction(torch.autograd.Function):
-    generate_vmap_rule = True
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(state: FSDPState, output: torch.Tensor):
-        return output
-
-    @staticmethod
-    def setup_context(ctx, inputs: tuple[Any, ...], output: Any) -> None:
-        state, _ = inputs
-        ctx.state = state
-
-    @staticmethod
-    def backward(ctx: Any, *grad_outputs: Any) -> Any:
-        (grad,) = grad_outputs
-        return None, ctx.state._pre_backward(grad)
-
-    @staticmethod
-    def jvp(ctx: Any, *grad_inputs: Any) -> Any:
-        # Drop the non-tensor FSDP state tangent; keep tangent backward on the
-        # FSDP pre-backward path.
-        tangent = grad_inputs[1]
-        if tangent is None:
-            return None
-        return RegisterPreBackwardFunction.apply(ctx.state, tangent)
-
-
-def _register_group_forward_hooks(
-    modules: Sequence[nn.Module],
-    pre_hook: Callable,
-    post_hook: Callable,
-    modules_to_run: set[nn.Module],
-    cast_output_dtype: Callable[[Any], Any],
-) -> _MultiHandle:
-    """
-    Registers group forward pre and post-hooks. The pre-hook runs on every
-    module pre-forward; downstream state gating ensures one-shot work
-    (root setup, post_backward hook registration) fires once per group
-    pass. The post-hook runs on every module's post-forward: on the
-    partial path (group not yet complete) it applies only the
-    ``mp_policy.output_dtype`` cast so standalone per-module callers
-    observe the same output dtype semantics as the non-grouped case; on
-    the last module it runs the full ``post_hook`` (which reshards,
-    registers the pre-backward hook, and itself casts output_dtype). If
-    a module never runs forward, the post-hook does not fire for it and
-    ``_force_complete_incomplete_states`` finishes the group from the
-    root's post-forward.
-    """
-    modules_set = set(modules)
-
-    @_dynamo_disable
-    @functools.wraps(pre_hook)
-    def wrapped_pre_hook(*args: Any, **kwargs: Any):
-        if len(modules_to_run) == 0:
-            modules_to_run.update(modules_set)
-        return pre_hook(*args, **kwargs)
-
-    def get_wrapped_post_hook(module: nn.Module):
-        @_dynamo_disable
-        @functools.wraps(post_hook)
-        def wrapped_post_hook(hook_module: nn.Module, input: Any, output: Any) -> Any:
-            # Full path fires once, when this invocation completes the
-            # group. Otherwise apply only the output_dtype cast so every
-            # module in the group (including repeat invocations such as
-            # per-chunk standalone head calls) produces output in the
-            # mp_policy's output_dtype.
-            if module in modules_to_run:
-                modules_to_run.remove(module)
-                if len(modules_to_run) == 0:
-                    return post_hook(hook_module, input, output)
-            return cast_output_dtype(output)
-
-        return wrapped_post_hook
-
-    pre_handles = [
-        module.register_forward_pre_hook(
-            wrapped_pre_hook, prepend=True, with_kwargs=True
-        )
-        for module in modules
-    ]
-    post_handles = [
-        module.register_forward_hook(
-            get_wrapped_post_hook(module), prepend=False, always_call=True
-        )
-        for module in modules
-    ]
-    return _MultiHandle(tuple(pre_handles + post_handles))

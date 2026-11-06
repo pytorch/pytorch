@@ -814,6 +814,22 @@ class DTensorTest(DTensorContinuousTestBase):
         reloaded_st = torch.load(buffer, weights_only=True)
         self.assertEqual(sharded_tensor, reloaded_st)
 
+    @with_comms
+    def test_dtensor_local_view_deepcopy_save_load(self):
+        import copy
+        import io
+
+        device_mesh = self.build_device_mesh()
+        # A local tensor at a nonzero storage offset, as fully_shard's sharded
+        # parameters view their group's storage
+        local_tensor = torch.randn(4, 3, device=self.device_type)[1:]
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, [Shard(0)])
+        self.assertEqual(copy.deepcopy(sharded_tensor), sharded_tensor)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.load(buffer, weights_only=True), sharded_tensor)
+
     @skipIfHpu
     @with_comms
     @unittest.skipIf(
@@ -1009,6 +1025,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         # integration
         "test_dtensor_save_load",
         "test_dtensor_save_load_import",
+        "test_dtensor_local_view_deepcopy_save_load",
     ],
 )
 

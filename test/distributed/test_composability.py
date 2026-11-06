@@ -510,7 +510,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         self.assertFalse(state._state_ctx.manual_backward_finalization)
         model.zero_grad(set_to_none=True)
         model(inputs[0]).sum().backward()
-        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+        self.assertEqual(state._engine_context.reduce_grad_states, [])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

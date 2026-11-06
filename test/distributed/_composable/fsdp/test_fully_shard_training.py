@@ -30,21 +30,13 @@ from torch.distributed.fsdp import (
     register_fsdp_forward_method,
     share_comm_ctx,
 )
-from torch.distributed.fsdp._fully_shard._all_gather_layout import AllGatherLayout
 from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
-    foreach_all_gather,
-    foreach_reduce,
-)
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     ShardPlacementResult,
     TrainingState,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_engine import FSDPEngineBucket
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -56,14 +48,13 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
+    DoubleLinear,
     FSDPTest,
     FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
     patch_all_gather,
-    patch_foreach_all_gather,
-    patch_foreach_reduce,
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
@@ -92,6 +83,16 @@ funcol = torch.ops.c10d_functional
 
 from torch.testing._internal.common_fsdp import get_devtype
 
+
+
+def context_buckets(model: nn.Module) -> list:
+    """The engine buckets of every fully_shard module under ``model``."""
+    return [
+        bucket
+        for module in model.modules()
+        if isinstance(module, FSDPModule)
+        for bucket in module._get_fsdp_state()._fsdp_param_groups
+    ]
 
 device_type = torch.device(get_devtype())
 
@@ -332,25 +333,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             model(inp).sum().backward()
             self._assert_dtensor_params(model.parameters())
-
-    def test_modules_to_run_forward_empty_for_single_module(self):
-        # ``_force_complete_incomplete_states`` guards on
-        # ``_modules_to_run_forward`` being non-empty. Single-module
-        # ``fully_shard(m)`` registers the raw pre/post hooks instead of
-        # the group wrapper (see ``FSDPState.init``), so the set must
-        # remain empty for its lifetime — otherwise force-complete would
-        # spuriously fire on ungrouped states.
-        device = torch.device(device_type.type, 0)
-        model = MLP(8, device)
-        fully_shard(model.in_proj)
-        fully_shard(model.out_proj)
-        fully_shard(model)
-        for submod in (model, model.in_proj, model.out_proj):
-            self.assertEqual(submod._get_fsdp_state()._modules_to_run_forward, set())
-        inp = torch.randn((2, 8), device=device_type.type)
-        model(inp).sum().backward()
-        for submod in (model, model.in_proj, model.out_proj):
-            self.assertEqual(submod._get_fsdp_state()._modules_to_run_forward, set())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
         # need to iterate over the list multiple times
@@ -1068,8 +1050,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def test_partial_group_forward_then_standalone(self):
         """Chunked-loss pattern: model forward skips one module in a grouped
         ``fully_shard([norm, head])``, then that module is called standalone
-        per-chunk. Validates ``_force_complete_incomplete_states`` +
-        ``mp_policy`` casts across resharding / weight-tying / AC axes.
+        per-chunk. Validates that the root post-forward completes the group's
+        forward, and ``mp_policy`` casts, across resharding / weight-tying / AC
+        axes.
         """
         self.run_subtests(
             {
@@ -1109,16 +1092,19 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         hidden = model(tokens, skip_head=True)
         chunk = hidden.detach().requires_grad_()
         model.head(chunk).sum().backward()
-        comm_ctx = model.head._get_fsdp_state()._comm_ctx
-        # The standalone head forward leaves this deferred state for the root
-        # backward boundary to release.
-        self.assertIsNotNone(comm_ctx.all_gather_state)
+        # The standalone head forward leaves the group's forward pass and
+        # prefetches for the root backward boundary to release.
+        context = model._get_fsdp_state()._engine_context
+        runtimes = [bucket.bucket for bucket in context_buckets(model)]
 
         # Pipeline schedules use non-final backwards while accumulating grads.
         model.set_is_last_backward(False)
         hidden.backward(chunk.grad)
 
-        self.assertIsNone(comm_ctx.all_gather_state)
+        self.assertEqual(context.pending_unshards, [])
+        for runtime in runtimes:
+            self.assertIsNone(runtime.group_pass)
+            self.assertFalse(runtime.is_unsharded)
 
     def _test_partial_group_forward_then_standalone(
         self,
@@ -1479,10 +1465,12 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
-        comm_ctx = model._get_fsdp_state()._comm_ctx
-        self.assertIsNotNone(comm_ctx.all_gather_state)
+        state = model._get_fsdp_state()
         model.reset_iter_state()
-        self.assertIsNone(comm_ctx.all_gather_state)
+        self.assertEqual(state._engine_context.pending_unshards, [])
+        self.assertIsNone(state._state_ctx.iter_forward_root)
+        for bucket in context_buckets(model):
+            self.assertIsNone(bucket.bucket.group_pass)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()
@@ -1555,10 +1543,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def test_double_partial_forward_then_backward(self):
         """Two back-to-back ``model(x, skip_head=True)`` calls before
         backward: both partial forwards must re-register their post_backward
-        autograd node. ``_force_complete_incomplete_states`` resets the
-        inner group's ``_training_state`` to IDLE so the second forward
-        sees ``entering_forward_pass=True`` and registers normally; without
-        that reset, backward would hang on a missing reduce-scatter.
+        autograd node. The root post-forward completes the inner group's
+        forward pass so the second forward opens a new one and registers
+        normally; without that, backward would hang on a missing
+        reduce-scatter.
         """
         dim, vocab_size = 32, 128
 
@@ -2023,7 +2011,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         with self.assertRaisesRegex(RuntimeError, "requires manual"):
             model.finalize_backward(async_op=True)
         state = model._get_fsdp_state()
-        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+        self.assertIsNone(state._engine_context.pending_finalization)
 
         model.zero_grad(set_to_none=True)
         model.set_manual_backward_finalization(True)
@@ -2041,7 +2029,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         output.sum().backward()
         self.assertEqual(len(errors), 1)
         self.assertIn("must be called after backward completes", errors[0])
-        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+        self.assertIsNone(state._engine_context.pending_finalization)
         model.finalize_backward(async_op=True).wait()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -2069,7 +2057,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
                 model.set_manual_backward_finalization(False)
             model.finalize_backward()
         state = model._get_fsdp_state()
-        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+        self.assertEqual(state._engine_context.reduce_grad_states, [])
         self.assertIsNone(state._state_ctx.manual_backward_finalization_active)
         model.set_manual_backward_finalization(not initial_mode)
 
@@ -2232,7 +2220,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         self.assertIsInstance(handle, GradientReductionHandle)
         state = model._get_fsdp_state()
         self.assertTrue(state._state_ctx.gradient_reduction_pending)
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 1)
         with self.assertRaisesRegex(RuntimeError, "before finalizing"):
             model.finalize_backward(async_op=True)
         with self.assertRaisesRegex(RuntimeError, "before forward"):
@@ -2243,7 +2231,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         handle.wait()
         handle.wait()
         self.assertFalse(state._state_ctx.gradient_reduction_pending)
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 0)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 0)
 
         for input_tensor in inputs:
             ref_model(input_tensor).sum().backward()
@@ -2273,11 +2261,11 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(torch.randn(4, 8, device=device_type.type)).sum().backward()
 
         state = model._get_fsdp_state()
-        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
+        self.assertGreater(len(state._engine_context.reduce_grad_states), 0)
         self.assertTrue(
             all(
-                reduction.allocation_stream == backward_stream
-                for reduction in state._comm_ctx.reduce_scatter_states
+                reduction.result.allocation_streams[0] == backward_stream
+                for reduction in state._engine_context.reduce_grad_states
             )
         )
         finalize_stream = device_module.Stream()
@@ -2382,7 +2370,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(input_tensor).sum().backward()
         model.set_requires_gradient_sync(True)
         state = model._get_fsdp_state()
-        comm.get_cap = lambda: state._comm_ctx.reduce_scatter_max_input_buffers
+        comm.get_cap = lambda: state._engine_context.max_pending_reduce_grads
 
         handle = model.finalize_backward(async_op=async_op)
         if handle is not None:
@@ -2423,9 +2411,9 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(input_tensor).sum().backward()
 
         state = model._get_fsdp_state()
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 1)
         self.assertEqual(
-            state._comm_ctx.reduce_scatter_states[0].allocation_stream,
+            state._engine_context.reduce_grad_states[0].result.allocation_streams[0],
             backward_stream,
         )
         model[0].set_requires_gradient_sync(True)
@@ -3283,6 +3271,8 @@ class TestFullyShardShareCommContext(FSDPTest):
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_share_comm_context(self):
+        from torch.distributed.fsdp._flex_shard import bucket_runtime
+
         torch.manual_seed(42)
         n_layers = 3
         lin_dim = 16
@@ -3294,102 +3284,38 @@ class TestFullyShardShareCommContext(FSDPTest):
             fully_shard(layer)
             layer._get_fsdp_state()._lazy_init()
         share_comm_ctx(list(model))
-        shared_comm_ctx = model[0]._get_fsdp_state()._comm_ctx
+        # The roots share one engine context, whose streams run their
+        # all-gathers and reduce-scatters
+        contexts = {id(layer._get_fsdp_state()._engine_context) for layer in model}
+        self.assertEqual(len(contexts), 1)
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn(4, 3, lin_dim, device=device_type.type)
         ref_loss = ref_model(inp).sum()
 
-        all_gather_streams = set()
-        reduce_scatter_streams = set()
+        unshard_streams = set()
+        reduce_grad_streams = set()
+        orig_begin_unshard = bucket_runtime.begin_bucket_unshard
+        orig_begin_reduce_grad = bucket_runtime.begin_reduce_grad
 
-        from torch.distributed.fsdp._fully_shard._fsdp_api import (
-            AllGather,
-            ReduceScatter,
-        )
-        from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
+        def begin_unshard_with_record(tensors, infos, mesh, unshard_stream, *args, **kwargs):
+            unshard_streams.add(unshard_stream)
+            return orig_begin_unshard(tensors, infos, mesh, unshard_stream, *args, **kwargs)
 
-        orig_foreach_all_gather = foreach_all_gather
-
-        def foreach_all_gather_with_assert(
-            fsdp_params: list[FSDPParam],
-            group: dist.ProcessGroup,
-            async_op: bool,
-            all_gather_copy_in_stream: torch.Stream,
-            all_gather_stream: torch.Stream,
-            device: torch.device,
-            all_gather_comm: AllGather,
-            layout: AllGatherLayout,
+        def begin_reduce_grad_with_record(
+            tensors, infos, mesh, reduction, reduce_grad_stream, *args, **kwargs
         ):
-            nonlocal all_gather_streams
-            all_gather_streams.add(all_gather_stream)
-            return orig_foreach_all_gather(
-                fsdp_params,
-                group,
-                async_op,
-                all_gather_copy_in_stream,
-                all_gather_stream,
-                device,
-                all_gather_comm,
-                layout,
+            reduce_grad_streams.add(reduce_grad_stream)
+            return orig_begin_reduce_grad(
+                tensors, infos, mesh, reduction, reduce_grad_stream, *args, **kwargs
             )
-
-        orig_foreach_reduce = foreach_reduce
-
-        @torch.no_grad()
-        def foreach_reduce_with_assert(
-            fsdp_params: list[FSDPParam],
-            unsharded_grads: list[torch.Tensor],
-            reduce_scatter_group: dist.ProcessGroup,
-            reduce_scatter_stream: torch.Stream,
-            reduce_scatter_comm: ReduceScatter,
-            reduce_dtype: torch.dtype,
-            device: torch.device,
-            gradient_divide_factor: float | None,
-            all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
-            all_reduce_stream: torch.Stream,
-            all_reduce_grads: bool,
-            partial_reduce_output: torch.Tensor | None,  # only used for HSDP
-            all_reduce_hook: Callable[[torch.Tensor], None] | None,
-            force_sum_reduction_for_comms: bool = False,
-            *,
-            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
-        ):
-            nonlocal reduce_scatter_streams
-            reduce_scatter_streams.add(reduce_scatter_stream)
-            return orig_foreach_reduce(
-                fsdp_params,
-                unsharded_grads,
-                reduce_scatter_group,
-                reduce_scatter_stream,
-                reduce_scatter_comm,
-                reduce_dtype,
-                device,
-                gradient_divide_factor,
-                all_reduce_group,
-                all_reduce_stream,
-                all_reduce_grads,
-                partial_reduce_output,
-                all_reduce_hook,
-                force_sum_reduction_for_comms,
-                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
-            )
-
-        # Groups on the FlexShard engine all-gather through their bucket
-        orig_engine_all_gather = FSDPEngineBucket.all_gather
-
-        def engine_all_gather_with_assert(bucket, group, async_op):
-            streams = group.comm_ctx.get_all_gather_streams(
-                async_op, group._training_state
-            )
-            all_gather_streams.add(streams[1])
-            return orig_engine_all_gather(bucket, group, async_op)
 
         with (
-            patch_foreach_all_gather(foreach_all_gather_with_assert),
-            patch_foreach_reduce(foreach_reduce_with_assert),
             mock.patch.object(
-                FSDPEngineBucket, "all_gather", engine_all_gather_with_assert
+                bucket_runtime, "begin_bucket_unshard", begin_unshard_with_record
+            ),
+            mock.patch.object(
+                bucket_runtime, "begin_reduce_grad", begin_reduce_grad_with_record
             ),
         ):
             loss = model(inp).sum()
@@ -3398,9 +3324,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             loss.backward()
             for param in ref_model.parameters():
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
-        self.assertEqual(len(all_gather_streams), 1)
-        self.assertEqual(len(reduce_scatter_streams), 1)
-        self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
+        self.assertEqual(len(unshard_streams), 1)
+        self.assertEqual(len(reduce_grad_streams), 1)
         check_sharded_parity(self, ref_model, model)
 
 
@@ -3566,12 +3491,10 @@ class TestFullyShardCudaGraph(FSDPTest):
         device = torch.device("cuda", self.rank)
         fake_pg = dist.new_group(backend="fake")
         mesh = DeviceMesh.from_group(fake_pg, "cuda")
-        model = nn.Sequential(
-            nn.Linear(8, 8, bias=False),
-            nn.Linear(8, 8, bias=False),
-        ).to(device)
+        model = nn.Sequential(nn.Linear(8, 8, bias=False), DoubleLinear(8)).to(device)
         fully_shard(model[0], mesh=mesh)
-        fully_shard(model[1], mesh=mesh)
+        fully_shard(model[1].lin1, mesh=mesh)
+        fully_shard(model[1].lin2, mesh=mesh)
         fully_shard(model, mesh=mesh)
         static_inputs = [torch.randn(4, 8, device=device) for _ in range(2)]
 
@@ -3579,29 +3502,35 @@ class TestFullyShardCudaGraph(FSDPTest):
             model.set_is_last_backward(False)
             model.set_reshard_after_backward(False)
             model.set_requires_gradient_sync(False)
-            model(static_inputs[0]).sum().backward()
+            out1, out2 = model(static_inputs[0])
+            (out1.sum() + out2.sum()).backward()
             model.set_is_last_backward(True)
             model.set_reshard_after_backward(True)
             model.set_requires_gradient_sync(True)
-            model(static_inputs[1]).sum().backward()
+            # lin2's backward prefetches lin1, which this backward leaves unused
+            _, out2 = model(static_inputs[1])
+            out2.sum().backward()
 
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             run_accumulation()
             model.zero_grad(set_to_none=True)
 
-        pending_all_gather_cleanups = 0
-        orig_finalize_backward = FSDPParamGroup.finalize_backward
+        from torch.distributed.fsdp._flex_shard.bucket_runtime import (
+            BucketCommContext,
+        )
 
-        def finalize_backward(param_group: FSDPParamGroup) -> None:
+        # The last backward releases the prefetches that the non-last one left
+        pending_all_gather_cleanups = 0
+        orig_release_prefetch = BucketCommContext._release_prefetch
+
+        def release_prefetch(context, pending) -> None:
             nonlocal pending_all_gather_cleanups
-            result = param_group._all_gather_result
-            if result is not None and result.all_gather_event is not None:
-                pending_all_gather_cleanups += 1
-            orig_finalize_backward(param_group)
+            pending_all_gather_cleanups += 1
+            orig_release_prefetch(context, pending)
 
         graph = torch.cuda.CUDAGraph()
-        with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
+        with mock.patch.object(BucketCommContext, "_release_prefetch", release_prefetch):
             with torch.cuda.graph(graph, stream=stream):
                 run_accumulation()
         self.assertGreater(pending_all_gather_cleanups, 0)
