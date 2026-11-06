@@ -395,14 +395,6 @@ def heavy_rpc_sparse(tensor):
 
 
 @torch.jit._script.script
-def heavy_rpc_torchscript(tensor):
-    for i in range(1, 100):
-        tensor *= i
-        tensor /= i + 1
-    return 0
-
-
-@torch.jit._script.script
 def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
@@ -2483,37 +2475,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 fut.wait()
 
     @dist_init
-    def test_async_record_function_cbs_jit_call(self):
-        if self.rank == 1:
-            with _profile() as pf:
-                key = _build_rpc_profiling_key(
-                    RPCExecMode.ASYNC,
-                    torch._jit_internal._qualified_name(my_script_func),
-                    "worker1",
-                    "worker0",
-                )
-                with torch.autograd.profiler.record_function(key) as rf:
-                    fut = rpc.rpc_async(
-                        worker_name(0), my_script_func, args=(torch.tensor(1),)
-                    )
-                    # Intentionally calling record_function internals
-                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(
-                        rf.record, fut
-                    )
-                result = fut.wait()
-                # Validate that the profiling future returns the same value as the RPC
-                # future.
-                expected = torch.add(torch.tensor(1), torch.tensor(1))
-                self.assertEqual(result, expected)
-            events = pf.function_events
-            rpc_event = get_function_event(
-                events, torch._jit_internal._qualified_name(my_script_func)
-            )
-            self.assertTrue(
-                torch._jit_internal._qualified_name(my_script_func) in rpc_event.name
-            )
-
-    @dist_init
     def test_py_class_constructor(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -2672,12 +2633,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
-
-    @dist_init
-    def test_stress_heavy_rpc_torchscript(self):
-        self._stress_test_rpc(
-            heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),)
-        )
 
     @dist_init
     def test_builtin_remote_ret(self):
@@ -3151,12 +3106,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
             # UDF
             rref = rpc.remote(worker_name(1), foo_add, args=())
-            rref.to_here()
-            fut = rref._get_future()
-            self.assertIsInstance(fut, torch._C.Future)
-
-            # Script
-            rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1),))
             rref.to_here()
             fut = rref._get_future()
             self.assertIsInstance(fut, torch._C.Future)

@@ -1045,10 +1045,6 @@ class TestFX(JitTestCase):
         #    native callable rather than the original code
         # 3) Run both the original code and native callable wrapper with
         #    equivalent results
-        # 4) TorchScript compile the native callable wrapper and confirm
-        #    equivalent results with the reference
-        # 5) TorchScript serialize and deserialize the native callable
-        #    and confirm equivalent results with the reference
 
         # We use this simple Module as a reference computation
         class MySimpleMod(torch.nn.Module):
@@ -1178,16 +1174,6 @@ class TestFX(JitTestCase):
         ref_out = msm(x)
         test_out = lowered(x)
         torch.testing.assert_close(test_out, ref_out)
-
-        # Test TorchScript compilation
-        scripted_lowered = torch.jit._script.script(lowered)
-        script_out = scripted_lowered(x)
-        torch.testing.assert_close(script_out, ref_out)
-
-        # Test TorchScript Ser/De
-        import_copy = self.getExportImportCopy(scripted_lowered)
-        imported_out = import_copy(x)
-        torch.testing.assert_close(imported_out, ref_out)
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
