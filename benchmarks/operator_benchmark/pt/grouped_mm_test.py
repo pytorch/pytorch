@@ -8,8 +8,10 @@ import torch
 Shapes follow the Primus-Turbo grouped GEMM benchmark
 (benchmark/ops/training/bench_grouped_gemm_torch.py): for each MoE config, the GateUP
 (N = 2 * moe_intermediate_size, K = hidden_size) and Down (N = hidden_size,
-K = moe_intermediate_size) projections with B = n_routed_experts / EP local experts
-for EP in (32, 16, 8), and M tokens routed to every expert.
+K = moe_intermediate_size) projections with B = n_routed_experts / EP local experts and
+M tokens routed to every expert. Each M uses one EP, rotating through (32, 16, 8) as M
+grows: that still reaches every ck_tile config these shapes select on gfx950, and every
+test fits in 40 GB.
 
 The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient test
 times backward through both inputs (dX and dW). Each test first checks the output, dX
@@ -33,25 +35,23 @@ MOE_CONFIGS = [
     (224, 1920, 8192),
 ]
 EP_SIZES = (32, 16, 8)
-TOKENS_PER_EXPERT = (512, 1024, 2048, 4096, 8192, 16384)
+TOKENS_PER_EXPERT = (512, 1024, 2048, 4096, 8192)
 
 
-def moe_shapes(configs=MOE_CONFIGS, tokens_per_expert=TOKENS_PER_EXPERT):
+def moe_shapes(configs=MOE_CONFIGS):
     shapes = []
     for experts, intermediate, hidden in configs:
         projs = {"GateUP": (2 * intermediate, hidden), "Down": (hidden, intermediate)}
-        for ep in EP_SIZES:
-            if experts % ep != 0:
-                continue
-            for M in tokens_per_expert:
-                for proj, (N, K) in projs.items():
-                    shapes.append([proj, experts // ep, M, N, K])
+        eps = [ep for ep in EP_SIZES if experts % ep == 0]
+        for i, M in enumerate(TOKENS_PER_EXPERT):
+            for proj, (N, K) in projs.items():
+                shapes.append([proj, experts // eps[i % len(eps)], M, N, K])
     return shapes
 
 
 grouped_mm_configs_short = op_bench.config_list(
     attr_names=["case", "B", "M", "N", "K"],
-    attrs=[s for s in moe_shapes(MOE_CONFIGS[:1], (512, 4096)) if s[1] == 8],
+    attrs=[s for s in moe_shapes(MOE_CONFIGS[:1]) if s[2] in (512, 4096)],
     cross_product_configs={
         "device": ["cuda"],
         "dtype": [torch.bfloat16],
@@ -91,6 +91,8 @@ TOLERANCES = {
 }
 
 
+# Runs eagerly under --use-compile: offs.tolist() and the print can't be compiled.
+@torch.compiler.disable
 def check_correctness(x, w, offs):
     """Primus-Turbo's check: output, dX and dW against per-group matmuls."""
     x, w = (t.detach().requires_grad_() for t in (x, w))
@@ -112,10 +114,11 @@ def check_correctness(x, w, offs):
             "dX": all(close(dx[s:e], grad_out[s:e] @ w[i]) for i, (s, e) in groups),
             "dW": all(close(dw[i], grad_out[s:e].t() @ x[s:e]) for i, (s, e) in groups),
         }
-    status = "PASS" if all(ok.values()) else "FAIL"
     details = ", ".join(f"{k}={v}" for k, v in ok.items())
     shapes = f"x {tuple(x.shape)} w {tuple(w.shape)} {x.dtype}"
-    print(f"# Correctness Check: {status} ({details}) {shapes}")
+    if not all(ok.values()):
+        raise AssertionError(f"Correctness check failed ({details}) {shapes}")
+    print(f"# Correctness Check: PASS ({details}) {shapes}")
 
 
 class DenseGrad(torch.autograd.Function):
