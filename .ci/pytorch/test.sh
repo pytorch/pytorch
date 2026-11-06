@@ -795,6 +795,8 @@ test_einops() {
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
+  echo "Testing dynamo/test_streams multi_gpu"
+  python test/run_test.py -i dynamo/test_streams -k test_cuda_current_stream_other_device --verbose
   echo "Testing multi_gpu tests in test_torchinductor"
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose

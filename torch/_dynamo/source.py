@@ -1385,6 +1385,10 @@ class ShapeEnvSource(Source):
 @dataclass_with_cached_hash(frozen=True)
 class CurrentStreamSource(Source):
     device: device_type
+    # Distinguishes separate queries of the same device so output codegen
+    # does not merge their reconstructions into one shared object; guard
+    # name and reconstruction use only `device`.
+    query_id: int | None = None
 
     @functools.cached_property
     def _name_template(self) -> str:
