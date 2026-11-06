@@ -1800,9 +1800,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # The CPython type(s) this VT is designed to represent.
-    # Single type or tuple of types. None means no static CPython type mapping
-    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
-    _cpython_type: type | tuple[type, ...] | None = None
+    # Single type or tuple of types. None means no static CPython type mapping.
+    # Read per class (own __dict__), not inherited. The base class itself
+    # represents plain `object()` instances, like PyBaseObject_Type:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
+    _cpython_type: type | tuple[type, ...] | None = object
 
     # Declarative named-method table (analogous to CPython's tp_methods): maps a
     # method name to a Method describing its handler and calling convention.
@@ -1986,6 +1988,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
+        if type(self) is VariableTracker:
+            return object
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
@@ -2974,7 +2978,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-
+        if type(self) is VariableTracker:
+            return self.value
         try:
             return self.as_python_constant()
         except NotImplementedError:
@@ -3481,8 +3486,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        value: object = NO_SUCH_SUBOBJ,
     ) -> None:
         super().__init__()
+        # Only bare VariableTrackers (plain object() instances) pass a value;
+        # subclasses manage their own self.value.
+        if value is not NO_SUCH_SUBOBJ:
+            self.value: Any = value
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
