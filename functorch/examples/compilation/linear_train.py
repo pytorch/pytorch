@@ -62,7 +62,7 @@ optim = torch.optim.SGD(
 )
 
 
-def eager_step(x, weights):
+def jit_step(x, weights):
     optim.zero_grad()
     loss = eager_mod(x)
     loss.backward()
@@ -92,4 +92,4 @@ print("Starting NNC training")
 train(grad_nnc, weights)
 
 print("Starting eager module training")
-train(eager_step, None)
+train(jit_step, None)
