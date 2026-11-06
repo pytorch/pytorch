@@ -36,6 +36,8 @@ class _FakeDebugHandler:
 
 
 class TestDebugGraphDump(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fx_graph_preserves_is_inference(self) -> None:
         gm = _make_graph_module()
 
@@ -45,8 +47,6 @@ class TestDebugGraphDump(TestCase):
 
             with open(os.path.join(tmpdir, "fx_graph_runnable.py")) as fd:
                 self.assertIn("is_inference=True", fd.read())
-
-    hw_classification = HardwareClassification.GENERIC
 
     def test_legacy_svg_flags_default_to_svg_with_global_dot_format(self) -> None:
         with mock.patch.dict(
