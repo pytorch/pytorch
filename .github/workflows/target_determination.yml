@@ -58,6 +58,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download pytest cache
+        id: pytest-cache
         uses: pytorch/pytorch/.github/actions/pytest-cache-download@main
         # Public-read bucket; works without creds (anonymous fallback) on fork PRs.
         continue-on-error: true
@@ -86,6 +87,7 @@ jobs:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTEST_CACHE_DOWNLOAD_OUTCOME: ${{ steps.pytest-cache.outcome }}
         run: |
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
           # Dependencies are declared inline in the script via PEP 723.

@@ -117,6 +117,12 @@ class TestPrioritizations:
 
         self.validate()
 
+    def get_score(self, test_run: TestRun) -> float:
+        """The score of test_run, which must be a TestRun from get_all_tests()
+        or get_top_per_tests(): it is an exact lookup, unlike
+        get_priority_info_for_test, so any other TestRun scores 0.0."""
+        return self._test_scores.get(test_run, 0.0)
+
     def get_all_tests(self) -> list[TestRun]:
         """Returns all tests in the TestPrioritizations"""
         return [x[1] for x in self._traverse_scores()]
