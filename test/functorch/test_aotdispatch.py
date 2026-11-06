@@ -6850,6 +6850,243 @@ def forward(self, primals, tangents):
 
 
 class TestPartitioning(AOTTestCase):
+    def test_final_joint_canonical_names_preserve_barrier_order(self):
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+        )
+
+        def make_graph(independent_first):
+            graph = torch.fx.Graph()
+            p1 = graph.placeholder("primals_1")
+            p2 = graph.placeholder("primals_2")
+
+            def barrier_path():
+                barrier = graph.call_function(torch.ops.aten.copy_.default, (p1, p1))
+                dependent = graph.call_function(torch.ops.aten.relu.default, (barrier,))
+                return barrier, dependent
+
+            if independent_first:
+                independent = graph.call_function(torch.ops.aten.relu.default, (p2,))
+                barrier, dependent = barrier_path()
+            else:
+                barrier, dependent = barrier_path()
+                independent = graph.call_function(torch.ops.aten.relu.default, (p2,))
+            graph.output((barrier, dependent, independent))
+            gm = torch.fx.GraphModule({}, graph)
+            physical_order = list(graph.nodes)
+            _canonicalize_joint_graph(gm)
+            self.assertEqual(list(graph.nodes), physical_order)
+            return (
+                {
+                    "barrier": barrier.name,
+                    "dependent": dependent.name,
+                    "independent": independent.name,
+                },
+                tuple(node is independent for node in graph.nodes),
+            )
+
+        names1, order1 = make_graph(True)
+        names2, order2 = make_graph(False)
+        self.assertEqual(names1, names2)
+        self.assertNotEqual(order1, order2)
+
+    def test_final_joint_canonical_names_distinguish_barrier_role(self):
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+        )
+
+        def make_graph(unsafe_first):
+            graph = torch.fx.Graph()
+            primal = graph.placeholder("primal")
+
+            def make_relu(unsafe):
+                node = graph.call_function(torch.ops.aten.relu.default, (primal,))
+                if unsafe:
+                    node.meta["unbacked_bindings"] = {"u0": None}
+                return node
+
+            if unsafe_first:
+                unsafe = make_relu(True)
+                safe = make_relu(False)
+            else:
+                safe = make_relu(False)
+                unsafe = make_relu(True)
+            graph.output(primal)
+            gm = torch.fx.GraphModule({}, graph)
+            physical_order = list(graph.nodes)
+            _canonicalize_joint_graph(gm)
+            self.assertEqual(list(graph.nodes), physical_order)
+            return safe.name, unsafe.name
+
+        self.assertEqual(make_graph(False), make_graph(True))
+
+    def test_sync_recanonicalizes_after_late_joint_pass(self):
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+            _enable_joint_graph_name_canonicalization,
+        )
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        def make_graph(relu_first):
+            graph = torch.fx.Graph()
+            p1 = graph.placeholder("p1")
+            p2 = graph.placeholder("p2")
+            if relu_first:
+                relu = graph.call_function(torch.ops.aten.relu.default, (p1,))
+                neg = graph.call_function(torch.ops.aten.neg.default, (p2,))
+            else:
+                neg = graph.call_function(torch.ops.aten.neg.default, (p2,))
+                relu = graph.call_function(torch.ops.aten.relu.default, (p1,))
+            graph.output((relu, neg))
+            gm = torch.fx.GraphModule({}, graph)
+            _canonicalize_joint_graph(gm)
+            for ordinal, node in enumerate(graph.nodes):
+                if node.op != "placeholder":
+                    node.name = f"late_joint_pass_{ordinal}"
+            physical_order = list(graph.nodes)
+            with _enable_joint_graph_name_canonicalization(True):
+                _sync_decision_cross_ranks(graph, [])
+            self.assertEqual(list(graph.nodes), physical_order)
+            return relu.name, neg.name
+
+        self.assertEqual(make_graph(True), make_graph(False))
+
+    def test_canonical_signature_keys(self):
+        from torch.fx.passes.canonicalize import (
+            _arg_has_stable_identity,
+            _stable_arg_key,
+            _stable_kwarg_key,
+        )
+
+        node_key = object()
+
+        def unused_node_key(_):
+            return node_key
+
+        def key(value):
+            return _stable_arg_key(value, unused_node_key)
+
+        self.assertNotEqual(key({"a": 1, "b": 2}), key({"b": 2, "a": 1}))
+        self.assertEqual(
+            _stable_kwarg_key({"a": 1, "b": 2}, unused_node_key),
+            _stable_kwarg_key({"b": 2, "a": 1}, unused_node_key),
+        )
+        self.assertEqual(key(torch.device("cuda:0")), key(torch.device("cuda:1")))
+        self.assertNotEqual(key(torch.Size([2, 3])), key((2, 3)))
+
+        class Opaque:
+            def __repr__(self):
+                return "same"
+
+        opaque1 = Opaque()
+        opaque2 = Opaque()
+        self.assertNotEqual(key(opaque1), key(opaque2))
+        self.assertFalse(_arg_has_stable_identity(opaque1))
+        self.assertTrue(_arg_has_stable_identity({"device": torch.device("cuda:1")}))
+
+    def test_canonical_target_identity_fails_closed_for_local_callables(self):
+        from torch.fx.passes.canonicalize import (
+            _stable_target_str,
+            _target_has_stable_identity,
+        )
+
+        def make_target(value):
+            def target(x):
+                return x + value
+
+            return target
+
+        target1 = make_target(1)
+        target2 = make_target(2)
+        self.assertNotEqual(_stable_target_str(target1), _stable_target_str(target2))
+        self.assertFalse(_target_has_stable_identity(target1))
+        self.assertEqual(_stable_target_str(torch.sym_not), "torch.sym_not")
+        self.assertTrue(_target_has_stable_identity(torch.sym_not))
+
+        class RaisingStrTarget:
+            def __call__(self, x):
+                return x
+
+            def __str__(self):
+                raise RuntimeError("must not stringify an unstable target")
+
+        raising_target = RaisingStrTarget()
+        self.assertFalse(_target_has_stable_identity(raising_target))
+        self.assertIn("RaisingStrTarget", _stable_target_str(raising_target))
+
+    @parametrize(
+        "source_names,num_params_buffers,canonicalize,sync,is_export,compiled_autograd,expected",
+        (
+            (None, 0, True, True, False, False, False),
+            ((), 0, True, True, False, False, True),
+            (
+                ("param_z", "param_a", "user_a", "user_b"),
+                2,
+                True,
+                True,
+                False,
+                False,
+                True,
+            ),
+            (
+                ("param_z", "param_a", "user_b", "user_a"),
+                2,
+                True,
+                True,
+                False,
+                False,
+                False,
+            ),
+            (("user_a", None), 0, True, True, False, False, False),
+            (("user_a",), -1, True, True, False, False, False),
+            (("user_a",), 2, True, True, False, False, False),
+            (("user_a",), 0, False, True, False, False, False),
+            (("user_a",), 0, True, False, False, False, False),
+            (("user_a",), 0, True, True, True, False, False),
+            (("user_a",), 0, True, True, False, True, False),
+        ),
+    )
+    def test_final_joint_canonicalization_source_gate(
+        self,
+        source_names,
+        num_params_buffers,
+        canonicalize,
+        sync,
+        is_export,
+        compiled_autograd,
+        expected,
+    ):
+        from torch._dynamo import compiled_autograd as compiled_autograd_module
+        from torch._functorch._aot_autograd.graph_compile import (
+            _has_source_canonicalized_dynamo_inputs,
+        )
+
+        sources = (
+            None
+            if source_names is None
+            else [
+                None if name is None else SimpleNamespace(name=name)
+                for name in source_names
+            ]
+        )
+        aot_config = SimpleNamespace(
+            aot_autograd_arg_pos_to_source=sources,
+            num_params_buffers=num_params_buffers,
+            is_export=is_export,
+        )
+        with (
+            torchdynamo.config.patch(canonicalize_output_graph_node_order=canonicalize),
+            torch._functorch.config.patch(_sync_decision_cross_ranks=sync),
+            patch.object(
+                compiled_autograd_module,
+                "in_compiled_autograd_region",
+                compiled_autograd,
+            ),
+        ):
+            self.assertEqual(
+                _has_source_canonicalized_dynamo_inputs(aot_config), expected
+            )
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
