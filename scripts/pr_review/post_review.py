@@ -7,7 +7,8 @@ A review notifies the PR author and puts findings on their lines.
 checked. Every string is checked again with the sanitizer's predicates; anything
 that fails is dropped, never repaired. `--mark-pending` and `--restore-pending`
 take no row: they mark the previous review in progress for RUN_ID, or put it
-back (see Invariants).
+back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
+notice that the PR is over the size limit instead of a verdict.
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
@@ -31,10 +32,21 @@ Invariants:
   without replacing it, failed, skipped or opted out, puts the body back
   (`--restore-pending`). Another run's mark is left alone, though with no
   compare-and-set on review edits two runs writing at once can still clash.
+  A too-large notice is marked like a verdict, since a smaller commit can make
+  it stale.
 - `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
-  commands from review bodies. One exception: a change request's footer names
-  `@pytorchbot review` live, so the author can copy it. It must stay mid-line
-  and backticked, so it never matches pytorch-bot's `^ *@pytorch(merge|)bot .+$`.
+  commands from review bodies. Two exceptions stay live, each written
+  mid-line inside a code span so it never matches pytorch-bot's
+  `^ *@pytorch(merge|)bot .+$`: a change request's footer names
+  `@pytorchbot review`, so the author can copy it, and the too-large notice
+  gives its opt-out command. A notice put back or folded is defused like any
+  other body.
+- A too-large notice is a COMMENT. It hides earlier reviews like any other but
+  dismisses no change request, and is not posted again while the newest
+  visible review is that same notice, unmarked or marked in progress (a marked
+  one gets its body back, whichever run marked it). A notice that differs,
+  such as one put back defused, is replaced. A change request it leaves
+  standing stays after an opt-out until a maintainer dismisses it.
 - API errors are warnings. The step fails only when an earlier change request
   may still stand after a clean verdict.
 """
@@ -42,6 +54,7 @@ Invariants:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -336,7 +349,10 @@ def contained(text: str) -> list[str]:
 
 def permalink(repo: str, sha: str, finding: dict) -> str:
     """A blob link to the finding's line in the posting repo, which GitHub
-    renders as the code. The path is percent-encoded, so it cannot carry `@`."""
+    renders as the code. The path is percent-encoded, so it cannot carry `@`.
+    A deleted file has no blob at `sha`, so its link is the diff line instead."""
+    if finding.get("removed"):
+        return finding["removed"]
     path = urllib.parse.quote(unescape_path(finding["path"]), safe="/")
     return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
 
@@ -463,7 +479,7 @@ def post(
         {
             "path": unescape_path(f["path"]),
             "line": f["line"],
-            "side": "RIGHT",
+            "side": "LEFT" if f.get("removed") else "RIGHT",
             "body": comment_body(f, report_url(gh.repo, pr, sha, run_link, f)),
         }
         for f in blocking_findings(verdict, findings)
@@ -593,6 +609,33 @@ def with_discussions(gh: GitHub, pr: int, author: str, findings: list[dict]):
     return note_discussions(findings, comments, reviews, gh.replies_seen)
 
 
+def with_removed(gh: GitHub, pr: int, findings: list[dict]) -> list[dict]:
+    """`findings`, each on a file the PR deletes marked `removed` with a link to
+    its diff line. The sanitizer anchors those on the deleted file's own lines,
+    which GitHub takes on the diff's LEFT side. Unchanged if the files could not
+    be listed: GitHub then refuses the inline comments (all of them, with the 422
+    the review falls back on) and they go into the body."""
+    if not findings:
+        return findings
+    try:
+        files = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/files")
+    except OutOfTime:
+        raise
+    except GitHubError as exc:
+        warn(f"could not list the PR's files: {exc}")
+        return findings
+    removed = {f.get("filename") for f in files if f.get("status") == "removed"}
+    out = []
+    for f in findings:
+        path = unescape_path(f["path"])
+        if path in removed:
+            digest = hashlib.sha256(path.encode()).hexdigest()
+            files_view = f"https://github.com/{gh.repo}/pull/{pr}/files"
+            f = {**f, "removed": f"{files_view}#diff-{digest}L{f['line']}"}
+        out.append(f)
+    return out
+
+
 def note_discussions(findings: list[dict], comments, reviews: set[int], replied):
     discussed = [
         c
@@ -607,6 +650,7 @@ def note_discussions(findings: list[dict], comments, reviews: set[int], replied)
             c
             for c in discussed
             if c.get("path") == unescape_path(f["path"])
+            and c.get("side", "RIGHT") == ("LEFT" if f.get("removed") else "RIGHT")
             and abs(c["line"] - f["line"]) <= NEARBY
         ]
         url = (near[0].get("html_url") or "") if near else ""
@@ -1110,7 +1154,108 @@ def opted_out(gh: GitHub, pr: int, opt_out: str) -> bool:
     return any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels)
 
 
-def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> int:
+# The second line of a notice that the PR was too large to review.
+TOO_LARGE_TAG = "<!-- hardened-pr-review-too-large -->"
+_PLAIN_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]*")
+
+
+def size_limits() -> tuple[int, int] | None:
+    """(MAX_CHANGED_FILES, MAX_DIFF_BYTES) from the workflow env, or None."""
+    files, size = os.environ.get("MAX_CHANGED_FILES"), os.environ.get("MAX_DIFF_BYTES")
+    if files and size and files.isdigit() and size.isdigit():
+        return int(files), int(size)
+    return None
+
+
+def too_large_body(opt_out: str, limits: tuple[int, int] | None) -> str:
+    """Constants only, so nothing in it comes from the PR or the model."""
+    if not _PLAIN_LABEL.fullmatch(opt_out):
+        opt_out = "no automated review"
+    limit = (
+        f" of {limits[0]} changed files or {limits[1] // 1000} KB of diff"
+        if limits
+        else ""
+    )
+    return "\n".join(
+        [
+            MARKER,
+            TOO_LARGE_TAG,
+            "**Automated review:** not run, because this PR is too large.",
+            "",
+            f"It is over the automated review's size limit{limit}.",
+            "",
+            "- To get an automated review, split it into smaller PRs.",
+            f'- To go ahead without one, comment `@pytorchbot label "{opt_out}"`.',
+            "",
+            "<sub>This notice is automated. A later automated review of a "
+            "smaller commit replaces it.</sub>",
+        ]
+    )
+
+
+def notice_stands(gh: GitHub, pr: int, review: dict, body: str) -> bool:
+    """Whether `review` is the notice `body`, as posted or marked in progress.
+
+    On the diff-size path `announce` marks the notice before `review` finds the
+    PR too large; it gets its body back here, since `--restore-pending` would
+    put it back defused. Clearing another run's mark costs only its status line.
+    """
+    text = (review.get("body") or "").replace("\r\n", "\n")
+    if text == body:
+        return True
+    if pending_run(text) is None or unwrapped(text) != defuse_bot_commands(body):
+        return False
+    try:
+        gh.request(
+            "PUT",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
+            {"body": body},
+        )
+    except GitHubError as exc:
+        warn(f"could not put back too-large notice {review['id']}: {exc}")
+        return False
+    return True
+
+
+def decline(gh, pr, sha, author, opt_out, limits) -> int:
+    """Post the too-large notice and hide earlier reviews. Never fails the step."""
+    current = head_sha(gh, pr)
+    if current != sha:
+        print(f"head moved {sha} -> {current}; the newer head's run decides")
+        return 0
+    if opted_out(gh, pr, opt_out):
+        print(f"PR carries '{opt_out}'; not posting")
+        return 0
+    body = too_large_body(opt_out, limits)
+    visible, _ = earlier_reviews(gh, pr, author, sys.maxsize)
+    if visible and notice_stands(gh, pr, max(visible, key=lambda r: r["id"]), body):
+        print("the newest automated review already says the PR is too large")
+        return 0
+    try:
+        new = gh.request(
+            "POST",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews",
+            {"commit_id": sha, "event": "COMMENT", "body": body},
+        )
+        print(f"posted too-large notice {new.get('id')}: {new.get('html_url')}")
+        if isinstance(new.get("id"), int):
+            replace_earlier(gh, pr, sha, author, new)
+    except GitHubError as exc:
+        warn(f"too-large notice not posted or earlier reviews not hidden: {exc}")
+    return 0
+
+
+def run(
+    gh: GitHub,
+    row: dict,
+    pr: int,
+    sha: str,
+    opt_out: str,
+    author: str,
+    limits: tuple[int, int] | None = None,
+) -> int:
+    if row.get("status") == "skipped_too_large":
+        return decline(gh, pr, sha, author, opt_out, limits)
     review = load_review(row)
     current = head_sha(gh, pr)
     if current != sha:
@@ -1201,7 +1346,8 @@ RETRACTED = object()
 def publish(gh, pr, sha, author, verdict, summary, findings, run_link: str = ""):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
-    findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
+    findings = with_removed(gh, pr, findings[:MAX_FINDINGS])
+    findings = with_discussions(gh, pr, author, findings)
     new = post(gh, pr, sha, verdict, summary, findings, run_link)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
@@ -1263,9 +1409,23 @@ def main() -> int:
         action="store_true",
         help="put back reviews still marked in progress for RUN_ID",
     )
+    mode.add_argument(
+        "--too-large",
+        action="store_true",
+        help="say the PR at REVIEWED_SHA is too large to review",
+    )
     args = ap.parse_args()
     try:
         gh = GitHub(os.environ["GH_TOKEN"], os.environ["REPO"])
+        if args.too_large:
+            return decline(
+                gh,
+                int(os.environ["PR_NUMBER"]),
+                os.environ["REVIEWED_SHA"],
+                os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
+                os.environ.get("OPT_OUT_LABEL", "no automated review"),
+                size_limits(),
+            )
         if args.mark_pending or args.restore_pending:
             run_id = os.environ["RUN_ID"]
             if not run_id.isdigit():
@@ -1292,10 +1452,15 @@ def main() -> int:
             os.environ["REVIEWED_SHA"],
             os.environ.get("OPT_OUT_LABEL", "no automated review"),
             os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
+            size_limits(),
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
         what = (
-            "posted" if args.row_file else "marked" if args.mark_pending else "put back"
+            "posted"
+            if args.row_file or args.too_large
+            else "marked"
+            if args.mark_pending
+            else "put back"
         )
         warn(f"automated review not {what}: {exc!r}")
         return 0

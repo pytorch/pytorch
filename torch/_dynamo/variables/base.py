@@ -1149,7 +1149,6 @@ _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
     SlotGroup.TYPE: {
         **{f: f"{f}_impl" for f in _TYPE_FIELDS},
         "tp_call": "call_function",
-        "tp_hash": "hash_impl",
     },
 }
 
@@ -1255,10 +1254,10 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    # tp_hash_impl returns (int, bool), not a VariableTracker like other impls.
     TPSLOT(
         "__hash__",
-        "hash_impl",
+        "tp_hash_impl",
         PyTypeSlots.TP_HASH,
         _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
     ),
@@ -1801,9 +1800,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # The CPython type(s) this VT is designed to represent.
-    # Single type or tuple of types. None means no static CPython type mapping
-    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
-    _cpython_type: type | tuple[type, ...] | None = None
+    # Single type or tuple of types. None means no static CPython type mapping.
+    # Read per class (own __dict__), not inherited. The base class itself
+    # represents plain `object()` instances, like PyBaseObject_Type:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
+    _cpython_type: type | tuple[type, ...] | None = object
 
     # Declarative named-method table (analogous to CPython's tp_methods): maps a
     # method name to a Method describing its handler and calling convention.
@@ -1987,6 +1988,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
+        if type(self) is VariableTracker:
+            return object
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
@@ -2067,7 +2070,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return True
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
 
         PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
@@ -2077,7 +2080,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         a sourceless object's identity and must not escape into output bytecode.
 
         VT subclasses override this for types with their own C tp_hash.
-        UserDefinedObjectVariable.hash_impl handles the MRO walk for custom
+        UserDefinedObjectVariable.tp_hash_impl handles the MRO walk for custom
         Python __hash__, builtin-inherited C hash, and unknown C tp_hash.
         """
         # object.__hash__ = Py_HashPointer(obj) — identity hash.
@@ -2085,11 +2088,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             real_val = tx.output.resolve_source_value(self.source)
             if type(real_val).__hash__ is not object.__hash__:
                 unimplemented(
-                    gb_type="Missing hash_impl override",
-                    context=f"hash_impl {self}",
+                    gb_type="Missing tp_hash_impl override",
+                    context=f"tp_hash_impl {self}",
                     explanation=f"{type(self).__name__} wraps "
                     f"{type(real_val).__name__} which has a non-default "
-                    f"tp_hash. Add a hash_impl override to "
+                    f"tp_hash. Add a tp_hash_impl override to "
                     f"{type(self).__name__}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
@@ -2975,7 +2978,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-
+        if type(self) is VariableTracker:
+            return self.value
         try:
             return self.as_python_constant()
         except NotImplementedError:
@@ -3482,8 +3486,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        value: object = NO_SUCH_SUBOBJ,
     ) -> None:
         super().__init__()
+        # Only bare VariableTrackers (plain object() instances) pass a value;
+        # subclasses manage their own self.value.
+        if value is not NO_SUCH_SUBOBJ:
+            self.value: Any = value
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
