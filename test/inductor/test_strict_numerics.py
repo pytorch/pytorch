@@ -369,6 +369,26 @@ class StrictNumericsCompileTest(TestCase):
         actual = torch.compile(fn, fullgraph=True, options=options)(*args)
         self._assert_bitwise_equal(actual, fn(*args))
 
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_mv_computed_matrix_layout(self, device, dtype, numerics):
+        torch.manual_seed(10)
+        a = torch.randn(19, 37, device=device, dtype=dtype)
+        b = torch.randn(37, 19, device=device, dtype=dtype).t()
+        v = torch.randn(37, device=device, dtype=dtype)
+
+        def fn(a, b, v):
+            return torch.mv(b + a, v)
+
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+            a, b, v
+        )
+        expected = fn(a, b, v)
+        if dtype.is_complex:
+            actual = torch.view_as_real(actual)
+            expected = torch.view_as_real(expected)
+        self._assert_bitwise_equal(actual, expected)
+
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
