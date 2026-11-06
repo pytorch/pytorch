@@ -73,15 +73,14 @@ __global__ void complex_math_kernel(float* out) {
   sum += torch::headeronly::log1p(z).real();
   sum += torch::headeronly::log2(z).real();
   sum += torch::headeronly::pow(z, z).real();
+  sum += torch::headeronly::pow(z, 2.0f).real();
+  sum += torch::headeronly::pow(2.0f, z).real();
   sum += torch::headeronly::sin(z).real();
   sum += torch::headeronly::sinh(z).real();
   sum += torch::headeronly::sqrt(z).real();
   sum += torch::headeronly::tan(z).real();
   sum += torch::headeronly::tanh(z).real();
 
-  sum += c10_complex_math::pow(z, 2.0f).real();
-  sum += ::sqrt(z).real();
-  sum += std::tanh(z).real();
   out[0] = sum;
 }
 
