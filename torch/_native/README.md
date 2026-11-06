@@ -391,3 +391,18 @@ relative to that order, rather than requiring a contiguous output.
 No CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
 The registry scalar-coercion fix is retained so calls with Python-number
 operands can still fall back to ATen correctly.
+
+
+Pointwise AOT declarations cover floating arithmetic, rounding, transcendental
+functions, and all six Tensor comparisons.
+They use the `sm_100f` target for the 10.x architecture family, for bfloat16 and
+float32 operands only. They reuse the TMA executor with dynamic sizes and aligned
+outer pitches for 2-D inputs and dense outputs (including transposed outputs
+allocated by ATen meta). The structured AOT hook returns false for contiguous
+calls, partial TMA tiles, broadcasting, inner strides,
+aliasing outputs and unsupported instantiations, retaining ATen's CUDA kernel.
+No general vectorized or unrolled fallback kernel is registered. The
+architecture-family exporter selects `sm_100f` for compatible build
+architectures, including `10.0` and `10.7`.
+`addcmul` exports require matching-shape tensors, with other cases retaining
+ATen's kernel.
