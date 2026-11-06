@@ -37,7 +37,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -720,7 +723,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         )
         self._validate(fn, backend, x)
 
-    @requires_triton()
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_recomputed_rand(self, device):
         def gn(x, y):
@@ -744,7 +751,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_triton()
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self, device):
         def gn(x, y):
@@ -771,7 +782,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_triton()
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self, device):
         # Figure out a way to test the number of inductor_random calls
