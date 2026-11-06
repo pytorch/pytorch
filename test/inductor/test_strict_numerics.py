@@ -211,6 +211,24 @@ class StrictNumericsConfigTest(TestCase):
 
 
 class StrictNumericsFallbackTest(TestCase):
+    @ops(
+        [op for op in op_db if op.name == "logit"],
+        allowed_dtypes=(torch.bool, torch.int64),
+    )
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_logit_integer_promotion(self, device, dtype, op, numerics):
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+
+            def fn(x):
+                return op.op(x, *sample.args, **sample.kwargs)
+
+            actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
+                sample.input
+            )
+            expected = fn(sample.input)
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual, expected)
+
     @dtypes(torch.float32, torch.float64)
     @parametrize("numerics", NUMERICS_MODES)
     def test_log_ndtr_without_decompositions(self, device, dtype, numerics):
@@ -687,6 +705,49 @@ class StrictNumericsCompileTest(TestCase):
                 tuple(t.view(torch.int64) for t in compiled(scalar, nans)),
                 tuple(t.view(torch.int64) for t in fn(scalar, nans)),
             )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_fused_sub_nan_payload(self, device, dtype, numerics):
+        values = _min_max_specials(dtype, device)
+        nans = values[-4:]
+        a = nans.repeat_interleave(values.numel())
+        b = values.repeat(nans.numel())
+
+        def fn(a, b):
+            computed = -b.rsqrt()
+            return a - computed, computed - a
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        result, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertTrue(_outputs_equal(result, fn(a, b)))
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("axis", (None, 1))
+    def test_sum_fallback_preserves_eager_input_layout(self, device, dtype, axis):
+        a = torch.randn(301, 64, device=device, dtype=dtype).t()
+        b = torch.randn(64, 301, device=device, dtype=dtype)
+
+        def fn(a, b):
+            return (a + b).sum(axis)
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})
+        actual, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self._assert_bitwise_equal(actual, fn(a, b))
+
+    @dtypes(torch.float32, torch.float64)
+    def test_empty_reshape_preserves_dtype_view_strides(self, device, dtype):
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+
+        def fn(x):
+            return (x + 1).reshape(0, 10, 6).view(complex_dtype)
+
+        x = torch.empty(0, 10, 3, 2, dtype=dtype, device=device)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, expected, exact_stride=True)
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))

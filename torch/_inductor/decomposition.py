@@ -26,14 +26,17 @@ from torch._decomp.decompositions import (
     embedding_dense_backward as decomp_embedding_dense_backward,
     gelu_backward as decomp_gelu_backward,
     hardsigmoid as decomp_hardsigmoid,
+    hardsigmoid_backward as decomp_hardsigmoid_backward,
     hardswish as decomp_hardswish,
     hardswish_backward as decomp_hardswish_backward,
     logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
+    pw_cast_for_int_to_real,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
     sigmoid_backward as decomp_sigmoid_backward,
     silu_backward as decomp_silu_backward,
+    softplus_backward as decomp_softplus_backward,
     tanh_backward as decomp_tanh_backward,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
@@ -52,6 +55,7 @@ from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
+    sgn as decomp_sgn,
     xlogy as decomp_xlogy,
 )
 from torch._refs.nn.functional import (
@@ -60,6 +64,7 @@ from torch._refs.nn.functional import (
     softplus as decomp_softplus,
 )
 from torch._refs.special import (
+    logit as decomp_logit,
     multigammaln as decomp_multigammaln,
     xlog1py as decomp_xlog1py,
 )
@@ -161,12 +166,16 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.hardswish_backward.default,
     aten.hardswish.default,
     aten.hardsigmoid.default,
+    aten.hardsigmoid_backward.default,
     aten.mish_backward.default,
     aten.logaddexp2.default,
     aten.logit_backward.default,
+    aten.logit.default,
     aten.sigmoid_backward.default,
+    aten.sgn,
     aten.silu_backward.default,
     aten.softplus.default,
+    aten.softplus_backward.default,
     aten.tanh_backward.default,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
@@ -224,7 +233,7 @@ def adaptive_max_pool3d(input, output_size):
 
 @register_decomposition([aten.special_log_ndtr])
 def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
-    if is_strict_cuda_triton(a.device) and a.dtype == torch.float32:
+    if is_strict_cuda_triton(a.device) and a.dtype in (torch.float32, torch.float64):
         return NotImplemented
     # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
     # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
@@ -664,7 +673,11 @@ def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
 def softplus(
     a: torch.Tensor, beta: float | None = None, threshold: float = 20
 ) -> torch.Tensor:
-    if not is_strict_cuda_triton(a.device) or a.dtype != torch.float32 or beta is None:
+    if (
+        not is_strict_cuda_triton(a.device)
+        or a.dtype not in (torch.float32, torch.float64)
+        or beta is None
+    ):
         return cast(torch.Tensor, decomp_softplus(a, beta, threshold))
     divisor = torch.ones((), dtype=a.dtype, device=a.device) * beta
     scaled = a * divisor
@@ -672,6 +685,21 @@ def softplus(
     zero = torch.full((), -0.0, dtype=a.dtype, device=a.device)
     result = torch.addcdiv(zero, torch.log1p(torch.exp(scaled)), divisor)
     return torch.where(scaled > threshold, a, result)
+
+
+@register_decomposition(aten.softplus_backward.default)
+def softplus_backward(
+    grad_output: torch.Tensor, self: torch.Tensor, beta: float, threshold: float
+) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(grad_output, self)
+    if inputs is None or inputs[2] != torch.float64:
+        return decomp_softplus_backward(grad_output, self, beta, threshold)
+    grad_output, self, dtype = inputs
+    scaled = self * beta
+    z = torch.exp(scaled)
+    # The native fused float64 kernel gives z priority when both factors are NaN.
+    result = z * grad_output / (z + 1.0)
+    return torch.where(scaled > threshold, grad_output, result).to(dtype)
 
 
 def _strict_pointwise_inputs(
@@ -704,6 +732,21 @@ def logaddexp2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         maximum, torch.log1p(torch.exp2(minimum - maximum)), alpha=1 / math.log(2)
     )
     return torch.where(torch.isinf(a) & (a == b), a, result).to(dtype)
+
+
+@register_decomposition(aten.logit.default)
+@pw_cast_for_int_to_real
+def logit(self: torch.Tensor, eps: float | None = None) -> torch.Tensor:
+    if not is_strict_cuda_triton(self.device):
+        return decomp_logit(self, eps)
+    # CUDA tests the sign after converting epsilon to opmath precision.
+    lo = torch.ones((), dtype=self.dtype, device=self.device) * (
+        -1.0 if eps is None else eps
+    )
+    hi = 1.0 - lo
+    clipped = torch.where(self < lo, lo, torch.where(self > hi, hi, self))
+    value = torch.where(lo < 0, self, clipped)
+    return torch.log(value / (1.0 - value))
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -928,11 +971,16 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
+# CUDA initializes one_sixth from 1.0f / 6.0f before converting to opmath,
+# including when opmath is float64.
+_CUDA_ONE_SIXTH = struct.unpack("f", struct.pack("f", 1.0 / 6.0))[0]
+
+
 @register_decomposition(aten.hardswish.default)
 @pw_cast_for_opmath
 def hardswish(self: torch.Tensor) -> torch.Tensor:
     if is_strict_cuda_triton(self.device):
-        return self * torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+        return self * torch.clamp(torch.clamp(self + 3, min=0), max=6) * _CUDA_ONE_SIXTH
     return decomp_hardswish(self)
 
 
@@ -940,8 +988,19 @@ def hardswish(self: torch.Tensor) -> torch.Tensor:
 @pw_cast_for_opmath
 def hardsigmoid(self: torch.Tensor) -> torch.Tensor:
     if is_strict_cuda_triton(self.device):
-        return torch.clamp(torch.clamp(self + 3, min=0), max=6) * (1.0 / 6.0)
+        return torch.clamp(torch.clamp(self + 3, min=0), max=6) * _CUDA_ONE_SIXTH
     return decomp_hardsigmoid(self)
+
+
+@register_decomposition(aten.hardsigmoid_backward.default)
+def hardsigmoid_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_pointwise_inputs(grad_output, self)
+    if inputs is None:
+        return decomp_hardsigmoid_backward(grad_output, self)
+    grad_output, self, dtype = inputs
+    return torch.where((self > -3) & (self < 3), grad_output * _CUDA_ONE_SIXTH, 0.0).to(
+        dtype
+    )
 
 
 def _strict_xlogy_nan(result, a, b):
@@ -1294,6 +1353,23 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
     if self.is_complex():
         return NotImplemented
     return self
+
+
+@register_decomposition(aten.sgn)
+@out_wrapper(exact_dtype=True)
+def sgn(self: torch.Tensor) -> torch.Tensor:
+    if not is_strict_cuda_triton(self.device) or self.dtype not in (
+        torch.complex64,
+        torch.complex128,
+    ):
+        return decomp_sgn(self)
+    real, imag = self.real, self.imag
+    magnitude = self.abs()
+    zero = (real == 0) & (imag == 0)
+    # CUDA sgn divides by a real scalar, rather than using complex division.
+    real = torch.where(zero, 0, real / magnitude)
+    imag = torch.where(zero, 0, imag / magnitude)
+    return torch.view_as_complex(torch.stack((real, imag), dim=-1))
 
 
 @register_decomposition([aten.lift, aten.detach_])
