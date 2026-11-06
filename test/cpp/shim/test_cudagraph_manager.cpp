@@ -784,7 +784,7 @@ TEST_F(CudaGraphManagerTest, ForgetsWarmupsPastLimit) {
   CudaGraphManager manager(0);
   Region region(affine);
   // Fill warm-up tracking with one-off shapes, then add one more.
-  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupKeys + 1; ++n) {
+  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupEntries + 1; ++n) {
     run(manager, region, at::randn({static_cast<int64_t>(n)}, at::kCUDA));
   }
   // The first shape was forgotten, so it warms up again before capture.
