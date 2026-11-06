@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 
 
 if os.environ.get("BACKEND") == "nccl":
@@ -36,6 +37,7 @@ if not dist.is_available():
 from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
+    IS_SANDCASTLE,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -76,6 +78,15 @@ if BACKEND in _allowed_backends:
             super().setUp()
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+
+    if not IS_SANDCASTLE:
+        for _name in unittest.defaultTestLoader.getTestCaseNames(
+            TestDistBackendWithSpawn
+        ):
+            _test = getattr(TestDistBackendWithSpawn, _name)
+            _reason = getattr(_test, "_skipped_reason", None)
+            if _reason is not None and not getattr(_test, "__unittest_skip__", False):
+                setattr(TestDistBackendWithSpawn, _name, unittest.skip(_reason)(_test))
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")

@@ -2257,6 +2257,7 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     def backend_str(cls) -> str:
         return "nccl-lazy"
 
+    @unittest.skip("nccl-lazy does not support communicator shrink")
     def test_shrink_with_nonblocking_communicator(self) -> None:
         self.skipTest("nccl-lazy does not support communicator shrink")
 
