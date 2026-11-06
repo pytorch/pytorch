@@ -19,6 +19,7 @@ from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 import math
+import struct
 import itertools
 import torch.optim as optim
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
@@ -193,7 +194,7 @@ def _check_equal(
         raise ValueError(msg)
 
 
-def check_out_and_grad(
+def _check_out_and_grad_legacy(
     out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -243,13 +244,60 @@ def check_out_and_grad(
             )
 
 
+def check_out_and_grad(
+    out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_value_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_attn_mask_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+    fudge_factors: dict[str, float] | None = None,
+) -> None:
+    arguments = (out_tuple, grad_query_tuple, grad_key_tuple, grad_value_tuple, grad_attn_mask_tuple, fudge_factors)
+    if fudge_factors is not None and type(fudge_factors) is not dict:
+        return _check_out_and_grad_legacy(*arguments)
+    factors = {} if fudge_factors is None else fudge_factors
+    checks = [(out_tuple, "out"), (grad_query_tuple, "grad_query"), (grad_key_tuple, "grad_key"), (grad_value_tuple, "grad_value")]
+    if grad_attn_mask_tuple:
+        checks.append((grad_attn_mask_tuple, "grad_attn_mask"))
+    if any(type(values) not in (tuple, list) or len(values) != 3 for values, _ in checks):
+        return _check_out_and_grad_legacy(*arguments)
+    golden = out_tuple[0]
+    if type(golden) is not torch.Tensor or golden.dtype not in (torch.float32, torch.float64):
+        return _check_out_and_grad_legacy(*arguments)
+    allowed = (torch.float16, torch.bfloat16, torch.float32) + ((torch.float64,) if golden.dtype == torch.float64 else ())
+    for values, name in checks:
+        gold, ref, test = values
+        factor = factors.get(name, 5.0)
+        if (type(factor) not in (int, float) or (type(factor) is int and not -(2**63) <= factor < 2**63)
+                or any(type(tensor) is not torch.Tensor or tensor.is_nested or tensor.layout != torch.strided
+                       or not tensor.is_cuda or tensor.device != golden.device or tensor.shape != gold.shape
+                       or not tensor.numel() or tensor.dtype not in allowed for tensor in values)
+                or gold.dtype != golden.dtype):
+            return _check_out_and_grad_legacy(*arguments)
+    with torch.no_grad():
+        errors = []
+        for (gold, ref, test), name in checks:
+            test_error = (gold - test).abs().max()
+            ref_error = (gold - ref).abs().max()
+            errors.extend((test_error, ref_error, ref_error * factors.get(name, 5.0)))
+        host = torch.stack(errors).cpu().tolist()
+        atol = default_atol[torch.float32]
+        if golden.dtype == torch.float32:
+            # Match the scalar promotion in the original CUDA comparison.
+            atol = struct.unpack("f", struct.pack("f", atol))[0]
+        for index, (values, name) in enumerate(checks):
+            test_error, ref_error, scaled_ref_error = host[3 * index:3 * index + 3]
+            if (math.isnan(test_error) and not math.isnan(ref_error)) or test_error > max(atol, scaled_ref_error):
+                _check_equal(*values, factors.get(name, 5.0), name)
+
+
 def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype = None):
     """ Clones the query, key, and value tensors and moves them to the specified dtype. """
     if dtype is None:
         dtype = query.dtype
-    query_ref = query.detach().clone().to(dtype).requires_grad_(query.requires_grad)
-    key_ref = key.detach().clone().to(dtype).requires_grad_(key.requires_grad)
-    value_ref = value.detach().clone().to(dtype).requires_grad_(value.requires_grad)
+    query_ref = query.detach().to(dtype=dtype, copy=True).requires_grad_(query.requires_grad)
+    key_ref = key.detach().to(dtype=dtype, copy=True).requires_grad_(key.requires_grad)
+    value_ref = value.detach().to(dtype=dtype, copy=True).requires_grad_(value.requires_grad)
     return query_ref, key_ref, value_ref
 
 def get_platform_specific_sdpa():
@@ -585,33 +633,6 @@ class TestTransformersAccelerator(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
-    def test_self_attn_TxT_attn_mask(self, device):
-        embed_dim = 16
-        num_heads = 4
-        batch_size = 10
-        tgt_len = 16
-
-        query = torch.rand(batch_size, tgt_len, embed_dim, device=device)  # [N, T, D]
-        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len), device=device).float()  # [T, T]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, 0.0)
-
-        attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
-
-        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).to(device)
-        mta_model.eval()
-
-        # Generate 3D results
-        with torch.inference_mode():
-            output_mask_4d = mta_model(query, query, query, attn_mask=attn_mask_4d)[0]
-            output_mask_4d = output_mask_4d.transpose(0, 1)  # [N, T, D]
-
-            output_mask_TxT = mta_model(query, query, query, attn_mask=attn_mask)[0]
-            output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
-
-            self.assertEqual(output_mask_4d, output_mask_TxT)
 
     @slowTest
     def test_train_with_pad_and_catch_error(self, device):
@@ -2689,6 +2710,99 @@ class TestSDPAGeneric(NNTestCase):
     """
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("dtype", [torch.float32, torch.float64])
+    @parametrize("masked", [False, True])
+    @parametrize("transposed", [False, True])
+    @parametrize("factor", [0.0, 2.5])
+    @parametrize("case", ["equal", "floor_below", "floor_equal", "floor_above", "relative_equal", "relative_above",
+                         "nan_actual", "nan_reference", "nan_both", "nan_golden", "inf_actual", "inf_reference",
+                         "bad_grad", "bad_mask"])
+    def test_check_out_and_grad_matches_legacy(self, device, dtype, masked, transposed, factor, case):
+        if torch.device(device).type in ("mps", "mtia") and dtype == torch.float64:
+            self.skipTest("Double precision is not supported on this device")
+        golden = torch.zeros((2, 3), device=device, dtype=dtype)
+        reference = torch.zeros_like(golden)
+        actual = torch.zeros_like(golden)
+        floor = torch.full_like(golden, default_atol[torch.float32])
+        infinity = torch.full_like(golden, float("inf"))
+        if case == "floor_below":
+            actual = torch.nextafter(floor, golden)
+        elif case == "floor_equal":
+            actual = floor
+        elif case in ("floor_above", "bad_grad", "bad_mask"):
+            actual = torch.nextafter(floor, infinity)
+        elif case in ("relative_equal", "relative_above"):
+            reference.fill_(0.002)
+            actual = torch.maximum(floor, reference * factor)
+            if case == "relative_above":
+                actual = torch.nextafter(actual, infinity)
+        elif case in ("nan_actual", "nan_both"):
+            actual.fill_(float("nan"))
+            if case == "nan_both":
+                reference.fill_(float("nan"))
+        elif case == "nan_reference":
+            reference.fill_(float("nan"))
+            actual = floor * 2
+        elif case == "nan_golden":
+            golden.fill_(float("nan"))
+        elif case in ("inf_actual", "inf_reference"):
+            actual = infinity
+            if case == "inf_reference":
+                reference = infinity
+        names = ["out", "grad_query", "grad_key", "grad_value", "grad_attn_mask"]
+        field = 1 if case == "bad_grad" else 4 if case == "bad_mask" else 0
+        checks = [(torch.zeros_like(golden), torch.zeros_like(golden), torch.zeros_like(golden)) for _ in names]
+        checks[field] = (golden, reference, actual)
+        if transposed:
+            checks = [tuple(tensor.transpose(0, 1) for tensor in values) for values in checks]
+        active = checks if masked else checks[:4]
+        expected_error = None
+        try:
+            for values, name in zip(active, names):
+                _check_equal(*values, factor, name)
+        except ValueError as error:
+            expected_error = str(error)
+        arguments = (*checks[:4], checks[4] if masked else None, dict.fromkeys(names, factor))
+        if expected_error is None:
+            check_out_and_grad(*arguments)
+        else:
+            with self.assertRaises(ValueError) as error:
+                check_out_and_grad(*arguments)
+            self.assertEqual(str(error.exception), expected_error)
+
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("ref_dtype", [None, torch.float16, torch.float32, torch.float64])
+    @parametrize("layout", ["contiguous", "transposed", "sliced"])
+    @parametrize("requires_grad", [False, True])
+    def test_query_key_value_clones(self, device, dtype, ref_dtype, layout, requires_grad):
+        if torch.device(device).type in ("mps", "mtia") and torch.float64 in (dtype, ref_dtype):
+            self.skipTest("Double precision is not supported on this device")
+        tensor = torch.arange(24, device=device, dtype=dtype).reshape(4, 6)
+        if layout == "transposed":
+            tensor = tensor.transpose(0, 1)
+        elif layout == "sliced":
+            tensor = tensor[:, ::2]
+        inputs = [tensor.detach().requires_grad_(flag) for flag in (requires_grad, False, requires_grad)]
+        expected = tensor.detach().clone().to(ref_dtype or dtype)
+        clones = query_key_value_clones(*inputs, dtype=ref_dtype)
+        self.assertEqual(len({clone.data_ptr() for clone in clones}), 3)
+        for original, clone in zip(inputs, clones):
+            self.assertEqual(clone, expected)
+            self.assertEqual(clone.dtype, ref_dtype or dtype)
+            self.assertEqual(clone.device, original.device)
+            self.assertEqual(clone.requires_grad, original.requires_grad)
+            self.assertTrue(clone.is_leaf)
+            self.assertIsNone(clone.grad_fn)
+            self.assertNotEqual(clone.data_ptr(), original.data_ptr())
+            if clone.requires_grad:
+                clone.sum().backward()
+                self.assertEqual(clone.grad, torch.ones_like(clone))
+                self.assertIsNone(original.grad)
+        with torch.no_grad():
+            tensor.zero_()
+        for clone in clones:
+            self.assertEqual(clone, expected)
+
     @expectedFailureMPS  # No double support
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, device, contiguous_inputs: bool):
@@ -3815,6 +3929,15 @@ class TestSDPAAccelerator(NNTestCase):
         """
         if TEST_WITH_ROCM:
             return S
+        if (query_padding_mask is None and key_padding_mask is None
+                and seqlen_q <= S.size(-2) and seqlen_k <= S.size(-1)):
+            converted = S[:, :, :seqlen_q, :seqlen_k]
+            if causal:
+                window_size = (window_size[0], 0)
+            if window_size[0] >= 0 or window_size[1] >= 0:
+                local_mask = self.construct_local_mask(seqlen_q, seqlen_k, window_size, None, None, S.device)
+                converted = converted.masked_fill(local_mask, 0.0)
+            return converted
         b = S.shape[0]
 
         if causal:
@@ -3854,6 +3977,30 @@ class TestSDPAAccelerator(NNTestCase):
         S_converted = F.pad(S_converted, (0, 0, 0, seqlen_q_og - seqlen_q_rounded))
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
+
+    @onlyCUDA
+    @parametrize("lengths", [(4, 4), (143, 127), (143, 579), (256, 256), (2048, 2048)])
+    @parametrize("causal", [False, True])
+    @parametrize("window_size", [(-1, -1), (2, 1)])
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_flash_dropout_mask_dense_matches_padding(self, device, lengths, causal, window_size, dtype):
+        seq_len_q, seq_len_k = lengths
+        rounded_q = ((seq_len_q + 127) // 128) * 128
+        rounded_k = ((seq_len_k + 127) // 128) * 128
+        scores = torch.randn((2, 2, rounded_q, rounded_k), device=device, dtype=dtype, requires_grad=True)
+        original = scores.detach().clone()
+        query_mask = torch.ones((2, seq_len_q), device=device, dtype=torch.bool)
+        key_mask = torch.ones((2, seq_len_k), device=device, dtype=torch.bool)
+        expected = self.convert_flash_attn_S_to_softmax(
+            scores, seq_len_q, seq_len_k, query_mask, key_mask, causal=causal, window_size=window_size)
+        actual = self.convert_flash_attn_S_to_softmax(
+            scores, seq_len_q, seq_len_k, None, None, causal=causal, window_size=window_size)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(actual >= 0, expected >= 0)
+        grad = torch.randn_like(actual)
+        self.assertEqual(torch.autograd.grad(actual, scores, grad)[0],
+                         torch.autograd.grad(expected, scores, grad)[0], atol=0, rtol=0)
+        self.assertEqual(scores, original, atol=0, rtol=0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_different_dk_dv(self, device):
@@ -5837,58 +5984,6 @@ class TestSDPAAccelerator(NNTestCase):
                         self.assertRaises(RuntimeError, lambda:
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
-    @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
-    def test_mem_eff_backwards_determinism(self, device):
-        # Need big seq_len to ensure that num_splits > 1
-        dtype = torch.float32
-        batch_size, seq_len, n_heads, head_dim = 1, 1024, 8, 64
-        query = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-        key = torch.rand(batch_size, n_heads, seq_len, head_dim, device=device,
-                         dtype=dtype, requires_grad=True)
-        value = torch.rand(batch_size, n_heads, seq_len, head_dim,
-                           device=device, dtype=dtype, requires_grad=True)
-
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            # Run once to establish baseline
-            out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # not deterministic
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
-                out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertTrue(diff_anwser_once)
-
-        with use_deterministic_algorithims(True, warn_only=False):
-            query.grad = None
-            out = F.scaled_dot_product_attention(query, key, value)
-            upward_grad = torch.rand_like(out)
-            out.backward(upward_grad)
-            initial_query_grad = query.grad
-
-            # Re-run the op with the same upward grad and check that the backward is
-            # deterministic now that we have enforced it
-            diff_anwser_once = False
-            for _ in range(100):
-                query.grad = None
-                out = F.scaled_dot_product_attention(query, key, value)
-                out.backward(upward_grad)
-                if not torch.equal(initial_query_grad, query.grad):
-                    diff_anwser_once = True
-                    break
-            self.assertFalse(diff_anwser_once)
-
     # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
@@ -6482,6 +6577,24 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertFalse(torch.isinf(out).any().item())
         _check_equal(golden, lp_ref, out, 4.0, "out")
 
+    @onlyCUDA
+    @parametrize("gold_dtype", [torch.float32, torch.float64])
+    @parametrize("masked", [False, True])
+    def test_check_out_and_grad_batched_dispatch(self, device, gold_dtype, masked):
+        golden = torch.ones((2, 3), device=device, dtype=gold_dtype)
+        values = [(golden, golden.to(torch.bfloat16), golden.to(torch.float16)) for _ in range(5)]
+        arguments = (*values[:4], values[4] if masked else None)
+        with patch(f"{__name__}._check_out_and_grad_legacy", wraps=_check_out_and_grad_legacy) as legacy, \
+                patch(f"{__name__}._check_equal", wraps=_check_equal) as scalar:
+            check_out_and_grad(*arguments)
+            check_out_and_grad(*arguments, fudge_factors={})
+            legacy.assert_not_called()
+            scalar.assert_not_called()
+        values[2][2].zero_()
+        values[4][2].zero_()
+        with self.assertRaisesRegex(ValueError, "^grad_key Test error"):
+            check_out_and_grad(*arguments)
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -6569,13 +6682,8 @@ class TestSDPAAccelerator(NNTestCase):
             out = out[..., :v_og_size]
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
-            query_padding_mask = torch.ones(
-                batch_size, seq_len_q, device=device, dtype=torch.bool)
-            key_padding_mask = torch.ones(
-                batch_size, seq_len_k, device=device, dtype=torch.bool)
-
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
+                dbug_mask, seq_len_q, seq_len_k, None, None,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
 
             # This is the default implementation for the mask but we need to match CK if we are using it
@@ -7098,14 +7206,10 @@ class TestSDPAAccelerator(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, max_seq_len_q, max_seq_len_kv, query_padding_mask, key_padding_mask, causal=is_causal)
             dropout_mask = softmax_mask >= 0
-            nt_stack = []
-            for tensor_component in range(batch_size):
-                batch_stack = []
-                for head in range(n_heads):
-                    batch_stack.append(dropout_mask[tensor_component, head,
-                                                    0:seq_lens_q[tensor_component],
-                                                    0:seq_lens_kv[tensor_component]].unsqueeze(0))
-                nt_stack.append(torch.cat(batch_stack))
+            nt_stack = [
+                dropout_mask[batch, :, :seq_lens_q[batch], :seq_lens_kv[batch]]
+                for batch in range(batch_size)
+            ]
             nested_dropout_mask = torch.nested.nested_tensor(nt_stack)
             # High Precision Math Reference
             with tf32_off():
