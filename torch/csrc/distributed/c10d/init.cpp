@@ -5509,8 +5509,9 @@ every backend of the group records natively.)")
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
-that records natively (stock ProcessGroupNCCL, xccl). Groups created by
-torch.distributed already have one attached; attaching another records each
+that records natively (nccl-legacy, xccl). Groups from init_process_group,
+new_group and torch.distributed.split_group already have one attached, unless
+the default group provides its own new_group; attaching another records each
 op twice, under separate pg_ids. The hook detaches when remove()
 is called or the returned handle is garbage collected. If the backend times
 collectives the hook holds each Work (and its output tensors) until its

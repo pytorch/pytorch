@@ -80,7 +80,7 @@ class PyProcessGroup : public ProcessGroup {
         return Work::getFutureResult();
       }
       py::object o = override();
-      TORCH_CHECK(
+      TORCH_CHECK_TYPE(
           py::isinstance<torch::jit::PythonFutureWrapper>(o),
           py::type::of(py::cast(static_cast<const Work*>(this)))
               .attr("__qualname__")

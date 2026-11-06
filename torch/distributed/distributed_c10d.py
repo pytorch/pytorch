@@ -2932,9 +2932,10 @@ def _maybe_attach_flight_recorder(
     # A hook is attached per ProcessGroup but backends are per device, and the
     # hook now resolves per op: it skips whatever a self-recording backend
     # serves and records the rest into that backend's own recorder instance. So
-    # a mixed group ("cpu:gloo,cuda:nccl") gets its gloo half without
-    # duplicating nccl's native entries, and only a group that is self-recording
-    # on every device is still skipped -- a hook there would record nothing.
+    # a mixed group ("cpu:gloo,cuda:nccl-legacy") gets its gloo half without
+    # duplicating nccl-legacy's native entries, and only a group that is
+    # self-recording on every device is still skipped -- a hook there would
+    # record nothing.
     if all(
         backend_str in _FR_SELF_RECORDING_BACKENDS
         for backend_str in backend_config.get_device_backend_map().values()
