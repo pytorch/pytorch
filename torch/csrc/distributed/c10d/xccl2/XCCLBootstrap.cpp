@@ -101,11 +101,6 @@ void populateXcclConfigFromHints(
     onecclConfig_t& config,
     const std::unordered_map<std::string, std::string>& hints,
     const std::string& name) {
-  // Iterate over the hints and set the corresponding fields in the config.
-  // String fields are const char*, and oneCCL does not document whether it
-  // keeps the pointer past communicator creation, so they are strdup'd and
-  // deliberately never freed.
-
   for (const auto& [key, val] : hints) {
     if (kLayerHints.count(key)) {
       continue;
@@ -126,13 +121,17 @@ void populateXcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.maxCTAs=" << config.maxCTAs;
     } else if (key == "netName") {
-      config.netName = strdup(val.c_str());
+      config.netName = val.c_str();
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.netName=" << config.netName;
     } else if (key == "splitShare" || key == "split_share") {
       config.splitShare = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.splitShare=" << config.splitShare;
+    } else if (key == "multiThreaded" || key == "multi_threaded") {
+      config.multiThreaded = std::stoi(val);
+      TC_LOG(INFO) << "[comm=" << name
+                   << "] Setting config.multiThreaded=" << config.multiThreaded;
     } else if (kNcclOnlyHints.count(key)) {
       TC_LOG(WARNING) << "XCCL hint '" << key
                       << "' is NCCL-specific and not supported by oneCCL, "
@@ -154,6 +153,8 @@ onecclComm_t XCCLBootstrap::createXcclComm(
   onecclUniqueId uniqueId;
   onecclComm_t xccl_comm = nullptr;
 
+  // TODO: use commInitRankScalable with multiple roots for large comms, as
+  // nccl2 does, once oneCCL provides it.
   uniqueId = exchangeUniqueId(name);
 
   onecclConfig_t config = base_config;
