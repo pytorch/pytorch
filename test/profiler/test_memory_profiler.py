@@ -3,7 +3,6 @@ import functools
 import gc
 import itertools as it
 import json
-import os
 import textwrap
 import unittest
 from collections.abc import Callable, Iterator
@@ -34,9 +33,6 @@ profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
 
-# XPU CI excluded this whole module before memory accounting moved here.
-SKIP_MEMORY_ANALYSIS = os.getenv("PYTORCH_TEST_SKIP_MEMORY_ANALYSIS") == "1"
-
 
 def setUpModule():
     if _profiler_test_skip_reason() is None:
@@ -66,7 +62,6 @@ def _lookup_tensor_categories(
     }
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -148,7 +143,6 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
         return out
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -355,7 +349,6 @@ class TestIdentifyGradients(TestCase):
         )
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestDataFlow(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -789,7 +782,6 @@ class TestDataFlow(TestCase):
         )
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1290,7 +1282,6 @@ class TestMemoryProfilerE2E(TestCase):
         )
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2EDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1521,7 +1512,6 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
         self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
 
 
-@unittest.skipIf(SKIP_MEMORY_ANALYSIS, "Memory analysis tests are disabled on XPU")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerTimeline(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

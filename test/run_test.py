@@ -297,6 +297,7 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_memory_profiler",
 ]
 
 XPU_TEST = [
@@ -577,8 +578,6 @@ def run_test(
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name
-    if options.xpu and test_file == "profiler/test_memory_profiler":
-        env["PYTORCH_TEST_SKIP_MEMORY_ANALYSIS"] = "1"
     # Stable identifier for CI logs, e.g. "test_ops 3/8". Deliberately built
     # from .name rather than str(test_module), which also embeds the pytest
     # filter for partial runs ("test_ops, not (TestA or TestB) 3/8") and would
