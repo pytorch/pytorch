@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     NAVI4_ARCH,
     skipIfRocm,
     skipIfTorchDynamo,
-    TEST_FAIRSEQ,
     run_tests,
     parametrize,
     freeze_rng_state,
@@ -78,9 +77,6 @@ from torch.testing._internal.common_cuda import (
     tf32_enabled,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
-
-if TEST_FAIRSEQ:
-    import fairseq.models.transformer as fairseq_transformer
 
 SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
 Tolerances = namedtuple('Tolerances', ['atol', 'rtol'])
@@ -557,82 +553,43 @@ class TestTransformersGeneric(NNTestCase):
         torch.jit.script(mha)
 
 
-class TestTransformersCUDA(NNTestCase):
-    _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = True
-
-    def setUp(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
-    @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
-    def test_decoder_only_layer(self):
-        class FairseqDecoder(torch.nn.Module):
-            def __init__(
-                self,
-                embed_dim,
-                attention_heads,
-                ffn_embed_dim,
-                num_layers,
-                embedding_layer,  # torch.nn.Embedding. Must have a padding_idx field
-                dropout=0,
-                normalize_before=False,
-                torch_encoder=None,  # torch encoder that you can map weights from
-                activation="relu",
-            ):
-                super().__init__()
-
-                cfg = fairseq_transformer.TransformerConfig()
-                cfg.decoder.embed_dim = embed_dim
-                cfg.decoder.output_dim = embed_dim
-                cfg.decoder.attention_heads = attention_heads
-                cfg.decoder.ffn_embed_dim = ffn_embed_dim
-                cfg.dropout = dropout
-                cfg.decoder.normalize_before = normalize_before
-                cfg.decoder.layers = num_layers
-                # make embedding behavior same as other encoders
-                cfg.no_token_positional_embeddings = True
-                cfg.no_scale_embedding = True
-                cfg.activation_fn = activation
-
-                dictionary = {}  # TODO: verify what this is
-
-                self.decoder = fairseq_transformer.TransformerDecoder(
-                    cfg,
-                    dictionary,
-                    embedding_layer,
-                    no_encoder_attn=True,
-                    output_projection=None,
-                )
-
-                if torch_encoder is not None:
-                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
-                self.decoder = self.decoder.eval().cuda().half()
-
-            def forward(
-                self,
-                tokens,
-                src_lengths=None,
-                with_triangle_mask=False,
-                incremental_state=None,
-            ):
-                return self.decoder(
-                    prev_output_tokens=tokens,
-                    encoder_out=None,
-                    incremental_state=incremental_state,
-                    features_only=True,
-                    full_context_alignment=not with_triangle_mask,
-                    alignment_layer=None,
-                    alignment_heads=None,
-                    src_lengths=src_lengths,
-                    return_all_hiddens=False,
-                )[0]
-
-
 class TestTransformersAccelerator(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("norm_first", [False, True])
+    @parametrize("activation", ["relu", "gelu"])
+    @torch.inference_mode()
+    def test_decoder_only_layer(self, device, dtype, norm_first, activation):
+        # Encoder layers with causal self-attention form a decoder-only stack without cross-attention.
+        layer = nn.TransformerEncoderLayer(
+            d_model=16, nhead=4, dim_feedforward=32, dropout=0.0,
+            activation=activation, batch_first=True, norm_first=norm_first,
+            device=device, dtype=dtype,
+        )
+        decoder = nn.TransformerEncoder(layer, num_layers=2, enable_nested_tensor=False).eval()
+        embedding = nn.Embedding(32, 16, device=device, dtype=dtype)
+        tokens = torch.arange(10, device=device).reshape(2, 5)
+        inputs = embedding(tokens)
+        causal_mask = torch.ones((5, 5), device=device, dtype=torch.bool).triu(1)
+        full = decoder(inputs, mask=causal_mask, is_causal=True)
+        self.assertEqual(full.shape, inputs.shape)
+        self.assertTrue(torch.isfinite(full).all())
+        atol, rtol = (2e-3, 2e-3) if dtype == torch.float16 else (1e-5, 1e-5)
+        for length in range(1, tokens.size(1) + 1):
+            prefix = decoder(inputs[:, :length], mask=causal_mask[:length, :length], is_causal=True)
+            self.assertEqual(prefix, full[:, :length], atol=atol, rtol=rtol)
+        changed_tokens = tokens.clone()
+        changed_tokens[:, 2:] += 10
+        changed = decoder(embedding(changed_tokens), mask=causal_mask, is_causal=True)
+        self.assertEqual(changed[:, :2], full[:, :2], atol=atol, rtol=rtol)
+        changed_past = tokens.clone()
+        changed_past[:, 0] += 10
+        past_result = decoder(embedding(changed_past), mask=causal_mask, is_causal=True)
+        self.assertNotEqual(past_result[:, 1:], full[:, 1:], atol=atol, rtol=rtol)
+        self.assertNotEqual(decoder(inputs)[:, :2], full[:, :2], atol=atol, rtol=rtol)
 
     @slowTest
     def test_train_with_pad_and_catch_error(self, device):
