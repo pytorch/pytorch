@@ -4,13 +4,8 @@ import torch
 from torch._utils import _dummy_type
 
 
-__all__ = [
-    "Stream",
-    "stream",
-    "current_stream",
-    "default_stream",
-    "set_stream",
-]
+# APIs defined in this file are public directly under `torch.mps`
+__all__: list[str] = []
 
 if not hasattr(torch._C, "_MPSStreamBase"):
     torch._C.__dict__["_MPSStreamBase"] = _dummy_type("_MPSStreamBase")
@@ -22,7 +17,31 @@ class Stream(torch._C._MPSStreamBase):
     An MPS stream is a linear sequence of execution that is independent from
     other streams. Use the :meth:`stream` context manager to ensure operators
     run on the corresponding stream.
+
+    Args:
+        device(torch.device or int, optional): a device on which to allocate
+            the stream. If :attr:`device` is ``None`` (default) or a negative
+            integer, this will use the current device.
     """
+
+    def __new__(cls, device=None, **kwargs):
+        if not torch.backends.mps.is_built():
+            raise RuntimeError("torch.mps.Stream requires MPS support")
+
+        # Currently all Apple M-series machines have only one GPU. So if
+        # `device` is given, just check it for errors but don't actually use it.
+        if device is not None:
+            if isinstance(device, int):
+                if device > 0:
+                    raise ValueError(f"mps device index is invalid: {device}")
+            else:
+                device = torch.device(device)
+                if device.type != "mps":
+                    raise ValueError(f"Expected an mps device, but got: {device.type}")
+                if device.index is not None and device.index != 0:
+                    raise ValueError(f"mps device index is invalid: {device.index}")
+
+        return super().__new__(cls, **kwargs)
 
     def synchronize(self) -> None:
         r"""Wait for all the kernels in this stream to complete."""
@@ -80,3 +99,8 @@ def set_stream(stream: Stream | None) -> None:
     if stream is None:
         return
     torch._C._mps_setStream(stream)
+
+
+for _obj in (Stream, stream, current_stream, default_stream, set_stream):
+    _obj.__module__ = "torch.mps"
+del _obj
