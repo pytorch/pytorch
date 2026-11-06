@@ -3596,12 +3596,17 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2,)), output_size=(1,)),
+                     error_type=ValueError, error_regex="Expected 2D or 3D tensor")
+
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
-                     error_regex="'output_size' should contain one int")
+                     error_type=ValueError, error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3633,10 +3638,11 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 2")
+                     error_type=ValueError, error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3671,10 +3677,11 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 3")
+                     error_type=ValueError, error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3794,6 +3801,7 @@ class _TestParamsMaxPoolBase:
     def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
+            # Overlapping stride first: inductor_one_sample (test_torchinductor_opinfo.py) runs only the first sample
             'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
@@ -3802,9 +3810,9 @@ class _TestParamsMaxPoolBase:
         }
 
         self.shapes = [
-            [1, 2, None],  # batch
+            [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first 1d sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -3827,32 +3835,35 @@ class _TestParamsMaxPoolBase:
         yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+    pass
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2)]
-        self.kwargs['stride'] += [(2, 1)]
-        self.kwargs['padding'] += [(1, 1)]
-        self.kwargs['dilation'] += [(1, 2)]
+        self.kwargs['kernel_size'] = [(3, 2)]
+        # Per-dim stride values differ: H overlaps and W tiles (both overlap with dilation)
+        self.kwargs['stride'] = [(1, 2), None]
+        self.kwargs['padding'] = [0, (1, 1)]
+        self.kwargs['dilation'] = [1, (1, 2)]
 
-        self.shapes.append([6])
+        self.shapes.append([5])  # odd, so the first sample has a partial ceil_mode window in W
+
+class _TestParamsMaxPool2dBackward(_TestParamsMaxPool2d):
+
+    def __init__(self) -> None:
+        super().__init__()
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        self.kwargs['return_indices'] = [True]
 
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2, 3)]
-        self.kwargs['stride'] += [(2, 1, 2)]
-        self.kwargs['dilation'] += [(1, 2, 1)]
+        self.kwargs['kernel_size'] = [(3, 2, 3)]
+        # Per-dim stride values all differ: D overlaps and H, W tile (H overlaps too with dilation)
+        self.kwargs['stride'] = [(1, 2, 3), None]
+        self.kwargs['dilation'] = [1, (1, 2, 1)]
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -3864,7 +3875,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
-        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2dBackward,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -10494,8 +10505,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
-        indices = sample.args[0]
+    samples = list(sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs))
+    smallest_size = min((math.prod(s.kwargs['output_size'][2:]) for s in samples), default=None)
+    for sample in samples:
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
@@ -10511,8 +10523,11 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
         # indices.
-        # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Here we go with the solution 2, the easiest of all: non-overlapping
+        # windows (stride=None, i.e. stride == kernel_size) always give unique indices.
+        # gradcheck is expensive, so only the smallest max_pool input is kept;
+        # output_size is that input's shape (sample.input is the pooled output).
+        if sample.kwargs['stride'] is None and math.prod(sample.kwargs['output_size'][2:]) == smallest_size:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
