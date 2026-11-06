@@ -12,6 +12,7 @@ import copy
 import functools
 import itertools
 import pprint
+import struct
 import typing
 import warnings
 from collections.abc import Callable, Generator, Sequence
@@ -50,8 +51,13 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
@@ -102,6 +108,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 from .utils import (
+    _get_inner_meta,
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -2647,6 +2654,7 @@ class AOTDispatchAutogradCompileSpec:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
+    backward_input_signature: tuple[Any, ...] | None = None
 
 
 @dataclass
@@ -2884,6 +2892,55 @@ class _AutogradRngStateTracker:
         all_args.extend(self.bwd_rng_states)
 
 
+def _backward_input_aliases(args: Sequence[Any]) -> tuple[tuple[int, int], ...]:
+    objects: dict[int, int] = {}
+    storages: dict[int, int] = {}
+    aliases: list[tuple[int, int]] = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            object_idx = objects.setdefault(id(arg), len(objects))
+            storage_idx = storages.setdefault(
+                arg.untyped_storage()._cdata, len(storages)
+            )
+            aliases.append((object_idx, storage_idx))
+    return tuple(aliases)
+
+
+def _backward_input_signature(args: Sequence[Any]) -> tuple[Any, ...]:
+    """Concrete metadata guards for backward variants, without reading tensor data."""
+    aliases = iter(_backward_input_aliases(args))
+    signature: list[tuple[Any, ...]] = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            object_idx, storage_idx = next(aliases)
+            signature.append(
+                (
+                    arg.dtype,
+                    arg.device,
+                    arg.layout,
+                    tuple(guarding_hint_or_throw(x) for x in arg.shape),
+                    tuple(guarding_hint_or_throw(x) for x in arg.stride()),
+                    guarding_hint_or_throw(arg.storage_offset()),
+                    arg.is_conj(),
+                    arg.is_neg(),
+                    object_idx,
+                    storage_idx,
+                )
+            )
+        elif isinstance(arg, (bool, torch.SymBool)):
+            signature.append((bool, guarding_hint_or_throw(arg)))
+        elif isinstance(arg, (int, torch.SymInt)):
+            # Saved symbolic sizes become ordinary integers at backward runtime.
+            signature.append((int, guarding_hint_or_throw(arg)))
+        elif isinstance(arg, (float, torch.SymFloat)):
+            signature.append((float, struct.pack("d", float(arg))))
+        elif isinstance(arg, (str, bytes)):
+            signature.append((type(arg), arg))
+        else:
+            signature.append((type(arg),))
+    return tuple(signature)
+
+
 @dataclass
 class _AutogradBackwardCompiler:
     compiled_bw: Callable[..., Any] | None
@@ -2895,8 +2952,26 @@ class _AutogradBackwardCompiler:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
+    backward_input_signature: tuple[Any, ...] | None = None
+    compiler_fw_metadata: ViewAndMutationMeta | None = None
+    _variants: collections.OrderedDict[tuple[Any, ...], Callable[..., Any]] = field(
+        default_factory=collections.OrderedDict
+    )
+    _context_prepared: bool = False
 
-    def get_or_compile(self, *, saved_tensors_use_once: bool) -> Callable[..., Any]:
+    def get_or_compile(
+        self, *, saved_tensors_use_once: bool, all_args: list[Any] | None = None
+    ) -> Callable[..., Any]:
+        if self.aot_config.preserve_tangent_layout:
+            if all_args is None:
+                raise AssertionError("layout-preserving backward needs runtime inputs")
+            from torch._dynamo.convert_frame import compile_lock
+
+            # Different backward graphs can share their saved FakeTensorMode and
+            # TracingContext. Use the existing compiler lock for variant lowering.
+            with compile_lock:
+                return self._get_or_compile_variant(all_args, saved_tensors_use_once)
+
         if self.compiled_bw is not None:
             return self.compiled_bw
 
@@ -2910,10 +2985,108 @@ class _AutogradBackwardCompiler:
 
         self._prepare_lazy_backward_context(saved_tensors_use_once)
 
+        return self._compile_backward(self.lazy_backward_info.placeholder_list)
+
+    def validate_input_aliases(self, all_args: list[Any]) -> None:
+        from .autograd_cache import sync_cache_decision_cross_ranks
+
+        compiler_metadata = self.compiler_fw_metadata or self.fw_metadata
+        if compiler_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw:
+            reference_aliases: tuple[tuple[int, int], ...] | None = None
+            if self.backward_input_signature is not None:
+                reference_aliases = tuple(
+                    (signature[-2], signature[-1])
+                    for arg, signature in zip(all_args, self.backward_input_signature)
+                    if isinstance(arg, torch.Tensor)
+                )
+            elif isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+                reference_aliases = _backward_input_aliases(
+                    self.lazy_backward_info.placeholder_list
+                )
+            aliases_match = (
+                reference_aliases is None
+                or _backward_input_aliases(all_args) == reference_aliases
+            )
+            # Reject an invalid alias contract on every rank before cache sync.
+            if not sync_cache_decision_cross_ranks(aliases_match):
+                raise RuntimeError(
+                    "Strict backward input aliasing changed from a graph with "
+                    "input mutations. Retracing the backward is required."
+                )
+
+    def _get_or_compile_variant(
+        self, all_args: list[Any], saved_tensors_use_once: bool
+    ) -> Callable[..., Any]:
+        from .autograd_cache import sync_cache_decision_cross_ranks
+
+        signature = _backward_input_signature(all_args)
+        if not self._context_prepared and self.compiled_bw is not None:
+            previous_signature = self.backward_input_signature
+            if previous_signature is not None:
+                self._variants.setdefault(previous_signature, self.compiled_bw)
+            # An eagerly compiled or cache-loaded backward already prepared its
+            # forward context. Do not advance DDP's bucket on a later variant.
+            self._context_prepared = True
+        # A rank with a variant hit must still compile when another rank misses:
+        # backward compilation can contain collectives just like forward compile.
+        if sync_cache_decision_cross_ranks(signature in self._variants):
+            self._variants.move_to_end(signature)
+            self.compiled_bw = self._variants[signature]
+            self.backward_input_signature = signature
+            return self.compiled_bw
+        if self.bw_compiler is None:
+            raise RuntimeError(
+                "This strict backward artifact has no compiled variant for the "
+                "runtime input metadata. A compiler callback is required to "
+                "compile a new backward input layout."
+            )
+        if not isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+            raise AssertionError("layout variants need the backward compile recipe")
+        if not self._context_prepared:
+            self._prepare_lazy_backward_context(saved_tensors_use_once)
+            self._context_prepared = True
+
+        mode = (
+            self.lazy_backward_info.saved_context.fake_mode
+            if self.lazy_backward_info.saved_context is not None
+            else detect_fake_mode(self.lazy_backward_info.placeholder_list)
+        )
+        if mode is None:
+            mode = FakeTensorMode()
+        # A backward compile cannot add new guards to an already executed
+        # forward. Specialize runtime metadata here and guard it with the
+        # signature above, including the values of saved symbolic sizes.
+        placeholders = [
+            mode.from_tensor(arg, static_shapes=True)
+            if isinstance(arg, torch.Tensor)
+            else arg
+            for arg in all_args
+        ]
+        # Deserialized graph modules can contain real lifted tensor constants.
+        with allow_non_fake_inputs_temporarily(mode):
+            compiled_bw = self._compile_backward(placeholders, signature)
+        self._variants[signature] = compiled_bw
+        # Shape-specialized variants can otherwise retain an artifact for every
+        # batch size. Evicted variants remain available in the backend cache.
+        if len(self._variants) > 8:
+            self._variants.popitem(last=False)
+        return compiled_bw
+
+    def _compile_backward(
+        self,
+        placeholder_list: list[Any],
+        signature: tuple[Any, ...] | None = None,
+    ) -> Callable[..., Any]:
+        if not isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+            raise AssertionError("expected backward compile recipe")
+
         bw_module = self.lazy_backward_info.bw_module
-        placeholder_list = self.lazy_backward_info.placeholder_list
         saved_context = self.lazy_backward_info.saved_context
         saved_compile_context = self.lazy_backward_info.saved_compile_context
+
+        if self.aot_config.preserve_tangent_layout and saved_context is not None:
+            # Other DDP buckets can reuse this tracing context between variants.
+            saved_context.fw_metadata = self.compiler_fw_metadata
 
         context = torch._C._DisableAutocast() if self.disable_amp else _NULL_CONTEXT
         metrics_context = get_metrics_context()
@@ -2944,16 +3117,22 @@ class _AutogradBackwardCompiler:
             # See Note: [Backward graph lazy lowering]
             if self.bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
-            self.compiled_bw = self.bw_compiler(
-                copy.deepcopy(bw_module), placeholder_list
-            )
+            bw_module_copy = copy.deepcopy(bw_module)
+            self.compiled_bw = self.bw_compiler(bw_module_copy, placeholder_list)
+            self.backward_input_signature = signature
             # Maybe save cache entry
             if self.try_save_cache_entry is not None:
+                cache_kwargs: dict[str, Any] = (
+                    {"backward_input_signature": signature}
+                    if self.aot_config.preserve_tangent_layout
+                    else {}
+                )
                 self.try_save_cache_entry(
                     self.compiled_bw,
                     bw_module,
                     self.fw_metadata,
                     self.aot_config,
+                    **cache_kwargs,
                 )
 
         return self.compiled_bw
@@ -3027,6 +3206,8 @@ def _codegen_backward_prologue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
     codegen_unwrap_fn: Callable[..., Any] | None,
+    preserve_tangent_layout: bool = False,
+    validate_input_aliases: Callable[[list[Any]], None] | None = None,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3142,6 +3323,7 @@ def _codegen_backward_prologue(
             _tangent_descs_=fw_metadata.traced_tangents_descs,
             _compile_id_=fw_metadata.compile_id_str,
             _stack_traces_=fw_metadata.tangent_source_stack_traces or (),
+            _preserve_layout_=preserve_tangent_layout,
         )
 
         if has_subclass:
@@ -3159,7 +3341,8 @@ def _codegen_backward_prologue(
             buf.writeline(
                 "_fpt = list(_chain_("
                 "_process_tangent_(t, m, idx, desc, _compile_id_, "
-                "_stack_traces_[idx] if _stack_traces_ else None)[1] "
+                "_stack_traces_[idx] if _stack_traces_ else None, "
+                "preserve_layout=_preserve_layout_)[1] "
                 "for idx, (t, m, desc) in enumerate("
                 "zip(_tangents, _tangent_metas_, _tangent_descs_))))"
             )
@@ -3178,7 +3361,8 @@ def _codegen_backward_prologue(
                 buf.writeline(
                     "all_args[_i] = _process_tangent_(all_args[_i], "
                     "_tangent_metas_[j], j, _tangent_descs_[j], _compile_id_, "
-                    "_stack_traces_[j] if _stack_traces_ else None)[0]"
+                    "_stack_traces_[j] if _stack_traces_ else None, "
+                    "preserve_layout=_preserve_layout_)[0]"
                 )
 
         if has_mutations_in_bw:
@@ -3189,6 +3373,10 @@ def _codegen_backward_prologue(
                     "'aot_autograd does not support input mutations with "
                     "requires_grad in backward for create_graph=True')"
                 )
+
+        if validate_input_aliases is not None:
+            buf.bind(_validate_input_aliases_=validate_input_aliases)
+            buf.writeline("_validate_input_aliases_(all_args)")
 
         buf.writeline("return all_args")
 
@@ -3475,6 +3663,12 @@ class _AOTDispatchAutogradFunctionFactory:
             aot_config=self.spec.aot_config,
             fw_metadata=self.spec.fw_metadata,
             try_save_cache_entry=self.spec.try_save_cache_entry,
+            backward_input_signature=self.spec.backward_input_signature,
+            compiler_fw_metadata=(
+                _get_inner_meta(self.spec.maybe_subclass_meta, self.spec.fw_metadata)
+                if self.spec.aot_config.preserve_tangent_layout
+                else None
+            ),
         )
 
         compiled_fw_func = self.spec.compiled_fw_func
@@ -3496,10 +3690,18 @@ class _AOTDispatchAutogradFunctionFactory:
                 grad_input_metas=maybe_subclass_meta.grad_input_metas,
             )
 
+        input_alias_validator = (
+            backward_compiler.validate_input_aliases
+            if backward_compiler.compiler_fw_metadata is not None
+            and backward_compiler.compiler_fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+            else None
+        )
         _codegen_bw_prologue = _codegen_backward_prologue(
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_unwrap_fn,
+            aot_config.preserve_tangent_layout,
+            validate_input_aliases=input_alias_validator,
         )
 
         _codegen_bw_epilogue = _codegen_backward_epilogue(
@@ -3629,6 +3831,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
             _bw_prologue_fn = _codegen_bw_prologue
+            _bw_has_input_alias_validator = input_alias_validator is not None
             _bw_epilogue_fn = _codegen_bw_epilogue
             _fwd_fn = _codegen_fwd
             _bwd_fn = _codegen_bwd
@@ -3709,7 +3912,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     not torch._C._autograd._get_current_graph_task_keep_graph()
                 )
                 compiled_bw = backward_compiler.get_or_compile(
-                    saved_tensors_use_once=saved_tensors_use_once
+                    saved_tensors_use_once=saved_tensors_use_once, all_args=all_args
                 )
                 CompiledFunction.compiled_bw = compiled_bw
 
@@ -3829,6 +4032,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_desc: AOTInput | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
+        *,
+        preserve_layout: bool = False,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
             return x, [x]
@@ -3838,7 +4043,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 raise AssertionError(
                     "meta.memory_format must not be None for FakeTensor"
                 )
-            x = coerce_to_expected_memory_format(x, meta.memory_format)
+            if not preserve_layout:
+                x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: type | None = torch.Tensor
@@ -3895,7 +4101,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         # Coerce to expected memory format
         if not meta.memory_format:
             raise AssertionError("meta.memory_format must not be None")
-        x = coerce_to_expected_memory_format(x, meta.memory_format)
+        if not preserve_layout:
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
@@ -3918,7 +4125,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 continue
             elem = getattr(x, attr)
             new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
-                elem, attr_meta
+                elem, attr_meta, preserve_layout=preserve_layout
             )
             if new_elem is not elem:
                 setattr(x, attr, new_elem)
