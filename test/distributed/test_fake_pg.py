@@ -61,9 +61,10 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3) * dist.get_rank()
         work = dist.all_reduce(output, async_op=True)
         self.assertEqual(tuple(output.shape), (3, 3))
-        self.assertEqual(
-            WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
-        )
+        # A fake op is done when issued.
+        fut = work.get_future_result()
+        self.assertTrue(fut.done())
+        self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
     def test_compile_sync_pg_stays_fake(self):
         # One real rank under a fake default group sized to a larger world must not
