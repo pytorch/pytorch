@@ -450,11 +450,15 @@ g () {
             (subprocess.CalledProcessError(2, argv), "CalledProcessError"),
         ]:
             error = error or f"{type(e).__name__}: {e}"
-            # The first answer greps every path, the second only for importers.
-            for out in (answer(tests=[{"file": "jit/test_freezing"}]), answer()):
-                sel = Selection.from_model_output(
-                    out, CANDIDATES, ["test/test_nn.py"], mock.Mock(side_effect=e)
-                )
+            # The first answer greps every path, the second only for importers
+            # or, for a failure list, for the class it names.
+            for out, changed in [
+                (answer(tests=[{"file": "jit/test_freezing"}]), "test/test_nn.py"),
+                (answer(), "test/test_nn.py"),
+                (answer(), "test/dynamo_expected_failures/TestNN.test_x"),
+            ]:
+                grep = mock.Mock(side_effect=e)
+                sel = Selection.from_model_output(out, CANDIDATES, [changed], grep)
                 self.assertEqual(
                     (sel.run_all, sel.reason, sel.error),
                     (True, f"grep failed ({error})", error),
@@ -589,6 +593,164 @@ g () {
             self.assertEqual(len(calls), rounds, depth)
             if not run_all:
                 self.assertEqual(sel.files, {"test_nn", f"m{depth}"}, depth)
+
+    def test_failure_list_edits_select_their_tests(self) -> None:
+        sources = {
+            "test_nn.py": "class TestNN(TestCase):\n",
+            "cpython/v3_13/test_set.py": "    class TestSet(unittest.TestCase):\n",
+            "inductor/test_torchinductor.py": "class TestSetCopy:\nclass DynamicShapesCodegenCpuTests(TestCase):\n",
+            "test_ops.py": "class Test:\n",
+            "cpp/api/modules.cpp": "class TestModel {\n",
+            "dynamo/test_misc.py": "class MiscTests(TestCase):\n",
+        }
+        for changed, files, sweeps in [
+            (
+                "test/inductor_skips/CPython313-test_set-TestSet.test_x",
+                {"cpython/v3_13/test_set"},
+                set(),
+            ),
+            ("test/dynamo_expected_failures/TestNNCPU.test_x", {"test_nn"}, set()),
+            ("test/dynamo_skips/TestNN.test_x_cuda", {"test_nn"}, set()),
+            ("test/inductor_skips/TestNNCUDA.test_x", {"test_nn"}, set()),
+            (
+                "test/dynamo_skips/CPython313-test_set-TestSet.test_x",
+                {"cpython/v3_13/test_set"},
+                set(),
+            ),
+            ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
+            # make_test_cls_with_patches names them after MiscTests.
+            (
+                "test/dynamo_skips/DynamicShapesMiscTests.test_x",
+                {"dynamo/test_misc"},
+                set(),
+            ),
+            (
+                "test/dynamo_skips/InlineAndInstallMiscTests.test_x",
+                {"dynamo/test_misc"},
+                set(),
+            ),
+            # Defined under its full name.
+            (
+                "test/inductor_skips/DynamicShapesCodegenCpuTests.test_x",
+                {"inductor/test_torchinductor"},
+                set(),
+            ),
+            # Not a CPython test entry.
+            ("test/dynamo_skips/CPythonGone.test_x", set(), {"dynamo_wrapped"}),
+            # Only a .py file defines a test class.
+            ("test/dynamo_skips/TestModel.test_x", set(), {"dynamo_wrapped"}),
+            # TestCUDA is not a TestCUDA made by instantiate_device_type_tests.
+            ("test/dynamo_skips/TestCUDA.test_x", set(), {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN.test_x", {"test_nn"}, set()),
+            ("test/compiled_autograd_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
+            ("test/dynamo_skips/.gitkeep", set(), set()),
+            # Not checked at import, and it names no test.
+            ("test/compiled_autograd_skips/TestNN", set(), set()),
+            # dynamo_test_failures.py rejects these names at import.
+            ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
+            (
+                "test/dynamo_expected_failures/TestNN.test_x.y",
+                set(),
+                {"dynamo_wrapped"},
+            ),
+            ("test/dynamo_skips/TestNN.x-TestNN.test_y", set(), {"dynamo_wrapped"}),
+            (
+                "test/dynamo_skips/TestNN.test_x test/dynamo_expected_failures/TestNN.test_x",
+                set(),
+                {"dynamo_wrapped"},
+            ),
+            (
+                "test/dynamo_skips/CPython313-test_set-TestSet.test_x test/dynamo_expected_failures/CPython313-test_set-TestSet.test_x",
+                {"cpython/v3_13/test_set"},
+                {"dynamo_wrapped"},
+            ),
+            # dynamo_test_failures.py lists only the top of each directory.
+            ("test/dynamo_skips/sub/TestNN.test_x", set(), {"dynamo_wrapped"}),
+            (
+                "test/compiled_autograd_skips/sub/TestNN.test_x",
+                set(),
+                {"dynamo_wrapped"},
+            ),
+        ]:
+            sel = self.select_in_tree(sources, CANDIDATES, changed.split())
+            self.assertFalse(sel.run_all, changed)
+            self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
+        inductor = "an edited inductor failure list entry was rejected or not resolved to the file defining its test class"
+        for changed in (
+            "test/inductor_expected_failures/TestGone.test_x",
+            "test/inductor_skips/TestGone.test_x",
+            "test/inductor_skips/TestNN.test_x.y",
+            "test/inductor_skips/sub/TestNN.test_x",
+            "test/inductor_skips/CPython313-test_gone-TestGone.test_x",
+        ):
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual(
+                (sel.run_all, sel.error, sel.reason), (True, None, inductor), changed
+            )
+        both = [
+            "test/inductor_skips/TestGone.test_x",
+            "test/dynamo_skips/TestGone.test_y",
+        ]
+        self.assertTrue(self.select_in_tree(sources, CANDIDATES, both).run_all)
+        # The dynamo_cpython config, not dynamo_wrapped, runs the CPython tests.
+        cpython = (False, {"cpython/v3_13/test_set"}, set())
+        sel = self.select_in_tree(
+            sources,
+            CANDIDATES,
+            ["test/dynamo_expected_failures/CPython313-test_gone-TestGone.test_x"],
+        )
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
+        sel = Selection.from_model_output(
+            answer(),
+            CANDIDATES,
+            ["test/dynamo_skips/CPython313-test_set-TestSet.test_x"],
+        )
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
+        self.assertEqual(sel.reason, "[failure list fallback]")
+        # The model already chose dynamo_wrapped, so the fallback adds nothing.
+        gone = ["test/dynamo_skips/TestGone.test_x"]
+        out = answer(sweeps=["dynamo_wrapped"])
+        sel = Selection.from_model_output(out, CANDIDATES, gone)
+        self.assertEqual((sel.sweeps, sel.reason), ({"dynamo_wrapped"}, ""))
+        # dynamo_cpython runs with compiled autograd, so it reads its skips too.
+        ca = "test/compiled_autograd_skips/CPython313-test_set-TestSet.test_x"
+        sel = Selection.from_model_output(answer(), CANDIDATES, [ca])
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
+        # The files defining a class are selected with their importers.
+        importer = sources | {"test_ops.py": "from test_nn import *\n"}
+        sel = self.select_in_tree(
+            importer,
+            CANDIDATES,
+            ["test/dynamo_skips/TestNN.test_x", "test/dynamo_skips/TestGone.test_x"],
+        )
+        self.assertEqual(
+            (sel.run_all, sel.files, sel.sweeps),
+            (False, {"test_nn", "test_ops"}, {"dynamo_wrapped"}),
+        )
+        limit = selection.MAX_FAILURE_LIST_CLASSES
+        defs = "".join(f"class TestNN{i}(TestCase):\n" for i in range(limit + 1))
+        many_sources = sources | {"test_nn.py": defs}
+        classes = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(limit + 1)]
+        tests = [f"test/dynamo_skips/TestNN0.test_{i}" for i in range(limit + 1)]
+        for many, files, sweeps in [
+            (classes[:limit], {"test_nn"}, set()),
+            (tests, {"test_nn"}, set()),
+            (classes, set(), {"dynamo_wrapped"}),
+        ]:
+            sel = self.select_in_tree(many_sources, CANDIDATES, many)
+            got = (sel.run_all, sel.files, sel.sweeps)
+            self.assertEqual(got, (False, files, sweeps), len(many))
+        # Without a grep, the classes cannot be looked up.
+        for changed, run_all, sweeps in [
+            ("test/dynamo_skips/TestNN.test_x", False, {"dynamo_wrapped"}),
+            ("test/inductor_skips/TestNN.test_x", True, set()),
+            ("test/compiled_autograd_skips/TestNN.test_x", False, {"dynamo_wrapped"}),
+            ("test/dynamo_skips/TestNN_test_x", False, {"dynamo_wrapped"}),
+        ]:
+            sel = Selection.from_model_output(answer(), CANDIDATES, [changed])
+            self.assertEqual(
+                (sel.run_all, sel.files, sel.sweeps), (run_all, set(), sweeps), changed
+            )
 
     def test_fallbacks_run_all(self) -> None:
         sel = Selection.from_model_output(None, CANDIDATES, ["torch/a.py"])
