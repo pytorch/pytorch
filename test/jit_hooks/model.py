@@ -8,7 +8,7 @@ import torch
 # grab modules from test_jit_hooks.cpp
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_hooks._fixtures import (
+from jit.test_hooks_modules import (
     create_forward_tuple_input,
     create_module_forward_multiple_inputs,
     create_module_forward_single_input,

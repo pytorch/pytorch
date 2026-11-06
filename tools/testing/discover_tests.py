@@ -107,9 +107,6 @@ TESTS = discover_tests(
         "lazy/test_extract_compiled_graph",
         "test/inductor/test_aot_inductor_utils",
         "inductor/test_aoti_cross_compile_windows",
-        "onnx/test_onnxscript_no_runtime",
-        "onnx/test_pytorch_onnx_onnxruntime_cuda",
-        "onnx/test_models",
         # These are not C++ tests
         f"{CPP_TEST_PREFIX}/CMakeFiles",
         f"{CPP_TEST_PREFIX}/CTestTestfile.cmake",

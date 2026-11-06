@@ -846,6 +846,7 @@
 # /test/cpp/jit/test_jit_type.cpp
 # /test/cpp/jit/test_save_load.cpp
 # /test/jit_hooks/
+# /test/jit/test_hooks_modules.py
 # /torch/csrc/jit/
 # /torch/jit/
 # /torch/csrc/jit/python/init.cpp
@@ -902,7 +903,6 @@
 # label: oncall: quantization
 # owner: @digantdesai @jerryzh168 @jianyuh @salilsdesai
 /test/ao/ @jerryzh168
-# /test/onnx/test_models_quantized_onnxruntime.py
 /test/quantization/ @jerryzh168
 /test/test_quantization.py @jerryzh168
 # /torch/ao/

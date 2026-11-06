@@ -264,7 +264,6 @@ S390X_BLOCKLIST = [
     "inductor/test_mkldnn_pattern_matcher",
     "test_metal",
     # lacks quantization support
-    "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
@@ -288,7 +287,6 @@ S390X_BLOCKLIST = [
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
     # depends on torchvision
-    "onnx/test_utility_funs",
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
@@ -378,13 +376,7 @@ XDIST_SERIAL_CPU_LIST = [
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
-ONNX_SERIAL_LIST = [
-    "onnx/test_models",
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_models_onnxruntime",
-    "onnx/test_custom_ops",
-    "onnx/test_utility_funs",
-]
+ONNX_SERIAL_LIST = []
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
