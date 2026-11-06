@@ -159,6 +159,11 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
     return torch.sin(x * y)
 
 
+@functools.lru_cache
+def mixed_scope_lru_wrapper():
+    return 1
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
@@ -6038,6 +6043,95 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("attr", ["custom_attr", "__closure__"])
+    @parametrize("use_dict", [False, True])
+    def test_lru_cache_wrapper_setattr(self, attr, use_dict):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x, wrapper, alias):
+            if use_dict:
+                wrapper.__dict__[attr] = x + 1
+            else:
+                setattr(wrapper, attr, x + 1)
+            return getattr(alias, attr) * 2
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        for value in (1.0, 2.0):
+            x = torch.tensor(value)
+            self.assertEqual(opt_fn(x, cached_fn, cached_fn), (x + 1) * 2)
+            self.assertEqual(getattr(cached_fn, attr), x + 1)
+            self.assertNotIn(attr, cached_fn.__wrapped__.__dict__)
+        self.assertEqual(backend.frame_count, 1)
+
+    def test_lru_cache_wrapper_setattr_none(self):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x):
+            cached_fn.__closure__ = None
+            return x + 1
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1)),
+            torch.full((1,), 2.0),
+        )
+        self.assertIn("__closure__", cached_fn.__dict__)
+        self.assertIsNone(cached_fn.__closure__)
+
+    @parametrize("global_first", [False, True])
+    @parametrize("replace_global", [False, True])
+    def test_lru_cache_wrapper_mixed_scope_alias(self, global_first, replace_global):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        @functools.lru_cache
+        def other_fn():
+            return 1
+
+        cached_fn.tag = 1
+        other_fn.tag = 2
+
+        def fn(x, wrapper):
+            if global_first:
+                return x + mixed_scope_lru_wrapper.tag + wrapper.tag
+            return x + wrapper.tag + mixed_scope_lru_wrapper.tag
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        with patch.dict(globals(), mixed_scope_lru_wrapper=cached_fn):
+            self.assertEqual(opt_fn(x, cached_fn), torch.tensor(12))
+            self.assertEqual(backend.frame_count, 1)
+            if replace_global:
+                globals()["mixed_scope_lru_wrapper"] = other_fn
+                wrapper = cached_fn
+            else:
+                wrapper = other_fn
+            self.assertEqual(fn(x, wrapper), torch.tensor(13))
+            self.assertEqual(opt_fn(x, wrapper), torch.tensor(13))
+            self.assertEqual(backend.frame_count, 2)
+
+    def test_lru_cache_wrapper_delattr(self):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        def fn(x, wrapper):
+            del wrapper.custom_attr
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (1.0, 2.0):
+            cached_fn.custom_attr = value
+            x = torch.tensor(value)
+            self.assertEqual(opt_fn(x, cached_fn), x + 1)
+            self.assertFalse(hasattr(cached_fn, "custom_attr"))
 
     def test_wrapper_user_function_hasattr(self):
         # WrapperUserFunctionVariable (e.g. lru_cache-wrapped fn) passed to a

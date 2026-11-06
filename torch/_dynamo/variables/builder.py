@@ -1163,7 +1163,11 @@ class VariableBuilder:
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                is_from_attr_proxy_source(self.source)
+                (
+                    isinstance(result, WrapperUserFunctionVariable)
+                    and result.source is not None
+                )
+                or is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1177,7 +1181,7 @@ class VariableBuilder:
                     raise AssertionError("Tracked alias must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # object (a base module, or the mapping behind a mappingproxy), so
+                # object (a wrapper, base module, or mapping behind a mappingproxy), so
                 # pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
@@ -2156,12 +2160,10 @@ class VariableBuilder:
             )
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
+            result = WrapperUserFunctionVariable(
+                value, "__wrapped__", source=self.source
             )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
