@@ -1180,8 +1180,9 @@ class MetalKernel(SIMDKernel):
             if use_argbuf:
                 code.writeline(f"struct {fn_name}_buffers {{")
                 with code.indent():
-                    for _, inner, metal_type, _ in tensor_args:
-                        code.writeline(f"{metal_type} {inner};")
+                    for _, inner, metal_type, on_cpu in tensor_args:
+                        field_type = "ulong" if on_cpu else metal_type
+                        code.writeline(f"{field_type} {inner};")
                 code.writeline("};")
 
             if self.inside_reduction and self.max_threadgroup_size > 1:
@@ -1234,8 +1235,11 @@ class MetalKernel(SIMDKernel):
             code.writeline(") {")
             with code.indent():
                 if use_argbuf:
-                    for _, inner, metal_type, _ in tensor_args:
-                        code.writeline(f"{metal_type} {inner} = buffers.{inner};")
+                    for _, inner, metal_type, on_cpu in tensor_args:
+                        value = f"buffers.{inner}"
+                        if on_cpu:
+                            value = f"reinterpret_cast<{metal_type}>(&{value})"
+                        code.writeline(f"{metal_type} {inner} = {value};")
                     for idx, inner in enumerate(int_args):
                         code.writeline(f"const long {inner} = int_args[{idx}];")
                 if len(idx_vars) > 1:
@@ -1270,37 +1274,25 @@ class MetalKernel(SIMDKernel):
             str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
         }
 
-        args = [arg.outer for arg in self._tensor_args()]
+        tensor_args = self._tensor_args()
+        args = [arg.outer for arg in tensor_args]
         args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs
-        for tree in self.range_trees:
-            if isinstance(tree.numel, (sympy.Integer, int)):
-                # Don't need to pass in integers as inputs
-                continue
-            elif isinstance(tree.numel, sympy.Symbol):
+        for tree in self._dynamic_numel_trees():
+            if isinstance(tree.numel, sympy.Symbol):
                 expr = tree.numel
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
-            if not tree.is_reduction or self.inside_reduction:
-                args.append(str(expr))
-                arg_types.append(int)
+            args.append(str(expr))
+            arg_types.append(int)
 
         if self._use_argument_buffer():
-            # A list of tensors is bound as an argument buffer of their addresses,
-            # which CPU scalars lack, and a list of ints as an int64 array
-            tensors = []
-            for arg in self._tensor_args():
-                if not arg.on_cpu:
-                    tensors.append(arg.outer)
-                    continue
-                is_double = V.graph.get_dtype(arg.outer) == torch.float64
-                dtype = ", torch.float32" if is_double else ""
-                tensors.append(f"{arg.outer}.to('{self.device_type}'{dtype})")
-            int_args = args[len(tensors) :]
-            args = [f"[{', '.join(tensors)}]"]
+            # Tensor lists contain GPU addresses and inline CPU scalar values.
+            int_args = args[len(tensor_args) :]
+            args = [f"[{', '.join(arg.outer for arg in tensor_args)}]"]
             if int_args:
                 args.append(f"[{', '.join(int_args)}]")
             arg_types = [list] * len(args)
@@ -1432,14 +1424,14 @@ class MetalScheduling(SIMDScheduling):
         # can_fuse_horizontal retries reduction epilogues with the consumer first
         if node2.get_operation_names() & node1.ancestors:
             node1, node2 = node2, node1
-        # Reserve slots for the error buffer and, with symbolic shapes, for the
-        # symbols and up to 3 dynamic numels
+        # Conservatively reserve symbols and up to 3 dynamic numels. The C++
+        # wrapper does not emit an error buffer.
         snodes = (*node1.get_nodes(), *node2.get_nodes())
         uses = OrderedSet().union(*(get_scheduler_node_symbol_uses(n) for n in snodes))
         symbols = filter_graph_level_symbols(uses)
-        scalar_args = 1 + (len(symbols) + 3 if symbols else 0)
+        scalar_args = len(symbols) + 3 if symbols else 0
         if self.scheduler.fusion_prevent_too_many_reads_and_writes(
-            node1, node2, MetalKernel.max_buffer_args - scalar_args
+            node1, node2, self.kernel_type.max_buffer_args - scalar_args
         ):
             WhyNoFuse(node1, node2)("exceeds Metal's buffer argument limit")
             return False
