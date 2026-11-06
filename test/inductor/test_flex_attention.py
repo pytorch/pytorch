@@ -93,16 +93,6 @@ from torch.testing._internal.inductor_utils import running_on_tdm_device
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
-# Use this decorator only when hitting Triton bugs on H100
-running_on_a100_only = skipUnless(
-    (
-        (torch.cuda.is_available() and has_triton())
-        and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
-    )
-    or (torch.xpu.is_available() and has_triton()),
-    "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
-)
-
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 
@@ -289,10 +279,19 @@ class DeviceConfig:
 device_configs = {}
 
 # flex_attention is supported only on specific device/platform combinations.
-# Rather than selecting a single device to run tests on, we allow all devices
-# and use @requires_capabilities(Capability.attention.flex_attention) to skip
-# per-device at runtime.
+# @supported_platform skips tests per-device at runtime; test_device below only
+# decides which device types are instantiated at all.
 supported_platform = requires_capabilities(Capability.attention.flex_attention)
+
+# Devices to instantiate on: the primary local accelerator, plus "cpu" when it
+# is the only device or runs alongside a flex-capable CUDA platform.
+test_device = ("cpu",)
+if torch.accelerator.is_available():
+    accel_type = torch.accelerator.current_accelerator().type
+    if accel_type == "cuda" and TEST_ON_CPU and TEST_ON_CUDA:
+        test_device = ("cuda", "cpu")
+    else:
+        test_device = (accel_type,)
 
 
 class SubstringSet:
@@ -2193,7 +2192,6 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(score_mod, dtype, device=device)
 
     @supported_platform
-    @running_on_a100_only
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -2210,7 +2208,6 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_call(attention, dtype, device, B, H, 64, D, B, H, 64, D)
 
     @supported_platform
-    @running_on_a100_only
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -2443,11 +2440,8 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # hardcodes kernel_options={"BACKEND": "TRITON"}
+    @requires_capabilities(Capability.dtype.bf16)
     def test_kv_order_invariance_padded_causal(self, device):
-        supports_bf16 = type(self).get_capabilities().get(Capability.dtype.bf16, False)
-        if torch.device(device).type == "cuda" and not supports_bf16:
-            self.skipTest("bf16 is required for this regression test")
-
         batch_size = 1
         q_heads = 16
         kv_heads = 4
@@ -3000,13 +2994,11 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps
+    @requires_capabilities(Capability.dtype.bf16)
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """
         Tests with tensors that require gradients with bf16 dtype in the score_mod
         """
-        if not type(self).get_capabilities().get(Capability.dtype.bf16, False):
-            self.skipTest("Platform does not support bf16")
-
         B_local, H_local, S_local, D_local = 2, 4, 32, 64
         dtype = torch.bfloat16
         x = torch.randn(
@@ -5539,10 +5531,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
+    @requires_capabilities(Capability.dtype.bf16)
     def test_backward_kernel_options_filtering(self, device):
-        if not type(self).get_capabilities().get(Capability.dtype.bf16, False):
-            self.skipTest("bf16 is required for this regression test")
-
         b, h, n, c = 1, 8, 234, 16
         block_size = 32
 
@@ -11756,39 +11746,21 @@ class TestLearnableBiases(InductorTestCase):
             )
 
 
-if TEST_ON_CPU and TEST_ON_CUDA:
-    # CUDA + AVX2 CPU: run on both cuda and cpu
-    instantiate_device_type_tests(TestFlexAttention, globals())
-    instantiate_device_type_tests(TestPagedAttention, globals())
-    instantiate_device_type_tests(TestBlockMask, globals(), except_for="cpu")
-    instantiate_device_type_tests(
-        TestLearnableBiases, globals(), allow_xpu=True, except_for="cpu"
-    )
-elif torch.accelerator.is_available():
-    instantiate_device_type_tests(
-        TestFlexAttention, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
-    )
-    instantiate_device_type_tests(
-        TestPagedAttention, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
-    )
-    instantiate_device_type_tests(
-        TestBlockMask, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
-    )
-    instantiate_device_type_tests(
-        TestLearnableBiases, globals(), allow_xpu=True, except_for="cpu"
-    )
-else:
-    instantiate_device_type_tests(TestFlexAttention, globals(), only_for="cpu")
-    instantiate_device_type_tests(TestPagedAttention, globals(), only_for="cpu")
-
+instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
+instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device)
+instantiate_device_type_tests(
+    TestBlockMask, globals(), only_for=test_device, except_for="cpu"
+)
+instantiate_device_type_tests(
+    TestLearnableBiases, globals(), only_for=test_device, except_for="cpu"
+)
 # TDM gates on host-global state (running_on_tdm_device), so register the E2E
-# suite once, on the primary local accelerator only.
-if torch.accelerator.is_available():
-    instantiate_device_type_tests(
-        TestFlexAttentionTDMEndToEnd,
-        globals(),
-        only_for=(torch.accelerator.current_accelerator().type,),
-    )
+# suite once, on the primary local device only. Registering for all of
+# test_device would include "cpu" alongside "cuda"; the CPU class would clear
+# the class-level skip on a gfx1250 host and then run these tests on CPU.
+instantiate_device_type_tests(
+    TestFlexAttentionTDMEndToEnd, globals(), only_for=(test_device[0],)
+)
 
 
 if __name__ == "__main__":
