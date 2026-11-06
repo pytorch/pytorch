@@ -11,6 +11,7 @@ call to it (the HOPifier).
 
 import copy
 import dataclasses
+import enum
 import sys
 import threading
 import types
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 
 
 KernelT = TypeVar("KernelT")
+_T = TypeVar("_T")
 
 
 ###############################################################################
@@ -134,6 +136,10 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
             (k, v) for k, v in getattr(value, "__dict__", {}).items() if k not in state
         )
         return state
+    # TODO(zoranzhao): key a list, tuple or dict subclass by all its state, not by its
+    # items alone (its attributes, a defaultdict's default_factory), and refuse a set,
+    # bytearray, deque, array.array or numpy.ndarray subclass, now keyed by its
+    # __dict__ alone (not its contents): either can get another value's constant.
     if (
         (cls.__hash__ is None or cls.__hash__ is object.__hash__)
         and hasattr(value, "__dict__")
@@ -158,8 +164,23 @@ def constant_key(value: object, rules: ConstantRules) -> object:
 
 def _snapshot(value: object, rules: ConstantRules) -> object:
     """``value`` with everything constant_key keys by content copied, so that the
-    caller mutating it later changes neither the stored value nor its key."""
+    caller mutating it later changes neither the stored value nor its key. A copy
+    that would be the value itself is refused with a TypeError (see _copy_of)."""
     return _ContentWalk(rules).snapshot(value)
+
+
+def _copy_of(value: _T) -> _T:
+    """copy.copy(value) for _snapshot, refused with a TypeError if it is ``value``
+    itself (a class's __copy__ or __reduce__ can return the object itself): the
+    snapshot would be the caller's object, which _snapshot would write into and the
+    caller could still change."""
+    new = copy.copy(value)
+    if new is value:
+        raise TypeError(
+            f"a constant kernel argument of type {type(value).__name__} cannot be "
+            "copied: copy.copy returns the object itself"
+        )
+    return new
 
 
 class _ContentWalk:
@@ -246,12 +267,13 @@ class _ContentWalk:
 
     def snapshot(self, value: object) -> object:
         if self.rules.scalar_value(value) is not None:
-            # A DSL scalar is keyed by its value, which its owner can still change.
-            return copy.copy(value)
+            # A DSL scalar is keyed by its value, which its owner can still change;
+            # an enum member's cannot (copy.copy returns the member itself).
+            return value if isinstance(value, enum.Enum) else _copy_of(value)
         if isinstance(value, (tuple, list)):
             items = self.visit(value, enumerate(value), "[{!r}]", self.snapshot)
             if isinstance(value, list):
-                new_list = copy.copy(value)
+                new_list = _copy_of(value)
                 new_list[:] = items
                 return new_list
             if all(a is b for a, b in zip(items, value)):
@@ -261,7 +283,7 @@ class _ContentWalk:
         if isinstance(value, dict):
             keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.snapshot)
             items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
-            new_dict = copy.copy(value)
+            new_dict = _copy_of(value)
             new_dict.clear()
             # Each item assigned, as pickle rebuilds a dict subclass: a Counter's
             # update() counts the pairs, and dict.update() would bypass the order an
@@ -273,7 +295,12 @@ class _ContentWalk:
         if state is None:
             return value
         items = self.visit(value, state.items(), ".{}", self.snapshot)
-        new = copy.copy(value)
+        cls = type(value)
+        # Made as copy.copy makes a plain object, not by copy.copy: a class's
+        # __copy__ or __reduce__ can return the object itself or a shared one (a
+        # RootLogger's returns the process's root logger), which the assignments
+        # below would overwrite.
+        new = object.__new__(cls) if cls.__new__ is object.__new__ else _copy_of(value)
         for name, item in zip(state, items):
             object.__setattr__(new, name, item)
         return new

@@ -572,6 +572,8 @@ class CuteDSLHOPTests(TestCase):
         # A compiled function's kernels are resolved on every device (see the
         # docstring of torch/_native/cutedsl/user_kernel.py), so a signature
         # compiled under cuda:0 launches on cuda:1 without another compile.
+        # TODO: run this in a CI job that has two GPUs and installs nvidia-cutlass-dsl;
+        # the smoke jobs that run this file skip it unless their runner has two.
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         if torch.cuda.get_device_capability(0) != torch.cuda.get_device_capability(1):
