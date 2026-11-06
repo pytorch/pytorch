@@ -2971,10 +2971,10 @@ make_propagate_real_tensors_cls(TestFakeTensorCUDA)
 class TestFakeTensorMoveModule(TestCase):
     # No hw_classification: it uses GPU_TYPE, so it runs on whichever accelerator
     # is present (CUDA, XPU or MPS), which neither GENERIC nor one device label fits.
+    # It isn't ACCELERATOR (a device parameter and instantiate_device_type_tests)
+    # because the fake-only path has to stay reachable on a CUDA build with no GPU
+    # present, where no cuda test variant would be generated.
 
-    # GPU_TYPE rather than a device-generic class: the fake-only path has to stay
-    # reachable on a CUDA build with no GPU present, where no cuda test variant
-    # would be generated.
     @unittest.skipIf(
         not TEST_ACCELERATOR and not torch.backends.cuda.is_built(),
         "requires an accelerator, or a CUDA build for the fake-only path",
