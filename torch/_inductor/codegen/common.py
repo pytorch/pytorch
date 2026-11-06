@@ -17,8 +17,8 @@ from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
-from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
-from typing_extensions import Self, TypeVar
+from typing import Any, cast, ClassVar, Generic, NamedTuple, Self, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -730,6 +730,8 @@ def _init_builtin_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    # a stack that registers its own MTIA scheduling first declares
+    # PREFER_AFFINE_INDEXING itself
     if get_scheduling_for_device("mtia") is None:
         register_backend_for_device(
             "mtia",

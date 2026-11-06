@@ -1038,6 +1038,7 @@ for _pointwise_name in (
     "isnan",
     "isinf",
     "signbit",
+    "to_dtype_bitcast",
 ):
     register_pointwise_op(_pointwise_name)
 
@@ -1563,7 +1564,7 @@ def repeat(x, repeats):
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return clone(expand(x, new_size))
     if not V.choices.use_modular_indexing(
-        x.get_device(), sympy_product(new_size), "repeat"
+        x.get_device(), numel=sympy_product(new_size), kind="repeat"
     ):
         # Interleave [r0, n0, r1, n1, ...] so the merge of each pair is handled
         # by View.create, which realizes the expanded copy instead of indexing
@@ -2467,15 +2468,27 @@ def cat(inputs, dim=0):
     exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
     fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
-    def should_lower_cat_input(x) -> bool:
+    def should_lower_cat_input(x, numel=None) -> bool:
+        # The cat input's own numel; unwrapping a view below reaches its base.
+        if numel is None:
+            numel = x.get_numel()
         # Unrealized inputs will not be storage and layouts, and we don't want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+            if ir.ConcatKernel.can_realize_into_without_copy(storage):
+                return False
+            # Copying all of a buffer Inductor computes can fuse into its
+            # producer, which is cheaper than re-reading it in a pointwise cat.
+            return not (
+                config.cat_fuse_computed_input_copies
+                and isinstance(storage.data, ir.ComputedBuffer)
+                and not storage.data.is_no_op()
+                and V.graph.sizevars.statically_known_equals(numel, storage.get_numel())
+            )
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
+            return should_lower_cat_input(unwrap_tensor(x), numel)
 
         if isinstance(x, ir.Pointwise):
             return True
@@ -4323,7 +4336,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         step != 1
         and V.graph.sizevars.statically_known_multiple_of(dim_size, step)
         and not V.choices.use_modular_indexing(
-            x.get_device(), sympy_product(x.get_size()), "slice_scatter"
+            x.get_device(), numel=sympy_product(x.get_size()), kind="slice_scatter"
         )
     ):
         # Iterate [..., dim_size // step, step, ...] so the scattered position

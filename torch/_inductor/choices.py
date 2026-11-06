@@ -32,7 +32,7 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _numel_hint, _use_autotune_backend, is_gpu, ModularIndexingUse
+from .utils import _use_autotune_backend, is_gpu, ModularIndexingUse
 from .virtualized import V
 
 
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
-    from .codegen.common import KernelTemplate
+    from .codegen.common import BackendFeature, KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
@@ -115,6 +115,32 @@ class FusionScore:
             other.buffer_overlap_score,
             other.proximity_score,
         )
+
+
+def _backend_features(device_type: str | None) -> OrderedSet[BackendFeature] | None:
+    """The features of device_type's Inductor backend; None without one."""
+    if device_type is None:
+        return None
+    from .codegen.common import (
+        get_backend_features,
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
+    init_backend_registration()
+    if get_scheduling_for_device(device_type) is None:
+        return None  # no Inductor backend, e.g. meta tensors during tracing
+    # the graph caches the lookup; decompositions run before there is a graph
+    cached = getattr(V.graph, "get_backend_features", None)
+    return cached(device_type) if cached else get_backend_features(device_type)
+
+
+def _numel_hint(numel: int | sympy.Expr | None) -> int | None:
+    if numel is None:
+        return None
+    if isinstance(numel, sympy.Expr) and not numel.is_number:
+        return V.graph.sizevars.optimization_hint(numel)
+    return int(numel)
 
 
 class InductorChoices:
@@ -466,53 +492,52 @@ class InductorChoices:
     def use_modular_indexing(
         self,
         device: torch.device | str | None,
-        numel: int | sympy.Expr | torch.SymInt | None = None,
-        kind: ModularIndexingUse | Callable[[], ModularIndexingUse] = "view",
+        *,
+        numel: int | sympy.Expr | None = None,
+        kind: ModularIndexingUse | Callable[[], ModularIndexingUse],
     ) -> bool:
         """
         Decide whether a load/store index may contain ModularIndexing/FloorDiv
         of loop variables (True) or must use the affine alternative: realizing
         a dim-merging view, splitting a reduction at a dim boundary, lowering
-        repeat/roll/strided slice_scatter without modular arithmetic, or
-        keeping %, // index arithmetic behind an indirect variable. numel is
-        the number of elements the affected kernel touches and kind names the
-        construct; a callable kind (View.create classifies a view by tracing
-        its loads) is only called when the answer depends on it.
+        repeat/roll/strided slice_scatter without modular arithmetic, keeping
+        %, // index arithmetic behind an indirect variable, or skipping a loop
+        reindexing during fusion. numel is the number of elements the affected
+        kernel touches and kind names the construct; a callable kind
+        (View.create classifies a view by tracing its loads) is only called
+        when the answer depends on it.
 
-        config.avoid_modular_indexing forces the answer. Otherwise backends
-        that declare BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas)
-        always get affine indices, everything that is not a Triton GPU backend
-        inlines as before, and Triton GPU backends follow what benchmarks on
-        CUDA showed: splitting a reduction at a dim boundary and iterating a
-        strided slice_scatter in split space are faster at nearly every size,
-        realizing a merged view only pays off for large tensors of fresh
-        compute (a copy of an existing buffer never does), and the
-        alternatives to %, // for repeat, roll and index arithmetic are slower
-        than the modular index.
+        Index arithmetic on a backend without indirect indexing has no affine
+        form and is always inlined. Otherwise config.avoid_modular_indexing
+        forces the answer, backends that declare
+        BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get affine
+        indices, everything that is not a Triton GPU backend (including a
+        device without an Inductor backend, such as meta tensors during
+        tracing) inlines as before, and Triton GPU backends, out-of-tree ones
+        included, follow what benchmarks on CUDA showed: splitting a reduction
+        at a dim boundary and iterating a strided slice_scatter in split space
+        are faster at nearly every size, realizing a merged view only pays off
+        for large tensors of fresh compute (a copy of an existing buffer never
+        does), and the alternatives to %, // for repeat, roll, index
+        arithmetic and loop reindexing are slower than the modular index.
         """
+        from .codegen.common import BackendFeature
+        from .ir import get_device_type, is_triton
+
+        if isinstance(device, str):
+            device = torch.device(device)
+        device_type = get_device_type(device)
+        features = _backend_features(device_type)
+        if (
+            kind == "index"
+            and features is not None
+            and BackendFeature.INDIRECT_INDEXING not in features
+        ):
+            return True  # a gather can only be expressed as a direct index here
         if config.avoid_modular_indexing is not None:
             return not config.avoid_modular_indexing
-        if device is None:
+        if device_type is None or features is None:
             return True
-        from .codegen.common import (
-            BackendFeature,
-            get_backend_features,
-            get_scheduling_for_device,
-            init_backend_registration,
-        )
-        from .ir import is_triton
-
-        device_type = (
-            torch.device(device).type if isinstance(device, str) else device.type
-        )
-        init_backend_registration()
-        if get_scheduling_for_device(device_type) is None:
-            return True  # no Inductor backend, e.g. meta tensors during tracing
-        # the graph caches features; decompositions run before there is a graph
-        cached = getattr(V.graph, "get_backend_features", None)
-        features = cached(device_type) if cached else get_backend_features(device_type)
-        if kind == "index" and BackendFeature.INDIRECT_INDEXING not in features:
-            return True  # a gather can only be expressed as a direct index here
         if BackendFeature.PREFER_AFFINE_INDEXING in features:
             return False
         if not (is_gpu(device_type) and is_triton(device_type)):
