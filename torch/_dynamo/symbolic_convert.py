@@ -74,9 +74,11 @@ from . import (
 )
 from .bytecode_analysis import (
     get_indexof,
+    JUMP_OPCODES,
     JUMP_OPNAMES,
     livevars_analysis,
     propagate_line_nums,
+    TERMINAL_OPCODES,
 )
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -115,7 +117,7 @@ from .exc import (
     UserError,
 )
 from .funcname_cache import get_funcname
-from .guards import GuardBuilder, install_guard
+from .guards import _instance_dict_bool_guard, GuardBuilder, install_guard
 from .output_graph import (
     CodeOptions,
     GraphCompileReason,
@@ -136,14 +138,18 @@ from .resume_execution import (
 )
 from .source import (
     AttrSource,
+    ChainedSource,
     DictGetItemSource,
     get_global_source_name,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
     LocalSource,
+    NNModuleSource,
     SkipGuardSource,
     Source,
+    UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -164,6 +170,7 @@ from .utils import (
 )
 from .variables.base import (
     AttributeMutationNew,
+    NO_SUCH_SUBOBJ,
     SourceLocation,
     typestr,
     ValueMutationNew,
@@ -972,7 +979,14 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            if truth_fn(value.as_python_constant()):
+            constant = value.as_python_constant()
+            if (
+                type(constant) is bool
+                and value.source is not None
+                and (truth_fn is operator.truth or truth_fn is operator.not_)
+            ):
+                self._record_retry_bool_branch(inst, value.source, constant)
+            if truth_fn(constant):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -1586,6 +1600,200 @@ class InstructionTranslatorBase(
     package: CompilePackage | None
     latest_bytecode_queue: deque[str]
     # Store the latest bytecode before graph_break() call by user
+
+    def _record_retry_bool_branch(
+        self, inst: Instruction, source: Source, expected: bool
+    ) -> None:
+        bool_source = source
+        index = self.indexof[inst] - 1
+        while index >= 0 and self.instructions[index].opname in (
+            "TO_BOOL",
+            "CACHE",
+            "EXTENDED_ARG",
+        ):
+            index -= 1
+        if index < 0:
+            return
+        producer = self.instructions[index]
+        if type(source) is AttrSource:
+            if producer.opname != "LOAD_ATTR" or producer.argval != source.member:
+                return
+            source = source.base
+            while type(source) in (
+                NNModuleSource,
+                UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
+            ):
+                source = cast(ChainedSource, source).base
+            index -= 1
+            while index >= 0 and self.instructions[index].opname in (
+                "CACHE",
+                "EXTENDED_ARG",
+            ):
+                index -= 1
+            if index < 0:
+                return
+            producer = self.instructions[index]
+        elif type(source) is not LocalSource:
+            return
+        if type(source) is LocalSource:
+            names = (
+                self.f_code.co_varnames[
+                    : self.f_code.co_argcount + self.f_code.co_kwonlyargcount
+                ]
+                + self.f_code.co_freevars
+            )
+            if (
+                not producer.opname.startswith(("LOAD_FAST", "LOAD_DEREF"))
+                or producer.argval not in names
+            ):
+                return
+            if any(
+                item.opname.startswith(
+                    ("STORE_FAST", "DELETE_FAST", "STORE_DEREF", "DELETE_DEREF")
+                )
+                and (
+                    item.argval == producer.argval
+                    or type(item.argval) is tuple
+                    and producer.argval in item.argval
+                )
+                for item in self.instructions[:index]
+            ):
+                return
+        elif type(source) is GlobalSource:
+            if (
+                producer.opname != "LOAD_GLOBAL"
+                or producer.argval != source.global_name
+            ):
+                return
+        else:
+            return
+        guards = tuple(
+            guard
+            for guard in self.output.guards.get_guards_for_source(bool_source)
+            if guard.inner_create_fn() is GuardBuilder.CONSTANT_MATCH
+        )
+        if guards:
+            self._retry_bool_branches[inst] = (expected, guards)
+
+    def can_retain_retry_guards(self) -> bool:
+        return (
+            self.output.frame_state is not None
+            and self.package is None
+            and not config.caching_precompile
+            and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.should_compile_partial_graph()
+        )
+
+    def retry_guard_root(self, source: Source | None) -> Any:
+        original_source = source
+        while type(source) in (
+            NNModuleSource,
+            UnspecializedNNModuleSource,
+            UnspecializedBuiltinNNModuleSource,
+        ):
+            source = cast(ChainedSource, source).base
+        if type(source) is LocalSource:
+            scope, name = self.output.local_scope, source.local_name
+        elif type(source) is GlobalSource:
+            if source.global_name in self.output.installed_globals:
+                return NO_SUCH_SUBOBJ
+            scope, name = self.output.global_scope, source.global_name
+        else:
+            return NO_SUCH_SUBOBJ
+        if type(scope) is not dict or any(type(key) is not str for key in scope):
+            return NO_SUCH_SUBOBJ
+        side_effects = self.output.side_effects
+        if (
+            source in side_effects.mutated_sources
+            or original_source in side_effects.mutated_sources
+        ):
+            return NO_SUCH_SUBOBJ
+        value = scope.get(name, NO_SUCH_SUBOBJ)
+        variable = side_effects.id_to_variable.get(id(value))
+        if variable is not None and side_effects.is_modified(variable):
+            return NO_SUCH_SUBOBJ
+        return value
+
+    def _retry_call_reachable(self, start: int, target: int) -> bool:
+        pending, visited = [start], set()
+        while pending:
+            index = pending.pop()
+            if index == target:
+                return True
+            if index in visited or index >= len(self.instructions):
+                continue
+            visited.add(index)
+            instruction = self.instructions[index]
+            if instruction.exn_tab_entry is not None:
+                pending.append(self.indexof[instruction.exn_tab_entry.target])
+            if instruction.opcode in JUMP_OPCODES and instruction.target is not None:
+                pending.append(self.indexof[instruction.target])
+            if instruction.opcode not in TERMINAL_OPCODES:
+                pending.append(index + 1)
+        return False
+
+    def retain_conditional_retry_guards(self) -> None:
+        if not self.can_retain_retry_guards():
+            return
+        tx = self
+        while tx is not None:
+            current = tx.indexof.get(tx.current_instruction)
+            if current is not None:
+                for instruction, (expected, guards) in tx._retry_bool_branches.items():
+                    if instruction.target is None:
+                        continue
+                    fallthrough = tx._retry_call_reachable(
+                        tx.indexof[instruction] + 1, current
+                    )
+                    jump = tx._retry_call_reachable(
+                        tx.indexof[instruction.target], current
+                    )
+                    if fallthrough == jump:
+                        continue
+                    for guard in guards:
+                        source = guard.originating_source
+                        if type(source) is not AttrSource:
+                            if self.retry_guard_root(source) is expected:
+                                self.speculation_log.retry_guards.add(guard)
+                            continue
+                        receiver = self.retry_guard_root(source.base)
+                        cls = type(receiver)
+                        if (
+                            _instance_dict_bool_guard(cls)(
+                                receiver, source.member, expected
+                            )
+                            is not True
+                        ):
+                            continue
+                        type_guards = tuple(
+                            item
+                            for item in self.output.guards.get_guards_for_source(
+                                source.base
+                            )
+                            if item.inner_create_fn() is GuardBuilder.TYPE_MATCH
+                        )
+                        if not type_guards:
+                            continue
+                        descriptor = inspect.getattr_static(cls, "__dict__")
+                        storage = descriptor.__get__(receiver)
+                        variable = self.output.side_effects.id_to_variable.get(
+                            id(storage)
+                        )
+                        if (
+                            variable is not None
+                            and self.output.side_effects.is_modified(variable)
+                        ):
+                            continue
+                        self.speculation_log.retry_guards.add(
+                            source.make_guard(
+                                functools.partial(
+                                    GuardBuilder.INSTANCE_DICT_BOOL, expected=expected
+                                )
+                            )
+                        )
+            tx = tx.parent
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -5445,6 +5653,9 @@ class InstructionTranslatorBase(
         self._pycode_last_varname: dict[str, str] = {}
         # Module name -> the alias source import_source minted for it.
         self._import_source_memo: dict[str, GlobalSource] = {}
+        self._retry_bool_branches: dict[
+            Instruction, tuple[bool, tuple[Guard, ...]]
+        ] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
