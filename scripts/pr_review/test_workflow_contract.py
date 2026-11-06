@@ -5747,6 +5747,15 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         for rec in recs:
             self.assertIn(rec, prompt)
 
+    def test_the_skill_labels_non_blocking_points_the_way_stage_b_reads_them(self):
+        # Stage B records a point the review labels non-blocking as `minor`;
+        # if the skill stops writing that label, every point posts as a blocker.
+        skill = " ".join(PR_REVIEW_SKILL.read_text().split())
+        self.assertIn('write "non-blocking" in it', skill)
+        self.assertIn('Write "non-blocking" in each non-blocking point', skill)
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn("A point the review labels non-blocking is `minor`", prompt)
+
     def test_the_schema_offers_exactly_what_the_sanitizer_accepts(self):
         m = re.search(r"--json-schema '([^']*)'", self.stage_b)
         self.assertIsNotNone(m, "stage B declares no --json-schema")
