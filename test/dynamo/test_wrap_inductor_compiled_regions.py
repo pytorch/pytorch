@@ -1472,7 +1472,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 instantiate_device_type_tests(
     TestWrapInductorCompiledRegionsDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 
