@@ -102,6 +102,24 @@ def _origami_package_supported(
         return False
 
 
+_ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError)
+_origami_fallback_warned: OrderedSet[type] = OrderedSet()
+
+
+def _log_origami_fallback(err: Exception) -> None:
+    """Warn once per exception type; later occurrences are logged at debug."""
+    if type(err) not in _origami_fallback_warned:
+        _origami_fallback_warned.add(type(err))
+        log.warning(
+            "Origami could not select configs (%s: %s); using the regular "
+            "config generator for this problem.",
+            type(err).__name__,
+            err,
+        )
+    else:
+        log.debug("Origami selection failed, using regular generator: %s", err)
+
+
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
     """Read the operand orientations a TDM heuristic must have injected.
 
@@ -2519,6 +2537,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             return self.get_mm_configs()
 
+    def _origami_may_select(self) -> bool:
+        """In-tree heuristics only: Origami ignores mm_configs and max_mm_configs."""
+        return (
+            type(self).__module__ == __name__
+            and config.test_configs.max_mm_configs is None
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2563,6 +2588,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if (
             origami is not None
             and _origami_enabled()
+            and self._origami_may_select()
             and config.max_autotune_gemm_search_space == "DEFAULT"
             and mnk_static
         ):
@@ -2606,26 +2632,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 op_name=op_name,
                 **kwargs,
             )
-            selector = origami.OrigamiMatmulSelector(
-                allcfgs,
-                m,
-                n,
-                k,
-                dtype,
-                dtype,
-                dtype,
-                device,
-                a_stride,
-                b_stride,
-            )
-            # _origami_{problem,hardware,configs} wrap the private attrs;
-            # see TODO at top of file for the upstream-API migration plan.
-            topk_results = origami.select_topk_configs(
-                _origami_problem(selector),
-                _origami_hardware(selector),
-                _origami_configs(selector),
-                config.rocm.origami_topk,
-            )
             seen = OrderedSet()
             # Collect origami-selected configs into a list before filtering
             origami_configs: list[BaseConfig] = []
@@ -2645,25 +2651,61 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg.block_k,
                 )
 
+            origami_error = False
+            try:
+                selector = origami.OrigamiMatmulSelector(
+                    allcfgs,
+                    m,
+                    n,
+                    k,
+                    dtype,
+                    dtype,
+                    dtype,
+                    device,
+                    a_stride,
+                    b_stride,
+                )
+                # _origami_{problem,hardware,configs} wrap the private attrs;
+                # see TODO at top of file for the upstream-API migration plan.
+                topk_results = origami.select_topk_configs(
+                    _origami_problem(selector),
+                    _origami_hardware(selector),
+                    _origami_configs(selector),
+                    config.rocm.origami_topk,
+                )
+            except _ORIGAMI_ERRORS as err:
+                _log_origami_fallback(err)
+                origami_error = True
+                selector = None
+                topk_results = []
+
             for result in topk_results:
                 cfg = result.config
                 key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
                 if key in seen:
                     continue
                 seen.add(key)
-                grid = origami.select_grid_size(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    origami.grid_selection_t.data_parallel,
-                    _origami_hardware(selector).N_CU,
-                )
-                wgm_result = origami.select_workgroup_mapping(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    grid,
-                )
+                try:
+                    grid = origami.select_grid_size(
+                        _origami_problem(selector),
+                        _origami_hardware(selector),
+                        cfg,
+                        origami.grid_selection_t.data_parallel,
+                        _origami_hardware(selector).N_CU,
+                    )
+                    wgm_result = origami.select_workgroup_mapping(
+                        _origami_problem(selector),
+                        _origami_hardware(selector),
+                        cfg,
+                        grid,
+                    )
+                except _ORIGAMI_ERRORS as err:
+                    # Drop partial picks so the regular-generator fallback below runs.
+                    _log_origami_fallback(err)
+                    origami_error = True
+                    origami_configs.clear()
+                    origami_triton_configs.clear()
+                    break
                 # One MFMA per warp, capped at 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
@@ -2762,9 +2804,10 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     yield template_kwargs
             else:
                 # No valid Origami configs remain; fall back to the regular generator.
-                log.warning(
-                    "No valid Origami configs remain, falling back to regular config generator"
-                )
+                if not origami_error:
+                    log.warning(
+                        "No valid Origami configs remain, falling back to regular config generator"
+                    )
                 for c in configs(
                     m,
                     n,
