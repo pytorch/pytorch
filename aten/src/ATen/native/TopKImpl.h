@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/NumericUtils.h>
+#include <type_traits>
 
 namespace at::native {
 
@@ -28,7 +29,31 @@ void topk_impl_loop(
     return;
   }
   using elem_t = std::pair<accscalar_t, int64_t>;
-  std::vector<elem_t> queue(dim_size);
+
+  // Comparator in output order. largest/has-NaN are passed as types, so each
+  // instantiation folds down to a body with no branch of its own.
+  // we want nan to be sorted as top for numpy compatibility
+  auto make_comp = [](auto largest_c, auto check_nan_c) {
+    return [](const elem_t& x, const elem_t& y) -> bool {
+      constexpr bool kLargest = decltype(largest_c)::value;
+      constexpr bool kCheckNan = decltype(check_nan_c)::value;
+      // Ordering for `smallest` is the `largest` one with operands swapped.
+      const elem_t& a = kLargest ? x : y;
+      const elem_t& b = kLargest ? y : x;
+      bool result = a.first > b.first;
+      if constexpr (kCheckNan) {
+        result = result ||
+            (_isnan<accscalar_t>(a.first) && !_isnan<accscalar_t>(b.first));
+      }
+      return result;
+    };
+  };
+
+  const bool use_heap = k * 64 <= dim_size;
+  const int64_t buf_size = use_heap ? k : dim_size;
+  // Holds the k kept elements on the heap path, or the whole row otherwise.
+  std::vector<elem_t> buf(buf_size);
+
   for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
         reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
@@ -40,56 +65,91 @@ void topk_impl_loop(
         reinterpret_cast<scalar_t*>(data[2] + i * strides[2]),
         &dim_size, &tmp_values_stride);
 
-    auto n_2 = dim_size;
-    auto use_partial_sort = k * 64 <= n_2;
-
-    for (const auto j : c10::irange(n_2)) {
-      queue[j].first = tmp_values[j];
-      queue[j].second = j;
-    }
-
-    // we want nan to be sorted as top for numpy compatibility
-    if (use_partial_sort) {
+    if (use_heap) {
+      // Bounded size-k heap, rooted at the weakest of the k kept so far. Most
+      // elements are rejected by a single compare, so the row is never copied.
+      auto run = [&](auto largest_c) {
+        constexpr bool kLargest = decltype(largest_c)::value;
+        auto comp = make_comp(largest_c, std::true_type{});
+        for (const auto j : c10::irange(k)) {
+          buf[j] = elem_t(tmp_values[j], j);
+        }
+        std::make_heap(buf.begin(), buf.end(), comp);
+        for (const auto j : c10::irange(k, dim_size)) {
+          const accscalar_t v = tmp_values[j];
+          const accscalar_t w = buf.front().first;
+          // Cheap filter that never rejects a NaN on either side; those fall
+          // through to the exact test, which applies the NaN ordering.
+          if (kLargest ? !(v <= w) : !(w <= v)) {
+            const elem_t cand(v, j);
+            if (comp(cand, buf.front())) {
+              // Drop the hole to a leaf taking the weaker child, then sift
+              // cand up. Comparing cand at each level instead costs two
+              // compares per level on inputs that always sink to a leaf;
+              // pop_heap + push_heap walks the tree twice.
+              int64_t hole = 0;
+              for (int64_t child = 1; child < k; child = 2 * hole + 1) {
+                if (child + 1 < k && comp(buf[child], buf[child + 1])) {
+                  ++child;
+                }
+                buf[hole] = buf[child];
+                hole = child;
+              }
+              for (int64_t parent = (hole - 1) / 2; hole > 0;
+                   parent = (hole - 1) / 2) {
+                if (!comp(buf[parent], cand)) {
+                  break;
+                }
+                buf[hole] = buf[parent];
+                hole = parent;
+              }
+              buf[hole] = cand;
+            }
+          }
+        }
+        if (sorted) {
+          std::sort_heap(buf.begin(), buf.end(), comp);
+        }
+      };
       if (largest) {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
+        run(std::true_type{});
       } else {
-        std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
+        run(std::false_type{});
       }
     } else {
-      if (largest) {
-        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-          });
+      // NaN is rare in practice (e.g. model logits), so fold the check into
+      // this already-required pass and let the comparator below skip it.
+      // `|=` rather than `||`: the short-circuit form serializes the loop and
+      // blocks vectorization of the copy.
+      bool has_nan = false;
+      for (const auto j : c10::irange(dim_size)) {
+        buf[j].first = tmp_values[j];
+        buf[j].second = j;
+        has_nan |= _isnan<accscalar_t>(buf[j].first);
+      }
+
+      auto run = [&](auto largest_c, auto check_nan_c) {
+        auto comp = make_comp(largest_c, check_nan_c);
+        std::nth_element(buf.begin(), buf.begin() + k - 1, buf.end(), comp);
         if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k - 1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-            });
+          std::sort(buf.begin(), buf.begin() + k - 1, comp);
         }
+      };
+
+      if (largest && has_nan) {
+        run(std::true_type{}, std::true_type{});
+      } else if (largest) {
+        run(std::true_type{}, std::false_type{});
+      } else if (has_nan) {
+        run(std::false_type{}, std::true_type{});
       } else {
-        std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-          [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-          });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k -1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-            });
-        }
+        run(std::false_type{}, std::false_type{});
       }
     }
 
     for (const auto j : c10::irange(k)) {
-      mode_values[j] = queue[j].first;
-      mode_indices[j] = queue[j].second;
+      mode_values[j] = buf[j].first;
+      mode_indices[j] = buf[j].second;
     }
   }
 }
