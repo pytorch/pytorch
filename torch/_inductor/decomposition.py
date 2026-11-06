@@ -48,6 +48,7 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
+from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
@@ -58,9 +59,13 @@ from torch._refs.nn.functional import (
     gelu as decomp_gelu,
     softplus as decomp_softplus,
 )
-from torch._refs.special import xlog1py as decomp_xlog1py
+from torch._refs.special import (
+    multigammaln as decomp_multigammaln,
+    xlog1py as decomp_xlog1py,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
+    has_free_unbacked_symbols,
     statically_known_true,
     sym_eq,
 )
@@ -165,6 +170,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.tanh_backward.default,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
+    aten.mvlgamma,  # preserve eager rounding and reduction order
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -232,6 +238,101 @@ def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
         torch.log1p(-torch.erfc(t) / 2),
     )
     return torch.copysign(res, -1.0)
+
+
+def _cuda_trailing_sum(
+    terms: list[torch.Tensor], reduction_input: torch.Tensor
+) -> torch.Tensor:
+    """Match ATen's CUDA fold order for the callers' 1-16 trailing terms.
+
+    gpu_reduce_kernel (Reduce.cuh) uses last_pow2(n) lanes. Each lane visits at most
+    two terms, seeds each accumulator with zero, then adds the accumulators. The
+    lane-halving fold differs from tl.sum's adjacent pairing.
+    """
+    from torch._native.registry import native_decomp_table
+
+    if aten.sum.dim_IntList in native_decomp_table(overrides_only=True):
+        from torch._native.ops.reductions.cutedsl_impl import (
+            _int32_indexing_safe,
+            _SUPPORTED_DTYPES,
+        )
+
+        # These inputs are fresh dense lgamma/digamma outputs. With a contiguous
+        # sum output, native's iterator coalesces their outer dims iff the input
+        # is contiguous. Meta TensorIterator itself skips reduction coalescing.
+        if (
+            reduction_input.dtype in _SUPPORTED_DTYPES
+            and reduction_input.numel() > 0
+            and reduction_input.is_contiguous()
+            and _int32_indexing_safe(reduction_input, reduction_input.ndim - 1)
+        ):
+            return torch.stack(terms, dim=-1).sum(-1)
+    n = len(terms)
+    width = 1 << (n.bit_length() - 1)
+    lanes = []
+    for lane in range(width):
+        total = torch.zeros_like(terms[lane]) + terms[lane]
+        if lane + width < n:
+            second = terms[lane + width]
+            total = total + (torch.zeros_like(second) + second)
+        lanes.append(total)
+    while len(lanes) > 1:
+        half = len(lanes) // 2
+        lanes = [lanes[i] + lanes[i + half] for i in range(half)]
+    return lanes[0]
+
+
+@register_decomposition([aten.mvlgamma])
+@out_wrapper()
+def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
+    if (
+        not is_strict_cuda_triton(self.device)
+        or self.is_complex()
+        or not isinstance(p, int)
+        or not 1 <= p <= 16
+        or has_free_unbacked_symbols((self.shape, self.stride()))
+    ):
+        return decomp_multigammaln(self, p)
+    if not self.dtype.is_floating_point:
+        # Eager builds the offsets in the default dtype for integral input.
+        self = self.to(torch.get_default_dtype())
+    dtype = self.dtype
+    # Eager (UnaryOps.cpp) materialises a scalar_t tensor after the offset add, after
+    # lgamma and after the sum, which itself accumulates in acc_type. The base
+    # decomposition leaves every stage in inductor's fp32 opmath instead, so an fp16
+    # or bf16 offset add that eager rounds onto a non-positive integer -- an lgamma
+    # pole, +inf -- stays just off it and finite. Round at each stage.
+    acc = torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+    narrow = acc != dtype
+
+    def materialize(t: torch.Tensor) -> torch.Tensor:
+        return t.to(dtype).to(acc) if narrow else t
+
+    x = self.to(acc) if narrow else self
+    offsets = 0.5 * torch.arange(1 - p, 1, 1, dtype=dtype, device=self.device)
+    terms = [
+        materialize(torch.lgamma(materialize(x + offset)))
+        for offset in offsets.unbind(0)
+    ]
+    from torch._tensor_iterator import binary_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    # Eager adds the offset vector before reducing; this preserves permuted
+    # outer dimensions, which can make the native sum override ineligible.
+    with _disable_current_modes():
+        meta_self = torch.empty_strided(
+            tuple(int(s) for s in self.shape),
+            tuple(int(s) for s in self.stride()),
+            dtype=dtype,
+            device="meta",
+        )
+        meta_offsets = torch.empty((p,), dtype=dtype, device="meta")
+        reduction_input = binary_op(
+            None, meta_offsets, meta_self.unsqueeze(-1)
+        ).output()
+    total = materialize(_cuda_trailing_sum(terms, reduction_input))
+    out = total + p * (p - 1) * math.log(math.pi) * 0.25
+    return out.to(dtype) if narrow else out
 
 
 if torch.distributed.is_available():
