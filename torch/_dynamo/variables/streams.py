@@ -1,4 +1,5 @@
 import collections
+import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -723,8 +724,46 @@ _stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {
 }
 
 
+@functools.cache
+def _stream_variable_cls_for_interface(
+    stream_type: type, handle_attr: str | None, name: str
+) -> type[StreamVariable]:
+    """Derive a StreamVariable subclass for a device interface.
+
+    The generic upcast path for backends that register a DeviceInterface
+    with stream support but have no explicit StreamVariable subclass. Keyed
+    on (Stream, handle attr, name) rather than the interface object so that
+    re-registering an interface with different stream attributes is not
+    served a stale generated class.
+    """
+    attrs: dict[str, Any] = {"_cpython_type": stream_type}
+    if handle_attr is not None:
+        attrs["_device_handle_attr"] = handle_attr
+        attrs["tp_getset"] = {
+            handle_attr: GetSet(
+                StreamVariable._stream_device_handle_get, readonly_setter
+            )
+        }
+    return type(f"{name}StreamVariable", (StreamVariable,), attrs)
+
+
 def _get_stream_variable_cls(stream_fn: object) -> type[StreamVariable] | None:
-    return _stream_fn_to_variable_cls.get(stream_fn)
+    cls = _stream_fn_to_variable_cls.get(stream_fn)
+    if cls is not None:
+        return cls
+    # Generic upcast path: derive the StreamVariable subclass from the
+    # device interface that owns this current_stream function. The
+    # exposes_streams() guard keeps interfaces without stream support out,
+    # both sentinel inheritors and partial fills that override
+    # current_stream without overriding Stream.
+    from ..device_interface import get_registered_device_interfaces
+
+    for _, di in get_registered_device_interfaces():
+        if di.current_stream is stream_fn and di.exposes_streams():
+            return _stream_variable_cls_for_interface(
+                di.Stream, di.stream_handle_attr, di.__name__
+            )
+    return None
 
 
 class EventVariable(VariableTracker):
