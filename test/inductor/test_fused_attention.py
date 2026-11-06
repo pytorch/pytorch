@@ -33,9 +33,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    RUN_CPU,
 )
 
 
@@ -1131,7 +1131,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
             torch.randn(tensor_shape, device=self.device),
         ]
-        self._check_common(model, args1=args, contains=False)
+        self._check_common(
+            model,
+            args1=args,
+            contains=False,
+            expected_fused_attention_patterns={
+                False: "_sfdp_pattern_2_inference",
+                True: "_sfdp_pattern_2_training",
+            },
+        )
 
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
@@ -2290,6 +2298,33 @@ class TestAttentionFusionDeviceRouting(TestCase):
         self.assertTrue(_sfdp_params_check(match, reject_zero_scale=True))
         self.assertTrue(_sfdp_extra_check(reject_zero_scale=True)(match))
 
+    @recover_orig_fp32_precision
+    def test_zero_hint_symint_scale_rejection(self, device):
+        from torch._dynamo.source import LocalSource
+        from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+
+        shape_env = ShapeEnv()
+        source = LocalSource("batch")
+        symint = shape_env.create_symintnode(
+            shape_env.create_symbol(
+                2, source, dynamic_dim=DimDynamic.DYNAMIC, constraint_dim=None
+            ),
+            hint=2,
+            source=source,
+        )
+        scale_node = torch.fx.Graph().placeholder("scale")
+        scale_node.meta["val"] = symint - 2
+        match = self._match_for(device, inv_scale=scale_node)
+        self.assertFalse(_sfdp_params_check(match, reject_zero_scale=True))
+
+        # A nonzero-hint symbolic scale is not zero and stays fuse-eligible.
+        scale_node.meta["val"] = symint + 2
+        match = self._match_for(device, inv_scale=scale_node)
+        self.assertTrue(_sfdp_params_check(match, reject_zero_scale=True))
+
     def test_fp32_fusion_gated_by_precision(self, device):
         from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check
 
@@ -2500,9 +2535,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         use_static_shapes = False
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
         test_pattern_fails_with_reuse_cpu = (
@@ -2613,6 +2649,7 @@ if HAS_CPU:
         use_static_shapes = False
 
     class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,

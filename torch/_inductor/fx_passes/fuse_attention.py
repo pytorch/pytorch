@@ -953,6 +953,12 @@ def _scale_value(scale):
 
 
 def _is_supported_scale(scale) -> bool:
+    # The matcher may bind the scale to a graph node, whose value lives in
+    # meta["val"]; a node carrying no "val" leaves the scale unknown, so we
+    # conservatively skip the fusion. The fused kernel takes a scalar scale, so
+    # a tensor scale is rejected here. SymFloat scales are tensorified into 0-d
+    # tensors before the joint graph passes run, so they arrive as tensors too;
+    # an untensorified one would land in the same conservative skip.
     # TODO: the scalar behind a tensorified SymFloat scale (e.g. head_dim**0.5
     # under dynamic shapes) could be recovered from the aten.scalar_tensor node
     # to keep the fusion - tracked in #194444.
@@ -960,6 +966,14 @@ def _is_supported_scale(scale) -> bool:
 
 
 def _is_zero_scale(scale) -> bool:
+    # Gated for the replacements that invert the scale into SDPA's scale
+    # argument: computing 1.0 / scale in Python raises on a concrete zero.
+    # Patterns 2, 4, 28 multiply and 29/30 square the scale, so they are not
+    # gated. A SymInt scale skips == 0 (that would install a guard) in favor
+    # of its best-effort hint, so an unbacked, hint-less scale falls through
+    # as not zero; and because patterns 3/12 name their scale kwarg
+    # inv_scale_factor instead of inv_scale, the div-node operand check in
+    # _sfdp_extra_check is their only guard.
     scale = _scale_value(scale)
     if isinstance(scale, torch.SymInt):
         hint = scale.node.hint
