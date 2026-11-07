@@ -820,10 +820,24 @@ def _create_nccl_process_group(
 
 
 def _nccl2_options(
-    backend_options: object | None,
+    opts: _DistributedBackendOptions, backend_options: object | None
 ) -> "ProcessGroupNCCL.Options":
     if backend_options is None:
-        return ProcessGroupNCCL.Options()
+        pg_options = ProcessGroupNCCL.Options()
+        # Like the legacy backend, create the communicator on first use unless
+        # the caller bound a device, but only for single-rank groups: creating a
+        # multi-rank communicator on first use could hang on a point-to-point op.
+        # Single-rank groups are often placeholders that never communicate (e.g.
+        # vLLM's TP/PP/DP groups at world size 1), and each eager communicator
+        # pins hundreds of MiB of device memory. See #199957.
+        process_group = opts.process_group
+        pg_options.lazy_init = (
+            opts.group_size == 1
+            and not opts.enable_reconfigure
+            and process_group is not None
+            and process_group.bound_device_id is None
+        )
+        return pg_options
     if not isinstance(backend_options, ProcessGroupNCCL.Options):
         raise AssertionError(
             "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
@@ -832,7 +846,7 @@ def _nccl2_options(
 
 
 def _nccl2_device(
-    opts: _DistributedBackendOptions,
+    opts: _DistributedBackendOptions, lazy_init: bool
 ) -> torch.device | None:
     if opts.enable_reconfigure:
         return None
@@ -857,7 +871,9 @@ def _nccl2_device(
         device_index = global_rank % device_count
 
     device = torch.device("cuda", device_index)
-    if process_group is not None:
+    # A bound device marks a group as eagerly initialized, which makes new_group
+    # split from it and DeviceMesh use split_group, so a lazy group stays unbound.
+    if process_group is not None and not lazy_init:
         process_group.bound_device_id = device
 
     return device
@@ -868,7 +884,7 @@ def _create_nccl2_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    pg_options = _nccl2_options(backend_options)
+    pg_options = _nccl2_options(opts, backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -887,7 +903,7 @@ def _create_nccl2_process_group(
         opts.group_rank,
         opts.group_size,
         pg_options,
-        _nccl2_device(opts),
+        _nccl2_device(opts, pg_options.lazy_init),
     )
     return backend
 
@@ -897,7 +913,7 @@ def _create_nccl_lazy_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    pg_options = _nccl2_options(backend_options)
+    pg_options = _nccl2_options(opts, backend_options)
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
@@ -916,7 +932,7 @@ def _create_nccl_lazy_process_group(
         opts.group_rank,
         opts.group_size,
         pg_options,
-        _nccl2_device(opts),
+        _nccl2_device(opts, pg_options.lazy_init),
     )
     return backend
 
