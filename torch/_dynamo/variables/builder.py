@@ -205,6 +205,7 @@ from ..utils import (
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
     namedtuple_fields,
+    odict_keys,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -964,6 +965,27 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
         )
 
 
+def _build_dict_items(
+    value: dict[Any, Any],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
+    snapshot = _dict_input_snapshot(value)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return {key: item for _, key, item in entries}
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1519,7 +1541,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1551,7 +1573,15 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
-                    key = ConstantVariable.create(k)
+                    # OrderedDict replay rebuilds linked order and must retain
+                    # the input key objects; plain dict replay can update in place.
+                    # Read values by literal key to avoid guarding input order.
+                    key_source = (
+                        ConstDictKeySource(base, i)
+                        if istype(value, collections.OrderedDict)
+                        else None
+                    )
+                    key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
@@ -1561,9 +1591,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            result = _build_dict_items(value, build_key_value)
 
             if istype(value, (dict, collections.OrderedDict)) and any(
                 value is getattr(torch.nn.modules.module, name)
@@ -2608,9 +2636,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            kv_items = _build_dict_items(value, build_key_value)
 
             if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -2735,6 +2761,7 @@ class VariableBuilder:
             result = FrozenDataClassVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             if all(ConstantVariable.is_literal(k) for k in value):
                 # Model the view over its owning dict (the view's only gc
                 # referent) so mutations of the dict are visible through it.
@@ -2742,11 +2769,15 @@ class VariableBuilder:
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
                 if not isinstance(dict_vt, ConstDictVariable):
-                    raise AssertionError(f"Expected a dict, got {dict_vt}")
-                # Same key guards as ConstDictVariable.dict_keys installs.
-                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
-                self.tx.output.guard_on_key_order.add(dict_source)
-                return DictKeysVariable(dict_vt, source=self.source)
+                    unimplemented(
+                        gb_type="Unsupported dictionary view owner",
+                        context=str(type(dict_vt)),
+                        explanation="Dynamo cannot access this dictionary view's owner storage.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                return DictKeysVariable(
+                    dict_vt, source=self.source, is_ordered=type(value) is odict_keys
+                )
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",
