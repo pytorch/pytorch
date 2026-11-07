@@ -221,7 +221,7 @@ class TestFlexHelion(InductorTestCase):
         pretuned = flex_helion_attention._PRETUNED_SM100
         self.assertTrue(pretuned)
         mask = create_block_mask(_causal, None, None, 256, 256, device="cuda")
-        for d in sorted({d for _, d, _ in pretuned}):
+        for d in sorted({dim for _, dim, _ in pretuned}):
             torch._dynamo.reset()
             q, k, v = _tensors(2, 4, 4, 256, 256, d)
             with mock.patch.object(
