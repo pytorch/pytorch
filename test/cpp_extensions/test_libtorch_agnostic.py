@@ -1275,6 +1275,75 @@ for warning in w:
             enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
         self.assertEqual(enabled, warn_always)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("value", [False, True, 0, 2**63 - 1, -(2**63), 1.25, -0.0, 1.5 - 2.5j])
+    def test_scalar(self, device, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        ops = libtorch_agnostic.ops
+        result = ops.my_scalar_identity(value)
+        self.assertEqual(result, value)
+        self.assertIs(type(result), type(value))
+        self.assertEqual(
+            ops.my_scalar_kind(value),
+            tuple(type(value) is kind for kind in (bool, int, float, complex)),
+        )
+        if isinstance(value, complex):
+            result = ops.my_scalar_from_complex(value.real, value.imag)
+        else:
+            name = {bool: "bool", int: "int", float: "double"}[type(value)]
+            result = getattr(ops, f"my_scalar_from_{name}")(value)
+        self.assertEqual(result, value)
+        self.assertIs(type(result), type(value))
+        expected = complex(value)
+        self.assertEqual(
+            ops.my_scalar_to_complex(value), (expected.real, expected.imag)
+        )
+        if isinstance(value, complex):
+            with self.assertRaises(RuntimeError):
+                ops.my_scalar_to_real(value)
+        else:
+            expected = (int(value), float(value), bool(value))
+            self.assertEqual(ops.my_scalar_to_real(value), expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_scalar_list_optional(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        values = [True, 2**63 - 1, 1.25, 1.5 - 2.5j]
+        for inputs in ([], values):
+            result = libtorch_agnostic.ops.my_scalar_list(inputs)
+            self.assertEqual(result, inputs)
+            expected_types = [type(value) for value in inputs]
+            self.assertEqual([type(value) for value in result], expected_types)
+        for value in [None, *values]:
+            result = libtorch_agnostic.ops.my_scalar_optional(value)
+            self.assertEqual(result, value)
+            self.assertIs(type(result), type(value))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("alpha", [True, 2, 2.5, 1.5 - 2.5j])
+    def test_scalar_add_item(self, device, alpha):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        dtypes = {
+            bool: torch.bool,
+            int: torch.int64,
+            float: torch.float64,
+            complex: torch.complex128,
+        }
+        dtype = dtypes[type(alpha)]
+        x = torch.ones(2, device=device, dtype=dtype)
+        y = torch.ones_like(x)
+        result = libtorch_agnostic.ops.my_scalar_add(x, y, alpha)
+        self.assertEqual(result, torch.add(x, y, alpha=alpha))
+        t = torch.tensor(alpha, device=device, dtype=dtype)
+        result = libtorch_agnostic.ops.my_scalar_item(t)
+        self.assertEqual(result, alpha)
+        self.assertIs(type(result), type(alpha))
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
