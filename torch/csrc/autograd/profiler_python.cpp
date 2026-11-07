@@ -733,6 +733,10 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   std::atomic<bool> active_lock_{false};
   bool active_{false};
   bool gc_callback_registered_{false};
+  // Frames still open when tracing stops are closed at min(session end, this
+  // time). Only a single pause is supported: restart() clears it, and frames
+  // orphaned by an earlier pause are not handled.
+  std::optional<c10::approx_time_t> stop_time_;
 
   torch::profiler::impl::RecordQueue* queue_;
   PyInterpreterState* interpreter_{nullptr};
@@ -1186,6 +1190,7 @@ void PythonTracer::stop() {
         tls.profile_sem.release();
       }
     }
+    stop_time_ = c10::getApproximateTime();
 
 #if IS_PYTHON_3_12
     unregisterMonitoringCallback();
@@ -1206,6 +1211,7 @@ void PythonTracer::restart() {
         "Refusing to register profile functions.");
     return;
   }
+  stop_time_.reset();
   setprofileAllThreads(PythonTracer::pyProfileFn, (PyObject*)shared_ctx_);
 #if IS_PYTHON_3_12
   registerMonitoringCallback();
@@ -1486,6 +1492,15 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     c10::time_t end_time_ns) {
   for (auto& tls : thread_local_results_) {
     tls.value_cache_.trimPrefixes();
+  }
+  // Frames still open at stop_time_ are closed there, while TorchOps keep their
+  // real end times. A TorchOp running at the stop can thus outlive its capped
+  // Python parent: build_tree() may give ops that start inside it afterwards
+  // the wrong parent or none. With verbose=True, ops starting after the stop
+  // also lack the then-open frames in their "Call stack" metadata, as with
+  // with_stack=False. TorchOps that never end keep the session end (pop_event).
+  if (stop_time_.has_value()) {
+    end_time_ns = std::min(end_time_ns, time_converter(*stop_time_));
   }
   PostProcess post_process(
       std::move(time_converter), thread_local_results_, end_time_ns);
