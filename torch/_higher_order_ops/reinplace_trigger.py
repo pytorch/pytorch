@@ -12,3 +12,11 @@ class ReInplaceTrigger(enum.Enum):
     TRITON_OPS = 3
     # A user-kernel DSL without a member of its own.
     USER_KERNEL_OPS = 4
+
+
+# The DSL that each DSL-specific member belongs to, for register_user_kernel_hop,
+# which refuses a member to any other DSL whichever of them registers first, and a
+# member without an entry to every DSL: a DSL that adds a member adds its entry.
+TRIGGER_DSLS: dict[ReInplaceTrigger, str] = {
+    ReInplaceTrigger.TRITON_OPS: "triton",
+}

@@ -647,8 +647,7 @@
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: addr
-    MPS: addr_mps
+    CPU, CUDA, MPS, XPU: addr
     CompositeExplicitAutograd: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -658,8 +657,7 @@
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: addr_out
-    MPS: addr_out_mps
+    CPU, CUDA, MPS, XPU: addr_out
     CompositeExplicitAutograd: math_addr_out
 
 - func: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
@@ -12407,6 +12405,7 @@
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
     XPU: adaptive_avg_pool3d_out_xpu
+    MPS: adaptive_avg_pool3d_out_mps
     QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
 
 - func: adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
@@ -12419,6 +12418,7 @@
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
     XPU: adaptive_avg_pool3d_xpu
+    MPS: adaptive_avg_pool3d_mps
     QuantizedCPU: adaptive_avg_pool3d_quantized_cpu
   autogen: _adaptive_avg_pool3d.out
   tags: core
@@ -12429,6 +12429,7 @@
     CPU: adaptive_avg_pool3d_backward_out_cpu
     CUDA: adaptive_avg_pool3d_backward_out_cuda
     XPU: adaptive_avg_pool3d_backward_out_xpu
+    MPS: adaptive_avg_pool3d_backward_out_mps
 
 - func: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
@@ -12436,6 +12437,7 @@
     CPU: adaptive_avg_pool3d_backward_cpu
     CUDA: adaptive_avg_pool3d_backward_cuda
     XPU: adaptive_avg_pool3d_backward_xpu
+    MPS: adaptive_avg_pool3d_backward_mps
   autogen: _adaptive_avg_pool3d_backward.out
 
 # Return: (Tensor output, Tensor indices)

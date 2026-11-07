@@ -12,8 +12,7 @@ import types
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, Never, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -28,6 +27,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     specialize_symbolic,
     store_non_graphable_args,
     UserKernelHOPifier,
+    UserKernelLayoutConstraint,
     UserKernelWrapperHOP,
 )
 
@@ -1805,10 +1805,16 @@ def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
         raise AssertionError("Unknown triton kernel type")
 
 
-def get_triton_layout_constraint() -> str:
+def get_triton_layout_constraint() -> UserKernelLayoutConstraint:
     from torch._inductor import config
 
-    return config.triton_kernel_default_layout_constraint
+    # The config module does not check values against their Literal type.
+    constraint = config.triton_kernel_default_layout_constraint
+    if constraint not in typing.get_args(UserKernelLayoutConstraint):
+        raise RuntimeError(
+            f"Unknown triton_kernel_default_layout_constraint: {constraint}"
+        )
+    return constraint
 
 
 triton_kernel_hop_info = register_user_kernel_hop_impls(
