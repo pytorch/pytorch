@@ -187,6 +187,193 @@ def fp8e4m3fn_to_float32(x):
 
 
 @triton.jit
+def round_float64_to_odd_float32(x):
+    """
+    Rounds float64 x to float32 by truncating and setting the last bit if
+    inexact ("round to odd"). float32 has more than two extra bits and covers
+    the range of all narrower dtypes, so rounding the result again rounds x
+    correctly. Needs CUDA (PTX).
+    """
+    bits = tl.inline_asm_elementwise(
+        "{ .reg .f32 t; .reg .f64 back; .reg .pred inexact; "
+        "cvt.rz.f32.f64 t, $1; cvt.f64.f32 back, t; "
+        "setp.neu.f64 inexact, back, $1; mov.b32 $0, t; "
+        "@inexact or.b32 $0, $0, 1; }",
+        "=r,d",
+        [x],
+        dtype=tl.int32,
+        is_pure=True,
+        pack=1,
+    )
+    return bits.to(tl.float32, bitcast=True)
+
+
+@triton.jit
+def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
+    """
+    Converts float32 x to float8_e4m3fn (E4M3) or float8_e5m2 bits, as uint8,
+    with the cvt.rn.satfinite instruction of sm_89+, like the eager CUDA kernel.
+    MODE is as in round_float32_to_bits.
+    """
+    if E4M3:
+        bits = tl.inline_asm_elementwise(
+            "cvt.rn.satfinite.e4m3x2.f32 $0, 0.0, $1;",
+            "=h,f",
+            [x],
+            dtype=tl.uint16,
+            is_pure=True,
+            pack=1,
+        ).to(tl.uint8)
+    else:
+        bits = tl.inline_asm_elementwise(
+            "cvt.rn.satfinite.e5m2x2.f32 $0, 0.0, $1;",
+            "=h,f",
+            [x],
+            dtype=tl.uint16,
+            is_pure=True,
+            pack=1,
+        ).to(tl.uint8)
+    if MODE != 0:
+        # The hardware only rounds to nearest, saturating. Step the result by
+        # one encoding toward x when it is on the wrong side of x. Comparisons
+        # with NaN are false, so NaN is left alone. Consecutive magnitudes have
+        # consecutive encodings, so for e5m2 stepping past the largest finite
+        # value gives infinity; e4m3fn saturates instead.
+        magnitude = (bits & 0x7F).to(tl.uint16)
+        if E4M3:
+            rounded = tl.inline_asm_elementwise(
+                "{ .reg .b32 h2; .reg .b16 lo, hi; cvt.rn.f16x2.e4m3x2 h2, $1; "
+                "mov.b32 {lo, hi}, h2; cvt.f32.f16 $0, lo; }",
+                "=f,h",
+                [magnitude],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
+        else:
+            rounded = tl.inline_asm_elementwise(
+                "{ .reg .b32 h2; .reg .b16 lo, hi; cvt.rn.f16x2.e5m2x2 h2, $1; "
+                "mov.b32 {lo, hi}, h2; cvt.f32.f16 $0, lo; }",
+                "=f,h",
+                [magnitude],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
+        down = tl.where(rounded > tl.abs(x), -1, 0)
+        up_cond = rounded < tl.abs(x)
+        if E4M3:
+            up_cond = up_cond & (magnitude != 0x7E)
+        up = tl.where(up_cond, 1, 0)
+        neg = x < 0
+        if MODE == 1:
+            step = down
+        elif MODE == 2:
+            step = tl.where(neg, down, up)
+        else:
+            step = tl.where(neg, up, down)
+        bits = (bits.to(tl.int32) + step).to(tl.uint8)
+    if not E4M3:
+        # e5m2 has infinities, where the hardware saturates: for infinite x,
+        # and when rounding to nearest from halfway between the largest finite
+        # value (57344) and 2^16.
+        if MODE == 0:
+            overflow = tl.abs(x) >= 61440.0
+        else:
+            overflow = tl.abs(x) == float("inf")
+        bits = tl.where(overflow, tl.where(x < 0, 0xFC, 0x7C).to(tl.uint8), bits)
+    return bits
+
+
+@triton.jit
+def round_float32_to_bits(
+    x,
+    MODE: tl.constexpr,
+    MANT_BITS: tl.constexpr,
+    BIAS: tl.constexpr,
+    SIGNED: tl.constexpr,
+    HAS_NEG_ZERO: tl.constexpr,
+    HAS_SUBNORMALS: tl.constexpr,
+    SIGN_BIT: tl.constexpr,
+    MAX_FINITE: tl.constexpr,
+    OVERFLOW: tl.constexpr,
+    NAN: tl.constexpr,
+):
+    """
+    Port of c10::convert_with_rounding (c10/util/FloatRounding.h) for float32
+    inputs. MODE is 0 (to_nearest_even), 1 (toward_zero), 2 (toward_positive)
+    or 3 (toward_negative); the other parameters describe the destination
+    format (see ROUNDING_FORMATS in torch/_inductor/codegen/triton.py).
+    Returns the destination's bits as int32.
+    """
+    bits = x.to(tl.int32, bitcast=True)
+    exp_field = (bits >> 23) & 0xFF
+    mant = bits & 0x7FFFFF
+    if SIGNED:
+        neg = bits < 0
+    else:
+        neg = bits != bits
+    sign = tl.where(neg, SIGN_BIT, 0)
+
+    # Normalize subnormal inputs; the exponent of float(mant), which is exact,
+    # gives the position of its leading one.
+    is_sub = exp_field == 0
+    sub_top = ((mant.to(tl.float32).to(tl.int32, bitcast=True) >> 23) & 0xFF) - 127
+    sub_shift = tl.minimum(tl.maximum(23 - sub_top, 0), 23)
+    sig = tl.where(is_sub, mant << sub_shift, mant | 0x800000)
+    top_exp = tl.where(is_sub, sub_top - 149, exp_field - 127)
+
+    if HAS_SUBNORMALS:
+        EMIN: tl.constexpr = 1 - BIAS
+    else:
+        EMIN: tl.constexpr = -BIAS
+    # Number of low bits of sig below the destination's quantum.
+    shift = (23 - MANT_BITS) + tl.maximum(EMIN - top_exp, 0)
+    big = shift > 24
+    s = tl.minimum(shift, 24)
+    kept = tl.where(big, 0, sig >> s)
+    guard = tl.where(big, 0, (sig >> (s - 1)) & 1)
+    sticky = tl.where(big, 1, ((sig & ((1 << (s - 1)) - 1)) != 0).to(tl.int32))
+    enc = tl.where(
+        top_exp >= EMIN,
+        ((top_exp + BIAS) << MANT_BITS) + kept - (1 << MANT_BITS),
+        kept,
+    )
+
+    if MODE == 0:
+        to_zero = neg != neg
+        if MANT_BITS == 0:
+            enc += guard
+        else:
+            enc += guard & (sticky | (enc & 1))
+    else:
+        if MODE == 1:
+            to_zero = neg == neg
+        elif MODE == 2:
+            to_zero = neg
+        else:
+            to_zero = ~neg
+        enc += tl.where(to_zero, 0, guard | sticky)
+
+    result = tl.where(enc > MAX_FINITE, tl.where(to_zero, MAX_FINITE, OVERFLOW), enc)
+    if not HAS_SUBNORMALS:
+        # No zero or subnormals to round to: clamp to the smallest value.
+        result = tl.where(top_exp < EMIN, 0, result)
+    if HAS_NEG_ZERO:
+        result = result | sign
+    else:
+        result = tl.where(result == 0, result, result | sign)
+    is_zero = is_sub & (mant == 0)
+    if HAS_NEG_ZERO:
+        result = tl.where(is_zero, sign, result)
+    else:
+        result = tl.where(is_zero, 0, result)
+    return tl.where(
+        exp_field == 0xFF, tl.where(mant != 0, NAN | sign, OVERFLOW | sign), result
+    )
+
+
+@triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer

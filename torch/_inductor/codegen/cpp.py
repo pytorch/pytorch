@@ -647,7 +647,7 @@ def arith_promoted(op, a, b):
 
 
 class CppOverrides(OpOverrides):
-    """Map element-wise ops to C++"""
+    """Map element-wise ops to scalar C++ expressions for the CPU backend."""
 
     @staticmethod
     def add(a, b):
@@ -737,6 +737,18 @@ class CppOverrides(OpOverrides):
         if dtype not in DTYPE_TO_CPP:
             raise AssertionError(f"{dtype} missing from {__name__}.DTYPE_TO_CPP")
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+
+    @staticmethod
+    def to_dtype_rounded(x, dtype, src_dtype, rounding):
+        mode = "".join(word.capitalize() for word in rounding.split("_"))
+        # Half and BFloat16 inputs widen to float exactly. Fused producers of
+        # such values pass their unrounded float result, unless
+        # config.emulate_precision_casts is set.
+        wide = "double" if src_dtype == torch.float64 else "float"
+        return (
+            f"c10::convert_with_rounding<{DTYPE_TO_CPP[dtype]}>("
+            f"static_cast<{wide}>({x}), c10::RoundingMode::{mode})"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -4152,6 +4164,10 @@ class TilingSelect:
             raise AssertionError("expected all_dtypes")
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
             return [], [], KernelOpStats()
+        # The scalarized fallback of CppVecKernel assumes the same number of
+        # elements per vector for inputs and outputs, which narrowing breaks.
+        if any(body.has_op("to_dtype_rounded") for body in loop_bodies):
+            return [], [], KernelOpStats()
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
@@ -4438,7 +4454,7 @@ class CppKernelProxy(CppKernel):
                     "value_expr",
                 ]:
                     return node.args[-1]  # type: ignore[return-value]
-                elif node.target == "to_dtype_bitcast":
+                elif node.target in ["to_dtype_bitcast", "to_dtype_rounded"]:
                     return node.args[2]  # type: ignore[return-value]
                 else:
                     return None
@@ -4473,7 +4489,8 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr", "value_expr"]
+                    _node.target
+                    in ["load", "index_expr", "value_expr", "to_dtype_rounded"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
