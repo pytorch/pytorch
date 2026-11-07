@@ -30,6 +30,7 @@ __all__ = [
 ]
 
 _grad_t = tuple[Tensor, ...] | Tensor
+_grad_kwargs_t = dict[str, Tensor | None]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -68,6 +69,50 @@ r"""This tracks hooks common to all modules that are executed immediately before
 _global_buffer_registration_hooks: dict[int, Callable] = OrderedDict()
 _global_module_registration_hooks: dict[int, Callable] = OrderedDict()
 _global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
+
+
+class _WrappedFullBackwardHook:
+    def __init__(self, hook, num_args, kwarg_names, with_kwargs):
+        self.hook = hook
+        self.num_args = num_args
+        self.kwarg_names = kwarg_names
+        self.with_kwargs = with_kwargs
+
+    def __call__(self, module, grad_input, grad_output):
+        grad_args = grad_input[: self.num_args]
+        grad_kwargs = grad_input[self.num_args :]
+        if self.with_kwargs:
+            result = self.hook(
+                module, grad_args, dict(zip(self.kwarg_names, grad_kwargs)), grad_output
+            )
+            if result is None:
+                return None
+            if not (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and isinstance(result[0], tuple)
+                and isinstance(result[1], dict)
+            ):
+                raise RuntimeError(
+                    "Backward hook with with_kwargs=True must return None or a tuple "
+                    "of (grad_input, grad_kwargs)."
+                )
+            grad_args, replacements = result
+            if replacements.keys() != set(self.kwarg_names):
+                raise RuntimeError(
+                    "Backward hook returned an invalid set of grad_kwargs keys."
+                )
+            grad_kwargs = tuple(replacements[name] for name in self.kwarg_names)
+        else:
+            grad_args = self.hook(module, grad_args, grad_output)
+            if grad_args is None:
+                return None
+        if len(grad_args) != self.num_args:
+            raise RuntimeError(
+                "Backward hook returned an invalid number of grad_input, "
+                f"got {len(grad_args)}, but expected {self.num_args}"
+            )
+        return tuple(grad_args) + grad_kwargs
 
 
 class _WrappedHook:
@@ -457,6 +502,7 @@ class Module:
     _non_persistent_buffers_set: set[str]
     _backward_pre_hooks: dict[int, Callable]
     _backward_hooks: dict[int, Callable]
+    _backward_hooks_with_kwargs: dict[int, bool]
     _is_full_backward_hook: bool | None
     _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
@@ -507,6 +553,7 @@ class Module:
         super().__setattr__("_non_persistent_buffers_set", set())
         super().__setattr__("_backward_pre_hooks", OrderedDict())
         super().__setattr__("_backward_hooks", OrderedDict())
+        super().__setattr__("_backward_hooks_with_kwargs", OrderedDict())
         super().__setattr__("_is_full_backward_hook", None)
         super().__setattr__("_forward_hooks", OrderedDict())
         super().__setattr__("_forward_hooks_with_kwargs", OrderedDict())
@@ -1467,8 +1514,14 @@ class Module:
 
     def register_full_backward_hook(
         self,
-        hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
+        hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None]
+        | Callable[
+            ["Module", _grad_t, _grad_kwargs_t, _grad_t],
+            tuple[_grad_t, _grad_kwargs_t] | None,
+        ],
         prepend: bool = False,
+        *,
+        with_kwargs: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
@@ -1487,10 +1540,22 @@ class Module:
         with respect to the inputs and outputs respectively. The hook should
         not modify its arguments, but it can optionally return a new gradient with
         respect to the input that will be used in place of :attr:`grad_input` in
-        subsequent computations. :attr:`grad_input` will only correspond to the inputs given
-        as positional arguments and all kwarg arguments are ignored. Entries
+        subsequent computations. By default, :attr:`grad_input` only corresponds to inputs given
+        as positional arguments and keyword arguments are ignored. Entries
         in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
         arguments.
+
+        If ``with_kwargs=True``, the hook also receives a dictionary containing gradients
+        for keyword arguments passed to :meth:`forward`, with ``None`` for non-Tensor
+        arguments. It may return a tuple of replacement positional and keyword gradients,
+        preserving the number of positional arguments and the keyword names::
+
+            hook(module, grad_input, grad_kwargs, grad_output) -> (grad_input, grad_kwargs) or None
+
+        When any registered full backward hook uses ``with_kwargs=True``, keyword tensors
+        are included in the input-gradient firing rules above. Other full backward hooks
+        on the module still receive only positional input gradients. Tensors nested inside
+        containers are not tracked.
 
         For technical reasons, when this hook is applied to a Module, its forward function will
         receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
@@ -1510,6 +1575,8 @@ class Module:
                 ``backward`` hooks registered with
                 :func:`register_module_full_backward_hook` will fire before
                 all hooks registered by this method.
+            with_kwargs (bool): If ``True``, include gradients of keyword inputs in the
+                hook. Default: ``False``.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1525,8 +1592,12 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(
+            self._backward_hooks, extra_dict=self._backward_hooks_with_kwargs
+        )
         self._backward_hooks[handle.id] = hook
+        if with_kwargs:
+            self._backward_hooks_with_kwargs[handle.id] = True
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1807,8 +1878,16 @@ class Module:
             if self._backward_pre_hooks or _global_backward_pre_hooks:
                 backward_pre_hooks = self._get_backward_pre_hooks()
 
+            full_backward_hooks_with_kwargs = []
             if self._backward_hooks or _global_backward_hooks:
                 full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+                if self._backward_hooks_with_kwargs:
+                    full_backward_hooks_with_kwargs = [False] * (
+                        len(full_backward_hooks) - len(self._backward_hooks)
+                    ) + [
+                        hook_id in self._backward_hooks_with_kwargs
+                        for hook_id in self._backward_hooks
+                    ]
 
             if _global_forward_pre_hooks or self._forward_pre_hooks:
                 for hook_id, hook in (
@@ -1834,8 +1913,18 @@ class Module:
 
             bw_hook = None
             if full_backward_hooks or backward_pre_hooks:
+                if full_backward_hooks_with_kwargs:
+                    num_args, kwarg_names = len(args), tuple(kwargs)
+                    # BackwardHook uses a flat tuple for both capture and gradient replacement.
+                    full_backward_hooks = [
+                        _WrappedFullBackwardHook(hook, num_args, kwarg_names, with_kwargs)
+                        for hook, with_kwargs in zip(full_backward_hooks, full_backward_hooks_with_kwargs)
+                    ]
+                    args = (*args, *kwargs.values())
                 bw_hook = BackwardHook(self, full_backward_hooks, backward_pre_hooks)
                 args = bw_hook.setup_input_hook(args)
+                if full_backward_hooks_with_kwargs:
+                    args, kwargs = args[:num_args], dict(zip(kwarg_names, args[num_args:]))
 
             result = forward_call(*args, **kwargs)
             if _global_forward_hooks or self._forward_hooks:
@@ -1955,6 +2044,8 @@ class Module:
             self._is_full_backward_hook = None
         if "_backward_pre_hooks" not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
+        if "_backward_hooks_with_kwargs" not in self.__dict__:
+            self._backward_hooks_with_kwargs = OrderedDict()
 
     # It is crucial that the return type is not annotated as `Any`, otherwise type checking
     # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
