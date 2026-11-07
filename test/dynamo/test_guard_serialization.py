@@ -3271,6 +3271,52 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": left}, False)
         self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
 
+    @parametrize("hooks_name", ["_forward_hooks", "_forward_pre_hooks"])
+    @parametrize("global_flags", [False, True])
+    def test_native_hook_membership_dependencies(self, hooks_name, global_flags):
+        def install_membership_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import GlobalSource
+
+            module_source = (
+                ctx.get_local("module")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source
+            )
+            flags_source = (
+                GlobalSource("HOOK_FLAGS_FOR_SERIALIZATION")
+                if global_flags
+                else ctx.get_local("flags")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source
+            )
+            install_guard(
+                module_source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                        hooks_name=hooks_name,
+                        flags_source=flags_source,
+                    )
+                )
+            )
+
+        def fn(x, module, flags):
+            comptime(install_membership_guard)
+            return x + 1 if module is module and flags is flags else x
+
+        x, module, flags = torch.ones(1), torch.nn.Identity(), {2: True}
+        getattr(module, hooks_name).update({1: None, 2: None})
+        with mock.patch.dict(globals(), {"HOOK_FLAGS_FOR_SERIALIZATION": flags}):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, flags
+            )
+            inputs = {"x": x, "module": module, "flags": flags}
+            self._test_check_fn(ref, loaded, inputs, True)
+            flags[1] = flags.pop(2)
+            self._test_check_fn(ref, loaded, inputs, False)
+            flags[2] = flags.pop(1)
+            self._test_check_fn(ref, loaded, inputs, True)
+
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):

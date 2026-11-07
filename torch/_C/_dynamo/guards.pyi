@@ -32,6 +32,8 @@ def ordered_dict_keys(value: Any) -> list[Any] | None: ...
 class RelationalGuard(LeafGuard):
     def get_group_id(self) -> int: ...
 
+class NN_MODULE_HOOK_MEMBERSHIP(RelationalGuard): ...
+
 class GuardDebugInfo:
     verbose_code_parts: list[str]
     result: bool
@@ -486,6 +488,13 @@ class GetAttrGuardAccessor(GuardAccessor):
 def install_object_alias_pattern_guard(
     guard_managers: Sequence[GuardManager],
     aliases: Sequence[int],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
+def install_nn_module_hook_membership_guard(
+    hooks: GuardManager,
+    flags: GuardManager,
+    expected: Sequence[bool],
     verbose_code_parts: list[str],
     user_stack: traceback.StackSummary | None,
 ) -> None: ...
