@@ -8167,6 +8167,11 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.GroupNorm(10, 10)(x).to(device)
 
+    def test_group_norm_invalid_num_groups(self):
+        x = torch.randn(2, 4, 3, 3)
+        with self.assertRaisesRegex(ValueError, "Expected num_groups to be greater than 0"):
+            F.group_norm(x, 0)
+
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
         inp = torch.randn(0, 4, 2, 2, device=device)
