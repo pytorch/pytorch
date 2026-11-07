@@ -263,8 +263,10 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
+    LruCacheWrapperVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
     SkipFunctionVariable,
@@ -309,7 +311,6 @@ from .misc import (
     LoggingLoggerVariable,
     NumpyDTypeVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -667,7 +668,7 @@ def lookup_spec_from_dynamo_source(
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
-    if type(value) is not types.BuiltinMethodType:
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
 
     method_self = value.__self__
@@ -924,6 +925,16 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
+def lookup_tracked_variable(
+    tx: "InstructionTranslatorBase", value: object
+) -> VariableTracker | None:
+    """The VT side effects already track for `value`, if any. Every build of
+    the same object must return it, or its pending mutations are missed."""
+    if tx is None or value not in tx.output.side_effects:
+        return None
+    return tx.output.side_effects[value]
+
+
 def _is_dim_dynamic_from_source_dynamism(
     source: Source, normalized_source_name: str, dim: int
 ) -> bool:
@@ -1096,7 +1107,13 @@ class VariableBuilder:
             raise AssertionError(
                 f"Expected function or wrapper, got {type(wrapper_obj)}"
             )
-        return WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, source=source)
+        if is_lru_cache_wrapped_function(wrapper_obj):
+            wrapper_cls = LruCacheWrapperVariable
+        elif isinstance(wrapper_obj, types.FunctionType):
+            wrapper_cls = FunctionWrapperVariable
+        else:
+            wrapper_cls = WrapperUserFunctionVariable
+        return wrapper_cls(wrapper_obj, attr_to_trace, source=source)
 
     @staticmethod
     def create_internal_torch_function_mode_stack_entry(
@@ -1187,16 +1204,31 @@ class VariableBuilder:
         self,
         value: object,
     ) -> VariableTracker | None:
-        if value not in self.tx.output.side_effects:
+        result = lookup_tracked_variable(self.tx, value)
+        if result is None:
             return None
 
-        result = self.tx.output.side_effects[value]
         if self.source != result.source:
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                is_from_attr_proxy_source(self.source)
+                isinstance(result, ConstDictVariable)
+                and any(
+                    isinstance(source, AttrSource)
+                    and source.member
+                    in (
+                        "_backward_hooks",
+                        "_backward_pre_hooks",
+                        "_forward_hooks",
+                        "_forward_pre_hooks",
+                        "_forward_hooks_with_kwargs",
+                        "_forward_pre_hooks_with_kwargs",
+                        "_forward_hooks_always_called",
+                    )
+                    for source in (self.source, result.source)
+                )
+                or is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1208,10 +1240,9 @@ class VariableBuilder:
             ):
                 if result.source is None:
                     raise AssertionError("Tracked alias must have a source")
-                # make_dupe_guard cannot relate local and global sources. Reusing
-                # the tracker still requires both sources to resolve to the same
-                # object (a base module, or the mapping behind a mappingproxy), so
-                # pin each source to its compile-time object.
+                # make_dupe_guard cannot relate local and global sources, e.g.
+                # G._forward_hooks is m._forward_hooks. Reusing the tracker still
+                # requires both sources to resolve to that same object, so pin both.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
@@ -1562,7 +1593,7 @@ class VariableBuilder:
 
             result = _build_dict_items(value, build_key_value)
 
-            if type(value) in (dict, collections.OrderedDict) and any(
+            if istype(value, (dict, collections.OrderedDict)) and any(
                 value is getattr(torch.nn.modules.module, name)
                 for name in (
                     "_global_forward_hooks_with_kwargs",
@@ -1571,7 +1602,7 @@ class VariableBuilder:
             ):
                 flags_cls = (
                     NNModuleGlobalOrderedHookFlagsDictVariable
-                    if type(value) is collections.OrderedDict
+                    if istype(value, collections.OrderedDict)
                     else NNModuleGlobalHookFlagsDictVariable
                 )
                 result = flags_cls(result, source=self.source)
@@ -1658,7 +1689,10 @@ class VariableBuilder:
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
-                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                (
+                    issubclass(type(x), types.BuiltinMethodType)
+                    and x.__module__ == "torch"
+                )
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
@@ -1864,7 +1898,7 @@ class VariableBuilder:
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
-            type(value) is types.BuiltinMethodType
+            issubclass(type(value), types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
@@ -2199,27 +2233,24 @@ class VariableBuilder:
             "__script_if_tracing_wrapper", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = FunctionWrapperVariable(value, "__original_fn", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = LruCacheWrapperVariable(value, "__wrapped__", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
+            wrapper_cls = (
+                FunctionWrapperVariable
+                if isinstance(value, types.FunctionType)
+                else WrapperUserFunctionVariable
+            )
+            return wrapper_cls(
                 value,
                 "_torchdynamo_inline",
                 source=self.source,
@@ -2360,16 +2391,29 @@ class VariableBuilder:
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
-            # Method-wrappers are written in C, and they are not guaranteed to
-            # return the same object on attribute lookup. Therefore, we cannot
-            # insert a ID_MATCH guard here. method-wrappers are very
-            # unlikely to change, so its ok to skip the guard here.
+            # Attribute lookup can create a fresh method-wrapper. For descriptor
+            # receivers, guard the receiver and operation instead of wrapper identity.
             descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
             if not isinstance(descriptor, types.WrapperDescriptorType):
                 raise AssertionError(
                     f"expected WrapperDescriptorType, got {type(descriptor)}"
                 )
             obj_source = self.source and AttrSource(self.source, "__self__")
+            if (
+                obj_source is not None
+                and not is_constant_source(obj_source)
+                and isinstance(
+                    value.__self__,
+                    (types.GetSetDescriptorType, types.MemberDescriptorType),
+                )
+            ):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                install_guard(
+                    AttrSource(self.source, "__name__").make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+                install_guard(obj_source.make_guard(GuardBuilder.ID_MATCH))
             obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
             return MethodWrapperVariable(descriptor, obj_vt)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
@@ -2725,7 +2769,12 @@ class VariableBuilder:
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
                 if not isinstance(dict_vt, ConstDictVariable):
-                    raise AssertionError(f"Expected a dict, got {dict_vt}")
+                    unimplemented(
+                        gb_type="Unsupported dictionary view owner",
+                        context=str(type(dict_vt)),
+                        explanation="Dynamo cannot access this dictionary view's owner storage.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 return DictKeysVariable(
                     dict_vt, source=self.source, is_ordered=type(value) is odict_keys
                 )
@@ -2767,7 +2816,7 @@ class VariableBuilder:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return ObjectVariable(value, source=self.source)
+            return VariableTracker(value=value, source=self.source)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
@@ -5863,6 +5912,8 @@ class SourcelessBuilder:
             return NumpyDTypeVariable(value)
         elif trace_rules.is_numpy_type_info(value):
             return ConstantLikeVariable(value)
+        elif (tracked := lookup_tracked_variable(tx, value)) is not None:
+            return tracked
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -6023,7 +6074,7 @@ class SourcelessBuilder:
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         elif istype(value, object):
-            return ObjectVariable(value)
+            return VariableTracker(value=value)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]

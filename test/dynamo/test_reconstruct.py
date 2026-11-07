@@ -255,7 +255,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
     @parametrize("container_type", [None, list, dict, set])
     @parametrize("nested", [False, True])
-    def test_sourced_constant_in_aggregates(self, container_type, nested):
+    @parametrize("frozen", [False, True])
+    def test_sourced_constant_in_aggregates(self, container_type, nested, frozen):
         def fn(x, key):
             contents = key
             if container_type is not None:
@@ -265,7 +266,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             value = slice(contents, None)
             if nested:
                 value = ((slice(value, None),),)
-            return x + 1, ((key,),), frozenset((key,)), value
+            return x + 1, ((key,),), frozenset((key,)) if frozen else None, value
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -278,7 +279,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             result = compiled(x, key)
             self.assertEqual(result, fn(x, key))
             self.assertIs(result[1][0][0], key)
-            self.assertIs(next(iter(result[2])), key)
+            if frozen:
+                self.assertIs(next(iter(result[2])), key)
             contents = result[3][0][0].start.start if nested else result[3].start
             if container_type is None:
                 self.assertIs(contents, key)
@@ -286,8 +288,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 self.assertIs(next(iter(contents)), key)
                 self.assertIsNot(contents, previous)
                 previous = contents
-            # Constructing the frozenset needs a value guard for its key hash.
-            self.assertEqual(counter.frame_count, 1 if index < 2 else 2)
+            # Only hashed keys need value specialization; tuple/list/slice leaves do not.
+            hashed = frozen or container_type in (dict, set)
+            self.assertEqual(counter.frame_count, 2 if hashed and index == 2 else 1)
 
     @parametrize("graph_break", [False, True])
     def test_dynamic_slice_reconstruct(self, graph_break):
