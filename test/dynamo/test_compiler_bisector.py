@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipPRIVATEUSE1,
 )
-from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton, has_triton_for_device
 
@@ -232,8 +232,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
-    # XPU doesn't support cudagrah
-    @requires_cuda
     def test_cudagraph_bisect_max(self):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
