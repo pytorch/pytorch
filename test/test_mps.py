@@ -15235,6 +15235,31 @@ class TestConsistency(TestCaseMPS):
             bwd_atol, bwd_rtol = (5e-3, 2e-2) if dtype == torch.float16 else (1e-1, 5e-1)
             self.assertEqual(half_grad_input, full_grad_input.to(dtype), atol=bwd_atol, rtol=bwd_rtol)
 
+    @parametrize("spatial_dims", (2, 3))
+    def test_grid_sample_size_one_large_stride(self, device, spatial_dims):
+        input_shape = (1, 2, 1, 4) if spatial_dims == 2 else (1, 2, 1, 3, 4)
+        grid_shape = (1, 2, 1, 2) if spatial_dims == 2 else (1, 1, 2, 1, 3)
+        input_cpu = torch.randn(input_shape, requires_grad=True)
+        grid_cpu = torch.empty(grid_shape).uniform_(-0.8, 0.8).requires_grad_()
+        expected = F.grid_sample(input_cpu, grid_cpu, align_corners=False)
+        grad_output_cpu = torch.randn_like(expected)
+        tensors = []
+        for tensor in (input_cpu, grid_cpu, grad_output_cpu):
+            tensor_mps = tensor.detach().to(device)
+            strides = tuple(2**31 if size == 1 else stride
+                            for size, stride in zip(tensor_mps.shape, tensor_mps.stride()))
+            tensor_mps = tensor_mps.as_strided(tensor_mps.shape, strides)
+            self.assertEqual(tensor_mps.stride(), strides)
+            tensors.append(tensor_mps)
+        input_mps, grid_mps, grad_output_mps = tensors
+        input_mps.requires_grad_()
+        grid_mps.requires_grad_()
+        actual = F.grid_sample(input_mps, grid_mps, align_corners=False)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (input_cpu, grid_cpu), grad_output_cpu)
+        actual_grads = torch.autograd.grad(actual, (input_mps, grid_mps), grad_output_mps)
+        self.assertEqual(actual_grads, expected_grads, atol=1e-5, rtol=1e-5)
+
     def test_grid_sampler_3d_nan(self, device):
         input = torch.ones(1, 1, 3, 3, 3)
         grid_nan = torch.tensor([[[[[torch.nan, 1., 1.], [1., 1., 1.]]]]])
