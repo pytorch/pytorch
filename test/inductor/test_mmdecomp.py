@@ -6,7 +6,7 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.decomposition import addmm as decomp_addmm, bmm as decomp_bmm, mm
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -574,6 +575,195 @@ class TestDecomp(NNTestCase):
                 ]
                 self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
+
+
+class TestAddmmZeroAlpha(NNTestCase):
+    @parametrize("alpha", [0, 0.0, -0.0])
+    def test_zero_alpha_decomposition(self, device, alpha):
+        shapes = (
+            [(1, 4, 1), (1, 4, 4)]
+            if torch.device(device).type == "cpu"
+            else [(4, 1, 4)]
+        )
+        for m, k, n in shapes:
+            with self.subTest(shape=(m, k, n)):
+                args = (
+                    torch.ones(n, device=device),
+                    torch.ones(m, k, device=device),
+                    torch.ones(k, n, device=device),
+                )
+                self.assertIsNot(decomp_addmm(*args, alpha=1), NotImplemented)
+                self.assertIs(decomp_addmm(*args, alpha=alpha), NotImplemented)
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize(
+        "shape,operand,value,beta",
+        [
+            ((1, 4, 1), 1, float("nan"), 1),
+            ((1, 4, 4), 2, float("inf"), -2),
+            ((4, 1, 4), 1, -float("inf"), 0),
+            ((8, 32, 8), 0, float("nan"), 0),
+            ((8, 32, 8), 0, float("nan"), 1),
+            ((8, 32, 8), 2, float("nan"), 0),
+        ],
+    )
+    def test_zero_alpha_numerics(self, device, dtype, shape, operand, value, beta):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=beta)
+
+        m, k, n = shape
+        args = (
+            torch.ones(n, device=device, dtype=dtype),
+            torch.ones(m, k, device=device, dtype=dtype),
+            torch.ones(k, n, device=device, dtype=dtype),
+        )
+        args[operand].fill_(value)
+        expected = fn(*args)
+        with config.patch(cpp_wrapper=False):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("extern_kernels.addmm", "\n".join(code))
+
+    @parametrize("bias_kind", ["scalar", "vector", "expanded", "transposed"])
+    @parametrize("k", [0, 3])
+    def test_zero_alpha_shapes(self, device, bias_kind, k):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2)
+
+        a = torch.ones(k, 2, device=device).t()
+        b = torch.ones(4, k, device=device).t()
+
+        if bias_kind == "scalar":
+            inp = torch.tensor(2.0, device=device)
+        elif bias_kind == "vector":
+            inp = torch.arange(8.0, device=device)[::2]
+        elif bias_kind == "expanded":
+            inp = torch.ones(1, 4, device=device).expand(2, 4)
+        else:
+            inp = torch.arange(8.0, device=device).view(4, 2).t()
+
+        expected = fn(inp, a, b)
+        actual = torch.compile(fn, fullgraph=True)(inp, a, b)
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    def test_zero_alpha_dynamic_backward(self, device):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2).square().sum()
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+
+        for m, k, n in [(2, 3, 4), (5, 6, 7)]:
+            args = (
+                torch.randn(n, device=device, requires_grad=True),
+                torch.randn(m, k, device=device, requires_grad=True),
+                torch.randn(k, n, device=device, requires_grad=True),
+            )
+            expected = fn(*args)
+            expected_grad = torch.autograd.grad(expected, args)
+
+            actual = compiled(*args)
+            actual_grad = torch.autograd.grad(actual, args)
+
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_grad, expected_grad)
+
+    def test_zero_alpha_pointwise(self, device):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0).relu()
+
+        args = (
+            torch.ones(4, device=device),
+            torch.full((2, 3), float("nan"), device=device),
+            torch.ones(3, 4, device=device),
+        )
+        expected = fn(*args)
+        with config.patch(cpp_wrapper=False):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("extern_kernels.addmm", "\n".join(code))
+
+    @onlyCPU
+    @unittest.skipIf(IS_WINDOWS, "C++ wrapper test requires Linux")
+    def test_zero_alpha_cpp_wrapper(self, device):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2)
+
+        args = (
+            torch.arange(4.0, device=device),
+            torch.full((2, 3), float("nan"), device=device),
+            torch.ones(3, 4, device=device),
+        )
+        expected = fn(*args)
+        torch._dynamo.reset()
+        with config.patch(cpp_wrapper=True):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        source = "\n".join(code)
+        self.assertRegex(source, r"aoti_torch_\w*addmm_out\(")
+        self.assertNotIn("aoti_torch_proxy_executor_call_function(", source)
+
+    @unittest.skipIf(not HAS_GPU, "GPU test requires Triton")
+    def test_zero_alpha_max_autotune(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("GPU autotuning test")
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=1)
+
+        args = (
+            torch.ones(64, device=device),
+            torch.full((64, 32), float("nan"), device=device),
+            torch.ones(32, 64, device=device),
+        )
+        expected = fn(*args)
+        torch._dynamo.reset()
+        # Even a template-only preference must preserve native semantics.
+        with config.patch(
+            cpp_wrapper=False,
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+        ):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("extern_kernels.addmm", "\n".join(code))
+
+
+class TestAddmmZeroAlphaGuards(NNTestCase):
+    @parametrize("alpha", [0, 1])
+    def test_zero_alpha_unfuse_guard(self, alpha):
+        from torch._inductor.fx_passes.post_grad import should_prefer_unfused_addmm
+        from torch._inductor.pattern_matcher import Arg, CallFunction, KeywordArg, Match
+
+        graph = torch.fx.Graph()
+        inp, a, b = [graph.placeholder(name) for name in ("inp", "a", "b")]
+        out = graph.call_function(
+            torch.ops.aten.addmm.default,
+            (inp, a, b),
+            {"alpha": alpha, "beta": 1},
+        )
+        graph.output(graph.call_function(torch.ops.aten.relu.default, (out,)))
+        with FakeTensorMode():
+            inp.meta["val"] = torch.empty(4, device=GPU_TYPE)
+            a.meta["val"] = torch.empty(2, 3, device=GPU_TYPE)
+            b.meta["val"] = torch.empty(3, 4, device=GPU_TYPE)
+            out.meta["val"] = torch.empty(2, 4, device=GPU_TYPE)
+        pattern = CallFunction(
+            torch.ops.aten.addmm.default,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            alpha=KeywordArg("alpha"),
+            beta=KeywordArg("beta"),
+        )
+        match = pattern.match(out)
+        self.assertIsInstance(match, Match)
+        self.assertEqual(should_prefer_unfused_addmm(match), alpha != 0)
+
+
+instantiate_parametrized_tests(TestAddmmZeroAlphaGuards)
+instantiate_device_type_tests(
+    TestAddmmZeroAlpha, globals(), only_for=("cpu", GPU_TYPE), allow_xpu=True
+)
 
 
 device_types = ("cpu", GPU_TYPE)
