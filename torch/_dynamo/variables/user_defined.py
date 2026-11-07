@@ -62,7 +62,12 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    is_portable_function_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -108,6 +113,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     check_setattr_args,
     GetSet,
@@ -135,6 +141,7 @@ from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
+    guard_mro_absent,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
@@ -168,7 +175,7 @@ def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
     Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's hash_impl and tp_richcompare_impl MRO walks.
+    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -354,6 +361,10 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
     }
 )
 
+# A metaclass whose MRO resolves __getattribute__ to anything else replaces
+# type_getattro, including one that only inherits the override.
+_type_getattribute = type.__getattribute__
+
 
 def is_data_descriptor(obj: object) -> bool:
     """Return True if *obj* is a data descriptor (has __get__ and (__set__ or __delete__))."""
@@ -390,6 +401,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
 
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
+
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -413,7 +440,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return GuardBuilder.CLASS_MATCH
         return None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if self.source:
             try:
                 install_guard(self.source.make_guard(GuardBuilder.CLASS_MATCH))
@@ -622,6 +649,50 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def pending_setattr_owner(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        """The class in this class's MRO whose pending setattr of *name* a lookup
+        sees, or None.
+
+        In eager the store would already be in that class's ``__dict__``, so it
+        wins unless a class earlier in the MRO defines *name*. The classes walked
+        past and the owner's place in the MRO are guarded to keep it that way, as
+        ``__bases__`` can be reassigned between calls.
+        """
+        side_effects = tx.output.side_effects
+        for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(self.value)):
+            if klass is self.value:
+                klass_vt = self
+            elif klass in side_effects:
+                klass_vt = side_effects[klass]
+            else:
+                klass_vt = None
+            if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
+                klass_vt, name
+            ):
+                if self.source is not None:
+                    guard_mro_absent(tx, self.value, self.source, name, idx)
+                    if klass_vt is not self:
+                        mro_entry = GetItemSource(TypeMROSource(self.source), idx)
+                        install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
+                return klass_vt
+            if name in namespace:
+                return None
+        return None
+
+    def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        """Whether a real ``getattr`` cannot stand in for tracing the lookup.
+
+        It would run a user-defined ``__get__`` at trace time and bake its result
+        into the graph, or miss a setattr still pending in this frame.
+        """
+        cls_attr = self.lookup_cls_mro_attr(name)
+        descr_get = inspect.getattr_static(type(cls_attr), "__get__", None)
+        if isinstance(descr_get, types.FunctionType):
+            return True
+        return self.pending_setattr_owner(tx, name) is not None
+
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -634,7 +705,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # EnumType, etc.) that don't override __getattribute__ use
         # type.__getattribute__ which is the algorithm we implement below.
         metacls = type(self.value)
-        if metacls is not type and "__getattribute__" in metacls.__dict__:
+        if self.lookup_metaclass_attr("__getattribute__") is not _type_getattribute:
             unimplemented(
                 gb_type="Custom metaclass with __getattribute__",
                 context=f"type({self.value}) = {metacls}",
@@ -660,9 +731,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
-        # Check for pending mutations from setattr on the class during tracing.
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+        # Check for pending mutations from setattr on the class or a base
+        # during tracing.
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is not None:
+            value = tx.output.side_effects.load_attr(owner, name)
+            # The store sits in owner.__dict__, so a descriptor is bound to this
+            # class, as in step 4 below.
+            if isinstance(
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+            ):
+                return value.tp_descr_get_impl(tx, self, self)
+            if isinstance(value, UserDefinedVariable) and (
+                mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+            ):
+                none = variables.ConstantVariable.create(None)
+                return value.call_method(tx, "__get__", [none, self], {})
+            return value
 
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
@@ -1280,6 +1365,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
+        elif (
+            name == "mro"
+            and len(args) == 0
+            and not kwargs
+            and type(self.value) is type
+            and self.lookup_cls_mro_attr("mro") is NO_SUCH_SUBOBJ
+        ):
+            # type.mro() returns a new list. With metaclass type, CPython
+            # recomputes __mro__ with the same C3 whenever a base changes, so
+            # the two always match. A custom metaclass can leave __mro__ stale.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
+            if self.source is not None:
+                # cls.mro is type.mro while no class in the MRO defines mro.
+                guard_mro_absent(
+                    tx, self.value, self.source, "mro", len(self.value.__mro__)
+                )
+            mro_source = self.source and TypeMROSource(self.source)
+            mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
+            items = mro.unpack_var_sequence(tx)
+            return variables.ListVariable(items, mutation_type=ValueMutationNew())
         elif name == "fromkeys" and issubclass(self.value, dict):
             if issubclass(self.value, collections.OrderedDict):
                 return tx.inline_user_function_return(
@@ -1392,7 +1498,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         # it resolves through cls.__mro__ first and can land on
                         # a different object (object.__repr__ rather than the
                         # metaclass __repr__). There is no expression for the
-                        # bound method itself, and hash_impl and
+                        # bound method itself, and tp_hash_impl and
                         # reconstruct_pycode both read the method VT's source,
                         # so leave it unset rather than give them cls.name.
                         fn_source = self.source and AttrSource(
@@ -2055,6 +2161,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
             new_fn = new_fn.__func__
         return new_fn is object.__new__
 
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable | None":
+        # A metaclass data descriptor wins over the MRO, as in tp_getattro_impl.
+        meta_attr = self.lookup_metaclass_attr(name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            return super()._hasattr_check_side_effects(tx, name)
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is None:
+            return None
+        value = tx.output.side_effects.load_attr(owner, name, deleted_ok=True)
+        # The lookup would run a metaclass __getattribute__ or the stored value's
+        # __get__, and either may raise AttributeError. Tracing that here would
+        # run it twice for getattr(cls, name, default), which looks the attribute
+        # up again after hasattr.
+        if self.lookup_metaclass_attr("__getattribute__") is not _type_getattribute or (
+            isinstance(value, UserDefinedVariable)
+            and mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+        ):
+            unimplemented(
+                gb_type="hasattr on a class attribute set earlier in the frame",
+                context=f"hasattr({self.value}, {name!r}), value {value}",
+                explanation="Dynamo cannot tell whether the lookup raises "
+                "AttributeError without running the stored value's __get__ "
+                "or the metaclass __getattribute__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return variables.ConstantVariable.create(
+            not isinstance(value, variables.DeletedVariable)
+        )
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
@@ -2155,6 +2292,16 @@ def call_random_fn(
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
+def can_guard_class_function_code(tx: "InstructionTranslatorBase", fn: object) -> bool:
+    """Whether a function reached through an instance's class can get its
+    CLOSURE_MATCH. A package must serialize every guard it keeps, and a function
+    whose globals no importable module owns (one exec'd into a plain dict) has
+    no portable form of that guard: under strict_precompile it would fail the
+    compile. Under a package such a function stays unguarded, as it was before
+    this guard existed."""
+    return tx.output.package is None or is_portable_function_guard("CLOSURE_MATCH", fn)
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
@@ -3318,9 +3465,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Other non-slot methods use the base VT; slots preserve subclass semantics.
-            # Comparisons use the UserDefined* slot implementation rather than `list_cmp`,
-            # which would trace tensor elements while dispatching a base method.
+            # Non-slot methods use the base VT; slots preserve subclass semantics.
+            # Comparisons use subclass slots rather than tracing tensor elements in list_cmp.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -3868,6 +4014,37 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     # Overrides the base __class__ getset to add the cls_source fallback above.
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
+    def guard_attribute_absence(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        cls = type(self.value)
+        if self.cls_source:
+            mro_attr_source(tx, cls, self.cls_source, name, guard_absence=True)
+            if not config.assume_dunder_attributes_remain_unchanged:
+                mro_attr_source(
+                    tx, cls, self.cls_source, "__getattr__", guard_absence=True
+                )
+        effects = tx.output.side_effects
+        if not self.source or any(
+            effects.has_pending_mutation_of_attr(self, attr)
+            for attr in (name, "__dict__")
+        ):
+            return
+        # Guard storage rather than re-running a user getter while building/checking guards.
+        offset = type.__dict__["__dictoffset__"].__get__(cls)
+        if offset and not isinstance(
+            self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+        ):
+            # Preserve the existing presence check when __dict__ is not a storage accessor.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+            return
+        if offset and name not in object.__getattribute__(self.value, "__dict__"):
+            install_not_in_instance_dict_guard(self.source, name)
+
     def generic_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -3977,17 +4154,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         # Step 7: AttributeError.
-        if (
-            self.source
-            and not self._object_has_getattribute
-            and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
-        ):
-            # Absence can change when a mutable class gains the attribute.
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
+        self.guard_attribute_absence(tx, name)
         raise_observed_exception(
             AttributeError,
             tx,
@@ -4004,10 +4171,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = mro_attr_source(
                 tx, type(self.value), self.cls_source, "__getattribute__"
             )
-            if source is not None and not any(
-                guard.inner_create_fn() is GuardBuilder.FUNCTION_MATCH
-                for guard in tx.output.guards.get_guards_for_source(source)
-            ):
+            if source is not None:
                 install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
@@ -4019,8 +4183,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Keep this off the builder so the instance-bound function
-                    # guard does not disable recursive module dictionary tags.
+                    # Avoid disabling recursive module tags with an instance function guard.
                     # See `test_nn_module_tag_overridden_getattr_safe`.
                     VariableBuilder.create_internal_user_function(
                         getattribute_fn,
@@ -4161,12 +4324,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         for owner, namespace in iter_mro_static_dicts(type(self.value))
                         if name in namespace
                     )
-                    if not type_is_immutable(owner) and not any(
-                        guard.inner_create_fn() is GuardBuilder.FUNCTION_MATCH
-                        for guard in tx.output.guards.get_guards_for_source(
-                            descriptor_source
-                        )
-                    ):
+                    if not type_is_immutable(owner):
                         install_guard(
                             descriptor_source.make_guard(GuardBuilder.FUNCTION_MATCH)
                         )
@@ -4248,13 +4406,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
-            return variables.UserMethodVariable(
-                VariableBuilder.create_internal_user_function(
-                    type_attr, source=fn_source
-                ),
-                self,
-                source=source,
-            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
+            else:
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -4456,12 +4633,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def is_hashable(self) -> bool:
-        # Mirrors the __hash__ is None check in hash_impl's MRO walk.
+        # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.
         # Returns "Is this hashable in CPython?", not "can Dynamo trace the hash?".
-        # Unknown C hashes are hashable but graph-break in hash_impl.
+        # Unknown C hashes are hashable but graph-break in tp_hash_impl.
         return type(self.value).__hash__ is not None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Mirrors CPython's slot_tp_hash which looks up __hash__ via the MRO:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9521-L9565
         # __hash__ = None → PyObject_HashNotImplemented:
@@ -4469,7 +4646,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self.inherits_base_slot("__hash__"):
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         obj_type = type(self.value)
 
@@ -4492,7 +4669,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.as_python_constant(), True
+                    return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
                     return int(result.evaluate_expr()), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
@@ -4513,7 +4690,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="Non-constant __hash__ return",
-                        context=f"hash_impl {self}",
+                        context=f"tp_hash_impl {self}",
                         explanation=f"__hash__ returned a non-constant "
                         f"{type(result).__name__}.",
                         hints=[
@@ -4538,7 +4715,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 break
             unimplemented(
                 gb_type="Untraceable C tp_hash",
-                context=f"hash_impl {self}",
+                context=f"tp_hash_impl {self}",
                 explanation=f"{cls.__name__} defines a C __hash__ that "
                 f"Dynamo cannot trace into.",
                 hints=[
@@ -4551,7 +4728,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self._base_methods is not None:
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
         # hash(self.value) calls the real tp_hash — handles both
         # object.__hash__ (identity) and builtin-inherited C hashes
         # (e.g. IntEnum inheriting int.__hash__).
@@ -4565,7 +4742,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
         """
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         obj_type = type(self.value)
 
@@ -4637,7 +4813,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_methods is not None:
             return super().tp_richcompare_impl(tx, other, op)
 
-        return object_richcompare(self, tx, other, op)
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def call_tree_map_branch(
         self,
@@ -4881,19 +5057,19 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # The fast path below replicates CPython's *generated* frozen dataclass
         # __hash__ (hash(tuple(field_values))).  A frozen dataclass may instead
         # define a custom __hash__ (e.g. the PyTreeSpec polyfill); dataclasses
         # synthesizes the generated one via exec (co_filename "<string>"), so a
         # __hash__ from a real source file is custom -- defer to the general
-        # MRO-walking hash_impl, which traces it.
+        # MRO-walking tp_hash_impl, which traces it.
         type_hash = type(self.value).__hash__
         if (
             isinstance(type_hash, types.FunctionType)
             and type_hash.__code__.co_filename != "<string>"
         ):
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         # CPython's frozen dataclass __hash__ is generated by _hash_add:
         # https://github.com/python/cpython/blob/e76aa128fe/Lib/dataclasses.py#L886-L892
@@ -5663,9 +5839,12 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
-                    if isinstance(arg, ConstDictVariable):
+                    storage = (
                         arg.materialize_keys()
-                    items = list(arg.items.keys())
+                        if isinstance(arg, ConstDictVariable)
+                        else arg.items
+                    )
+                    items = list(storage)
                 else:
                     items = unpack_iterable(tx, arg)
             else:
