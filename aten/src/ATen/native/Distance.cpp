@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
 #include <c10/util/accumulate.h>
@@ -76,14 +77,29 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   /** This function does the fist part of the euclidean distance calculation
    * We divide it in two steps to simplify dealing with subgradients in the
    * backward step */
-  Tensor x1_norm = x1.pow(2).sum(-1, true);
+  // float16/bfloat16 squares and the padded product cancel in too few bits:
+  // identical rows then have a nonzero diagonal. Evaluate that product in the
+  // op math type (float32 for reduced types) and cast back. float32 and
+  // float64 keep the original dtype.
+  const auto out_dtype = at::result_type(x1, x2);
+  const auto compute_dtype = at::toOpMathType(out_dtype);
+  Tensor a = x1;
+  Tensor b = x2;
+  if (compute_dtype != out_dtype) {
+    a = x1.to(compute_dtype);
+    b = x2.to(compute_dtype);
+  }
+  Tensor x1_norm = a.pow(2).sum(-1, true);
   Tensor x1_pad = at::ones_like(x1_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor x2_norm = x2.pow(2).sum(-1, true);
+  Tensor x2_norm = b.pow(2).sum(-1, true);
   Tensor x2_pad = at::ones_like(x2_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor x1_ = at::cat({x1.mul(-2), std::move(x1_norm), std::move(x1_pad)}, -1);
-  Tensor x2_ = at::cat({x2, std::move(x2_pad), std::move(x2_norm)}, -1);
+  Tensor x1_ = at::cat({a.mul(-2), std::move(x1_norm), std::move(x1_pad)}, -1);
+  Tensor x2_ = at::cat({b, std::move(x2_pad), std::move(x2_norm)}, -1);
   Tensor result = x1_.matmul(x2_.mT());
   result.clamp_min_(0).sqrt_();
+  if (result.scalar_type() != out_dtype) {
+    return result.to(out_dtype);
+  }
   return result;
 }
 
