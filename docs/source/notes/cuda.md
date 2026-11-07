@@ -1016,6 +1016,106 @@ with torch.cuda.use_mem_pool(pool):
 ```
 
 
+(cuda-pinned-host-memory-pools)=
+## Pinned host memory pools
+
+{class}`torch.cuda.use_mem_pool` also routes pinned host allocations, such as
+`torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs of
+`tensor.to("cpu", non_blocking=True)`. Pass `pinned=True` with a {class}`torch.cuda.MemPool`
+to route device and pinned allocations to one pool, or pass a {class}`torch.cuda.HostMemPool`,
+a pool of pinned host memory only:
+
+```python
+pool = torch.cuda.MemPool()
+with torch.cuda.use_mem_pool(pool, pinned=True):
+    x = torch.empty(1024, device="cuda")      # device memory from pool
+    buf = torch.empty(1024, pin_memory=True)  # pinned memory from pool
+
+host_pool = torch.cuda.HostMemPool()
+with torch.cuda.use_mem_pool(host_pool):
+    buf = torch.empty(1024, pin_memory=True)  # pinned memory from host_pool
+```
+
+What a pool guarantees is cache isolation: a pinned block freed by any thread returns to the
+pool it came from, and is handed out again only to threads inside that pool, or to the capture
+of a graph that uses it as its `pool`.
+
+Routing follows the thread:
+
+* Only the thread that entered the context routes to the pool; threads it starts do not.
+* Contexts nest: the innermost one wins. Several threads can route pinned memory to one
+  HostMemPool at the same time.
+* Contexts that route pinned memory must be exited in reverse order, on the thread that
+  entered them; anything else raises an error and changes nothing. When a thread exits inside
+  a context, its pinned routes are ended.
+* CUDA graph capture follows the same rules for device and pinned memory: the newest of the
+  capture and the context takes the capturing stream. Entered inside a capture, the context
+  wins and the graph keeps the pool until it is reset. A HostMemPool, like a MemPool, can be the
+  `pool` of a graph. Pinned blocks allocated during the capture and then used by a stream are
+  reused only once the capture's pool loses its last reference: every graph that keeps it is
+  reset and, if it is a HostMemPool or a MemPool used with `pinned=True`, the pool is deleted.
+* Use contexts from synchronous code, on threads you control. A context that stays open across
+  an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
+  pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
+* Pools are local to the process. Using them across `fork` is not supported.
+
+{meth}`torch.cuda.HostMemPool.use_count` is 1 for the pool object, plus 1 for each open context
+on any thread and each graph that keeps the pool.
+
+Creating a pool allocates nothing. While the pool is alive, emptying the host cache, which
+{class}`torch.cuda.graph` does on entry, leaves its cache alone. Once the pool is deleted and
+no graph keeps it, its cached pinned blocks are freed at once, by the deletion or by the reset
+of the last graph that keeps it. Deleting a HostMemPool frees them with the GIL released, since
+`cudaFreeHost` waits for the work already issued on the current device. Blocks that tensors,
+pending copies or other graphs still use, and the whole cache if a CUDA graph capture is
+underway at that point, are freed by a later {func}`torch.accelerator.empty_host_cache`.
+
+### One pool per NUMA node
+
+`cudaHostAlloc` places and pins all pages of a new block on the NUMA node of the calling
+thread, or on the node its memory policy names, and pinned pages never move. A thread inside a
+pool allocates the pool's new blocks itself. So to keep the buffers of each node on that node,
+create one pool per node and enter `pools[k]` only from threads bound to node `k`:
+
+```python
+import os
+import threading
+
+import torch
+
+# cpus_of_node[k]: the CPUs of NUMA node k, e.g. from
+# /sys/devices/system/node/node{k}/cpulist
+pools = [torch.cuda.HostMemPool() for _ in cpus_of_node]
+
+def loader(node):
+    os.sched_setaffinity(0, cpus_of_node[node])  # before entering the pool
+    with torch.cuda.use_mem_pool(pools[node]):
+        ...  # pinned buffers for the GPUs attached to this node
+
+threads = [threading.Thread(target=loader, args=(k,)) for k in range(len(pools))]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+```
+
+The allocator knows nothing about NUMA, so placement depends on the setup:
+
+* Bind the thread, or set its memory policy, before it enters the pool. A block allocated by an
+  unbound thread stays in the pool on whatever node it landed. With CPU affinity alone, the
+  kernel can fall back to another node when the local one is full; `MPOL_BIND` does not.
+* `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
+  the pages from a shared thread pool, which then decides where they go.
+* A pool's new blocks never come from the `pinned_reserve_segment_size_mb` segment, which the
+  first allocating thread placed for the whole process. This includes the blocks allocated
+  during the capture of a graph whose `pool` is the pool; the capturing thread places them. A
+  MemPool counts as a pool here only from its first use with `pinned=True`.
+* On ROCm 7.2 and later, a pool's new blocks come from `hipHostMalloc` with
+  `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but only `MPOL_BIND` and
+  `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes the pages from the
+  node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that touches the pages
+  places them, as on CUDA.
+
 (cuda-memory-python-allocators)=
 ## Python-defined CUDA allocators
 
@@ -1993,7 +2093,8 @@ g1.replay()
 g2.replay()
 ```
 
-The `pool` argument also accepts {class}`~torch.cuda.MemPool`. If
+The `pool` argument also accepts {class}`~torch.cuda.MemPool` and
+{class}`~torch.cuda.HostMemPool`. If
 {func}`~torch.cuda.use_mem_pool` is used during capture, the graph retains that
 pool until the graph is reset or destroyed. {meth}`torch.cuda.CUDAGraph.pool`
 returns the primary capture pool, while `CUDAGraph.pools()` returns all pools

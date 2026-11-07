@@ -2216,6 +2216,21 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self._check_cuda_use_mem_pool(backend="eager")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_decorator(self):
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+
+        @torch.cuda.use_mem_pool(pool)
+        def alloc():
+            return torch.ones(16, device="cuda") + 1
+
+        res = torch.compile(lambda: alloc(), backend="eager", fullgraph=True)()
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_mem_pool_id(self):
         def fn(pool):
             return pool.id

@@ -174,6 +174,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
   std::vector<MempoolId_t> retained_mempool_ids_;
+  // Host pools retained by retain_pool(), released on reset.
+  std::vector<MempoolId_t> retained_host_mempool_ids_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
