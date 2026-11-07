@@ -2226,11 +2226,13 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     zero_point_loader = zero_point.make_loader()
 
     device = input.get_device()
+    scale_idx = (0,) if len(scale.get_size()) == 1 else ()
+    zero_point_idx = (0,) if len(zero_point.get_size()) == 1 else ()
 
     def inner_fn(idx):
         input = input_loader(idx)
-        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
-        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        _scale = scale_loader(scale_idx)
+        _zero_point = zero_point_loader(zero_point_idx)
         if scale.dtype != torch.float32:
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
@@ -2285,11 +2287,13 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
+    scale_idx = (0,) if len(scale.get_size()) == 1 else ()
+    zero_point_idx = (0,) if len(zero_point.get_size()) == 1 else ()
 
     def inner_fn(idx):
         input = input_loader(idx)
-        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
-        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        _scale = scale_loader(scale_idx)
+        _zero_point = zero_point_loader(zero_point_idx)
         if scale.dtype != torch.float32:
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:

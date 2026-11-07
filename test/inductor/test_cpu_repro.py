@@ -2348,6 +2348,26 @@ class CPUReproTests(TestCase):
     def test_dequant_quant_lowering_fp8_e5m2(self):
         self._test_dequant_quant_lowering_helper(torch.float8_e5m2)
 
+    @parametrize("scale_shape", ((), (1,)))
+    @parametrize("zero_point_shape", ((), (1,)))
+    def test_quant_dequant_per_tensor_tensor_scalar_shapes(
+        self, scale_shape, zero_point_shape
+    ):
+        # https://github.com/pytorch/pytorch/issues/203189
+        def fn(x, scale, zero_point):
+            q = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+                x, scale, zero_point, -128, 127, torch.int8
+            )
+            dq = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
+                q, scale, zero_point, -128, 127, torch.int8
+            )
+            return q, dq
+
+        x = torch.linspace(-2, 2, 16)
+        scale = torch.tensor(0.5).reshape(scale_shape)
+        zero_point = torch.tensor(3, dtype=torch.int64).reshape(zero_point_shape)
+        self.common(fn, (x, scale, zero_point))
+
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
