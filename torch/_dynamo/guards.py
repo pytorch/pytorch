@@ -1368,10 +1368,14 @@ class GuardCheckSpec(NamedTuple):
         information from the guarded value at build time.
     eval_fn: (value, metadata) -> bool  — re-evaluates the guard at lookup
         time using a fresh value and the previously saved metadata.
+    get_extra_sources_fn: optional ordered dependencies. Both functions receive the
+        tuple (originating value, *dependency values) for a relational check.
     """
 
     get_metadata_fn: GuardCheckGetMetadataFn
     eval_fn: GuardCheckEvalFn
+    # Relational checks receive (originating value, *dependency values).
+    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None
 
 
 SKIP_GUARD = object()
@@ -1508,9 +1512,15 @@ def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
 def register_guard_check_spec(
     get_metadata_fn: GuardCheckGetMetadataFn,
     eval_fn: GuardCheckEvalFn,
+    *,
+    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
-    handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
+    handler = GuardCheckSpec(
+        get_metadata_fn=get_metadata_fn,
+        eval_fn=eval_fn,
+        get_extra_sources_fn=get_extra_sources_fn,
+    )
 
     def decorator(fn):
         fn.guard_check_spec = handler
@@ -3746,10 +3756,14 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @skip_guard_check_spec
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, values: values[0] is values[1],
+        eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
+        get_extra_sources_fn=lambda guard: (
+            _guard_create_fn_keyword(guard, "source_b"),
+        ),
+    )
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
@@ -5960,14 +5974,9 @@ def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
     if portable is None:
         return guard
     create_fn, expected = portable
-    return dataclasses.replace(
-        guard,
+    return guard.with_source(
+        guard.originating_source,
         create_fn=functools.partial(create_fn, expected=expected),
-        guard_types=None,
-        code_list=None,
-        obj_weakref=None,
-        guarded_class_weakref=None,
-        _hash=None,
     )
 
 
