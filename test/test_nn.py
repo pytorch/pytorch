@@ -9671,6 +9671,30 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad_input[0, 0, 1, 0].item(), 0)
         self.assertEqual(grad_input[0, 0, 64, 64].item(), 1)
 
+    @onlyCUDA
+    @largeTensorTest("16GB")
+    def test_upsamplingNearest2d_backward_nhwc_int64(self, device):
+        # The NHWC (channels_last) backward path used to reject grad_input
+        # tensors with more than INT_MAX (~2.1e9) elements via an int32
+        # TORCH_CHECK, even though the kernel itself indexes with int64_t.
+        # Downsampling keeps grad_output small while grad_input stays huge.
+        # See https://github.com/pytorch/pytorch/issues/141831
+        n, c, h, w = 1, 4, 24000, 24000  # 4 * 24000 * 24000 = 2.304e9 > 2^31 - 1
+        output_size = (16, 16)
+
+        x = torch.randn((n, c, h, w), device=device, dtype=torch.bfloat16)
+        x = x.contiguous(memory_format=torch.channels_last).requires_grad_()
+        out = F.interpolate(x, size=output_size, mode="nearest")
+        # ones_like keeps channels_last on grad_output; a scalar-sum backward
+        # would expand a contiguous grad and silently skip the NHWC path.
+        out.backward(torch.ones_like(out))
+
+        # Each output pixel maps to exactly one input pixel (scale 1500 is
+        # integral), so exactly n * c * 16 * 16 input elements receive a
+        # gradient of 1 and everything else stays 0.
+        self.assertEqual(torch.count_nonzero(x.grad), n * c * 16 * 16)
+        self.assertEqual(x.grad.sum(dtype=torch.float32).item(), float(n * c * 16 * 16))
+
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearest2d_correctness(self, device, memory_format, isize, osize):

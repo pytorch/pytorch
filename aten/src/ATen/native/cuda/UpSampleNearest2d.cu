@@ -431,13 +431,13 @@ static void upsample_nearest2d_backward_out_cuda_template(
         grad_input.is_contiguous(memory_format)) {
     Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
-    TORCH_CHECK(grad_input.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports grad_input tensors with less than INT_MAX elements, but got ", grad_input.sizes());
-    TORCH_CHECK(grad_output.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports grad_output tensors with less than INT_MAX elements, but got ", grad_output.sizes());
+    TORCH_CHECK(grad_input.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports grad_input tensors with less than 2^63 - 1 elements, but got ", grad_input.sizes());
+    TORCH_CHECK(grad_output.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports grad_output tensors with less than 2^63 - 1 elements, but got ", grad_output.sizes());
 
-    const int num_kernels = grad_input.numel();
-    const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+    const int64_t num_kernels = grad_input.numel();
+    const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_nhwc_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
