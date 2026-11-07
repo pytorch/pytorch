@@ -2111,6 +2111,12 @@ class TestMetaCore(TestCase):
             out = f()
             self.assertEqual(out.shape, [10, 16])
 
+    @parametrize("op", [torch.max, torch.min])
+    def test_max_min_dim_empty_dim_error(self, op):
+        name = op.__name__
+        with self.assertRaisesRegex(IndexError, rf"{name}\(\): Expected reduction dim 0 to have non-zero size"):
+            op(torch.empty(0, 3, device="meta"), 0)
+
     def test_local_scalar_dense_call(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')
