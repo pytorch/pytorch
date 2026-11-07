@@ -3885,6 +3885,11 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        """Time this extern candidate, in the TunableOp worker where possible.
+
+        Routed GEMMs are timed in the worker so hipBLASLt tuning cannot abort
+        or hang this process; every other path times inline with tuning off.
+        """
         if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
 
@@ -3898,10 +3903,30 @@ class ExternKernelCaller(ChoiceCaller):
         # grouped/sparse GEMMs, custom-op fallbacks -- would tune GEMMs they
         # call internally into the results file, and their bmreqs build inputs
         # (rand_strided, zero-filled integer tensors) that mis-time them.
-        if (
+        # The remaining gates are all about not spending the worker on a
+        # candidate it cannot benchmark. routing_is_open(): a worker that has
+        # just died three times running is containing nothing, and each fault
+        # costs a kill and a cold restart. output_tensor_meta: __init__ leaves
+        # the metas [] when TensorMeta.from_irnodes raises, which fails the
+        # worker's own assertion for an arg-less benchmark -- a guaranteed
+        # kill where inline would have worked. VERIFY: the routed path never
+        # writes `out`, so the caller's expected would be an unwritten buffer.
+        if not (
             tunableop.is_enabled()
             and out.is_cuda
             and tunableop.is_tunableop_gemm(self.choice.name)
+        ):
+            return self._benchmark_inline(args, out)
+
+        # Past here a mode is set and this is a GEMM TunableOp would tune, so
+        # EVERY exit has to keep tuning out of this process -- not just the
+        # post-fault one. The gates below decide whether the worker is used;
+        # when any of them says no the candidate still has to be timed, and
+        # timing it unguarded is the abort or hang the worker exists to stop.
+        if (
+            tunableop.routing_is_open()
+            and isinstance(self.bmreq.output_tensor_meta, TensorMeta)
+            and not VERIFY
         ):
             # Extern kernels are otherwise benchmarked inline, assuming they do not
             # crash (see benchmark_in_sub_process); hipBLASLt tuning can abort the
@@ -3920,33 +3945,36 @@ class ExternKernelCaller(ChoiceCaller):
                     dyn_dims_mask=self.tunable_dyn_dims_mask,
                 )
             )
+            tunableop.note_routing_outcome(outcome.status)
             if outcome.status == "ok":
                 return outcome.time
-            # Time the untuned kernel inline rather than dropping the candidate.
-            # Tuning must be off while doing so, or a user enable(True) lets
-            # hipBLASLt tune inline in the parent -- exactly the abort or hang
-            # the worker contains. enable(False) alone does not get there:
-            # IsTunableOpEnabled honours PYTORCH_TUNABLEOP_ENABLED=1 over the
-            # setting, so an existing exact or wildcard hit is still served and
-            # only tuning_enable(False) stops new tuning. Both are restored so
-            # later compiles see the caller's setting.
-            tunable = torch.cuda.tunable
-            was_enabled = tunable.is_enabled()
-            was_tuning = tunable.tuning_is_enabled()
-            log.warning(
+            # Debug, not warning: submit() has already reported the fault
+            # itself, once per kind. This fires per candidate and only says
+            # what was done about it.
+            log.debug(
                 "TunableOp benchmark of %s hit %s; timing it inline instead.",
                 self.name,
                 outcome.status,
             )
-            try:
-                tunable.enable(False)
-                tunable.tuning_enable(False)
-                return self._benchmark_inline(args, out)
-            finally:
-                tunable.enable(was_enabled)
-                tunable.tuning_enable(was_tuning)
 
-        return self._benchmark_inline(args, out)
+        # Time the untuned kernel inline rather than dropping the candidate.
+        # Tuning must be off while doing so, or a user enable(True) lets
+        # hipBLASLt tune inline in the parent -- exactly the abort or hang
+        # the worker contains. enable(False) alone does not get there:
+        # IsTunableOpEnabled honours PYTORCH_TUNABLEOP_ENABLED=1 over the
+        # setting, so an existing exact or wildcard hit is still served and
+        # only tuning_enable(False) stops new tuning. Both are restored so
+        # later compiles see the caller's setting.
+        tunable = torch.cuda.tunable
+        was_enabled = tunable.is_enabled()
+        was_tuning = tunable.tuning_is_enabled()
+        try:
+            tunable.enable(False)
+            tunable.tuning_enable(False)
+            return self._benchmark_inline(args, out)
+        finally:
+            tunable.enable(was_enabled)
+            tunable.tuning_enable(was_tuning)
 
     def _benchmark_inline(self, args, out):
         # Bind to a local: entering the dynamic_dims_mask context below drops
