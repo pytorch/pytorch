@@ -659,6 +659,7 @@ class WorldData:
     )
     pg_backend_config: dict[dist.ProcessGroup, str] = field(default_factory=dict)
     group_count: int = 0
+    hashed_group_counts: dict[tuple[int, ...], int] = field(default_factory=dict)
     tags_to_pg: dict[str, list[dist.ProcessGroup]] = field(default_factory=dict)
     pg_to_tag: dict[dist.ProcessGroup, str] = field(default_factory=dict)
     pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]] = field(
@@ -709,6 +710,10 @@ class ThreadLocalWorld:
     @group_count.setter
     def group_count(self, value):
         self._get_world().group_count = value
+
+    @property
+    def _hashed_group_counts(self) -> dict[tuple[int, ...], int]:
+        return self._get_world().hashed_group_counts
 
     @property
     def tags_to_pg(self):
