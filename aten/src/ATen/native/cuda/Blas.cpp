@@ -1098,12 +1098,9 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
     if (result.numel() != 0) {
       // A length-1 result can be contiguous with any stride, including zero
       auto r_stride = result.size(0) == 1 ? int64_t(1) : result.stride(0);
-      auto vec_stride = vec.stride(0);
-
-      // Check for contiguity of `vec` and update `vec_stride` accordingly
-      const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
-      // A vector can be contiguous and have a stride of zero if it has it is of length 1
-      vec_stride = std::max<int64_t>(vec_contiguous.stride(0), 1LL);
+      // An expanded vector needs a materialized copy; a length-1 vector can be contiguous with any stride
+      const auto vec_contiguous = vec.size(0) > 1 && vec.stride(0) == 0 ? vec.contiguous() : vec;
+      const auto vec_stride = vec_contiguous.size(0) == 1 ? int64_t(1) : vec_contiguous.stride(0);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();

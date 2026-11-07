@@ -6434,6 +6434,12 @@ class TestLinalg(TestCase):
         out = torch.empty(1, device=device).as_strided((1,), (0,))
         self.assertEqual(torch.mv(mat, vec, out=out), mat @ vec)
 
+    @onlyCUDA
+    def test_mv_length_one_vector_large_stride(self, device):
+        mat = torch.randn(3, 1, device=device)
+        vec = torch.randn(1, device=device).as_strided((1,), (2**40,))
+        self.assertEqual(torch.mv(mat, vec), mat @ vec.contiguous())
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
