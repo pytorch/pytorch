@@ -711,7 +711,9 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest:
+class CommonDistributedDataParallelHelpers:
+    """Setup/teardown and DDP helpers shared by GENERIC and CUDA test classes."""
+
     def tearDown(self):
         super().tearDown()
         # DistributedDataParallel test doesn't seem to call FileStore destructor
@@ -854,10 +856,257 @@ class CommonDistributedDataParallelTest:
                     self.assertTrue(j.grad is not None)
                 self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
-    # A list of tests for ddp with activation checkpointing
-    # when gradient_as_bucket_view=True, False.
-    # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
+    def _prepare_dummy_data(self):
+        ddp_bs = 16
+        bs = ddp_bs * self.world_size
+        input = torch.rand((bs, 20), device=device_type, requires_grad=True)
+        target = torch.randn((bs, 20), device=device_type)
+        offset = self.rank * ddp_bs
+        ddp_input = input[offset : offset + ddp_bs]
+        ddp_target = target[offset : offset + ddp_bs]
+        return input, ddp_input, target, ddp_target
+
+    def _test_ddp_with_process_group(
+        self,
+        process_group,
+        devices,
+        device_ids,
+        multi_device=False,
+        gradient_as_bucket_view=False,
+    ):
+        """
+        Note: we pass down `device_ids` all the way to DistributedDataParallel
+        as part of the test. Below you find tests that either use a list of
+        integers, a list of `torch.Device` instances, or an empty list.
+        The `devices` argument is used to control placement of the model and
+        must always be specified as list of `torch.Device` instances.
+        """
+        local_batch_size = 1 if devices is None else len(devices)
+        global_batch_size = self.world_size * local_batch_size
+
+        if multi_device:
+            model, ddp_model, input, target = self._prepare_multi_device_module(
+                process_group,
+                devices,
+                device_ids,
+                global_batch_size,
+                gradient_as_bucket_view,
+            )
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.get("is_multi_device_module"))
+        else:
+            model, ddp_model, input, target = self._prepare_single_device_module(
+                process_group,
+                devices,
+                device_ids,
+                global_batch_size,
+                gradient_as_bucket_view,
+            )
+            ddp_logging_data = ddp_model._get_ddp_logging_data()
+            self.assertFalse(ddp_logging_data.get("is_multi_device_module"))
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        def update_parameters(model):
+            for param in model.parameters():
+                with torch.no_grad():
+                    param -= param.grad
+                param.grad = None
+
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            step_model(
+                ddp_model,
+                input[
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+                ],
+                target[
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+                ],
+            )
+
+            # Update weights and run a second iteration to shake out errors
+            update_parameters(model)
+            update_parameters(ddp_model)
+            self.assertEqual(
+                len(list(model.parameters())), len(list(ddp_model.parameters()))
+            )
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                self.assertEqual(i, j, rtol=1.3e-06, atol=5e-5)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    def _gpu_model_with_ddp_comm_hook(
+        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+    ):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        # Register a DDP communication hook if any.
+        if hook is not None:
+            gpu_model.register_comm_hook(state, hook)
+
+        return gpu_model
+
+    def _gpu_model_with_builtin_ddp_comm_hook(
+        self, process_group, hook=None, gradient_as_bucket_view=False
+    ):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        # Register a built-in DDP communication hook if defined
+        if hook is not None:
+            gpu_model._register_builtin_comm_hook(hook)
+
+        return gpu_model
+
+    def _run_and_verify_hook(self, model, input, expected_grad):
+        # Run forward
+        output = model(input, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
+
+    def _simple_hook(
+        self, state: object, bucket: dist.GradBucket
+    ) -> torch.futures.Future[torch.Tensor]:
+        fut = torch.futures.Future()
+        fut.set_result(torch.ones_like(bucket.buffer()))
+
+        def fut_then(fut):
+            # Add ones to fut's result.
+            t = fut.value()
+            return t + torch.ones_like(t)
+
+        return fut.then(fut_then)
+
+    def _test_not_nan(self, model, x):
+        y = model(x)
+        self.assertFalse(y.isnan().any().item())
+        y.sum().backward()
+        for p in model.parameters():
+            self.assertFalse(p.grad.isnan().any().item())
+
+    def _test_dataclass_output(self, skip_o1):
+        net_x = torch.cat([torch.ones(4, 10) * i for i in range(self.world_size)]).to(
+            self.rank
+        )
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=True,
+            static_graph=False,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x)
+        ddp_out = ddp(ddp_x)
+
+        net_loss = F.mse_loss(
+            (
+                net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+                if not skip_o1
+                else net_out.o2["a"] + net_out.o2["b"]
+            ),
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            (
+                ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+                if not skip_o1
+                else ddp_out.o2["a"] + ddp_out.o2["b"]
+            ),
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    def _create_ddp_model(self, model=None, process_group=None, **kwargs):
+        if model is None:
+            model = Net()
+        if process_group is None:
+            process_group = self._get_process_group()
+        return DistributedDataParallel(
+            model.to(self.rank),
+            device_ids=[self.rank],
+            process_group=process_group,
+            bucket_cap_mb=0.001,
+            **kwargs,
+        )
+
+    def _create_manual_ddp_model(self, **kwargs):
+        ddp_model = self._create_ddp_model(**kwargs)
+        ddp_model.require_manual_backward_finalization = True
+        return ddp_model
+
+    def _register_finalize_backward_hook(self, ddp_model, param=None):
+        if param is None:
+            param = ddp_model.module.fc1.weight
+        grad_accumulator = param.expand_as(param).grad_fn.next_functions[0][0]
+        # DDP registered its node post-hook first, so this runs after the
+        # reducer processes this parameter.
+        return grad_accumulator.register_hook(lambda *_: ddp_model.finalize_backward())
+
+    def _register_ones_comm_hook(self, ddp_model):
+        def ones_hook(state, bucket):
+            future = torch.futures.Future()
+            future.set_result(torch.ones_like(bucket.buffer()))
+            return future
+
+        ddp_model.register_comm_hook(state=None, hook=ones_hook)
+
+    def _assert_gradients_equal(self, ddp_model, value):
+        for param in ddp_model.parameters():
+            self.assertEqual(param.grad, torch.full_like(param.grad, value))
+
+    def _assert_gradients_equal_across_ranks(self, ddp_model):
+        process_group = ddp_model.process_group
+        for param in ddp_model.parameters():
+            rank_grads = [
+                torch.empty_like(param.grad) for _ in range(process_group.size())
+            ]
+            dist.all_gather(rank_grads, param.grad, group=process_group)
+            for rank_grad in rank_grads[1:]:
+                self.assertEqual(rank_grads[0], rank_grad)
+
+
+class CommonDistributedDataParallelTest(CommonDistributedDataParallelHelpers):
+    """GPU/common DDP tests. Inherit Helpers for tearDown/world_size/MRO."""
+
     class CheckpointOnceModule(nn.Module):
         """
         Runs checkpoint for a single layer in the model.
@@ -925,16 +1174,6 @@ class CommonDistributedDataParallelTest:
             super().__init__(use_reentrant=use_reentrant)
             # Share weights
             self.l1.weight = self.l2.weight
-
-    def _prepare_dummy_data(self):
-        ddp_bs = 16
-        bs = ddp_bs * self.world_size
-        input = torch.rand((bs, 20), device=device_type, requires_grad=True)
-        target = torch.randn((bs, 20), device=device_type)
-        offset = self.rank * ddp_bs
-        ddp_input = input[offset : offset + ddp_bs]
-        ddp_target = target[offset : offset + ddp_bs]
-        return input, ddp_input, target, ddp_target
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [True, False])
@@ -1082,7 +1321,6 @@ class CommonDistributedDataParallelTest:
                 allow_none_grads=True,
             )
 
-    # DDP works as expected if there is weight sharing among layers
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [True, False])
     def test_ddp_checkpointing_weight_sharing(self, use_reentrant):
@@ -1140,149 +1378,6 @@ class CommonDistributedDataParallelTest:
                     use_error_feedback=use_error_feedback,
                     warm_start=warm_start,
                 )
-
-    def _test_ddp_with_process_group(
-        self,
-        process_group,
-        devices,
-        device_ids,
-        multi_device=False,
-        gradient_as_bucket_view=False,
-    ):
-        """
-        Note: we pass down `device_ids` all the way to DistributedDataParallel
-        as part of the test. Below you find tests that either use a list of
-        integers, a list of `torch.Device` instances, or an empty list.
-        The `devices` argument is used to control placement of the model and
-        must always be specified as list of `torch.Device` instances.
-        """
-        local_batch_size = 1 if devices is None else len(devices)
-        global_batch_size = self.world_size * local_batch_size
-
-        if multi_device:
-            model, ddp_model, input, target = self._prepare_multi_device_module(
-                process_group,
-                devices,
-                device_ids,
-                global_batch_size,
-                gradient_as_bucket_view,
-            )
-            ddp_logging_data = ddp_model._get_ddp_logging_data()
-            self.assertTrue(ddp_logging_data.get("is_multi_device_module"))
-        else:
-            model, ddp_model, input, target = self._prepare_single_device_module(
-                process_group,
-                devices,
-                device_ids,
-                global_batch_size,
-                gradient_as_bucket_view,
-            )
-            ddp_logging_data = ddp_model._get_ddp_logging_data()
-            self.assertFalse(ddp_logging_data.get("is_multi_device_module"))
-
-        def step_model(model, input, target):
-            model.train()
-            output = model(input)
-            loss = F.mse_loss(output, target.to(output.device))
-            loss.backward()
-
-        def update_parameters(model):
-            for param in model.parameters():
-                with torch.no_grad():
-                    param -= param.grad
-                param.grad = None
-
-        # check two model parameters over 2 iterations
-        for iteration in range(2):
-            # single cpu/gpu training
-            step_model(model, input, target)
-
-            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-            step_model(
-                ddp_model,
-                input[
-                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
-                ],
-                target[
-                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
-                ],
-            )
-
-            # Update weights and run a second iteration to shake out errors
-            update_parameters(model)
-            update_parameters(ddp_model)
-            self.assertEqual(
-                len(list(model.parameters())), len(list(ddp_model.parameters()))
-            )
-            for i, j in zip(model.parameters(), ddp_model.parameters()):
-                self.assertEqual(i, j, rtol=1.3e-06, atol=5e-5)
-
-            # Shuffle the input so that DDP input is different
-            torch.manual_seed(1337 + iteration)
-            input = input[torch.randperm(global_batch_size)]
-
-    def _gpu_model_with_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
-    ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            ModuleForDdpCommHook().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-        )
-
-        # Register a DDP communication hook if any.
-        if hook is not None:
-            gpu_model.register_comm_hook(state, hook)
-
-        return gpu_model
-
-    def _gpu_model_with_builtin_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False
-    ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            ModuleForDdpCommHook().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-        )
-
-        # Register a built-in DDP communication hook if defined
-        if hook is not None:
-            gpu_model._register_builtin_comm_hook(hook)
-
-        return gpu_model
-
-    def _run_and_verify_hook(self, model, input, expected_grad):
-        # Run forward
-        output = model(input, self.rank)
-
-        # Run backward
-        output.mean().backward()
-
-        [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
-
-    def _simple_hook(
-        self, state: object, bucket: dist.GradBucket
-    ) -> torch.futures.Future[torch.Tensor]:
-        fut = torch.futures.Future()
-        fut.set_result(torch.ones_like(bucket.buffer()))
-
-        def fut_then(fut):
-            # Add ones to fut's result.
-            t = fut.value()
-            return t + torch.ones_like(t)
-
-        return fut.then(fut_then)
-
-    def _test_not_nan(self, model, x):
-        y = model(x)
-        self.assertFalse(y.isnan().any().item())
-        y.sum().backward()
-        for p in model.parameters():
-            self.assertFalse(p.grad.isnan().any().item())
 
     @skip_if_lt_x_gpu(2)
     def test_sync_batch_norm_only_empty_input(self):
@@ -1406,52 +1501,6 @@ class CommonDistributedDataParallelTest:
             o2 = {"a": self.seq2(x), "b": self.relu(self.seq2(x))}
             return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
 
-    def _test_dataclass_output(self, skip_o1):
-        net_x = torch.cat([torch.ones(4, 10) * i for i in range(self.world_size)]).to(
-            self.rank
-        )
-        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
-
-        # use manual_seed to make sure local models start with the same values
-        torch.manual_seed(0)
-        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
-        ddp = DistributedDataParallel(
-            copy.deepcopy(net),
-            device_ids=[self.rank],
-            find_unused_parameters=True,
-            static_graph=False,
-            process_group=self._get_process_group(),
-        )
-
-        net_out = net(net_x)
-        ddp_out = ddp(ddp_x)
-
-        net_loss = F.mse_loss(
-            (
-                net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
-                if not skip_o1
-                else net_out.o2["a"] + net_out.o2["b"]
-            ),
-            torch.ones_like(net_out.o2["a"], device=self.rank),
-        )
-        ddp_loss = F.mse_loss(
-            (
-                ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
-                if not skip_o1
-                else ddp_out.o2["a"] + ddp_out.o2["b"]
-            ),
-            torch.ones_like(ddp_out.o2["a"], device=self.rank),
-        )
-
-        net_loss.backward()
-        ddp_loss.backward()
-
-        for p1, p2 in zip(net.parameters(), ddp.parameters()):
-            if torch.is_tensor(p1.grad):
-                self.assertTrue(p1.grad.allclose(p2.grad))
-            else:
-                self.assertEqual(p1.grad, p2.grad)
-
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output(self):
         self._test_dataclass_output(skip_o1=False)
@@ -1459,54 +1508,6 @@ class CommonDistributedDataParallelTest:
     @skip_if_lt_x_gpu(2)
     def test_dataclass_output_unused_param(self):
         self._test_dataclass_output(skip_o1=True)
-
-    def _create_ddp_model(self, model=None, process_group=None, **kwargs):
-        if model is None:
-            model = Net()
-        if process_group is None:
-            process_group = self._get_process_group()
-        return DistributedDataParallel(
-            model.to(self.rank),
-            device_ids=[self.rank],
-            process_group=process_group,
-            bucket_cap_mb=0.001,
-            **kwargs,
-        )
-
-    def _create_manual_ddp_model(self, **kwargs):
-        ddp_model = self._create_ddp_model(**kwargs)
-        ddp_model.require_manual_backward_finalization = True
-        return ddp_model
-
-    def _register_finalize_backward_hook(self, ddp_model, param=None):
-        if param is None:
-            param = ddp_model.module.fc1.weight
-        grad_accumulator = param.expand_as(param).grad_fn.next_functions[0][0]
-        # DDP registered its node post-hook first, so this runs after the
-        # reducer processes this parameter.
-        return grad_accumulator.register_hook(lambda *_: ddp_model.finalize_backward())
-
-    def _register_ones_comm_hook(self, ddp_model):
-        def ones_hook(state, bucket):
-            future = torch.futures.Future()
-            future.set_result(torch.ones_like(bucket.buffer()))
-            return future
-
-        ddp_model.register_comm_hook(state=None, hook=ones_hook)
-
-    def _assert_gradients_equal(self, ddp_model, value):
-        for param in ddp_model.parameters():
-            self.assertEqual(param.grad, torch.full_like(param.grad, value))
-
-    def _assert_gradients_equal_across_ranks(self, ddp_model):
-        process_group = ddp_model.process_group
-        for param in ddp_model.parameters():
-            rank_grads = [
-                torch.empty_like(param.grad) for _ in range(process_group.size())
-            ]
-            dist.all_gather(rank_grads, param.grad, group=process_group)
-            for rank_grad in rank_grads[1:]:
-                self.assertEqual(rank_grads[0], rank_grad)
 
     @skip_if_lt_x_gpu(2)
     def test_manual_backward_finalization_scheduling(self):
