@@ -212,6 +212,35 @@ def _force_pdl_nvgemm_choice():
     return _force_nvgemm_choice(is_pdl_choice)
 
 
+class TestNVUniversalGemmEligibility(TestCase):
+    def test_cpp_wrapper_rejected(self):
+        from torch._inductor import utils
+
+        layout = ir.FixedLayout(torch.device("cuda"), torch.float16, [16, 16])
+        mat_a = ir.Buffer(name="mat_a", layout=layout)
+        mat_b = ir.Buffer(name="mat_b", layout=layout)
+        graph = SimpleNamespace(cpp_wrapper=False, unaligned_buffers=set())
+
+        with (
+            config.patch({"max_autotune": True}),
+            V.set_graph_handler(graph),
+            V.set_aot_compilation(False),
+            mock.patch.object(utils, "ensure_cute_available", return_value=True),
+            mock.patch.object(
+                utils, "ensure_nv_universal_gemm_available", return_value=True
+            ),
+            mock.patch.object(utils, "_use_autotune_backend", return_value=True),
+            mock.patch.object(torch.version, "hip", None),
+        ):
+            self.assertTrue(
+                utils.use_nv_universal_gemm_template(layout, 16, 16, 16, mat_a, mat_b)
+            )
+            graph.cpp_wrapper = True
+            self.assertFalse(
+                utils.use_nv_universal_gemm_template(layout, 16, 16, 16, mat_a, mat_b)
+            )
+
+
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and SM90OrLater),
     "NVIDIA Universal GEMM (cutlass.operators) library not available or GPU is older than SM90",
