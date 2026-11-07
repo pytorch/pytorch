@@ -28,6 +28,8 @@ from torch._inductor.debug import (
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
     get_kernel_information_jsons,
+    innermost_module_fqn,
+    owning_module_fqns,
     reset_inductor_kernel_provenance_debug_handle,
     reset_provenance_globals,
     set_kernel_post_grad_provenance_tracing,
@@ -1497,6 +1499,132 @@ copy_tests(
     TestProvenanceTracingKernelContextGpu,
     GPU_TYPE,
 )
+
+
+class TestProvenanceTracingModuleFqn(TestCase):
+    """Per-kernel `nn.Module` FQN. `pre_grad_nodes` covers the forward only;
+    reading the stack off the node resolves the backward too."""
+
+    def _node(self, **meta):
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta.update(meta)
+        return node
+
+    def _stack(self, fqn):
+        return {"a": (fqn, torch.nn.Linear)}
+
+    def _fqn(self, name):
+        return innermost_module_fqn(self._node(nn_module_stack=self._stack(name)))
+
+    def test_frame_root_is_stripped(self):
+        for name, expected in (
+            ("L['self'].block.fc", "block.fc"),
+            ("L['mod'].block", "block"),
+            ('G["model"].block.fc', "block.fc"),
+            # `._modules['x']` is already rewritten to `.x` by dynamo.
+            ("L['self'].layers.0.attn", "layers.0.attn"),
+            # A root module names no component.
+            ("L['self']", None),
+            ("G['model']", None),
+            # Export form: no frame root to drop.
+            ("block.fc", "block.fc"),
+            ("", None),
+        ):
+            self.assertEqual(self._fqn(name), expected, name)
+
+    def test_innermost_entry_wins(self):
+        node = self._node(
+            nn_module_stack={
+                "a": ("L['self'].block", torch.nn.Module),
+                "b": ("L['self'].block.fc", torch.nn.Linear),
+            }
+        )
+        self.assertEqual(innermost_module_fqn(node), "block.fc")
+
+    def test_backward_node_uses_the_forward_stack(self):
+        node = self._node(fwd_nn_module_stack=self._stack("L['self'].block.fc"))
+        self.assertEqual(innermost_module_fqn(node), "block.fc")
+
+    def test_node_under_no_module(self):
+        self.assertIsNone(innermost_module_fqn(self._node()))
+
+    def test_an_unexpected_stack_shape_yields_none_rather_than_raising(self):
+        """The caller's except spans the whole kernel, so one odd node here
+        would otherwise drop that kernel's stack traces too."""
+        for stack in ("", {}, "not-a-map", None, [], {"a": ()}, {"a": None}):
+            self.assertIsNone(
+                innermost_module_fqn(self._node(nn_module_stack=stack)), stack
+            )
+
+    def test_origins_are_collected_and_deduped(self):
+        nodes = [
+            self._node(nn_module_stack=self._stack(f"L['self'].{fqn}"))
+            for fqn in ("block.fc", "block.ln", "block.fc")
+        ]
+        # Plus one owned by nothing, which must not contribute an empty id.
+        nodes.append(self._node())
+        self.assertEqual(list(owning_module_fqns(nodes)), ["block.fc", "block.ln"])
+
+    @torch._inductor.config.patch(
+        {
+            "trace.provenance_tracking_level": 1,
+            "trace.provenance_tracking_to_timeline": True,
+        }
+    )
+    def test_forward_and_backward_kernels_both_carry_an_fqn(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                return torch.nn.functional.relu(self.fc(x))
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Inner()
+                # A ModuleList so the indexed form is exercised for real
+                # rather than assumed from reading dynamo's source rewrite.
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(16, 16) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                x = self.block(x)
+                for layer in self.layers:
+                    x = layer(x)
+                return (x * 2.0).sum()
+
+        torch._dynamo.reset()
+        model = Outer()
+        x = torch.randn(8, 16, requires_grad=True)
+        with reset_provenance_globals():
+            torch.compile(model, backend="inductor")(x).backward()
+            per_graph = dict(get_kernel_information_jsons())
+
+        forward = [k for k in per_graph if "False" in k]
+        backward = [k for k in per_graph if "True" in k]
+        self.assertTrue(forward, f"no forward graph in {list(per_graph)}")
+        self.assertTrue(backward, f"no backward graph in {list(per_graph)}")
+
+        for direction, keys in (("forward", forward), ("backward", backward)):
+            fqns = {
+                fqn
+                for key in keys
+                for record in per_graph[key].values()
+                for fqn in record["module_fqns"]
+            }
+            self.assertTrue(fqns, f"no module_fqns on any {direction} kernel")
+            # `block.fc`, not `L['self'].block.fc`: no frame root may survive.
+            self.assertIn("block.fc", fqns, f"{direction}: {sorted(fqns)}")
+            self.assertFalse(
+                [f for f in fqns if f.startswith(("L[", "G["))],
+                f"{direction} kept a frame root: {sorted(fqns)}",
+            )
+            # An indexed submodule must read as an FQN segment, not `[0]`.
+            self.assertIn("layers.0", fqns, f"{direction}: {sorted(fqns)}")
 
 
 if __name__ == "__main__":
