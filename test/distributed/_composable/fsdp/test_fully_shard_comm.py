@@ -10,6 +10,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -86,6 +87,7 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -166,6 +168,45 @@ class TestFSDPCommContext(TestCase):
         comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
         comm_ctx.all_gather_stream.wait_event.assert_not_called()
         self.assertIsNone(comm_ctx.all_gather_state)
+
+
+class TestFSDPReduceScatterStreamPolicy(TestCase):
+    @parametrize("enable", [False, True])
+    @parametrize("recurse", [False, True])
+    def test_configures_only_selected_parameter_groups(self, enable, recurse):
+        root, child = (MagicMock(spec=FSDPModule) for _ in range(2))
+        root_groups = [
+            SimpleNamespace(reduce_scatter_on_current_stream=not enable)
+            for _ in range(2)
+        ]
+        child_group = SimpleNamespace(reduce_scatter_on_current_stream=not enable)
+        root.modules = MagicMock(return_value=[root, child, nn.Identity()])
+        root._get_fsdp_state.return_value = SimpleNamespace(
+            _fsdp_param_groups=root_groups
+        )
+        child._get_fsdp_state.return_value = SimpleNamespace(
+            _fsdp_param_groups=[child_group]
+        )
+
+        FSDPModule.set_reduce_scatter_on_current_stream(root, enable, recurse=recurse)
+
+        for group in root_groups:
+            self.assertIs(group.reduce_scatter_on_current_stream, enable)
+        self.assertIs(
+            child_group.reduce_scatter_on_current_stream,
+            enable if recurse else not enable,
+        )
+
+    @parametrize("enable", [None, 0, 1, "true"])
+    def test_rejects_non_boolean_policy(self, enable):
+        module = MagicMock(spec=FSDPModule)
+        module.modules = MagicMock()
+        with self.assertRaisesRegex(TypeError, "enable must be a bool"):
+            FSDPModule.set_reduce_scatter_on_current_stream(module, enable)
+        module.modules.assert_not_called()
+
+
+instantiate_parametrized_tests(TestFSDPReduceScatterStreamPolicy)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -490,7 +531,7 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             chunk_cat_kernels = [
                 event.name
                 for event in prof.events()
-                if event.device_type == DeviceType.CUDA
+                if event.device == DeviceType.CUDA
                 and "chunk_cat_cuda_kernel" in event.name
             ]
             # One launch copies the fp32 input and a second casts the bf16 one.
@@ -2876,6 +2917,172 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestFullyShardCurrentStreamReduceScatter(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, device_module.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_matches_default_deferred_reduction(self, device):
+        with DeterministicGuard(True):
+            self.run_subtests(
+                {
+                    "mesh_shape": [(self.world_size,), (self.world_size, 1)],
+                    "reduce_dtype": [torch.float32, torch.bfloat16],
+                },
+                self._test_matches_default_deferred_reduction,
+            )
+
+    @onlyCUDA
+    @skip_if_lt_x_gpu(2)
+    def test_cudagraph_matches_eager_for_twelve_updates(self, device):
+        with DeterministicGuard(True):
+            torch.manual_seed(42)
+            reference = nn.Sequential(*[MLP(32) for _ in range(3)]).to(device)
+            candidate = copy.deepcopy(reference)
+            policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            )
+            for model in (reference, candidate):
+                for child in model:
+                    fully_shard(child, mp_policy=policy)
+                fully_shard(model, mp_policy=policy)
+                model.set_manual_backward_finalization(True)
+                model.set_reshard_after_backward(True)
+            candidate.set_reduce_scatter_on_current_stream(True)
+            optimizers = [
+                torch.optim.SGD(model.parameters(), lr=1e-3)
+                for model in (reference, candidate)
+            ]
+            torch.manual_seed(42 + self.rank)
+            inputs = [
+                torch.randn(4, 32, device=device, dtype=torch.bfloat16)
+                for _ in range(4)
+            ]
+            graph = torch.cuda.CUDAGraph()
+            stream = torch.cuda.Stream()
+            captured_grads = None
+            for step in range(12):
+                for optimizer in optimizers:
+                    optimizer.zero_grad(set_to_none=True)
+                reference_loss = self._deferred_forward_backward(reference, inputs)
+                stream.wait_stream(torch.cuda.current_stream())
+                if step < 2:
+                    with torch.cuda.stream(stream):
+                        candidate_loss = self._deferred_forward_backward(
+                            candidate, inputs
+                        )
+                    torch.cuda.current_stream().wait_stream(stream)
+                else:
+                    if step == 2:
+                        with torch.cuda.graph(graph, stream=stream):
+                            captured_loss = self._deferred_forward_backward(
+                                candidate, inputs
+                            )
+                        captured_grads = [
+                            parameter.grad for parameter in candidate.parameters()
+                        ]
+                    graph.replay()
+                    for parameter, grad in zip(candidate.parameters(), captured_grads):
+                        parameter.grad = grad
+                    candidate_loss = captured_loss
+                self.assertEqual(reference_loss, candidate_loss, atol=0, rtol=0)
+                for reference_param, candidate_param in zip(
+                    reference.parameters(), candidate.parameters()
+                ):
+                    self.assertEqual(
+                        reference_param.grad.to_local(),
+                        candidate_param.grad.to_local(),
+                        atol=0,
+                        rtol=0,
+                    )
+                for optimizer in optimizers:
+                    optimizer.step()
+                for reference_param, candidate_param in zip(
+                    reference.parameters(), candidate.parameters()
+                ):
+                    self.assertEqual(
+                        reference_param.to_local(),
+                        candidate_param.to_local(),
+                        atol=0,
+                        rtol=0,
+                    )
+
+    def _deferred_forward_backward(self, model, inputs):
+        model.set_requires_gradient_sync(False)
+        loss = None
+        for value in inputs:
+            microbatch_loss = model(value).float().square().mean() / len(inputs)
+            microbatch_loss.backward()
+            loss = microbatch_loss if loss is None else loss + microbatch_loss
+        model.set_requires_gradient_sync(True)
+        model.finalize_backward()
+        return loss
+
+    def _test_matches_default_deferred_reduction(self, mesh_shape, reduce_dtype):
+        torch.manual_seed(42)
+        reference = nn.Sequential(*[MLP(32) for _ in range(3)]).to(device)
+        candidate = copy.deepcopy(reference)
+        mesh_dim_names = ("shard",) if len(mesh_shape) == 1 else ("replicate", "shard")
+        mesh = init_device_mesh(device.type, mesh_shape, mesh_dim_names=mesh_dim_names)
+        policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=reduce_dtype
+        )
+        for model in (reference, candidate):
+            for child in model:
+                fully_shard(child, mesh=mesh, mp_policy=policy)
+            fully_shard(model, mesh=mesh, mp_policy=policy)
+            model.set_manual_backward_finalization(True)
+            model.set_reshard_after_backward(True)
+            for module in model.modules():
+                if isinstance(module, FSDPModule):
+                    for group in module._get_fsdp_state()._fsdp_param_groups:
+                        self.assertFalse(group.reduce_scatter_on_current_stream)
+        candidate.set_reduce_scatter_on_current_stream(True)
+        optimizers = [
+            torch.optim.SGD(model.parameters(), lr=1e-3)
+            for model in (reference, candidate)
+        ]
+        torch.manual_seed(42 + self.rank)
+        for _ in range(12):
+            inputs = [
+                torch.randn(4, 32, device=device, dtype=torch.bfloat16)
+                for _ in range(4)
+            ]
+            losses = []
+            for model in (reference, candidate):
+                losses.append(self._deferred_forward_backward(model, inputs))
+            self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+            for reference_param, candidate_param in zip(
+                reference.parameters(), candidate.parameters()
+            ):
+                self.assertEqual(
+                    reference_param.grad.to_local(),
+                    candidate_param.grad.to_local(),
+                    atol=0,
+                    rtol=0,
+                )
+            for optimizer in optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+            for reference_param, candidate_param in zip(
+                reference.parameters(), candidate.parameters()
+            ):
+                self.assertEqual(
+                    reference_param.to_local(),
+                    candidate_param.to_local(),
+                    atol=0,
+                    rtol=0,
+                )
+
+
+instantiate_device_type_tests(
+    TestFullyShardCurrentStreamReduceScatter,
+    globals(),
+    only_for=(device.type,),
+)
 
 
 class TestFullyShardReduceScatterRecordStream(FSDPTest):

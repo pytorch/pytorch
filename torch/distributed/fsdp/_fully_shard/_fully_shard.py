@@ -959,6 +959,38 @@ class FSDPModule:
                         reduce_scatter_unused_params
                     )
 
+    def set_reduce_scatter_on_current_stream(
+        self, enable: bool, *, recurse: bool = True
+    ) -> None:
+        """Choose current-stream rather than communication-stream reduction.
+
+        The default is False. Enabling this keeps packing, reduce-scatter,
+        division, and FSDP post-reduction work on the caller's current stream.
+        This can let CUDA graph output allocations reuse storage released by
+        backward on that stream, at the cost of losing compute/reduction and
+        copy-in/reduction overlap. It is useful when gradient reduction is
+        already deferred until all backward computation finishes.
+
+        HSDP all-reduces and custom all-reduce hooks retain their configured
+        streams and synchronization. No process group, dtype, reduction
+        arithmetic, or gradient-accumulation policy changes. Configure this
+        consistently across ranks before capturing a graph; do not change the
+        policy between capture and replay.
+
+        Args:
+            enable (bool): Whether reduce-scatter uses the current stream.
+            recurse (bool): Whether to configure all FSDP submodules.
+        """
+        if not isinstance(enable, bool):
+            raise TypeError(f"enable must be a bool, got {type(enable).__name__}")
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_scatter_on_current_stream = enable
+
     def set_reduce_scatter_max_input_buffers(
         self, max_input_buffers: int, *, recurse: bool = True
     ) -> None:
