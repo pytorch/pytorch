@@ -41,6 +41,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
     raise_attribute_error,
+    raise_observed_exception,
     raise_type_error,
     unimplemented,
     Unsupported,
@@ -556,6 +557,24 @@ def load_pending_mutation(
     if se.has_pending_mutation_of_attr(self, name):
         return se.load_attr(self, name)
     return None
+
+
+def is_immutable_type(type_: type) -> bool:
+    flags = type.__dict__["__flags__"].__get__(type_, type)
+    return bool(flags & (1 << 8))
+
+
+def raise_type_doc_error(
+    tx: InstructionTranslatorBase, type_: type, *, deleting: bool = False
+) -> NoReturn:
+    immutable = is_immutable_type(type_)
+    operation = "set" if immutable or not deleting else "delete"
+    name = type.__getattribute__(type_, "__name__")
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[f"cannot {operation} '__doc__' attribute of immutable type '{name}'"],
+    )
 
 
 def getset_load_or_build(
