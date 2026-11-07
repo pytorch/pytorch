@@ -3,6 +3,7 @@
 
 
 import copy
+from typing_extensions import TypeIs
 
 import torch
 from torch._ops import OpOverload
@@ -345,6 +346,71 @@ def scaled_mm_single_dim_strategy(
         if scale_self_p is None or scale_mat2_p is None:
             continue
         result.append(strat + [scale_self_p, scale_mat2_p])
+    return result
+
+
+@register_single_dim_strategy(
+    aten._scaled_mm_v2.default,
+    # The swizzle args (4 and 7) change which placements are valid, so the
+    # non-tensor args starting at scale_recipe_a must be in the cache key.
+    schema_info=RuntimeSchemaInfo(static_argnum=3, needs_pytree=True),
+    allow_unbacked_sharding=True,
+)
+def scaled_mm_v2_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Strategy format: [output, self, mat2, *scale_a, *scale_b]
+    scale_a_metas = args_schema[2]
+    swizzle_a = args_schema[4]
+    scale_b_metas = args_schema[5]
+    swizzle_b = args_schema[7]
+    if not isinstance(scale_a_metas, (list, tuple)) or not all(
+        isinstance(m, TensorMeta) for m in scale_a_metas
+    ):
+        raise AssertionError
+    if not isinstance(scale_b_metas, (list, tuple)) or not all(
+        isinstance(m, TensorMeta) for m in scale_b_metas
+    ):
+        raise AssertionError
+    if args_schema[8] is not None:
+        raise AssertionError("_scaled_mm_v2 on DTensors doesn't support bias")
+
+    # Swizzled scales use a padded, tiled layout whose rows and columns do not
+    # line up with slices of the data operand, so an operand with a swizzled
+    # scale cannot be sharded on any dim. Keep it Replicate or Partial.
+    if not isinstance(swizzle_a, (list, tuple)) or not isinstance(
+        swizzle_b, (list, tuple)
+    ):
+        raise AssertionError
+    no_swizzle = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
+    self_swizzled = any(s != no_swizzle for s in swizzle_a)
+    mat2_swizzled = any(s != no_swizzle for s in swizzle_b)
+
+    def _is_sharded(
+        p: Placement | _ShardingPlaceholder,
+    ) -> TypeIs[Shard | _ShardingPlaceholder]:
+        return isinstance(p, (_ShardingPlaceholder, Shard))
+
+    # "mk,kn->mn": self_contracting_dim=1, mat2_contracting_dim=0
+    result: list[list[Placement | _ShardingPlaceholder]] = []
+    for strat in gen_single_dim_einsum_strategies("mk,kn->mn"):
+        # strat is [output, self, mat2]; derive one placement per scale tensor
+        if (self_swizzled and _is_sharded(strat[1])) or (
+            mat2_swizzled and _is_sharded(strat[2])
+        ):
+            continue
+        scale_a_ps = [
+            _scaled_mm_scale_placement(strat[1], m.shape, contracting_dim=1)
+            for m in scale_a_metas
+        ]
+        scale_b_ps = [
+            _scaled_mm_scale_placement(strat[2], m.shape, contracting_dim=0)
+            for m in scale_b_metas
+        ]
+        scale_ps = [p for p in scale_a_ps + scale_b_ps if p is not None]
+        if len(scale_ps) != len(scale_a_ps) + len(scale_b_ps):
+            continue
+        result.append(strat + scale_ps)
     return result
 
 
