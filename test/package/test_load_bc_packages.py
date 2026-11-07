@@ -4,7 +4,12 @@ from pathlib import Path
 from unittest import skipIf
 
 from torch.package import PackageImporter
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    run_tests,
+)
 
 
 try:
@@ -18,6 +23,8 @@ packaging_directory = f"{Path(__file__).parent}/package_bc"
 
 class TestLoadBCPackages(PackageTestCase):
     """Tests for checking loading has backwards compatibility"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,

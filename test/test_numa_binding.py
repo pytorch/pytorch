@@ -20,7 +20,12 @@ from torch.numa.binding import (
     AffinityMode,
     NumaOptions,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,8 @@ _real_open = open
     torch.distributed.is_available(), "Need access to some distributed submodules"
 )
 class NumaBindingTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
 
