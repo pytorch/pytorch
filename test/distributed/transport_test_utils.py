@@ -1,7 +1,41 @@
 import asyncio
+import os
+import time
+from collections import deque
 
 import torch
 from torch.distributed._transport import MemoryView, MutableMemoryView, wait_all, Work
+
+
+class NotificationInbox:
+    def __init__(self, transport):
+        self.transport = transport
+        self._pending = deque()
+
+    def receive(self, count, *, timeout=5):
+        deadline = time.monotonic() + timeout
+        while len(self._pending) < count:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"expected {count} notifications, buffered {list(self._pending)!r}"
+                )
+            try:
+                messages = self.transport.poll_notifications(
+                    timeout=min(remaining, 0.01)
+                )
+                self._pending.extend(messages)
+            except TimeoutError:
+                pass
+            if len(self._pending) < count:
+                os.sched_yield()
+        return [self._pending.popleft() for _ in range(count)]
+
+    def poll(self):
+        self._pending.extend(self.transport.poll_notifications())
+        messages = list(self._pending)
+        self._pending.clear()
+        return messages
 
 
 class TransportTestMixin:
