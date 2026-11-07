@@ -1505,8 +1505,9 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
+    # Use actual types to ignore spoofed __class__ while retaining CPython subtypes.
+    return issubclass(
+        type(value),
         (
             types.FunctionType,
             types.BuiltinFunctionType,
@@ -3263,7 +3264,7 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
@@ -5649,6 +5650,18 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def find_type_attribute_name(obj_type: type, value: object, /) -> str | None:
+    """Find a directly declared class attribute by value identity."""
+    return next(
+        (
+            name
+            for name, item in get_type_dict_no_user_code(obj_type).items()
+            if item is value
+        ),
+        None,
+    )
+
+
 def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
     return type.__dict__["__dict__"].__get__(cls, type(cls))
 
@@ -5671,9 +5684,10 @@ def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
 
 
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
 
+    value = cast(types.BuiltinMethodType, value)
     receiver = value.__self__
     receiver_is_type = issubclass(type(receiver), type)
     owner = cast(type, receiver if receiver_is_type else type(receiver))
