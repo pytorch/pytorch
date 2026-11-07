@@ -1303,7 +1303,9 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
-        if self.is_python_constant():
+        if self.is_python_constant() and not any(
+            key._hash_is_identity for key in self.items
+        ):
             return hash(self.as_python_constant()), False
         is_fake = False
         raw_hashes = []
