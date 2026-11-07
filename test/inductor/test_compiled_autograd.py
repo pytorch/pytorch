@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import functools
+import importlib.util
 import io
 import itertools
 import logging
@@ -13,7 +14,6 @@ import sys
 import tempfile
 import unittest
 from copy import deepcopy
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from string import Template
 from unittest import mock
@@ -5369,10 +5369,13 @@ copy_.default""",
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
+    path = testdir / f"{name.replace('.', '/')}.py"
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
-        return SourceFileLoader(
-            name, str(testdir / f"{name.replace('.', '/')}.py")
-        ).load_module()
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 def make_wrapped(fn, ctx_fns):
