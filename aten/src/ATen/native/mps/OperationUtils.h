@@ -656,6 +656,13 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
 }
 
+// Threadgroups that keep every GPU core busy: 4 x 1024 threads cover the ~3072 resident threads per core
+static inline int64_t occupancy_threadgroups() {
+  constexpr int64_t threadgroups_per_core = 4;
+  static const int64_t cores = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  return threadgroups_per_core * cores;
+}
+
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
 }
