@@ -236,7 +236,13 @@ if sys.platform == "win32":
                     "cupti",
                     "cudnn",
                 ):
-                    load_nvidia_dynamic_lib(lib)
+                    try:
+                        load_nvidia_dynamic_lib(lib)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
+                        )
             except Exception:
                 warnings.warn(
                     "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
@@ -1798,6 +1804,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
         * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
@@ -1825,7 +1833,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 

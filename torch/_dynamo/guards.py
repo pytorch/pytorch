@@ -1676,7 +1676,11 @@ class GuardBuilder(GuardBuilderBase):
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
+        # Values the pickler must retain, independently of manager selection.
         self.guard_tree_values: dict[int, Any] = {}
+        # Transient manager identities select the order sources to serialize.
+        # The loader recomputes key_order_guarded_dict_ids from those sources.
+        self.dict_guard_manager_ids: set[int] = set()
         # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
         # the value so the id stays live; see Note [Reconstructing a function a
         # guard is rooted at] in GuardsStatePickler. Save-path only.
@@ -1730,9 +1734,7 @@ class GuardBuilder(GuardBuilderBase):
         for key in builtin_dict_keys(example_value):
             value = example_value[key]
             value_source = DictGetItemSource(guard.originating_source, index=key)
-            guard_manager_enum = self.get_guard_manager_type(
-                value_source, example_value
-            )
+            guard_manager_enum = self.get_guard_manager_type(value_source, value)
             dict_mgr.dict_getitem_manager(
                 key=key,
                 source=f"{dict_source}[{key!r}]",
@@ -1990,8 +1992,8 @@ class GuardBuilder(GuardBuilderBase):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         if guard_manager_enum == GuardManagerType.DICT_GUARD_MANAGER:
-            # Module attribute access can build this manager without a source lookup.
-            self.guard_tree_values[id(example_value)] = example_value
+            # Include implicit module dictionaries without retaining their values.
+            self.dict_guard_manager_ids.add(id(example_value))
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum: GuardManagerType) -> bool:
@@ -2945,6 +2947,27 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and torch._C._is_fake_tensor(value) == metadata
+        ),
+    )
+    def FAKE_TENSOR_MATCH(self, guard: Guard, expected: bool | None = None) -> None:
+        # Whether the tensor is a C++ fake, which TENSOR_MATCH does not check.
+        # expected is bound into the guard rather than read from the value,
+        # which is a stand-in when the guard is rebuilt from saved state.
+        if expected is None:
+            raise AssertionError("expected must not be None for FAKE_TENSOR_MATCH")
+        code = [f"torch._C._is_fake_tensor({self.arg_ref(guard)}) == {expected!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_fake_tensor_match_guard(
+            expected, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
@@ -5106,8 +5129,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         return get_type_dict_no_user_code(owner)[name]
 
     @classmethod
-    def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
-        return dict.fromkeys(elems).keys()
+    def _unpickle_dict_keys(cls, owner: dict[Any, Any], ordered: bool) -> Any:
+        if ordered:
+            return collections.OrderedDict.keys(
+                cast(collections.OrderedDict[Any, Any], owner)
+            )
+        return dict.keys(owner)
 
     @classmethod
     def _restore_ordered_dict_state(
@@ -5687,8 +5714,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             if item is not NotImplemented and step is not NotImplemented:
                 return type(self)._unpickle_count_iter, (item, step)
 
+        elif isinstance(obj, torch._dynamo.utils.odict_keys):
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], True)
+
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
-            return type(self)._unpickle_dict_keys, (list(obj),)
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], False)
 
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
@@ -6110,8 +6140,7 @@ def pickle_guards_state(
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
-    guard_tree_values = builder.guard_tree_values
-
+    guard_tree_values = dict(builder.guard_tree_values)
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
     # strict_precompile), never a compiler crash. A PackageError raised inside
@@ -6119,6 +6148,14 @@ def pickle_guards_state(
     # try too: it recurses into the local values, so a deep pytree in a local
     # overflows there rather than in dump.
     try:
+        implicit_dicts = {}
+        for source in state.output_graph.guard_on_key_order:
+            value = builder.get(source)
+            if id(value) not in guard_tree_values and isinstance(value, dict):
+                implicit_dicts[id(value)] = value
+        # Rebuilding implicit managers requires dictionary structure, not every value.
+        # Register all aliased/nested containers before pruning their unused entries.
+        guard_tree_values.update(implicit_dicts)
         leaves = pytree.tree_leaves(state.output_graph.local_scope)
         for leaf in leaves:
             if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
@@ -6141,6 +6178,18 @@ def pickle_guards_state(
             buf,
             protocol=_GUARDS_PROTOCOL,
         )
+
+        for value in implicit_dicts.values():
+            if type(value) is dict:
+                for item in value.values():
+                    # A bystander here may also belong to metadata compared whole.
+                    if (
+                        id(item) not in guard_tree_values
+                        and id(item) not in pickler._whole_compared_values
+                        and id(item) not in pickler._verbatim_elements
+                        and not _is_shared_constant(item)
+                    ):
+                        missing_values[id(item)] = item
 
         if all(
             torch.compiler.keep_portable_guards_unsafe(
@@ -6508,7 +6557,7 @@ class CheckFunctionManager:
         retained_order_sources = {
             source
             for source in output_graph_guards_state.guard_on_key_order
-            if id(builder.get(source)) in builder.guard_tree_values
+            if id(builder.get(source)) in builder.dict_guard_manager_ids
         }
         # Only serialize the global variables that are actually used in guards.
         for guard in sorted_guards:
