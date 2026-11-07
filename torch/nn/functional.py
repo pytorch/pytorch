@@ -897,7 +897,9 @@ def max_pool3d_with_indices(
     if stride is None:
         stride = torch.jit.annotate(list[int], [])
     if not torch.jit.is_scripting():
-        if input.is_cuda and torch.are_deterministic_algorithms_enabled():
+        if torch.are_deterministic_algorithms_enabled() and (
+            input.is_cuda or input.is_xpu
+        ):
             return importlib.import_module(
                 "torch._decomp.decompositions"
             ).max_pool3d_with_indices(

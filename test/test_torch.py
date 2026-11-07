@@ -1503,7 +1503,6 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5306
     def test_deterministic_max_pool3d(self, device):
         test_cases = [
             # size, kernel_size, stride, padding, dilation, ceil_mode
