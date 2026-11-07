@@ -1931,6 +1931,56 @@ class TestLinalg(TestCase):
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out, expected, msg=msg)
 
+    # A running float32 sum stops growing once it reaches 2**24, so a norm that
+    # accumulates linearly drops every small term after a large one (#65815).
+    # At 4 threads only the dim=None cases are split across threads, which checks
+    # how the per-thread sums are combined. The other cases have 2 or 3 outputs,
+    # and each output is still reduced by a single thread.
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_vector_norm_keeps_small_terms(self, device, dtype):
+        norm, powsum = torch.linalg.vector_norm, torch.linalg._powsum
+        n = 2**16
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for ord, first in ((1, 2.0**24), (2, 2.0**12)):
+                    x = torch.ones(n + 1, dtype=dtype, device=device)
+                    x[0] = first
+                    cols = x.unsqueeze(1).repeat(1, 3)
+                    for (t, dim), fn in product(((x, None), (cols, 0), (cols.t().contiguous(), 1)), (norm, powsum)):
+                        result = fn(t, ord, dim=dim)
+                        expected = 2.0**24 + n
+                        if fn is norm and ord == 2:
+                            expected = math.sqrt(expected)
+                        msg = f"threads={threads}, {fn.__name__}, ord={ord}, dim={dim}"
+                        self.assertEqual(result, torch.full_like(result, expected), atol=0, rtol=1e-5, msg=msg)
+                # ord=0 counts the nonzeros, so it needs more than 2**24 elements.
+                x = torch.ones((), dtype=dtype, device=device).expand(2**24 + n, 2)
+                for t, dim in ((x, 0), (x[:, 0], None)):
+                    result = torch.linalg.vector_norm(t, 0, dim=dim)
+                    msg = f"threads={threads}, dim={dim}"
+                    self.assertEqual(result, torch.full_like(result, 2.0**24 + n), atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Inputs longer than two vectors plus a tail, so ord 0, 1 and 2 run through the
+    # vectorized maps; small integers keep the sums exact.
+    @onlyCPU
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_vector_norm_special_values(self, device, dtype):
+        base = torch.tensor([-3.0, -0.0, 2.0, 0.0, -1.0, 1.0], dtype=torch.double).repeat(12)[:67]
+        for (special, i), ord in product([(None, 0)] + list(product((nan, inf, -inf), (20, 65))), (0, 1, 2)):
+            x = base.clone()
+            if special is not None:
+                x[i] = special
+            for t, dim in ((x, None), (x.unsqueeze(1).repeat(1, 32), 0)):
+                expected = torch.from_numpy(np.array(np.linalg.norm(t.numpy(), ord, axis=dim))).to(dtype)
+                result = torch.linalg.vector_norm(t.to(dtype=dtype, device=device), ord, dim=dim)
+                msg = f"ord={ord}, dim={dim}, x[{i}]={special}"
+                self.assertEqual(result, expected, atol=0, rtol=0, exact_device=False, msg=msg)
+
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     def test_vector_norm_extreme_values(self, device):
@@ -1984,6 +2034,53 @@ class TestLinalg(TestCase):
                     result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim)
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
+
+    # The two reduced dims cannot be merged, so the sum is built from 2**14 partial
+    # sums of 2. Adding those in half or bfloat16 would stop at 4096 or 512.
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_accumulates_in_float(self, device, dtype):
+        x = torch.ones(2**14, 3, 2, dtype=dtype, device=device)
+        for fn, ord, expected in (
+            (torch.linalg._powsum, 1, 2.0**15),
+            (torch.linalg._powsum, 2, 2.0**15),
+            (torch.linalg.vector_norm, 0, 2.0**15),
+            (torch.linalg.vector_norm, 1, 2.0**15),
+            (torch.linalg.vector_norm, 2, 2.0**7.5),
+        ):
+            result = fn(x, ord, dim=(0, 2))
+            expected = torch.full((3,), expected, dtype=dtype, device=device)
+            self.assertEqual(result, expected, atol=0, rtol=0, msg=f"{fn.__name__}, ord={ord}")
+
+    # A single-element output goes through the all-reduce branch of the cascade
+    # sum, which adds up each thread's chunk in float. In the sliced x, the dims
+    # can't be merged, so a chunk is summed row by row; doing that in half or
+    # bfloat16 would stall far below the expected values.
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_all_reduce(self, device, dtype):
+        x = torch.full((2**16, 3, 2), 2.0**-4, dtype=dtype, device=device)
+        # ord=0 counts the nonzeros; with one row in 8 left, their count (2**15)
+        # stays below float16's max of 65504.
+        sparse = x.clone()
+        sparse[torch.arange(2**16, device=device) % 8 != 0] = 0
+        cases = (
+            (x, torch.linalg._powsum, 1),
+            (x, torch.linalg._powsum, 2),
+            (sparse, torch.linalg.vector_norm, 0),
+            (x, torch.linalg.vector_norm, 1),
+            (x, torch.linalg.vector_norm, 2),
+        )
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for (inp, fn, ord), contiguous in product(cases, (False, True)):
+                    t = inp[:, :2].contiguous() if contiguous else inp[:, :2]
+                    expected = fn(t.double(), ord).to(dtype)
+                    msg = f"threads={threads}, contiguous={t.is_contiguous()}, {fn.__name__}, ord={ord}"
+                    self.assertEqual(fn(t, ord), expected, atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
 
     @onlyAccelerator
     def test_powsum_dtype_kwarg(self, device):

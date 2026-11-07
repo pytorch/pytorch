@@ -1404,6 +1404,17 @@ class TestReductionsDevice(TestCase):
                 for reduce_dim in reduce_dims:
                     helper(self, shape, reduce_dim, device, dtype)
 
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_sum_lowp_float_out(self, device, dtype) -> None:
+        # 257 * 131 elements is above GRAIN_SIZE, so the full reduction runs multithreaded
+        x = torch.randn(257, 131, device=device).to(dtype)
+        for t in (x, x.t(), x[::2], x.unsqueeze(1)):
+            for dim in (None, 0, 1, (0, -1)):
+                ref = t.double().sum(dim)
+                out = t.sum(dim, dtype=torch.float)
+                self.assertEqual(out.dtype, torch.float)
+                self.assertEqual(out, ref, atol=1e-3, rtol=1e-5, exact_dtype=False)
+                self.assertEqual(t.mean(dim), (ref / (t.numel() // ref.numel())).to(dtype))
 
     @dtypes(torch.bool, torch.double)
     @skipIfMPS
@@ -1818,6 +1829,37 @@ class TestReductionsDevice(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
+
+    # inf + -inf is NaN, and nansum keeps it at any thread count, as np.nansum
+    # does. At 4 threads, inf and -inf land in the same thread's chunk.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_nansum_keeps_inf_minus_inf(self, device, dtype):
+        x = torch.ones(2**16, dtype=dtype, device=device)
+        x[:2] = torch.tensor([math.inf, -math.inf])
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                self.assertEqual(torch.nansum(x), np.nansum(x.numpy()), msg=f"threads={threads}")
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Above GRAIN_SIZE, so at 4 threads a full nansum is split across threads; the
+    # small integers keep the sum exact, so it is rounded to dtype only once.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_nansum_nan_multithreaded(self, device, dtype):
+        x = torch.arange(2**16, dtype=torch.double).remainder(9).sub(4)
+        x[::7] = math.nan
+        expected = torch.nansum(x).to(dtype)
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                self.assertEqual(torch.nansum(x.to(dtype)), expected, atol=0, rtol=0, msg=f"threads={threads}")
+        finally:
+            torch.set_num_threads(num_threads)
 
     @dtypes(*all_types_and(torch.half))
     @skipIfMPS
