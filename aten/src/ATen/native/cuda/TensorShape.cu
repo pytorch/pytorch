@@ -188,14 +188,14 @@ static inline std::vector<int64_t> get_split_base_addrs(
     at::IntArrayRef split_sizes,
     int64_t dim) {
   const auto* data_ptr = static_cast<const char*>(tensor.const_data_ptr());
-  const auto strides = tensor.strides();
+  const auto slice_numel = c10::multiply_integers(tensor.sizes().slice(dim + 1));
   const auto element_sz = tensor.element_size();
   int64_t off = 0;
   std::vector<int64_t> split_base_addrs;
   split_base_addrs.reserve(split_sizes.size());
   for (const auto& split_size : split_sizes) {
     split_base_addrs.push_back(reinterpret_cast<int64_t>(data_ptr + off));
-    off += split_size * strides[dim] * element_sz;
+    off += split_size * slice_numel * element_sz;
   }
   return split_base_addrs;
 }
@@ -214,12 +214,12 @@ static inline std::vector<int64_t> get_split_chunk_sizes(
     const at::Tensor& tensor,
     at::IntArrayRef split_sizes,
     int64_t dim) {
-  const auto stride = tensor.stride(dim);
+  const auto slice_numel = c10::multiply_integers(tensor.sizes().slice(dim + 1));
   const auto element_sz = tensor.element_size();
   std::vector<int64_t> split_chunk_sizes;
   split_chunk_sizes.reserve(split_sizes.size());
   for (const auto& split_size : split_sizes) {
-    split_chunk_sizes.push_back(split_size * stride * element_sz);
+    split_chunk_sizes.push_back(split_size * slice_numel * element_sz);
   }
   return split_chunk_sizes;
 }
@@ -710,9 +710,11 @@ void split_with_sizes_copy_out_cuda(
     IntArrayRef split_sizes,
     int64_t dim,
     TensorList out) {
-  bool contiguous_no_cast = self.is_non_overlapping_and_dense();
+  // The fast path copies flat row-major buffers, so it needs contiguous
+  // tensors; non-overlapping and dense (e.g. transposed) is not enough.
+  bool contiguous_no_cast = self.is_contiguous();
   for (const auto& t : out) {
-    contiguous_no_cast &= t.is_non_overlapping_and_dense();
+    contiguous_no_cast &= t.is_contiguous();
     contiguous_no_cast &= (t.dtype() == self.dtype());
   }
   if (contiguous_no_cast) {
