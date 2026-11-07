@@ -672,6 +672,43 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.placements, (Partial(reduce_op),))
 
     @with_comms
+    def test_nan_to_num_partial_redistributes(self):
+        # nan_to_num is not max/min-preserving when NaN or custom
+        # posinf/neginf replacements are involved, so it must redistribute
+        # a pending Partial(max/min) to Replicate() before applying the
+        # replacement instead of preserving the Partial placement (#203922).
+        device_mesh = self.build_device_mesh()
+
+        cases = [
+            # (reduce_op, rank0 local, rank1 local, kwargs, expected full)
+            ("max", [float("nan"), -3.0], [5.0, 2.0], {}, [0.0, 2.0]),
+            ("min", [float("nan"), -3.0], [-5.0, 2.0], {}, [0.0, -3.0]),
+            (
+                "max",
+                [float("inf"), -3.0],
+                [5.0, 2.0],
+                {"posinf": -1.0},
+                [-1.0, 2.0],
+            ),
+            (
+                "min",
+                [-float("inf"), -3.0],
+                [-5.0, 2.0],
+                {"neginf": 1.0},
+                [1.0, -3.0],
+            ),
+        ]
+        for reduce_op, local0, local1, kwargs, expected in cases:
+            local = map_local_for_rank(
+                self.rank,
+                lambda rank: torch.tensor(local0 if rank == 0 else local1),
+            )
+            dt = DTensor.from_local(local, device_mesh, [Partial(reduce_op)])
+            result = torch.nan_to_num(dt, **kwargs)
+            self.assertTrue(result._spec.placements[0].is_replicate())
+            self.assertEqual(result.full_tensor(), torch.tensor(expected))
+
+    @with_comms
     def test_neg_partial(self):
         # test that neg preserves Partial placement without communication
         # math: -(A1 + A2) = -A1 + -A2
