@@ -4485,6 +4485,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
+    def test_implicit_dictionary_bystander_keeps_shared_tensor_subclass_metadata(self):
+        def fn(module, x):
+            return x + len(tuple(module.mapping)) + hasattr(module, "mapping")
+
+        def inputs(blocks):
+            module = torch.nn.Module()
+            module.mapping = {"unused": blocks}
+            x = SubclassWithMeta(torch.ones(3), extra=blocks)
+            return {"module": module, "x": x}
+
+        ref, loaded = self._test_serialization(
+            ("HASATTR", "TENSOR_SUBCLASS_METADATA_MATCH", "TENSOR_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
     def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
         def fn(x, stage):
             return x * stage.lr
