@@ -57,6 +57,7 @@ from torch.testing._internal.opinfo.core import (
     ReductionOpInfo,
     S,
     SampleInput,
+    sample_inputs_reduction,
 )
 from torch.testing._internal.opinfo.refs import PythonRefInfo, ReductionPythonRefInfo
 
@@ -78,6 +79,71 @@ def sample_kwargs_vector_norm(t, **kwargs):
         return has_id + no_id
 
     return (((), dict(ord=o)) for o in ords())
+
+
+def sample_inputs_linalg_vector_norm(
+    op_info, device, dtype, requires_grad=False, **kwargs
+):
+    yield from sample_inputs_reduction(
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        supports_multiple_dims=True,
+        generate_args_kwargs=sample_kwargs_vector_norm,
+        **kwargs,
+    )
+    yield SampleInput(
+        torch.empty(0, 5, device=device, dtype=dtype, requires_grad=requires_grad),
+        kwargs=dict(ord=inf, dim=-1),
+    )
+    yield SampleInput(
+        torch.empty(0, 5, device=device, dtype=dtype, requires_grad=requires_grad),
+        kwargs=dict(ord=-inf, dim=-1),
+    )
+    yield SampleInput(
+        torch.empty(0, 5, 3, device=device, dtype=dtype, requires_grad=requires_grad),
+        kwargs=dict(ord=-1, dim=(-1,), keepdim=True),
+    )
+
+
+def error_inputs_linalg_vector_norm(op_info, device, **kwargs):
+    yield ErrorInput(
+        SampleInput(
+            torch.empty(0, 5, device=device, dtype=torch.float32),
+            args=(inf,),
+            kwargs=dict(dim=(-1, -2)),
+        ),
+        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension -2",
+        error_type=RuntimeError,
+    )
+    yield ErrorInput(
+        SampleInput(
+            torch.empty(3, 0, device=device, dtype=torch.float32),
+            args=(inf,),
+            kwargs=dict(dim=-3),
+        ),
+        error_regex=r"Dimension out of range",
+        error_type=IndexError,
+    )
+    yield ErrorInput(
+        SampleInput(
+            torch.empty(5, 0, device=device, dtype=torch.float32),
+            args=(inf,),
+            kwargs=dict(dim=-1),
+        ),
+        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension -1",
+        error_type=RuntimeError,
+    )
+    yield ErrorInput(
+        SampleInput(
+            torch.randn(3, 4, device=device, dtype=torch.float32),
+            args=(inf,),
+            kwargs=dict(dim=(5,), dtype=torch.float16),
+        ),
+        error_regex=r"without narrowing",
+        error_type=RuntimeError,
+    )
 
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -2055,6 +2121,8 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
+        sample_inputs_func=sample_inputs_linalg_vector_norm,
+        error_inputs_func=error_inputs_linalg_vector_norm,
         aten_name="linalg_vector_norm",
     ),
     OpInfo(
