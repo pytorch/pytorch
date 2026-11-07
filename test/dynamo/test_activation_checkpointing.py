@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfXpu,
     TEST_CUDA,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -2053,6 +2054,11 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
         if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        elif torch.version.xpu and TEST_XPU:
+            # XPU prioritizes OVERRIDEABLE (oneDNN).
+            sdpa_op = (
+                torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default
+            )
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
         self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
