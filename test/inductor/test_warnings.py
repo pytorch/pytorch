@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
+    skipIfXpu,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -25,7 +26,8 @@ TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication av
 def _has_tf32() -> bool:
     # On ROCm, capability >= (8, 0) is true for MI200 and RDNA, which do not
     # have XF32. is_tf32_supported() is gfx94x/gfx95x only.
-    return torch.cuda.is_available() and torch.cuda.is_tf32_supported()
+    dev = torch.get_device_module(GPU_TYPE)
+    return dev.is_available() and dev.is_tf32_supported()
 
 
 class InductorWarningTests(TestCase):
@@ -70,6 +72,7 @@ class InductorWarningTests(TestCase):
         self.assertIn("FLOAT32_PRECISION : tl.constexpr = 'ieee'", source)
         self.assertNotIn("FLOAT32_PRECISION : tl.constexpr = 'tf32'", source)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5048")
     @unittest.skipIf(not _has_tf32(), "requires TF32")
     @recover_orig_fp32_precision
     @torch._inductor.config.patch(force_disable_caches=True)

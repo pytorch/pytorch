@@ -5224,7 +5224,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(f, tracing_mode="symbolic")(torch.randn(4, device=GPU_TYPE))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_autotune_config_maxnreg(self, autotune_at_compile_time):
         # A triton.Config's maxnreg must survive serialization into the

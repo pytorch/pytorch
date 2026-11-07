@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfXpu
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -726,9 +726,6 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(
-        msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
@@ -911,7 +908,6 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
     @skipCPUIf(True, "requires gpu and triton")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):

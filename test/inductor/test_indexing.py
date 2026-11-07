@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_GPU_AND_TRITON,
 )
 from torch.utils._sympy.functions import (
     FloorDiv,
@@ -1443,7 +1444,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         else:
             FileCheck().check("for r0_offset in tl.range").run(kernel)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1727,7 +1728,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             reduction_kernels[0]
         )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(force_disable_caches=True)
     def test_reduction_dependent_pointer_keeps_masked_index_load_dense(self):
         def fn(index, source, left):
@@ -1748,7 +1749,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(r"tl\.load\([^\n]*r0_[^\n]*R0_BLOCK").run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(force_disable_caches=True)
     def test_reduction_dependent_mask_keeps_masked_index_load_dense(self):
         def fn(index, source, value):
@@ -1769,7 +1770,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1795,7 +1796,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @parametrize("dense_indexing", [False, True])
     @config.patch(
         {
@@ -1804,6 +1805,13 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         }
     )
     def test_loop_epilogue_masked_index_load_scope(self, dense_indexing):
+        if not dense_indexing and not HAS_CUDA_AND_TRITON:
+            # The narrowed reduction-invariant load is CUDA/ROCm-only; other
+            # backends keep dense indexing even when triton.dense_indexing=False.
+            raise unittest.SkipTest(
+                "reduction-invariant indexing codegen is CUDA/ROCm-only"
+            )
+
         def fn(index, mask, value):
             positions = torch.arange(index.numel(), device=index.device)
             masked_index = torch.ops.aten._unsafe_masked_index(
