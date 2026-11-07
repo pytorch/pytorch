@@ -77,7 +77,12 @@ from .input_output_analysis import (
     create_synthetic_base_metadata,
     remove_dupe_metadata,
 )
-from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
+from .logging_utils import (
+    describe_input,
+    format_guard_bug_msg,
+    get_aot_graph_name,
+    track_graph_compiling,
+)
 from .schemas import (
     AOTConfig,
     CompilerWrapper,
@@ -105,6 +110,7 @@ from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
+    maybe_wrap_compiled_graph,
     partial_flatten_asdict,
     simple_wraps,
     strict_zip,
@@ -2944,9 +2950,12 @@ class _AutogradBackwardCompiler:
             # See Note: [Backward graph lazy lowering]
             if self.bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
-            self.compiled_bw = self.bw_compiler(
-                copy.deepcopy(bw_module), placeholder_list
+            graph_name = get_aot_graph_name()
+            compiled_bw = self.bw_compiler(copy.deepcopy(bw_module), placeholder_list)
+            self.compiled_bw = maybe_wrap_compiled_graph(
+                compiled_bw, "backward", graph_name=graph_name
             )
+
             # Maybe save cache entry
             if self.try_save_cache_entry is not None:
                 self.try_save_cache_entry(
