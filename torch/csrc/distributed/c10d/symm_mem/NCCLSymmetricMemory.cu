@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
@@ -187,8 +188,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "been eagerly initialized by filling `device_id` in the "
         "`init_process_group` call.");
 
-#ifdef USE_ROCM
     comm_generation_ = mgr.get_comm_generation(group_name_, comm_);
+#ifdef USE_ROCM
     // Without device API support the handle is host-only: collectives on the
     // buffer still work, but there are no peer pointers, and their accessors
     // raise.
@@ -393,10 +394,23 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         }
       }
 #else
-      auto res = ncclCommWindowDeregister(comm_, combined_win_);
-      if (res != ncclSuccess) {
-        LOG(WARNING) << "ncclCommWindowDeregister failed: "
-                     << ncclGetErrorString(res);
+      auto& manager = NCCLDevCommManager::get(
+          c10::Device(c10::DeviceType::CUDA, device_idx_));
+      if (manager.comm_registration_is_live(
+              group_name_, comm_, comm_generation_)) {
+        auto res = ncclCommWindowDeregister(comm_, combined_win_);
+        if (debug_level() >= DebugLevel::Info) {
+          LOG(INFO) << "NCCL symmetric-memory window cleanup: group="
+                    << group_name_ << ", action=deregister, result="
+                    << static_cast<int>(res);
+        }
+        if (res != ncclSuccess) {
+          LOG(WARNING) << "ncclCommWindowDeregister failed: "
+                       << ncclGetErrorString(res);
+        }
+      } else if (debug_level() >= DebugLevel::Info) {
+        LOG(INFO) << "NCCL symmetric-memory window cleanup: group=" << group_name_
+                  << ", action=skip-retired";
       }
 #endif
     }
@@ -454,8 +468,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Multicast address (data buffer base within the multicast mapping)
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
-#ifdef USE_ROCM
   uint64_t comm_generation_{0};
+#ifdef USE_ROCM
   bool device_api_support_{false};
 #endif
   friend class NCCLSymmetricMemory;

@@ -360,9 +360,7 @@ void NCCLComm::finalize() {
 
 void NCCLComm::destroy() {
   LockType lock(mutex_);
-#ifdef USE_ROCM
   runPreInvalidateHook();
-#endif
   if (aborted_) {
     LOG(INFO) << "Rank " << rank_
               << ": NCCL communicator already Invalidated. Skip destroy.";
@@ -377,9 +375,7 @@ void NCCLComm::destroy() {
 
 void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LockType lock(mutex_);
-#ifdef USE_ROCM
   runPreInvalidateHook();
-#endif
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   if (aborted_ && !initialized_) {
     // Should not abort twice.

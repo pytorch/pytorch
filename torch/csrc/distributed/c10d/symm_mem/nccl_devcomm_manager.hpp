@@ -9,9 +9,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
-#ifdef USE_ROCM
 #include <cstdint>
-#endif
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -108,7 +106,6 @@ class TORCH_API NCCLDevCommManager {
     return it->second;
   }
 
-#ifdef USE_ROCM
   uint64_t get_comm_generation(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto comm_it = group_to_comm_.find(group_name);
@@ -116,7 +113,7 @@ class TORCH_API NCCLDevCommManager {
     TORCH_CHECK(
         comm_it != group_to_comm_.end() && comm_it->second == comm &&
             generation_it != group_to_comm_generation_.end(),
-        "ROCm NCCL communicator registration for group '",
+        "NCCL communicator registration for group '",
         group_name,
         "' changed before its generation was read");
     return generation_it->second;
@@ -134,6 +131,7 @@ class TORCH_API NCCLDevCommManager {
         generation_it->second == generation;
   }
 
+#ifdef USE_ROCM
   bool comm_has_device_api_support(
       const std::string& group_name,
       ncclComm_t comm) {
@@ -235,13 +233,11 @@ class TORCH_API NCCLDevCommManager {
   // Register the host-side NCCL communicator for `group_name` on this
   // manager's device. Last-write-wins so a successor PG can replace the
   // entry before the prior PG's destructor runs (e.g. restart-after-error).
-  // Producers must retire their entry before invalidating the communicator;
-  // destructor cleanup remains a fallback.
+  // Producers must retire their entry before invalidating the communicator.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto registered_comm = group_to_comm_.find(group_name);
-    [[maybe_unused]] const bool is_new_registration =
-        registered_comm == group_to_comm_.end() ||
+    const bool is_new_registration = registered_comm == group_to_comm_.end() ||
         registered_comm->second != comm;
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Device communicators are built from a specific host comm, so a
@@ -253,9 +249,7 @@ class TORCH_API NCCLDevCommManager {
     //
     // Identity is the pointer alone, so a successor at a recycled `ncclComm_t`
     // address looks like a re-registration and skips the eviction. Producers
-    // that retire before invalidating their comm (nccl2, and ProcessGroupNCCL
-    // on ROCm) rule that out; on CUDA, ProcessGroupNCCL keeps the entry of a
-    // destroyed comm, so a successor after destroy_process_group can reach it.
+    // that retire before invalidating their comm rule that out.
     if (registered_comm != group_to_comm_.end() &&
         registered_comm->second != comm) {
       devcomm_registry_.erase(group_name);
@@ -295,13 +289,11 @@ class TORCH_API NCCLDevCommManager {
         capture_allocation_support;
 #endif
     group_to_comm_[group_name] = comm;
-#ifdef USE_ROCM
     if (is_new_registration ||
         group_to_comm_generation_.find(group_name) ==
             group_to_comm_generation_.end()) {
       group_to_comm_generation_[group_name] = next_comm_generation_++;
     }
-#endif
   }
 
   // Unregister `group_name` on this manager's device. Safe to call when
@@ -317,16 +309,15 @@ class TORCH_API NCCLDevCommManager {
   // These devcomms request none, but a comm that enabled GIN elsewhere attaches
   // contexts to them anyway, so this holds for single-node symmetric memory.
   //
-  // This key-only form is retained for CUDA callers. ROCm teardown uses the
-  // identity-safe overload below.
+  // Producers should use an identity-safe overload for delayed teardown.
   void unregister_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     group_to_comm_.erase(group_name);
 #ifdef USE_ROCM
     group_to_device_api_support_.erase(group_name);
     group_to_capture_allocation_support_.erase(group_name);
-    group_to_comm_generation_.erase(group_name);
 #endif
+    group_to_comm_generation_.erase(group_name);
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     devcomm_registry_.erase(group_name);
 #endif
@@ -343,15 +334,14 @@ class TORCH_API NCCLDevCommManager {
 #ifdef USE_ROCM
       group_to_device_api_support_.erase(group_name);
       group_to_capture_allocation_support_.erase(group_name);
-      group_to_comm_generation_.erase(group_name);
 #endif
+      group_to_comm_generation_.erase(group_name);
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
       devcomm_registry_.erase(group_name);
 #endif
     }
   }
 
-#ifdef USE_ROCM
   // Same as above, but identified by the generation the caller was handed when
   // it registered. A successor can be handed the predecessor's freed
   // `ncclComm_t` address, which the pointer-only overload cannot tell apart,
@@ -367,15 +357,16 @@ class TORCH_API NCCLDevCommManager {
         generation_it != group_to_comm_generation_.end() &&
         generation_it->second == generation) {
       group_to_comm_.erase(it);
+#ifdef USE_ROCM
       group_to_device_api_support_.erase(group_name);
       group_to_capture_allocation_support_.erase(group_name);
+#endif
       group_to_comm_generation_.erase(generation_it);
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
       devcomm_registry_.erase(group_name);
 #endif
     }
   }
-#endif // USE_ROCM
 
   // Destructor: Clean up all registered device communicators.
   // This is a best-effort cleanup. If the CUDA context has already been
@@ -391,11 +382,9 @@ class TORCH_API NCCLDevCommManager {
       // communicator. This is important to ensure no kernels are still using
       // the device communicator when we destroy it.
       C10_CUDA_CHECK(cudaDeviceSynchronize());
-      // Fallback path; see `unregister_comm` for why an earlier erase does not
-      // need `ncclDevCommDestroy`. Producers that retire before invalidating
-      // their comm leave nothing here, but on CUDA stock ProcessGroupNCCL keeps
-      // the entries of destroyed comms, so a comm reaching here may already be
-      // destroyed.
+      // See `unregister_comm` for why retirement does not need
+      // `ncclDevCommDestroy`. Remaining entries belong to live communicators;
+      // producers must retire them before invalidating their communicator.
       for (auto& [group_name, group_map] : devcomm_registry_) {
         // Find the host communicator for the group.
         // Device communicators need the host communicator for destruction.
@@ -451,12 +440,12 @@ class TORCH_API NCCLDevCommManager {
   // communicators. It should be registered before any device communicators
   // for the same group.
   std::unordered_map<std::string, ncclComm_t> group_to_comm_;
+  std::unordered_map<std::string, uint64_t> group_to_comm_generation_;
+  uint64_t next_comm_generation_{1};
 
 #ifdef USE_ROCM
   std::unordered_map<std::string, bool> group_to_device_api_support_;
   std::unordered_map<std::string, bool> group_to_capture_allocation_support_;
-  std::unordered_map<std::string, uint64_t> group_to_comm_generation_;
-  uint64_t next_comm_generation_{1};
   cudaStream_t capture_setup_stream_{nullptr};
   std::mutex capture_setup_mutex_;
 #endif
