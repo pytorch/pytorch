@@ -625,6 +625,9 @@ class TestBenchmarker(TestCase):
             def zero_(self):
                 pass
 
+            def sum(self):
+                pass
+
         class FakeDeviceInterface:
             def synchronize(self):
                 pass
@@ -661,6 +664,7 @@ class TestBenchmarker(TestCase):
                     return_value=FakeDeviceInterface(),
                 ),
                 patch.object(_bench.torch, "empty", return_value=FakeBuffer()),
+                patch.object(_bench, "_rocm_mall_size", return_value=0),
                 patch.object(
                     _bench.inductor_config, "autotune_cudagraph_benchmarking", True
                 ),
@@ -729,6 +733,99 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+    def test_inductor_benchmarker_flush_size_adds_rocm_mall(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = InductorBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 4 * 1024 * 1024
+        with patch.object(torch.version, "hip", None):
+            self.assertEqual(benchmarker.get_flush_size("cuda"), 4 * 1024 * 1024)
+        for arch, mall in (
+            ("gfx950:sramecc+:xnack-", 256),
+            ("gfx942", 256),
+            ("gfx90a", 0),
+            ("gfx9999", 256),
+        ):
+            props = unittest.mock.Mock(gcnArchName=arch)
+            _bench._rocm_mall_size.cache_clear()
+            try:
+                with (
+                    patch.object(torch.version, "hip", "mock-hip"),
+                    patch.object(_bench.torch.cuda, "current_device", return_value=0),
+                    patch.object(
+                        _bench.torch.cuda, "get_device_properties", return_value=props
+                    ),
+                ):
+                    self.assertEqual(
+                        benchmarker.get_flush_size("cuda"), (4 + mall) * 1024 * 1024
+                    )
+            finally:
+                _bench._rocm_mall_size.cache_clear()
+
+    @parametrize("hip_value", (None, "mock-hip"))
+    def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value):
+        # ROCm flushes by reading a float32 buffer (zero_() leaves dirty lines whose
+        # write-back the timed call pays); CUDA keeps the int32 zero_() flush.
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        class FakeBuffer:
+            def zero_(self):
+                calls.append("zero_")
+
+            def sum(self):
+                calls.append("sum")
+
+        class FakeDeviceInterface:
+            def synchronize(self):
+                pass
+
+        class FakeEvent:
+            def record(self):
+                pass
+
+            def elapsed_time(self, other):
+                return 1.0
+
+        class FakeInductorBenchmarker(InductorBenchmarker):
+            def get_device_cache_size(self, device_type=None):
+                return 4
+
+            def get_event_pairs(self, iters, device_type=None):
+                return [(FakeEvent(), FakeEvent()) for _ in range(iters)]
+
+        empty_calls = []
+
+        def fake_empty(*args, **kwargs):
+            empty_calls.append((args, kwargs))
+            return FakeBuffer()
+
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(_bench.torch, "empty", side_effect=fake_empty),
+            patch.object(_bench, "_rocm_mall_size", return_value=256),
+            patch.object(torch.version, "hip", hip_value),
+        ):
+            FakeInductorBenchmarker().benchmark_gpu(
+                lambda: None,
+                estimation_iters=2,
+                memory_warmup_iters=3,
+                benchmark_iters=4,
+                is_vetted_benchmarking=True,
+                device_type="cuda",
+            )
+
+        (size,), kwargs = empty_calls[0]
+        if hip_value:
+            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
+            self.assertEqual(calls, ["zero_"] + ["sum"] * (2 + 3 + 4))
+        else:
+            self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
+            self.assertEqual(calls, ["zero_"] * (1 + 2 + 3 + 4))
 
 
 class TestGpuBenchmarkDeviceTypes(TestCase):
