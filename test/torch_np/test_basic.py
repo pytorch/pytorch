@@ -511,6 +511,69 @@ class TestNormalizations(TestCase):
             w.eye()
 
 
+class TestArangeKeywordBinding(TestCase):
+    """arange's start/stop/step kwargs-vs-positional handling (NumPy parity).
+
+    NumPy requires stop when start is passed by keyword (arange(start=4)
+    raises), binds a lone positional arg to stop (arange(4) == arange(4,))
+    unless a stop keyword is also given (arange(0, stop=5)), and errors when
+    a keyword collides with a positional slot. See gh-194866.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_lone_positional_is_stop(self):
+        # arange(4) is shorthand for arange(stop=4); step kw still applies
+        assert_equal(w.arange(4), _np.arange(4))
+        assert_equal(w.arange(4, step=2), _np.arange(4, step=2))
+        assert_equal(w.arange(stop=5), _np.arange(stop=5))
+
+    def test_positional_with_stop_kw_binds_to_start(self):
+        assert_equal(w.arange(0, stop=5), _np.arange(0, stop=5))
+        assert_equal(w.arange(4, stop=5), _np.arange(4, stop=5))
+        assert_equal(w.arange(0, stop=5, step=2), _np.arange(0, stop=5, step=2))
+
+    def test_start_kw_requires_stop(self):
+        # both arange() and arange(start=4)
+        for args, kwargs in [((), {"start": 4}), ((), {}), ((), {"start": 0, "step": 2})]:
+            with assert_raises(TypeError):
+                w.arange(*args, **kwargs)
+
+    def test_keyword_positional_collisions(self):
+        with assert_raises(TypeError):
+            w.arange(4, start=2)
+        with assert_raises(TypeError):
+            w.arange(4, start=0)
+        with assert_raises(TypeError):
+            w.arange(4, start=2, stop=5)
+        with assert_raises(TypeError):
+            w.arange(1, 2, start=3)
+        with assert_raises(TypeError):
+            w.arange(1, 2, stop=3)
+        with assert_raises(TypeError):
+            w.arange(1, 2, 3, step=4)
+
+    def test_too_many_positional(self):
+        with assert_raises(TypeError):
+            w.arange(1, 2, 3, 4, 5)
+
+    def test_step_zero_raises(self):
+        with assert_raises(ZeroDivisionError):
+            w.arange(1, 5, step=0)
+
+    def test_positional_dtype(self):
+        # NumPy's 4th positional slot is dtype: arange(0, 10, 2, np.int16)
+        for dt in (_np.float32, _np.int16, "float64", float, int):
+            got = w.arange(0, 10, 2, dt)
+            expected = _np.arange(0, 10, 2, dt)
+            assert_equal(got, expected)
+            assert_equal(got.dtype.torch_dtype, torch.from_numpy(expected).dtype)
+
+    def test_dtype_positional_and_kw_collision(self):
+        with assert_raises(TypeError):
+            w.arange(0, 10, 2, _np.float32, dtype=_np.float64)
+
+
 class TestCopyTo(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

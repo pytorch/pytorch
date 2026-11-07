@@ -381,23 +381,79 @@ def logspace(
 
 
 def arange(
+    *args: ArrayLikeOrScalar,
     start: ArrayLikeOrScalar | None = None,
     stop: ArrayLikeOrScalar | None = None,
     step: ArrayLikeOrScalar | None = 1,
     dtype: DTypeLike | None = None,
-    *,
     like: NotImplementedType = None,
 ) -> torch.Tensor:
-    if step == 0:
-        raise ZeroDivisionError
-    if stop is None:
+    # NumPy's arange requires stop to be specified when start is passed by
+    # keyword: arange(start=4) raises TypeError while arange(4) is shorthand
+    # for arange(stop=4). Interface the impl as star-args so the args/kwargs
+    # distinction survives the normalizer.
+    #
+    # NumPy binds positional args to the (start, stop, step) slots in order,
+    # then applies the `[start, ]stop` shorthand: a *lone* positional arg
+    # that is not disambiguated by a `stop` keyword means stop (so
+    # arange(4) == arange(stop=4) and arange(4, step=2) == arange(0, 4, 2));
+    # when `stop` *is* passed by keyword, the positional binds to start
+    # (arange(0, stop=5)). A keyword colliding with a positional slot raises
+    # TypeError with NumPy's wording (there the parser reports keyword
+    # presence even when it equals the default, e.g. arange(1, 2, 3, step=1);
+    # our default-filtered check cannot see that edge case).
+    # NB: NumPy also accepts `dtype` as a 4th positional arg (its signature
+    # is arange([start, ]stop, [step, ]dtype=None)); the wrapper registered in
+    # _funcs.py peels that slot into the dtype keyword before the normalizer
+    # runs, since a positional dtype would not survive the first parameter's
+    # ArrayLikeOrScalar annotation.
+    n = len(args)
+    if n > 4:
+        raise TypeError(
+            f"arange() takes from 0 to 4 positional arguments but {n} were given"
+        )
+    if n == 4:
+        # only reachable from direct callers of this impl (the public `arange`
+        # wrapper peels the 4th positional before the normalizer runs)
+        if dtype is not None:
+            raise TypeError(
+                "argument for arange() given by name ('dtype') "
+                "and position (position 3)"
+            )
+        dtype = args[3]
+        args = args[:3]
+        n = 3
+    if n >= 1 and start is not None:
+        raise TypeError(
+            "argument for arange() given by name ('start') and position (position 0)"
+        )
+    if n >= 2 and stop is not None:
+        raise TypeError(
+            "argument for arange() given by name ('stop') and position (position 1)"
+        )
+    if n == 3 and step != 1:
+        raise TypeError(
+            "argument for arange() given by name ('step') and position (position 2)"
+        )
+    if n == 0:
+        if stop is None:
+            # both arange() and arange(start=4)
+            raise TypeError("arange() requires stop to be specified.")
         if start is None:
-            raise TypeError
-        # XXX: this breaks if start is passed as a kwarg:
-        # arange(start=4) should raise (no stop) but doesn't
-        start, stop = 0, start
-    if start is None:
-        start = 0
+            start = 0
+    elif n == 1:
+        if stop is not None:
+            # the positional binds to start; stop comes from the keyword
+            start = args[0]
+        else:
+            # the lone positional is the `[start, ]stop` shorthand
+            start, stop = 0, args[0]
+    elif n == 2:
+        start, stop = args
+    else:
+        start, stop, step = args
+    if step == 0:
+        raise ZeroDivisionError("division by zero")
 
     # the dtype of the result
     # NB: a None step is not handled here (numpy would treat it as 1); passing
