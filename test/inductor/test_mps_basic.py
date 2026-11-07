@@ -370,6 +370,113 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("case", ["horizontal", "vertical", "scalars", "cpu_scalars", "python_ints", "mixed"])
+    def test_many_buffer_args(self, dynamic, case):
+        # https://github.com/pytorch/pytorch/issues/201864
+        # Python ints specialize with static shapes; those cases also exercise
+        # the ordinary binding path below the buffer limit.
+        def horizontal(x, *ws):
+            return [x * w for w in ws]
+
+        def vertical(x, *ws):
+            for w in ws:
+                x = x * w + 1
+            return x
+
+        def scalars(x, *args):
+            ws, ns = args[:24], args[24:]
+            for i, w in enumerate(ws):
+                x = x * w + ns[i % len(ns)]
+            return x
+
+        def add_many(x, *values):
+            for v in values:
+                x = x + v
+            return x
+
+        x = make_tensor(33, 65, device=self.device, dtype=torch.float32)
+        v = make_tensor(65, device=self.device, dtype=torch.float32)
+        ws = [make_tensor(65, 33, device=self.device, dtype=torch.float32).t() for _ in range(31)]
+        ns = list(range(2, 12))
+        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(32)]
+        mps_scalars = [torch.tensor(float(i), device=self.device) for i in range(10)]
+        cases = {
+            "horizontal": (horizontal, x, ws, True),
+            "vertical": (vertical, x, ws, True),
+            "scalars": (scalars, x, ws[:24] + ns, dynamic),
+            "cpu_scalars": (add_many, v, cpu_scalars, True),
+            "python_ints": (add_many, v, list(range(2, 34)), dynamic),
+            "mixed": (add_many, v, cpu_scalars[:12] + mps_scalars + ns, dynamic),
+        }
+        fn, x0, args, packed = cases[case]
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), x0, *args)
+        self.assertEqual(result, fn(x0, *args))
+        self.assertEqual(code.count("kernel void "), 1)
+        self.assertEqual("_buffers& buffers" in code, packed)
+        self.assertEqual("constant long* int_args" in code, packed and dynamic)
+        self.assertNotIn(".to('mps'", code)
+
+    @parametrize("num_weights", [29, 30])
+    def test_argument_buffer_boundary(self, num_weights):
+        def fn(x, *weights):
+            for weight in weights:
+                x = x + weight
+            return x
+
+        inputs = tuple(make_tensor(65, device=self.device, dtype=torch.float32) for _ in range(num_weights + 1))
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), *inputs)
+        self.assertEqual(result, fn(*inputs))
+        self.assertEqual(code.count("kernel void "), 1)
+        self.assertEqual("_buffers& buffers" in code, num_weights == 30)
+        self.assertNotIn("constant long* int_args", code)
+
+    def test_argument_buffer_reduction(self):
+        def fn(x, *weights):
+            for weight in weights:
+                x = x + weight
+            return x.sum(dim=1)
+
+        inputs = tuple(make_tensor(33, 65, device=self.device, dtype=torch.float32) for _ in range(32))
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), *inputs)
+        self.assertEqual(result, fn(*inputs))
+        self.assertIn("_buffers& buffers", code)
+        self.assertIn("constant long* int_args", code)
+        self.assertIn("r0_numel = int_args[", code)
+
+    def test_argument_buffer_indirect_load(self):
+        def fn(x, index, *weights):
+            x = x[index]
+            for weight in weights:
+                x = x + weight
+            return x
+
+        x = make_tensor(65, device=self.device, dtype=torch.float32)
+        index = torch.arange(65, device=self.device).flip(0)
+        weights = tuple(make_tensor(65, device=self.device, dtype=torch.float32) for _ in range(30))
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), x, index, *weights)
+        self.assertEqual(result, fn(x, index, *weights))
+        self.assertIn("_buffers& buffers", code)
+        self.assertIn("ErrorMessages* error_buf", code)
+        self.assertIn("error_buf_idx=", code)
+
+    def test_two_argument_buffer_kernels(self):
+        def fn(x, matrix, *weights):
+            for weight in weights[:31]:
+                x = x + weight
+            x = torch.mm(x, matrix)
+            for weight in weights[31:]:
+                x = x - weight
+            return x
+
+        x = make_tensor(8, 8, device=self.device, dtype=torch.float32)
+        matrix = make_tensor(8, 8, device=self.device, dtype=torch.float32)
+        weights = tuple(make_tensor(8, 8, device=self.device, dtype=torch.float32) for _ in range(62))
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), x, matrix, *weights)
+        self.assertEqual(result, fn(x, matrix, *weights))
+        self.assertEqual(code.count("kernel void "), 2)
+        self.assertEqual(code.count("_buffers& buffers"), 2)
+
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
@@ -394,8 +501,37 @@ class MPSBasicTests(TestCase):
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
+@instantiate_parametrized_tests
 class MPSBasicTestsAOTI(TestCase):
     hw_classification = HardwareClassification.MPS
+
+    def test_buffer_limit_error(self):
+        kernel = unittest.mock.Mock()
+        kernel.args.sizevars = {}
+        kernel.headers = set()
+        kernel.max_buffer_args = MetalKernel.max_buffer_args
+        kernel._dynamic_numel_trees.return_value = []
+        with patch("torch._inductor.codegen.mps.V") as virtualized:
+            virtualized.graph.cpp_wrapper = True
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"too_many_args needs 32.*at most 31.*Disable cpp_wrapper",
+            ):
+                MetalKernel._use_argument_buffer(kernel, 32, "too_many_args")
+
+    @parametrize("num_weights", [29, 30])
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_many_buffer_args(self, num_weights):
+        def fn(x, *weights):
+            for weight in weights:
+                x = x + weight
+            return x
+
+        inputs = tuple(make_tensor(65, device="mps", dtype=torch.float32) for _ in range(num_weights + 1))
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), *inputs)
+        self.assertEqual(result, fn(*inputs))
+        self.assertEqual(code.count("kernel void "), 1 if num_weights == 29 else 2)
+        self.assertNotIn("_buffers& buffers", code)
 
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
