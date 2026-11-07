@@ -14,11 +14,18 @@ from torch.distributed.flight_recorder.components.types import (
     Op,
 )
 from torch.distributed.flight_recorder.components.utils import match_one_event
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.get_default_backend_for_device(device_type)
+try:
+    backend = torch.distributed.get_default_backend_for_device(device_type)
+except ValueError:
+    backend = "c10d"
 
 
 def create_one_event(
@@ -49,6 +56,8 @@ def create_one_event(
 
 
 class FlightRecorderEventTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_match_one_event(self):
         e1 = create_one_event(
             "all_reduce", ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
@@ -277,6 +286,8 @@ class FlightRecorderEventTest(TestCase):
 class FlightRecorderOpBackendTest(TestCase):
     """Tests that the Op class accepts all supported backend prefixes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_event(self, backend: str, collective: str = "all_reduce"):
         return {
             "profiling_name": f"{backend}:{collective}",
@@ -348,6 +359,8 @@ class FlightRecorderOpBackendTest(TestCase):
 
 
 class FlightMatchInfoTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_match_info(self):
         m1 = MatchInfo(MatchState.FULLY_MATCHED, "rank 0")
         m2 = MatchInfo(MatchState.FULLY_MATCHED, "rank 1")
@@ -408,6 +421,8 @@ def create_one_entry(
 
 
 class FlightRecorderE2ETest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def testBuildDB(self):
         config = JobConfig()
         args = config.parse_args([])
@@ -571,6 +586,8 @@ class FlightRecorderHookShapeTest(TestCase):
     have to analyze with no mismatch, or a real desync ends up buried under
     fabricated ones.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     version = "2.8"  # Same as the version in FlightRecorder.hpp
 
