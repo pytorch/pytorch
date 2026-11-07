@@ -11,7 +11,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
-from ..utils import is_bf16x9_matmul
+from ..utils import is_bf16x9_matmul, is_gpu
 from .split_cat import construct_pattern_matcher_pass
 
 
@@ -19,7 +19,7 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 # TODO: need a better strategy for decomposing mm
-# The following two constants are for CUDA device only
+# The following two constants are for GPU/accelerator devices
 MIN_FIRST_DIMENSION_DECOMPOSITION = 10240
 MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 # The following two constants are for CPU device only
@@ -53,6 +53,11 @@ def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
     return (a.device.type == b.device.type) and (b.device.type == device)
 
 
+def check_gpu_device(a: Tensor, b: Tensor) -> bool:
+    device_type = a.device.type
+    return device_type == b.device.type and is_gpu(device_type)
+
+
 def realize_inputs(inputs: list[torch.fx.Node]):
     for inp in inputs:
         if isinstance(inp, torch.fx.node.Node):
@@ -71,9 +76,7 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         or is_bf16x9_matmul(mat1.device.type, mat1.dtype)
     ):
         return False
-    if check_device(mat1, mat2, device="cuda") or check_device(
-        mat1, mat2, device="xpu"
-    ):
+    if check_gpu_device(mat1, mat2):
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
@@ -123,7 +126,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
             - Both matrices must be 2-dimensional.
             - If the configuration option `skip_dynamic_shape_dim_check` is False:
                 - Decomposition is only considered for statically-shaped matrices.
-                - For CUDA devices: `mat1.shape[0]` must be at least `min_first_dimension_decomposition`,
+                - For GPU/accelerator devices: `mat1.shape[0]` must be at least `min_first_dimension_decomposition`,
                   and both dimensions of `mat2` must be less than `max_other_dimension_decomposition`.
                 - For CPU devices: All relevant dimensions must be less than or equal to their respective
                   CPU decomposition thresholds.
@@ -133,8 +136,8 @@ def should_decompose_mm(mat1, mat2) -> bool:
                 - The same dimension and device checks apply, but allow for dynamic/static uncertainty.
             - Returns False if any of the above conditions are not met.
     Notes:
-        - Relies on helper functions such as `is_node_meta_valid`, `check_device`, `statically_known_true`,
-          and `statically_known_false`, as well as configuration values like
+        - Relies on helper functions such as `is_node_meta_valid`, `check_device`, `check_gpu_device`,
+          `statically_known_true` and `statically_known_false`, as well as configuration values like
           `min_first_dimension_decomposition`, `max_other_dimension_decomposition`, etc.
         - Designed for use in graph optimization or fusion passes where decomposing large or dynamic
           matrix multiplications can improve performance or memory usage.
@@ -155,10 +158,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
         "skip_dynamic_shape_dim_check", False
     ):
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            check_gpu_device(mat1, mat2)
             and statically_known_true(
                 mat1.shape[0] >= min_first_dimension_decomposition
             )
@@ -179,10 +179,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
     # case 2: we decompose mm if the input is dynamic shape
     else:
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            check_gpu_device(mat1, mat2)
             and (
                 statically_known_true(
                     mat1.shape[0] >= min_first_dimension_decomposition
