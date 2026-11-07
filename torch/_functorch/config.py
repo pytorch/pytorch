@@ -18,10 +18,17 @@ from typing import Literal, TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
+if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.utils import CompiledGraphWrapper
+else:
+    CompiledGraphWrapper = Callable
+
+
 # [@compile_ignored: debug]
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    "compiled_graph_wrapper",
     # callable configs with uuid() for caching, or raw callables
     "activation_memory_budget_runtime_estimator",
     "activation_memory_budget_solver",
@@ -478,6 +485,25 @@ selective_decompose: bool = False
 # then converting back to a regular tensor.
 enable_complex_wrapper: bool = False
 
+
+# Optional hook called after each AOT graph compiles:
+# `hook(compiled, graph_name, graph_role=...)`, where graph_name is e.g.
+# "model__0_backward_3" and graph_role is "forward", "backward" or "inference".
+# Its result replaces `compiled` only if it is callable, keeps `_boxed_call`,
+# reaches `compiled` through `__wrapped__`, and keeps every instance attribute
+# of `compiled` by identity; otherwise a warning is logged and `compiled` is
+# used. functools.wraps covers all but `_boxed_call`, which must be copied
+# explicitly. Exceptions raised by the hook propagate.
+#
+# If None, torch._utils_internal.get_compiled_graph_wrapper() supplies the hook.
+#
+# While a hook is active, AOTAutogradCache lookup is skipped (a hit would bypass
+# the hook); saving and the FX graph cache still apply. Like other config, it is
+# per-thread, and a lazily compiled backward uses the hook active when it runs.
+# Not wrapped: backwards already restored from the cache (so enable the hook
+# before the forward compiles), artifacts loaded without compiling, and backward
+# graphs inlined by compiled autograd.
+compiled_graph_wrapper: CompiledGraphWrapper | None = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
