@@ -1365,6 +1365,17 @@ def pow(
     if not (isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)):
         raise AssertionError("at least one of a or b must be TensorLikeType")
 
+    # Same check as the pow.Tensor_Scalar meta function in aten/src/ATen/native/Pow.cpp,
+    # which this decomposition replaces under meta and FakeTensor.
+    if (
+        isinstance(a, TensorLikeType)
+        and utils.is_integer_dtype(a.dtype)
+        and isinstance(b, IntLike)
+    ):
+        torch._check(
+            b >= 0, lambda: "Integers to negative integer powers are not allowed."
+        )
+
     if isinstance(b, Number):
         if statically_known_true(b == 1.0):
             return a.clone()  # type: ignore[return-value,union-attr]
