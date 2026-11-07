@@ -1056,12 +1056,86 @@ class FakeTensorConverter:
 
 @functools.cache
 def init_gpu_context(device: torch.device) -> None:
-    # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.accelerator.current_accelerator(True) == device.type:
-        (
-            torch.empty(1, device=device)
-            if torch.version.hip is None
-            else torch.zeros(1, device=device)
+    # Backward will error with FakeTensors on an accelerator if no real tensors
+    # have been initialized on it first. Self-guards on the current accelerator,
+    # so any other device type (cpu and meta included) is a no-op. The
+    # allocation must stay REAL and both blocking TLS states must be cleared
+    # around it: callers may hold the meta include set (see
+    # in_kernel_invocation_manager), under which torch.empty hits the meta
+    # kernel, and a pushed FakeTensorMode makes device_lazy_init return early
+    # on the FAKE dispatch mode, skipping the runtime init this allocation
+    # exists to trigger. no_dispatch() clears neither.
+    # Ask the compile-time answer first: current_accelerator() without
+    # check_available only reports the backend this wheel was built with and
+    # never touches a driver. The runtime leg (torch.accelerator.is_available,
+    # i.e. check_available=True) delegates to <backend>.is_available(), which
+    # for CUDA runs _cuda_getDeviceCount() and poisons fork unless
+    # PYTORCH_NVML_BASED_CUDA_CHECK=1 is set. Only a FakeTensor standing in for
+    # the current accelerator can warm it, so every other device type, cpu and
+    # meta included, returns before any availability check is made.
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or acc.type != device.type:
+        return
+    try:
+        available = torch.accelerator.is_available()
+        count = (
+            torch.accelerator.device_count()
+            if available and device.index is not None
+            else 0
+        )
+    except (RuntimeError, AttributeError) as err:
+        # The two queries are the only calls a half-registered backend can fail
+        # structurally: torch.get_device_module raises RuntimeError when the
+        # registered PrivateUse1 name has no torch.<name> module, and that module can
+        # exist without implementing the query at all (AttributeError). Reading both
+        # as "no accelerator" is what torch._utils._is_privateuse1_backend_available
+        # does with getattr(..., None). This lenient catch stays confined to the two
+        # queries; the allocation below swallows a broader family on purpose because
+        # its failure types are open-ended, and its comment covers that trade.
+        log.warning(
+            "Skipping the FakeTensor accelerator warm-up on %s: %s", device, err
+        )
+        return
+    if not available:
+        return
+    # A present index warms that exact device; a locally missing one
+    # (cuda:7 on a 4-GPU box) would raise invalid device ordinal, so fall
+    # back to the type's default device: runtime init is per-backend.
+    warmup_device = (
+        device
+        if device.index is None or device.index < count
+        else torch.device(device.type)
+    )
+    try:
+        with (
+            unset_fake_temporarily(),
+            no_dispatch(),
+            torch._C._PreserveDispatchKeyGuard(),
+        ):
+            torch._C._set_meta_in_tls_dispatch_include(False)
+            (
+                torch.empty(1, device=warmup_device)
+                if torch.version.hip is None
+                else torch.zeros(1, device=warmup_device)
+            )
+    except Exception as err:
+        # The allocation is where the backend runtime actually initializes, and its
+        # failure types are not one family: device_lazy_init reaches the backend's
+        # _lazy_init through TORCH_CHECK_PYTHON, whose DeferredCudaCallError and
+        # DeferredMtiaCallError are direct Exception subclasses; _lazy_init can also
+        # raise AssertionError; a process forked after CUDA was probed, an
+        # exclusive-process device, and an OOM all raise RuntimeError. Listing the
+        # deferred types instead would reintroduce per-vendor knowledge into this
+        # device-agnostic guard, so the catch is Exception; KeyboardInterrupt and
+        # SystemExit are BaseException and still propagate. The breadth has a cost:
+        # a call-site bug here (a renamed API) surfaces as one warning instead of a
+        # raise, accepted because an optional warm-up must not gain a way to fail
+        # FakeTensor construction. functools.cache does not store exceptions, so
+        # handling here is also what stops a refused backend from being re-probed on
+        # every later construction. Logged, not silenced, and not through
+        # warnings.warn so an optional path cannot become a failure under -W error.
+        log.warning(
+            "Skipping the FakeTensor accelerator warm-up on %s: %s", warmup_device, err
         )
 
 
@@ -1304,10 +1378,12 @@ class FakeTensor(Tensor):
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
-        """Normalize device by initializing GPU context and setting device index."""
-        if device.type in ("cuda", "xpu"):
-            init_gpu_context(device)
-
+        """Normalize device by initializing the accelerator context and index."""
+        # init_gpu_context self-guards on the current accelerator, so no
+        # device-type whitelist is needed here (PrivateUse1 backends included).
+        # The call is unconditional: repeat calls are functools.cache hits and
+        # the self-guard inside init_gpu_context decides whether to allocate.
+        init_gpu_context(device)
         return _pin_device_index(device)
 
     @staticmethod
