@@ -442,6 +442,9 @@ class BaseHeuristicSingleton(type):
         with cls._lock:
             if cls not in cls._instances:
                 instance = super().__call__()
+                # Remember the list __init__ chose so a later reassignment
+                # (e.g. inst.mm_configs = [...]) can be detected.
+                instance._constructed_mm_configs = instance.mm_configs
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
@@ -2488,6 +2491,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    mm_configs: list[BaseConfig]
+    _constructed_mm_configs: list[BaseConfig]
     uses_tdm_configs: bool
     blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
@@ -2538,9 +2543,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             return self.get_mm_configs()
 
     def _origami_may_select(self) -> bool:
-        """In-tree heuristics only: Origami ignores mm_configs and max_mm_configs."""
+        """Origami picks from exhaustive_configs, not mm_configs, so use it only for
+        in-tree heuristics whose mm_configs was not replaced after construction,
+        and not when max_mm_configs is set."""
         return (
             type(self).__module__ == __name__
+            and self.mm_configs is self._constructed_mm_configs
             and config.test_configs.max_mm_configs is None
         )
 

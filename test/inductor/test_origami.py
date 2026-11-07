@@ -630,6 +630,21 @@ class TestOrigami(TestCase):
             custom_cls = type(f"Custom{cls.__name__}", (cls,), {})
             self.assertFalse(custom_cls()._origami_may_select(), custom_cls)
 
+    def test_origami_not_used_after_mm_configs_reassigned(self):
+        import torch._inductor.heuristics.template.triton as th
+
+        heuristic = th.ROCmMMTemplateConfigHeuristic()
+        original = heuristic.mm_configs
+        patch_config = self._origami_default_config(ORIGAMI_TOPK_VALUES[0])
+        try:
+            heuristic.mm_configs = original[:1]
+            self.assertFalse(heuristic._origami_may_select())
+            case = self._compile_with_config("mm", patch_config, size=256)
+            self.assertEqual(case["topk_calls"], 0)
+        finally:
+            heuristic.mm_configs = original
+        self.assertTrue(heuristic._origami_may_select())
+
     def _matmul_inputs(
         self,
         op_name: str,
