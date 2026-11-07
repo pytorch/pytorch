@@ -527,6 +527,57 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             partial_dt.clamp_(max=10)
 
     @with_comms
+    def test_threshold_partial(self):
+        # threshold(x, threshold, value) is non-decreasing only when value <= threshold.
+        # When value > threshold, Partial(max)/Partial(min) must not be preserved,
+        # and sharding propagation should redistribute to Replicate.
+        mesh = self.build_device_mesh()
+        full = torch.tensor(
+            [[-1.0, 3.0], [1.0, -2.0]] * self.world_size, device=self.device_type
+        )
+        x = distribute_tensor(full, mesh, [Shard(0)])
+
+        # Test Partial(max)
+        m_max = x.amax(dim=0)
+        self.assertEqual(m_max.placements, (Partial("max"),))
+
+        # value <= threshold: preserves Partial(max)
+        y_max_ok = torch.nn.functional.threshold(m_max, 0.0, 0.0)
+        self.assertEqual(y_max_ok.placements, (Partial("max"),))
+        self.assertEqual(
+            y_max_ok.full_tensor(),
+            torch.nn.functional.threshold(full.amax(dim=0), 0.0, 0.0),
+        )
+
+        # value > threshold: redistributes to Replicate
+        y_max_redist = torch.nn.functional.threshold(m_max, 0.0, 5.0)
+        self.assertEqual(y_max_redist.placements, (Replicate(),))
+        self.assertEqual(
+            y_max_redist.full_tensor(),
+            torch.nn.functional.threshold(full.amax(dim=0), 0.0, 5.0),
+        )
+
+        # Test Partial(min)
+        m_min = x.amin(dim=0)
+        self.assertEqual(m_min.placements, (Partial("min"),))
+
+        # value <= threshold: preserves Partial(min)
+        y_min_ok = torch.nn.functional.threshold(m_min, 0.0, 0.0)
+        self.assertEqual(y_min_ok.placements, (Partial("min"),))
+        self.assertEqual(
+            y_min_ok.full_tensor(),
+            torch.nn.functional.threshold(full.amin(dim=0), 0.0, 0.0),
+        )
+
+        # value > threshold: redistributes to Replicate
+        y_min_redist = torch.nn.functional.threshold(m_min, 0.0, 5.0)
+        self.assertEqual(y_min_redist.placements, (Replicate(),))
+        self.assertEqual(
+            y_min_redist.full_tensor(),
+            torch.nn.functional.threshold(full.amin(dim=0), 0.0, 5.0),
+        )
+
+    @with_comms
     def test_mul_div_scalar_partial(self):
         aten = torch.ops.aten
         mesh = self.build_device_mesh()
