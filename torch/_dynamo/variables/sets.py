@@ -314,8 +314,13 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            guard_key_collisions(self.items, other.items)
-            yield from other.items.keys()
+            storage = (
+                other.materialize_keys()
+                if isinstance(other, ConstDictVariable)
+                else other.items
+            )
+            guard_key_collisions(self.items, storage)
+            yield from storage
             return
 
         for item in lazily_unpack(tx, other):
@@ -332,7 +337,12 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            keys = list(other.items.keys())
+            storage = (
+                other.materialize_keys()
+                if isinstance(other, ConstDictVariable)
+                else other.items
+            )
+            keys = list(storage)
         else:
             keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
         guard_key_collisions(self.items, keys)
@@ -1471,7 +1481,10 @@ class DictKeySetVariable(BaseSetVariable):
         if isinstance(vt, ConstDictVariable):
             vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
-            items: list[Any] = list(vt.items.keys())
+            storage = (
+                vt.materialize_keys() if isinstance(vt, ConstDictVariable) else vt.items
+            )
+            items: list[Any] = list(storage)
         else:
             items = unpack_iterable(tx, vt)
         return SetVariable(items, mutation_type=ValueMutationNew())

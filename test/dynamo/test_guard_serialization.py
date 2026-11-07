@@ -5175,6 +5175,211 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    @parametrize("with_kwargs", [False, True])
+    def test_forward_pre_hook_membership(self, with_kwargs):
+        def hook(module, args, *rest):
+            return ((args[0] + 1,), rest[0]) if rest else (args[0] + 1,)
+
+        def make_module(flag):
+            module = torch.nn.Identity()
+            module.register_forward_pre_hook(hook, with_kwargs=flag)
+            return module
+
+        def fn(x, module):
+            return module(x)
+
+        x = torch.ones(2)
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, make_module(with_kwargs)
+        )
+        for flag in (with_kwargs, not with_kwargs):
+            self._test_check_fn(
+                ref, loaded, {"x": x, "module": make_module(flag)}, flag == with_kwargs
+            )
+
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    def test_nn_module_hook_membership(self, flag_name):
+        def hook(module, args, *rest):
+            return rest[-1] + 1
+
+        def make_module(flags):
+            module = torch.nn.Identity()
+            for flag in flags:
+                module.register_forward_hook(hook, **{flag_name: flag})
+            return module
+
+        def fn(x, module):
+            flags = getattr(
+                module,
+                "_forward_hooks_with_kwargs"
+                if flag_name == "with_kwargs"
+                else "_forward_hooks_always_called",
+            )
+            return x + sum(
+                index + 1
+                for index, (key, _) in enumerate(module._forward_hooks.items())
+                if key in flags
+            )
+
+        x = torch.ones(2)
+        module = make_module((False, True))
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
+        )
+        self.assertIn("== (False, True)", str(ref))
+        self.assertIn("== (False, True)", str(loaded))
+        for flags in ((False, True), (True, False)):
+            self._test_check_fn(
+                ref,
+                loaded,
+                {"x": x, "module": make_module(flags)},
+                flags == (False, True),
+            )
+
+        first, second = module._forward_hooks
+        flags = getattr(
+            module,
+            "_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_forward_hooks_always_called",
+        )
+        flags[first] = flags.pop(second)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "module": module},
+            False,
+        )
+        flags[second] = flags.pop(first)
+        module._forward_hooks.move_to_end(first)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "module": module},
+            True,
+        )
+
+    def test_nested_region_hook_secondary_source(self):
+        @torch.compiler.nested_compile_region
+        def region(x, module, box):
+            return x + sum(key in box.flags for key in module._forward_hooks)
+
+        def fn(x, module, first, second):
+            return region(x, module, first), region(x, module, second)
+
+        module = torch.nn.Identity()
+        module._forward_hooks.update({1: None, 2: None})
+        first = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
+        second = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
+        x = torch.ones(2)
+        with mock.patch.object(
+            torch.nn.modules.module, "_global_forward_hooks_with_kwargs", first.flags
+        ):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, first, second
+            )
+            inputs = {
+                "x": x,
+                "module": module,
+                "first": first,
+                "second": second,
+                "region": region,
+            }
+            self._test_check_fn(ref, loaded, inputs, True)
+            second.flags.clear()
+            self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize("global_flags", [False, True])
+    @parametrize("populated", [False, True])
+    def test_nested_region_hook_membership(self, global_flags, populated):
+        def hook(module, args, *rest):
+            return rest[-1] * 10 + len(rest)
+
+        first, second = torch.nn.Identity(), torch.nn.Identity()
+        for module in (first, second):
+            module._forward_hooks.update({1: hook, 2: hook})
+            if populated:
+                module._forward_hooks_with_kwargs[1] = True
+        flags = (
+            collections.OrderedDict({7: True})
+            if populated
+            else collections.OrderedDict()
+        )
+        if global_flags:
+            second._forward_hooks = collections.OrderedDict({3: hook, 4: hook})
+
+        @torch.compiler.nested_compile_region
+        def region(x, module, flags):
+            if global_flags:
+                return x + sum(key in flags for key in module._forward_hooks)
+            return module(x)
+
+        def fn(x, first, second):
+            return region(x, first, flags), region(x, second, flags)
+
+        x = torch.ones(2)
+        registry_name = "_global_forward_hooks_with_kwargs"
+        with mock.patch.object(torch.nn.modules.module, registry_name, flags):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, first, second
+            )
+            inputs = {"x": x, "first": first, "second": second, "flags": flags}
+            self._test_check_fn(ref, loaded, inputs, True)
+            if global_flags:
+                with mock.patch.object(
+                    torch.nn.modules.module, registry_name, collections.OrderedDict()
+                ):
+                    flags[3] = True
+                    self._test_check_fn(ref, loaded, inputs, False)
+            else:
+                second._forward_hooks_with_kwargs.clear()
+                second._forward_hooks_with_kwargs[2] = True
+                self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize("flag_name", ["with_kwargs", "always_call"])
+    @parametrize("replace_registry", [False, True])
+    def test_global_hook_membership(self, flag_name, replace_registry):
+        def hook(module, args, *rest):
+            return rest[-1]
+
+        handle = torch.nn.modules.module.register_module_forward_hook(
+            hook, **{flag_name: True}
+        )
+        self.addCleanup(handle.remove)
+        flags = getattr(
+            torch.nn.modules.module,
+            "_global_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_global_forward_hooks_always_called",
+        )
+
+        def fn(x, module):
+            return x + sum(key in flags for key in module._forward_hooks)
+
+        x = torch.ones(2)
+        module = torch.nn.Identity()
+        local_handle = module.register_forward_hook(hook)
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
+        )
+        inputs = {"x": x, "module": module, "flags": flags}
+        self._test_check_fn(ref, loaded, inputs, True)
+        registry_name = (
+            "_global_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_global_forward_hooks_always_called"
+        )
+        with mock.patch.object(
+            torch.nn.modules.module,
+            registry_name,
+            collections.OrderedDict() if replace_registry else flags,
+        ):
+            self._test_check_fn(ref, loaded, inputs, True)
+            module._forward_hooks[handle.id] = module._forward_hooks.pop(
+                local_handle.id
+            )
+            self._test_check_fn(ref, loaded, inputs, False)
+
     @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
     def test_empty_nn_module_hooks_dict(self):
         class Module(torch.nn.Module):
