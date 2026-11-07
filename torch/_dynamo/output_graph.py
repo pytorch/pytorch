@@ -904,6 +904,7 @@ class OutputGraph(OutputGraphCommon):
         # not its MRO, so a base shared by two classes needs a guard through
         # each, since either can reassign __bases__.
         self.guarded_mro_absent_keys: set[tuple[int, int, str]] = set()
+        self.guarded_mro_type_ids: set[int] = set()
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
@@ -3933,6 +3934,7 @@ class OutputGraph(OutputGraphCommon):
         self.variable_tracker_cache.clear()
         self.mro_source_cache.clear()
         self.guarded_mro_absent_keys.clear()
+        self.guarded_mro_type_ids.clear()
         self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()

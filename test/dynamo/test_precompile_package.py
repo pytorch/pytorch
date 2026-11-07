@@ -43,6 +43,7 @@ from torch._dynamo.source import (
     GetItemSource,
     GlobalSource,
     LocalSource,
+    TypeMROSource,
     TypeSource,
 )
 from torch._dynamo.types import GuardFilterEntry
@@ -277,7 +278,58 @@ _RISKY_DROP_CASES = {
 }  # fmt: skip
 
 
+class _MROBase:
+    scale = 1
+
+
+class _MROOther:
+    scale = 7
+
+
+class _MROLeft(_MROBase):
+    pass
+
+
+class _MRORight(_MROBase):
+    pass
+
+
+class _DynamicMROInput(type("_DynamicMROBase", (), {"scale": 1})):
+    pass
+
+
+def _mro_sum(x, left, right):
+    return x + left.scale + right.scale
+
+
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    def test_mro_guard_survives_serialization(self):
+        x, left, right = torch.ones(1), _MROLeft(), _MRORight()
+        compiled = _aot_compile(_mro_sum, x, left, right)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, left, right))
+        self.assertEqual(loaded(x, left, right), x + 2)
+        try:
+            _MRORight.__bases__ = (_MROOther,)
+            self.assertFalse(loaded.guard_check(x, left, right))
+        finally:
+            _MRORight.__bases__ = (_MROBase,)
+
+    def test_mro_guard_refuses_nonreferenceable_base(self):
+        # Retained identity guards must fail loudly; dropping them opts out of protection.
+        x, obj = torch.ones(1), _DynamicMROInput()
+        with self.assertRaisesRegex(
+            PackageError, "ID_MATCH guard cannot be serialized"
+        ):
+            _aot_compile(
+                _mro_sum,
+                x,
+                obj,
+                obj,
+                guard_filter_fn=lambda entries: [True] * len(entries),
+            )
+
     @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))
     def test_raw_descriptor_guard_survives_serialization(
@@ -528,6 +580,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
         class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        # TreeSpec's mutable MRO adds an identity check for its object base.
+        id_matches += 1
         self.assertEqual(
             counts - control_counts,
             {
@@ -586,7 +640,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 t = type(e.value)
                 return e.guard_type == "TYPE_MATCH" and t.__qualname__ != t.__name__
 
-            return [not local_type_match(e) and _pre_check_accepts(e) for e in entries]
+            # The control must also drop the MRO length: local nn.Module instances
+            # load as base Module objects, so that snapshot otherwise rejects both types.
+            return [
+                not local_type_match(e)
+                and not isinstance(e.orig_guard.originating_source, TypeMROSource)
+                and _pre_check_accepts(e)
+                for e in entries
+            ]
 
         # Not assertRaises: it stores the exception with its traceback cleared.
         # Both paths raise through guards.py's raise_local_type_error with one
