@@ -12385,7 +12385,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
-    @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
+    @skip_if_halide
     @skip_if_pallas
     def test_index_put_bool_accumulate(self):
         def fn(x, idx, values):

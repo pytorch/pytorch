@@ -5136,10 +5136,11 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     x_ndim = len(x_size)
 
     device = self.get_device()
+    # Triton atomic_add does not support bool or int64 on any device.
     if (
         accumulate
         and device is not None
-        and is_gpu(device.type)
+        and (is_gpu(device.type) or is_triton(device.type))
         and needs_fallback_due_to_atomic_add_limitations(self.get_dtype())
     ):
         # self is an scalar Tensor
