@@ -53,9 +53,9 @@ onecclDataType_t getXcclDataTypeInternal(const at::Tensor& tensor) {
       return onecclInt8;
     case at::ScalarType::Byte:
     case at::ScalarType::Bool:
-      // TODO: Add Float8 datatype handling
       return onecclUint8;
     default:
+      // TODO: Add Float8 datatype handling
       TORCH_CHECK(false, "Unsupported tensor data type for XCCL");
   }
 }
@@ -108,7 +108,7 @@ ProcessGroupXCCL::RedOpRAII::RedOpRAII(
           &xcclRedOp_, factor, comm, xccl_api_.get());
       break;
     case onecclBfloat16:
-      createPreMulSum<float, onecclBfloat16>(
+      createPreMulSum<at::BFloat16, onecclBfloat16>(
           &xcclRedOp_, factor, comm, xccl_api_.get());
       break;
     case onecclFloat64:
