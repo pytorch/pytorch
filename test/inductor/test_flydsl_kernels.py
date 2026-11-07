@@ -872,7 +872,9 @@ def forward(self, x_1, y_1):
                 RuntimeError,
                 r"^FlyDSL kernel add_kernel: 'X' and 'Out' are the same tensor or views "
                 r"that may overlap, and both count as written "
-                r"\(mutates_args=\('X', 'Out'\)\), which PT2 cannot functionalize",
+                r"\(mutates_args=\('X', 'Out'\)\)\. PT2 clones each written argument "
+                r"and writes it back on its own, so one write could be lost\. Pass "
+                r"tensors that do not overlap\.$",
             ):
                 trace(f, x.clone(), y)
         base = torch.stack([x, torch.zeros_like(x)])
