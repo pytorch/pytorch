@@ -800,6 +800,10 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
+  # CUDA graph capture on a second GPU.
+  /usr/bin/env LD_LIBRARY_PATH="${TORCH_LIB_DIR}" "${BUILD_BIN_DIR}/test_shim" \
+    --gtest_filter='AOTICudaGraphTest.UsesThePoolsDevice:AOTICudaGraphRAIITest.MakesNonBlockingStreamsAndEvents:AOTICudaGraphRAIITest.EndsACaptureOnAnotherDevice' \
+    --gtest_output=xml:test/test-reports/cpp/test_shim_multi_gpu.xml
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
