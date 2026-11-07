@@ -516,6 +516,9 @@ def get_device_properties(
     - ``platform_name`` (str): SYCL platform name.
     - ``vendor`` (str): device vendor.
     - ``device_id`` (int): device identifier (product ID).
+    - ``pci_domain_id`` (int): PCI domain number of the device, -1 if unavailable.
+    - ``pci_bus_id`` (int): PCI bus number of the device, -1 if unavailable.
+    - ``pci_device_id`` (int): PCI device (slot) number of the device, -1 if unavailable.
     - ``driver_version`` (str): driver version.
     - ``version`` (str): runtime version.
     - ``max_compute_units`` (int): number of parallel compute units.

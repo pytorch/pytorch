@@ -16,6 +16,7 @@
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
 #include <torch/csrc/xpu/memory_snapshot.h>
+#include <cstdio>
 
 using namespace torch;
 
@@ -345,6 +346,19 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto get_device_architecture = [](const DeviceProp& prop) {
     return static_cast<int64_t>(prop.architecture);
   };
+  // SYCL reports the PCI address as a single "domain:bus:slot.function"
+  // string, whereas torch/numa/binding.py reads the separate integer fields
+  // that cudaDeviceProp exposes. Split it here so that NUMA binding stays
+  // device-generic. Returns -1 when the device reports no PCI address.
+  auto get_pci_id = [](const DeviceProp& prop, size_t field) {
+    std::array<unsigned int, 3> ids{};
+    if (std::sscanf(
+            prop.pci_address.c_str(), "%x:%x:%x", &ids[0], &ids[1], &ids[2]) !=
+        3) {
+      return int64_t{-1};
+    }
+    return static_cast<int64_t>(ids[field]);
+  };
   // Wrapper class for XPU UUID
   struct XPUuuid {
     XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
@@ -396,6 +410,15 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
       .def_property_readonly("architecture", get_device_architecture)
+      .def_property_readonly(
+          "pci_domain_id",
+          [get_pci_id](const DeviceProp& prop) { return get_pci_id(prop, 0); })
+      .def_property_readonly(
+          "pci_bus_id",
+          [get_pci_id](const DeviceProp& prop) { return get_pci_id(prop, 1); })
+      .def_property_readonly(
+          "pci_device_id",
+          [get_pci_id](const DeviceProp& prop) { return get_pci_id(prop, 2); })
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
           "uuid",
