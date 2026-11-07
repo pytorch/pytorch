@@ -2615,7 +2615,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
+        elif issubclass(type(value), dict):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
