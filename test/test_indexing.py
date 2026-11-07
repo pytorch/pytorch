@@ -2119,6 +2119,18 @@ class TestIndexingDevice(TestCase):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
+    def test_index_add_float_alpha_integral(self, device) -> None:
+        x = torch.zeros(2, 2, dtype=torch.int64, device=device)
+        index = torch.tensor([1], device=device)
+        source = torch.full((1, 2), 4, dtype=torch.int64, device=device)
+        msg = "For integral input tensors, argument alpha must not be a floating point number"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x.index_add(0, index, source, alpha=2.5)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x.index_add_(0, index, source, alpha=0.5)
+        expected = torch.tensor([[0, 0], [8, 8]], device=device)
+        self.assertEqual(x.index_add(0, index, source, alpha=2), expected)
+
     @onlyNativeDeviceTypes
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
