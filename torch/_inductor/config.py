@@ -294,6 +294,17 @@ inplace_buffers = True
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = lite_mode_default(False, True)
 
+# Reinplace view-scatters whose destination buffer is force-realized by an
+# in-place mutation of one of its views, and drop the resulting identity
+# self-scatters. This eliminates the redundant concat "repack" clone that
+# functionalization emits for custom ops which write disjoint views of a fresh
+# buffer (e.g. a ragged-attention backward writing dq/dk/dv into a duvqk
+# gradient buffer). Correctness is still gated by can_inplace(). Opt-in
+# (default off) for now; enable via this config or the env var below.
+reinplace_mutated_base_scatters = (
+    os.environ.get("TORCHINDUCTOR_REINPLACE_MUTATED_BASE_SCATTERS", "0") == "1"
+)
+
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
