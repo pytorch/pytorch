@@ -6,6 +6,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -26,6 +27,13 @@ DEFINE_DISPATCH(_segment_reduce_lengths_backward_stub);
 DEFINE_DISPATCH(_segment_reduce_offsets_backward_stub);
 
 namespace {
+// The kernels use stride(axis) as the size of the dims after axis. A contiguous
+// tensor can carry any stride on a size-1 dim, so also give the result the
+// canonical contiguous strides (no copy when already contiguous).
+Tensor contiguous_dense_strides(const Tensor& t) {
+  auto c = t.contiguous();
+  return c.as_strided(c.sizes(), c10::contiguous_strides(c.sizes()));
+}
 
 template <typename T, bool is_offsets_like=false>
 void _segment_reduce_lengths_cpu_kernel1(
@@ -406,7 +414,7 @@ Tensor segment_reduce_kernel(
       "segment_reduce(): Either lengths or offsets must be defined.")
 
   auto reduction = get_reduction_enum(reduce);
-  const auto data_contig = data.contiguous();
+  const auto data_contig = contiguous_dense_strides(data);
 
   if (offsets_has_value) {
     const auto& offsets_value = offsets.value();
@@ -419,7 +427,7 @@ Tensor segment_reduce_kernel(
 
     // TODO: add checks when !unsafe
 
-    const auto offsets_contig = offsets_value.contiguous();
+    const auto offsets_contig = contiguous_dense_strides(offsets_value);
 
     return _segment_reduce_offsets_stub(
       data_contig.device().type(),
@@ -446,7 +454,7 @@ Tensor segment_reduce_kernel(
                   "to sum to data.size(lengths.dim()-1) when !unsafe.");
     }
 
-    const auto lengths_contig = lengths_value.contiguous();
+    const auto lengths_contig = contiguous_dense_strides(lengths_value);
 
     return _segment_reduce_lengths_stub(
       data_contig.device().type(),
@@ -482,14 +490,14 @@ Tensor _segment_reduce_backward_kernel(
       lengths_has_value ||  offsets_has_value,
       "segment_reduce(): Either lengths or offsets must be defined.");
 
-  const auto grad_contig = grad.contiguous();
-  const auto output_contig = output.contiguous();
-  const auto data_contig = data.contiguous();
+  const auto grad_contig = contiguous_dense_strides(grad);
+  const auto output_contig = contiguous_dense_strides(output);
+  const auto data_contig = contiguous_dense_strides(data);
   auto reduction = get_reduction_enum(reduce);
 
   if (offsets_has_value) {
     const auto& offsets_value = offsets.value();
-    const auto offsets_contig = offsets_value.contiguous();
+    const auto offsets_contig = contiguous_dense_strides(offsets_value);
     return _segment_reduce_offsets_backward_stub(
       grad_contig.device().type(),
       grad_contig,
@@ -501,7 +509,7 @@ Tensor _segment_reduce_backward_kernel(
       initial);
   } else {
     const auto& lengths_value = lengths.value();
-    const auto lengths_contig = lengths_value.contiguous();
+    const auto lengths_contig = contiguous_dense_strides(lengths_value);
     return _segment_reduce_lengths_backward_stub(
       grad_contig.device().type(),
       grad_contig,
