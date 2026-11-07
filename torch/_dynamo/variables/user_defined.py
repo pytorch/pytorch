@@ -4624,7 +4624,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.as_python_constant(), True
+                    return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
                     return int(result.evaluate_expr()), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):

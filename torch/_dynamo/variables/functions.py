@@ -2840,6 +2840,19 @@ class SkipFunctionVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        if type(self.value) is types.BuiltinFunctionType:
+            receiver = self.value.__self__
+            if (
+                self.source is not None
+                and receiver is not None
+                and not isinstance(receiver, types.ModuleType)
+            ):
+                install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            # Identity-dependent hashes are internal across process boundaries.
+            return hash(self.value), True
+        return super().tp_hash_impl(tx)
+
     def get_source(self) -> Source | None:
         return self.source
 

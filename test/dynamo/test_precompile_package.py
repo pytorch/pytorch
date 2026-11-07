@@ -613,7 +613,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_state, _ = _kept_types(control)
         # The kept keys-match is all that tells the two artifacts' guards apart
         # beyond the identity guards on objects a load resolves by reference
-        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # (G['pytree'], its referenced classes and torch), which the pre-check's type
         # tests drop. Counted per type, because a set of type names hides a
         # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
@@ -627,7 +627,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
         # TreeSpec's mutable MRO adds an identity check for its object base.
         id_matches += 1
         self.assertEqual(
