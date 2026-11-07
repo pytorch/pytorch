@@ -6001,14 +6001,6 @@ dynamo_wrapper_skips["xpu"] = {
     # intel/torch-xpu-ops/issues/5401
     'test_Hardshrink_no_batch_dim_xpu',
     'test_Softshrink_no_batch_dim_xpu',
-    'test_Conv1d_zero_batch_xpu_fp32',
-    'test_Conv2d_zero_batch_xpu_fp32',
-    'test_Conv3d_zero_batch_xpu_fp32',
-    'test_Conv1d_zero_batch_xpu_tf32',
-    'test_Conv2d_zero_batch_xpu_tf32',
-    'test_Conv3d_zero_batch_xpu_tf32',
-    'test_Embedding_sparse_xpu',
-    'test_EmbeddingBag_sparse_xpu',
 }
 def add_test(test, decorator=None, tf32_decorator=None):
     def add(test_name, fn):
