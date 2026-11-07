@@ -341,4 +341,7 @@ TORCH_API void pack(
 // Whether pack is supported in the platform.
 TORCH_API bool could_pack(ScalarType dt_in);
 
+// Whether the brgemm ukernel is available for the given dtype on this platform.
+TORCH_API bool can_use_brgemm(ScalarType dt_in);
+
 } // namespace at::native::cpublas

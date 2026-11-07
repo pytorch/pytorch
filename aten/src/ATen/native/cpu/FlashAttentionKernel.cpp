@@ -445,6 +445,12 @@ void cpu_flash_attention(
       need_pack = gemm_size_per_thread / pack_size >= (dtype == at::ScalarType::BFloat16 ? 4 : 1);
     }
   }
+#if !defined(CPU_CAPABILITY_AVX512)
+  // at::vec::pack_vnni2 only has an AVX512 implementation, and this copy of the
+  // kernel can still be dispatched on AVX512 hardware (ATEN_CPU_CAPABILITY, or a
+  // build without AVX512 kernels). Drop to the unpacked gemm path.
+  need_pack = false;
+#endif
 
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
@@ -1167,36 +1173,39 @@ void flash_attention_kernel_impl(
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-  bool could_pack = ((query.scalar_type() == kHalf && cpublas::could_pack(kHalf)) ||
-                     (query.scalar_type() == kBFloat16 && cpublas::could_pack(kBFloat16)));
+  // BFloat16 also takes this path on avx512 without AMX: could_pack() is false
+  // there, but the brgemm ukernel is available and still wants VNNI-packed B.
+  bool use_brgemm = ((query.scalar_type() == kHalf && cpublas::could_pack(kHalf)) ||
+                     (query.scalar_type() == kBFloat16 &&
+                      (cpublas::could_pack(kBFloat16) || cpublas::can_use_brgemm(kBFloat16))));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {
       if (q_seq_len >= 768) {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 256, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, scalar_t, 256, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       } else if (q_seq_len >= 192) {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 64, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, scalar_t, 64, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       } else {
-        FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, scalar_t, 32, 512,
+        FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, scalar_t, 32, 512,
           output, logsumexp, query, key, value,
           dropout_p, is_causal, attn_mask, scale);
       }
     } else {
       AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
         if (q_seq_len >= 768) {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 256, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, mask_t, 256, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         } else if (q_seq_len >= 192) {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 64, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, mask_t, 64, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         } else {
-          FLASH_ATTENTION_KERNEL(cpu_flash_attention, could_pack, scalar_t, mask_t, 32, 512,
+          FLASH_ATTENTION_KERNEL(cpu_flash_attention, use_brgemm, scalar_t, mask_t, 32, 512,
             output, logsumexp, query, key, value,
             dropout_p, is_causal, attn_mask, scale);
         }
