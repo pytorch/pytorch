@@ -21,6 +21,9 @@ TEST(DeviceTest, BasicConstruction) {
       {"cuda:1", c10::DeviceType::CUDA, 1},
   };
   std::vector<std::string> invalid_device_strings = {
+      "cpu:1",
+      "cpu:2",
+      "cpu:127",
       "cpu:x",
       "cpu:foo",
       "cuda:cuda",
@@ -45,6 +48,17 @@ TEST(DeviceTest, BasicConstruction) {
 
   for (auto& ds : invalid_device_strings) {
     EXPECT_THROW(make_device(ds), c10::Error) << "Device String: " << ds;
+  }
+}
+
+TEST(DeviceTest, CpuDeviceIndexValidation) {
+  EXPECT_NO_THROW(c10::Device(c10::DeviceType::CPU));
+  EXPECT_NO_THROW(c10::Device(c10::DeviceType::CPU, -1));
+  EXPECT_NO_THROW(c10::Device(c10::DeviceType::CPU, 0));
+
+  for (const c10::DeviceIndex index : {1, 2, 127}) {
+    EXPECT_THROW(c10::Device(c10::DeviceType::CPU, index), c10::Error);
+    EXPECT_NO_THROW(c10::Device(c10::DeviceType::CUDA, index));
   }
 }
 

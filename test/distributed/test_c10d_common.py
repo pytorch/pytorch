@@ -735,7 +735,11 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
+        device = (
+            devices[0]
+            if devices
+            else torch.device(device_type, self.rank if device_type != "cpu" else None)
+        )
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
