@@ -140,6 +140,21 @@ Users can force a reload by calling `hub.load(..., force_reload=True)`. This wil
 the existing GitHub folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
 
+Processes that share a cache directory (the hub directory, or the `model_dir` passed to
+{func}`~torch.hub.load_state_dict_from_url`), such as DDP ranks on the same machine, coordinate
+through lock files: when several of them need an entry that isn't cached yet, one of them
+downloads it while the others wait and then use the cached copy. This needs filelock 3.20.1 or
+later; with an older filelock, every process downloads the entry, as in earlier releases.
+On Linux and macOS the lock files (`<entry>.lock`) stay next to the entries; they are
+group-writable if the directory is, so that users who share the cache through a group can take
+each other's locks. On Linux this also needs the setgid bit on the directory (`chmod g+s`), so
+that new lock files get the shared group instead of their creator's primary group.
+If the lock can't be taken (for example on a filesystem without `flock` support, or a lock file
+another user created without giving this user write access) or another process holds it for
+more than an hour, the entry is downloaded without it, as in earlier releases, and a
+`UserWarning` is raised. Repos are downloaded and extracted in a temporary work directory in
+the hub directory, whose name starts with `.<owner_repo_ref>~`.
+
 ### Known limitations:
 
 Torch hub works by importing the package as if it was installed. There are some side effects
@@ -155,3 +170,16 @@ A known limitation that is worth mentioning here: users **CANNOT** load two diff
 the same repo in the **same python process**. It's just like installing two packages with the
 same name in Python, which is not good. Cache might join the party and give you surprises if you
 actually try that. Of course it's totally fine to load them in separate processes.
+
+The lock between processes that share a cache directory has these limitations:
+- `force_reload=True` isn't coordinated: every caller that passes it downloads the entry again
+  (one at a time, when the lock can be taken) and replaces the copy other processes may be
+  using, so avoid passing it from several processes at once.
+- Checkpoints in the legacy zip format are extracted on every load, without the lock.
+- The repo work directory makes extracted paths longer by its name (`.<owner_repo_ref>~` plus 8
+  characters), so on Windows without long paths enabled, a repo whose deepest file is close to
+  `MAX_PATH` can fail to extract.
+- A work directory that a killed process leaves behind is only removed when the same repo is
+  downloaded again (with `force_reload=True`, or after its cached copy is deleted), once it has
+  been untouched for a day, and only by the user who created it. Until then it stays in the hub
+  directory, and it can be deleted by hand.

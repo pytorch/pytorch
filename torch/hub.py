@@ -6,8 +6,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
+import time
 import uuid
 import warnings
 import zipfile
@@ -19,6 +21,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import torch
+from torch._vendor.packaging.version import Version
 from torch.serialization import MAP_LOCATION
 
 
@@ -264,6 +267,140 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
     )
 
 
+# How long to wait for another process's download before downloading anyway.
+_CACHE_LOCK_TIMEOUT_S = 3600
+# How often a waiting process tries the lock. filelock's default of 50 ms would
+# mean tens of thousands of attempts (round trips on NFS) during a long download.
+_CACHE_LOCK_POLL_S = 1.0
+# Work directories untouched for this long are left by killed processes. It is
+# well above the lock timeout, so a waiter that gives up doesn't remove the
+# directory of a download that is stalled but still running.
+_STALE_WORK_DIR_S = 24 * 3600
+
+
+def _lock_unavailable(lock_path, mode):
+    """Return the error that makes ``lock_path`` impossible to lock, or None.
+
+    filelock 3.x reports some "can't lock" errors the same way as a lock held
+    by another process: ENOLCK (NFS without lockd) and EOPNOTSUPP (some FUSE/SMB
+    mounts) on Unix, EACCES (an unwritable directory or lock file) on both. 4.x
+    raises most of them instead. A lock that is held or free counts as available.
+    """
+    if sys.platform == "win32":
+        # os.access reports every directory as writable on Windows.
+        try:
+            fd, probe = tempfile.mkstemp(dir=os.path.dirname(lock_path))
+        except OSError as e:
+            return e
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.remove(probe)
+        # filelock reports EACCES on an existing lock file (read-only, or an ACL
+        # that denies this user) as a held lock too. The holder may remove it
+        # in the meantime, which leaves the lock available.
+        try:
+            os.close(os.open(lock_path, os.O_RDWR))
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            return e
+        return None
+
+    import fcntl
+
+    flags = os.O_RDWR | os.O_NOFOLLOW
+    # Like filelock, add O_CREAT only for a missing file: with fs.protected_regular,
+    # Linux refuses an O_CREAT open of another user's file in a sticky directory.
+    if not os.path.lexists(lock_path):
+        flags |= os.O_CREAT
+    try:
+        fd = os.open(lock_path, flags, mode)
+    except OSError as e:
+        return e
+    try:
+        # Shared, so that concurrent probes don't see each other as a held lock.
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError as e:
+        if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+            return e
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+    return None
+
+
+@contextlib.contextmanager
+def _cache_lock(path, stacklevel, verbose):
+    """Hold the lock for cache entry ``path`` while populating it.
+
+    Processes that share a cache directory (for example DDP ranks) take this lock
+    so that only one of them downloads an entry while the others wait for it.
+    If the lock can't be taken (no flock support, an unwritable lock file) or
+    stays held for more than ``_CACHE_LOCK_TIMEOUT_S``, the entry is populated
+    without it, with a warning that ``stacklevel`` points at the user's call.
+    With filelock older than 3.20.1, it isn't taken at all.
+    """
+    import filelock
+
+    from torch.utils._filelock import FileLock
+
+    # Older filelock follows a symlink planted at the lock path (CVE-2025-68146).
+    if Version(filelock.__version__) < Version("3.20.1"):
+        yield
+        return
+
+    lock_path = path + ".lock"
+    # filelock gives the lock files it creates this mode, whatever the umask.
+    # They are group-writable only in a group-writable directory (a cache shared
+    # by a group), so that every member of the group can take the lock. On Linux,
+    # that also needs a setgid directory, so that the files get the shared group.
+    lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
+    mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
+
+    class _CacheLock(FileLock):
+        # Entered as a context manager for FileLock's wait counters, which
+        # calls acquire() without arguments.
+        def acquire(self, timeout=None, poll_interval=_CACHE_LOCK_POLL_S, **kwargs):
+            return super().acquire(timeout, poll_interval, **kwargs)
+
+    def new_lock(timeout):
+        return _CacheLock(lock_path, timeout=timeout, mode=mode)
+
+    stack = contextlib.ExitStack()
+    message = None
+    try:
+        try:
+            stack.enter_context(new_lock(timeout=0))
+        except filelock.Timeout:
+            error = _lock_unavailable(lock_path, mode)
+            if error is not None:
+                raise error from None
+            if verbose:
+                sys.stderr.write(f"Waiting for another process to download {path}\n")
+            stack.enter_context(new_lock(timeout=_CACHE_LOCK_TIMEOUT_S))
+    except filelock.Timeout:
+        message = (
+            f"Another process has held {lock_path} for more than "
+            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process stops waiting and "
+            "downloads the entry if it isn't cached by then. If downloading it "
+            "takes longer than that, populate the cache from one process before "
+            "the others load it."
+        )
+    except (NotImplementedError, OSError) as e:
+        message = (
+            f"Could not lock {lock_path} ({e!r}), so other processes may download "
+            "this entry at the same time. To avoid this, use a cache directory "
+            "(torch.hub.set_dir(), or the model_dir argument) on a filesystem that "
+            "supports file locks, where this user can write the directory and its "
+            "lock files."
+        )
+    if message is not None:
+        warnings.warn(message, stacklevel=stacklevel)
+    with stack:
+        yield
+
+
 def _get_cache_or_reload(
     github,
     force_reload,
@@ -300,49 +437,86 @@ def _get_cache_or_reload(
     if use_cache:
         if verbose:
             sys.stderr.write(f"Using cache found in {repo_dir}\n")
-    else:
+        return repo_dir
+
+    # force_reload is not coordinated between processes: each caller that passes
+    # it downloads the repo again (one at a time, while the lock can be taken) and
+    # replaces the directory that other processes may be using.
+    with _cache_lock(repo_dir, stacklevel=5, verbose=verbose):
+        # Another process may have populated the cache while we waited.
+        if not force_reload and os.path.exists(repo_dir):
+            if verbose:
+                sys.stderr.write(f"Using cache found in {repo_dir}\n")
+            return repo_dir
+
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
             _validate_not_a_forked_repo(repo_owner, repo_name, ref)
 
-        cached_file = os.path.join(hub_dir, normalized_br + ".zip")
-        _remove_if_exists(cached_file)
-
-        try:
-            url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
-            download_url_to_file(url, cached_file, progress=False)
-        except HTTPError as err:
-            if err.code == 300:
-                # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
-                # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
-                # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
-                # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
-                warnings.warn(
-                    f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
-                    "Torchhub will now assume that it's a branch. "
-                    "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
-                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
-                    stacklevel=2,
-                )
-                disambiguated_branch_ref = f"refs/heads/{ref}"
-                url = _git_archive_link(
-                    repo_owner, repo_name, ref=disambiguated_branch_ref
-                )
+        # Download and extract in a private directory: different repos on the same
+        # branch, and refs of a repo at the same commit, would otherwise share the
+        # archive or the extracted top-level directory. Cached repos never start
+        # with "." (GitHub owner names can't), so the cleanup below can't match
+        # one, even for a ref like "main~1".
+        work_prefix = "." + owner_name_branch + "~"
+        # Remove work directories of processes killed mid-download. A running
+        # download keeps writing to a file in its work directory, so only those
+        # untouched for longer than _STALE_WORK_DIR_S are removed.
+        for name in os.listdir(hub_dir):
+            if not name.startswith(work_prefix):
+                continue
+            stale = os.path.join(hub_dir, name)
+            try:
+                with os.scandir(stale) as entries:
+                    mtimes = [e.stat().st_mtime for e in entries]
+                mtimes.append(os.path.getmtime(stale))
+            except OSError:
+                continue
+            if time.time() - max(mtimes) > _STALE_WORK_DIR_S:
+                shutil.rmtree(stale, ignore_errors=True)
+        with tempfile.TemporaryDirectory(
+            prefix=work_prefix, dir=hub_dir, ignore_cleanup_errors=True
+        ) as work_dir:
+            cached_file = os.path.join(work_dir, "archive.zip")
+            try:
+                url = _git_archive_link(repo_owner, repo_name, ref)
+                sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
                 download_url_to_file(url, cached_file, progress=False)
-            else:
-                raise
+            except HTTPError as err:
+                if err.code == 300:
+                    # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
+                    # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
+                    # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
+                    # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
+                    warnings.warn(
+                        f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
+                        "Torchhub will now assume that it's a branch. "
+                        "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
+                        "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
+                        stacklevel=2,
+                    )
+                    disambiguated_branch_ref = f"refs/heads/{ref}"
+                    url = _git_archive_link(
+                        repo_owner, repo_name, ref=disambiguated_branch_ref
+                    )
+                    download_url_to_file(url, cached_file, progress=False)
+                else:
+                    raise
 
-        with zipfile.ZipFile(cached_file) as cached_zipfile:
-            extraced_repo_name = cached_zipfile.infolist()[0].filename
-            extracted_repo = os.path.join(hub_dir, extraced_repo_name)
-            _remove_if_exists(extracted_repo)
-            # Unzip the code and rename the base folder using safe extraction
-            _safe_extract_zip(cached_zipfile, hub_dir)
+            with zipfile.ZipFile(cached_file) as cached_zipfile:
+                extracted_repo_name = cached_zipfile.infolist()[0].filename
+                # Unzip the code and rename the base folder using safe extraction
+                _safe_extract_zip(cached_zipfile, work_dir)
 
-        _remove_if_exists(cached_file)
-        _remove_if_exists(repo_dir)
-        shutil.move(extracted_repo, repo_dir)  # rename the repo
+            if force_reload:
+                _remove_if_exists(repo_dir)
+            try:
+                # Unlike shutil.move, os.rename never moves into an existing repo_dir.
+                os.rename(os.path.join(work_dir, extracted_repo_name), repo_dir)
+            except OSError:
+                # Another process published it first, which can happen without the lock.
+                if not os.path.isdir(repo_dir):
+                    raise
 
     return repo_dir
 
@@ -491,8 +665,9 @@ def list(
 
             Default is ``"check"``.
         verbose (bool, optional): If ``False``, mute messages about hitting
-            local caches. Note that the message about first download cannot be
-            muted. Default is ``True``.
+            local caches and about waiting for another process to download the
+            repo. Note that the message about first download cannot be muted.
+            Default is ``True``.
 
     Returns:
         list: The available callables entrypoint
@@ -625,9 +800,9 @@ def load(
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
         verbose (bool, optional): If ``False``, mute messages about hitting
-            local caches. Note that the message about first download cannot be
-            muted. Does not have any effect if ``source = 'local'``.
-            Default is ``True``.
+            local caches and about waiting for another process to download the
+            repo. Note that the message about first download cannot be muted.
+            Does not have any effect if ``source = 'local'``. Default is ``True``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
@@ -845,11 +1020,22 @@ def load_state_dict_from_url(
     The default value of ``model_dir`` is ``<hub_dir>/checkpoints`` where
     ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
+    With filelock 3.20.1 or later, processes that share ``model_dir`` (for
+    example DDP ranks) don't download the same file at the same time: one of
+    them downloads it while the others wait, for up to an hour, and then load
+    the cached copy. The lock is a ``.lock`` file next to the downloaded file in
+    ``model_dir``, which stays there on Linux and macOS. If it can't be taken,
+    or is held for more than an hour, the file is downloaded without it and a
+    warning is raised. With an older filelock, every process downloads the
+    file. Checkpoints in the legacy zip format are still extracted on every
+    load, without the lock.
+
     Args:
         url (str): URL of the object to download
         model_dir (str, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
-        progress (bool, optional): whether or not to display a progress bar to stderr.
+        progress (bool, optional): whether or not to display a progress bar to stderr,
+            and a message while waiting for another process to download the file.
             Default: True
         check_hash(bool, optional): If True, the filename part of the URL should follow the naming convention
             ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more
@@ -886,12 +1072,16 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
-        hash_prefix = None
-        if check_hash:
-            r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
-            hash_prefix = r.group(1) if r else None
-        download_url_to_file(url, cached_file, hash_prefix, progress=progress)
+        # Processes sharing the cache (e.g. DDP ranks) wait for whichever one
+        # downloads first instead of all downloading the same file.
+        with _cache_lock(cached_file, stacklevel=4, verbose=progress):
+            if not os.path.exists(cached_file):
+                sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
+                hash_prefix = None
+                if check_hash:
+                    r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
+                    hash_prefix = r.group(1) if r else None
+                download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     if _is_legacy_zip_format(cached_file):
         return _legacy_zip_load(cached_file, model_dir, map_location, weights_only)
