@@ -401,6 +401,11 @@ class TestUtils(TestCase):
         self.assertTrue(expr >= 0)
         self.assertTrue(Max(0, expr).has(expr))
 
+    def testSympySubsIdentityIntegerInMinMax(self):
+        p0 = Symbol("p0", integer=True, nonnegative=True)
+        expr = Max(0, Identity(p0 - 1) - 1)
+        self.assertEqual(sympy_subs(expr, {p0: 0}), 0)
+
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
         self.assertEqual(sympy_str(sympify("a*b+c")), "c + a * b")
