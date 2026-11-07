@@ -1904,8 +1904,8 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
-        if user_kernel_hop is not None and fx_node.target is user_kernel_hop.mutation:
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target, "mutation")
+        if user_kernel_hop is not None:
             mutated = user_kernel_hop.get_node_mutated_tensors(fx_node, old_kwargs)
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2092,8 +2092,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and (info := get_user_kernel_hop_info(n.target)) is not None
-                and n.target is info.mutation
+                and (info := get_user_kernel_hop_info(n.target, "mutation")) is not None
                 and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
                 debug("user_defined_kernel_layout_constraints")
@@ -2565,6 +2564,8 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         import copy
 
+        from .compile_fx import clone_preserve_strides
+
         cloned_gm = copy.deepcopy(self.orig_gm)
         example_inputs = copy.deepcopy(example_inputs)
         triton_nodes = []
@@ -2609,7 +2610,10 @@ class GraphLowering(torch.fx.Interpreter):
             with cloned_gm.graph.inserting_before(node):
                 for k, v in kwargs.items():
                     if k in mutated:
-                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        # Kernels keep the original stride arguments when autotuned.
+                        new_node = cloned_gm.graph.call_function(
+                            clone_preserve_strides, args=(v,)
+                        )
                         new_kwargs[k] = len(kwargs_inputs)
                         kwargs_inputs.append(new_node)
                         continue
@@ -2969,7 +2973,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # The JIT wrapper keeps lazy kernel state in function-local statics.
         # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        # Not id(self): a later graph can reuse a freed graph's id.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
