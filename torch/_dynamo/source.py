@@ -383,8 +383,35 @@ class GenericAttrSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "dict"))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.utils", "get_type_dict_no_user_code"
+            )
+        )
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+        codegen.extend_output(create_call_function(1, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            value = dict(utils.get_type_dict_no_user_code(base))
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base, error)
+            raise
+        cache[self] = value
+        return value
 
     @property
     def _name_template(self) -> str:
@@ -415,8 +442,33 @@ class MappingProxyMappingSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.utils", "get_type_mro_no_user_code"
+            )
+        )
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+        codegen.extend_output(create_call_function(1, False))
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            value = utils.get_type_mro_no_user_code(base)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base, error)
+            raise
+        cache[self] = value
+        return value
 
     @property
     def _name_template(self) -> str:
@@ -826,16 +878,35 @@ class GetItemSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class DictKeysSource(ChainedSource):
+    # Codegen-only snapshot; this source must never be used for guards.
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "list"))
+
+        def load_keys() -> None:
+            codegen.load_import_from("builtins", "dict")
+            codegen.append_output(codegen.create_load_attr("keys"))
+
+        codegen.add_push_null(load_keys)
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "list(dict.keys({0}))"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
     index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(utils.__name__, "dict_keys_getitem")
-        )
-        codegen(self.base)
+        # Share a storage-order snapshot across indices within each codegen pass.
+        # A single index also snapshots all keys, trading O(n) work for shared reconstruction.
+        codegen(DictKeysSource(self.base))
         codegen.append_output(codegen.create_load_const(self.index))
-        codegen.extend_output(create_call_function(2, False))
+        codegen.append_output(create_binary_subscr())
 
     @functools.cached_property
     def _name_template(self) -> str:

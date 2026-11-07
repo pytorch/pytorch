@@ -102,6 +102,15 @@ class BaseSetVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
+    _nonvar_fields = {
+        # Same reason as ConstDictVariable.original_items: a construction-time
+        # snapshot read only for still-live keys, so traversing it would make
+        # removed elements look reachable.  Here the mismatch is even wider --
+        # reconstruct emits set_items and never consults original_items at all.
+        "original_items",
+        *VariableTracker._nonvar_fields,
+    }
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         name = self.python_type_name()
@@ -627,7 +636,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
@@ -985,7 +994,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def sq_contains_impl(
@@ -1220,13 +1229,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_global("frozenset"),
-                ]
-            )
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "frozenset"))
         codegen.foreach([x.vt for x in self.set_items])
         codegen.extend_output(
             [
@@ -1294,13 +1297,15 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # frozenset is hashable, unlike set (SetVariable.hash_impl raises TypeError).
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # frozenset is hashable, unlike set (SetVariable.tp_hash_impl raises TypeError).
         # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
-        if self.is_python_constant():
+        if self.is_python_constant() and not any(
+            key._hash_is_identity for key in self.items
+        ):
             return hash(self.as_python_constant()), False
         is_fake = False
         raw_hashes = []
@@ -1361,7 +1366,7 @@ class DictKeySetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def _dictview_binop(

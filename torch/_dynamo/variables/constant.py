@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import enum
 import operator
-from collections.abc import Iterable
+import types
+from collections.abc import Callable, Iterable
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
@@ -25,13 +26,95 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import _RICHCOMPARE_OPS, SourceLocation, ValueMutationNew, VariableTracker
+from .base import (
+    _RICHCOMPARE_OPS,
+    GetSet,
+    Member,
+    Method,
+    NO_SUCH_SUBOBJ,
+    readonly_setter,
+    SourceLocation,
+    ValueMutationNew,
+    VariableTracker,
+)
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
+
+
+def _constant_method(
+    descriptor: types.MethodDescriptorType,
+) -> Callable[..., VariableTracker | None]:
+    def handler(
+        self: ConstantVariable,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not all(a.is_python_constant() for a in (*args, *kwargs.values())):
+            return None
+        try:
+            res = descriptor(
+                self.value,
+                *[a.as_python_constant() for a in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # str.split and friends return a fresh list the caller may mutate.
+        mutation_type = ValueMutationNew() if isinstance(res, list) else None
+        return ConstantVariable.create(res, mutation_type=mutation_type)
+
+    return handler
+
+
+def _constant_getter(
+    descriptor: types.GetSetDescriptorType | types.MemberDescriptorType,
+) -> Callable[..., VariableTracker]:
+    def getter(
+        self: ConstantVariable, tx: InstructionTranslatorBase
+    ) -> VariableTracker:
+        return ConstantVariable.create(descriptor.__get__(self.value))
+
+    return getter
+
+
+class _ConstantTables:
+    """Per-type tp_methods / tp_getset / tp_members of the constant types, read
+    from the real descriptors of each type and its bases."""
+
+    def __init__(self) -> None:
+        self.methods: dict[type, dict[str, Method]] = {}
+        self.getset: dict[type, dict[str, GetSet]] = {}
+        self.members: dict[type, dict[str, Member]] = {}
+        for ty in (int, bool, float, complex, str, bytes, type(None), type(...)):
+            methods = self.methods.setdefault(ty, {})
+            getset = self.getset.setdefault(ty, {})
+            members = self.members.setdefault(ty, {})
+            for klass in reversed(ty.__mro__[:-1]):
+                for name, d in klass.__dict__.items():
+                    if isinstance(d, types.MethodDescriptorType):
+                        methods[name] = Method(_constant_method(d))
+                    elif isinstance(d, types.GetSetDescriptorType):
+                        getset[name] = GetSet(_constant_getter(d), readonly_setter)
+                    elif isinstance(d, types.MemberDescriptorType):
+                        members[name] = Member(_constant_getter(d), readonly_setter)
+
+    @staticmethod
+    def of(tables: dict[type, dict[str, Any]], value: object) -> dict[str, Any]:
+        mro = type(value).__mro__
+        for i, ty in enumerate(mro):
+            if ty in tables:
+                # A user subclass's own attributes shadow the builtin's members.
+                shadowed = {n for sub in mro[:i] for n in sub.__dict__}
+                return {n: e for n, e in tables[ty].items() if n not in shadowed}
+        return {}
+
+
+_CONSTANT_TABLES = _ConstantTables()
 
 
 class ConstantVariable(VariableTracker):
@@ -51,6 +134,19 @@ class ConstantVariable(VariableTracker):
     # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
     # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
     _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+
+    # These depend on the wrapped value's type, so they are properties of the VT.
+    @property
+    def tp_methods(self) -> dict[str, Method]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.methods, self.value)
+
+    @property
+    def tp_getset(self) -> dict[str, GetSet]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.getset, self.value)
+
+    @property
+    def tp_members(self) -> dict[str, Member]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.members, self.value)
 
     @overload
     @staticmethod
@@ -230,7 +326,7 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         from torch.fx.experimental.proxy_tensor import _coor_enabled
 
@@ -238,7 +334,7 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, torch.device) and _coor_enabled():
             # Drop the index so an explicit cuda:N lands in the same bucket as a
-            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            # rank-relative CurrentDeviceVariable; see its tp_hash_impl.
             return hash(torch.device(self.value.type)), False
 
         value_type = cast(Any, type(self.value))
@@ -980,7 +1076,18 @@ class FakeIdVariable(VariableTracker):
         return SourcelessBuilder.create_internal_fake_id(value, kind)
 
     def as_python_constant(self) -> int:
+        if self.kind is FakeValueKind.HASH:
+            unimplemented(
+                gb_type="Conversion of compile-time-only hash value",
+                context="FakeIdVariable",
+                explanation="An identity-dependent hash cannot be converted to a constant result.",
+                hints=["Compute the hash outside the compiled function."],
+            )
         return self.value
+
+    def get_real_python_backed_value(self) -> object:
+        # Internal hash integers have no observable runtime identity.
+        return NO_SUCH_SUBOBJ if self.kind is FakeValueKind.HASH else self.value
 
     def is_python_constant(self) -> bool:
         return False
@@ -988,7 +1095,7 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
@@ -996,12 +1103,12 @@ class FakeIdVariable(VariableTracker):
         # decimal string. The distinct-but-compile-time-only identity carried by
         # the fake id is preserved in the resulting string, matching how
         # FakeIdVariable already resolves same-kind id()/hash() comparisons.
-        return ConstantVariable.create(repr(self.value))
+        return ConstantVariable.create(repr(self.as_python_constant()))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors long_bool. The fake value is only meaningful at compile time,
         # but its truthiness is, like tp_repr_impl, a plain function of it.
-        return ConstantVariable.create(bool(self.value))
+        return ConstantVariable.create(bool(self.as_python_constant()))
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -1057,7 +1164,10 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return self._create(result)
+        kind = self.kind
+        if isinstance(other, FakeIdVariable) and other.kind is FakeValueKind.HASH:
+            kind = FakeValueKind.HASH
+        return self._create(result, kind=kind)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1090,16 +1200,16 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(-self.value)
+        return self._create(-self.value, kind=self.kind)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(+self.value)
+        return self._create(+self.value, kind=self.kind)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(abs(self.value))
+        return self._create(abs(self.value), kind=self.kind)
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(~self.value)
+        return self._create(~self.value, kind=self.kind)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
         return self._create(int(self.value), kind=self.kind)

@@ -1263,12 +1263,21 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
+        # Whether this value is zero when the compile-time autotune block runs the
+        # kernel (see TritonKernel.load).
+        self.zero_in_autotune_block = False
         if dtype is None:
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
             raise AssertionError("TritonCSEVariable must have shape")
 
     def update_on_args(self, name, args, kwargs):
+        if name == "indirect_indexing":
+            # Wrapping a negative index leaves a zero index as it is.
+            self.zero_in_autotune_block = args[0].zero_in_autotune_block
+        elif name == "to_dtype" and isinstance(args[0], TritonCSEVariable):
+            # A cast leaves zero as it is.
+            self.zero_in_autotune_block = args[0].zero_in_autotune_block
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -3668,6 +3677,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
+        # Whether a device assert can fail on the generated inputs of the
+        # compile-time autotune block, so that the block must not launch it.
+        self.asserts_need_real_inputs = False
         self.triton_meta: TritonMeta | None = None
 
         if self.inside_reduction:
@@ -4951,6 +4963,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if not isinstance(expr, sympy.Expr):
             raise AssertionError(f"expected sympy.Expr, got {type(expr)}")
+        # A check on an index that is zero in the autotune block passes there,
+        # unless the size can be zero. Any other index can be out of range there,
+        # and is then read out of bounds even if the assert is compiled out.
+        index_var = self.cse.varname_map.get(str(expr))
+        if not (
+            index_var is not None
+            and index_var.zero_in_autotune_block
+            and V.graph.sizevars.statically_known_gt(size, 0)
+        ):
+            self.asserts_need_real_inputs = True
         indexing = self.indexing(expr, block_ptr=False, tma_compatibility_checker=None)
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
@@ -5154,6 +5176,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
         # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
         if torch.version.hip:
+            return False
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
             return False
         return (
             V.graph.get_current_device_or_throw().type == "cuda"
@@ -5600,7 +5624,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self.inside_reduction or load_buffer is self.body:
             self.outside_loop_vars.add(result_var)
 
+        # An indirect load can read past the end of a buffer when its index is
+        # not checked, so only a direct load is known to read the zeros.
+        if (
+            not self._load_other
+            and not indirect_indexing
+            and self._is_zero_in_autotune_block(name)
+        ):
+            result_var.zero_in_autotune_block = True
         return result_var
+
+    @staticmethod
+    def _is_zero_in_autotune_block(name: str) -> bool:
+        """Whether buffer `name` holds zeros whenever the compile-time autotune
+        block launches a kernel that reads it: the block fills each non-float
+        graph input and constant with zeros (rand_strided), and only a mutation
+        writes to one.
+        """
+        graph = V.graph
+        return (
+            (name in graph.graph_inputs or name in graph.constants)
+            and name not in graph.mutated_buffers
+            and not graph.get_dtype(name).is_floating_point
+        )
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -5707,6 +5753,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         exit_stack.close()
 
     def device_assert_async(self, cond, msg) -> None:
+        # Without Triton debug asserts, the assert is compiled out and cannot fail.
+        if triton_heuristics._should_enable_triton_debug_asserts(
+            self.inductor_meta_common()
+        ):
+            self.asserts_need_real_inputs = True
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
 
     def guard_cooperative_store(self, name, buffer):
@@ -8009,6 +8060,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["uses_tma"] = True
         if self.uses_device_tma:
             out["uses_device_tma"] = True
+        if self.asserts_need_real_inputs:
+            out["asserts_need_real_inputs"] = True
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
         if self.min_xblock is not None:

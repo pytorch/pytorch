@@ -12,6 +12,7 @@ It includes functionality for:
 
 import collections
 import dataclasses
+import enum
 import re
 import sys
 import types
@@ -39,16 +40,27 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, ChainedSource, DictGetItemSource, Source
-from .utils import is_safe_constant
+from .source import (
+    AttrSource,
+    ChainedSource,
+    ConstDictKeySource,
+    DictGetItemSource,
+    DictKeysSource,
+    Source,
+)
+from .utils import is_identity_singleton, is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.constant import ConstantVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
 from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
+from .variables.sets import FrozensetVariable, SetVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -56,6 +68,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -122,7 +135,42 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self._constant_reconstruction_cache: dict[VariableTracker, bool] = {}
         self.pycodes = []
+
+    def _constant_requires_reconstruction(self, value: VariableTracker) -> bool:
+        if not value.is_realized():
+            # Neither sourced leaves nor computed expressions may be specialized here.
+            return True
+        if value.source is not None:
+            # These trackers have already specialized their class/member identity.
+            if isinstance(value, UserDefinedClassVariable) or (
+                isinstance(value, UserDefinedObjectVariable)
+                and issubclass(type(value.value), enum.Enum)
+            ):
+                return False
+            return not (
+                isinstance(value, ConstantVariable)
+                and is_identity_singleton(value.value)
+            )
+        if value in self._constant_reconstruction_cache:
+            return self._constant_reconstruction_cache[value]
+        if isinstance(value, (TupleVariable, SliceVariable)):
+            items = value.items
+        elif isinstance(value, FrozensetVariable):
+            items = [key.vt for key in value.set_items]
+        elif isinstance(value, (BaseListVariable, ConstDictVariable, SetVariable)):
+            # Probing mutable containers would specialize their lazy children.
+            return True
+        else:
+            return not value.is_python_constant() or not is_safe_constant(
+                value.as_python_constant()
+            )
+        # Only aggregate data affects reconstruction, not tracker metadata. Cache
+        # immutable subtrees so reconstructing nested outputs visits each once.
+        result = any(self._constant_requires_reconstruction(item) for item in items)
+        self._constant_reconstruction_cache[value] = result
+        return result
 
     def add_pycode(self, pycode: str, *args):
         if not config.generate_pycode:
@@ -331,8 +379,23 @@ class PyCodegen:
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
+        elif (
+            # Mutable containers cannot use LOAD_CONST. Do not specialize their children.
+            not isinstance(value, (ConstDictVariable, SetVariable))
+            and not (
+                isinstance(value, BaseListVariable)
+                and not isinstance(value, TupleVariable)
+            )
+            # LOAD_CONST lets CPython intern aggregate elements. Reconstruct
+            # sourced children and mutable members to preserve identity, except
+            # during export, which deliberately disables reconstruction by source.
+            and not (
+                self.value_from_source
+                and isinstance(value, (TupleVariable, FrozensetVariable, SliceVariable))
+                and self._constant_requires_reconstruction(value)
+            )
+            and value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
@@ -706,7 +769,9 @@ class PyCodegen:
 
         def extract_nested_sources(source: Source) -> list[Source]:
             nested_sources: list[Source] = []
-            if isinstance(source, ChainedSource):
+            if isinstance(source, ConstDictKeySource):
+                nested_sources.append(DictKeysSource(source.base))
+            elif isinstance(source, ChainedSource):
                 nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source
