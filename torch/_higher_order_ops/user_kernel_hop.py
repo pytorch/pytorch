@@ -12,14 +12,13 @@ call to it (the HOPifier).
 import dataclasses
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
-from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -341,7 +340,12 @@ def register_user_kernel_hop_dispatch(
 # Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
 
 
-@dataclasses.dataclass(frozen=True)
+UserKernelLayoutConstraint = Literal["needs_fixed_stride_order", "flexible_layout"]
+
+
+# eq=False: infos compare and hash by identity, as register_user_kernel_hop compares
+# them, so a DSL's callables need not be hashable.
+@dataclasses.dataclass(frozen=True, eq=False)
 class UserKernelHOPInfo:
     """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
     the same way (reinplacing, the functional decomposition, Inductor's layout
@@ -391,20 +395,45 @@ class UserKernelHOPInfo:
     # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
-    get_layout_constraint: Callable[[], str]
-    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
-    # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
-    # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
-    # stops it from rewriting getitem users.
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
 
 
 _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+# DSL modules may register from different threads (import locks only serialize the
+# imports of one module), so a registration holds this lock across its ownership
+# checks and both writes, and every read of the registry takes it too: no reader
+# sees half of a pair, and two conflicting registrations cannot both pass the checks.
+_user_kernel_hops_lock = threading.Lock()
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    """Register a DSL's HOP pair with the passes that handle every DSL. Each DSL
+    module calls it once, at import time.
+
+    Everything is checked before the registry is written, so a refused registration
+    leaves it as it was. Raises:
+
+    - TypeError if the trigger is not a ReInplaceTrigger member (its name, for
+      example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
+      has no CompositeExplicitAutograd py_impl for the decomposition to trace.
+    - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
+    - RuntimeError if either HOP is registered already, with another info. Infos
+      compare by identity: registering the same object again is accepted and changes
+      nothing, but an equal copy of it is refused.
+    """
     trigger = info.reinplace_trigger
     if not isinstance(trigger, ReInplaceTrigger):
         raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
@@ -413,39 +442,68 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
             f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
             "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
         )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    if info.mutation is info.functional:
+        raise ValueError(
+            f"{info.mutation} cannot be both the mutation and the functional HOP of "
+            f"the {info.dsl} DSL"
+        )
     hops = (info.mutation, info.functional)
-    for hop in hops:
-        if not isinstance(hop, UserKernelWrapperHOP):
-            raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
-        owner = _user_kernel_hops.get(hop, info)
-        if owner is not info:
-            raise RuntimeError(f"{hop} is already registered by the {owner.dsl} DSL")
-    if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
-        raise TypeError(f"{info.functional} has no CompositeExplicitAutograd py_impl")
-    for hop in hops:
-        _user_kernel_hops[hop] = info
+    with _user_kernel_hops_lock:
+        for hop in hops:
+            if not isinstance(hop, UserKernelWrapperHOP):
+                raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+            owner = _user_kernel_hops.get(hop, info)
+            if owner is not info:
+                raise RuntimeError(
+                    f"{hop} is already registered by the {owner.dsl} DSL with another "
+                    "UserKernelHOPInfo object; only that object can be registered again"
+                )
+        if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+            raise TypeError(
+                f"{info.functional} has no CompositeExplicitAutograd py_impl"
+            )
+        for hop in hops:
+            _user_kernel_hops[hop] = info
 
 
-def get_user_kernel_hop_info(target: object) -> UserKernelHOPInfo | None:
-    """The registry entry whose mutation or functional HOP is ``target``."""
+def get_user_kernel_hop_info(
+    target: object, role: Literal["mutation", "functional"] | None = None
+) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``; given a
+    ``role``, only if ``target`` is the HOP of its pair with that role."""
     if not isinstance(target, UserKernelWrapperHOP):
         return None
-    return _user_kernel_hops.get(target)
+    with _user_kernel_hops_lock:
+        info = _user_kernel_hops.get(target)
+    if info is None or role is None:
+        return info
+    hop = info.mutation if role == "mutation" else info.functional
+    return info if target is hop else None
 
 
 def is_user_kernel_mutation_hop(target: object) -> bool:
-    info = get_user_kernel_hop_info(target)
-    return info is not None and target is info.mutation
+    return get_user_kernel_hop_info(target, "mutation") is not None
 
 
 def is_user_kernel_functional_hop(target: object) -> bool:
-    info = get_user_kernel_hop_info(target)
-    return info is not None and target is info.functional
+    return get_user_kernel_hop_info(target, "functional") is not None
 
 
 def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
     """Every registered DSL, in registration order."""
-    return list(dict.fromkeys(_user_kernel_hops.values()))
+    with _user_kernel_hops_lock:
+        return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################
