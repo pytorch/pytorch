@@ -1457,10 +1457,73 @@ class PropertyVariable(VariableTracker):
         obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
+        """Resolve property access on an instance or class.
+
+        Mirrors CPython's ``property_descr_get``:
+        https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
+
+        - When accessed on the class (``obj is None``), returns the descriptor itself.
+        - If the property has no getter (``fget is None``), raises :exc:`AttributeError`.
+        - When the instance is a Python constant and the property getter is an opaque
+          C/pybind builtin (or any callable other than a pure Python function), eagerly
+          evaluates the getter to avoid emitting a spurious
+          "Dynamo does not know how to trace the builtin" warning from
+          :class:`SkipFunctionVariable`.
+        - Otherwise, builds a tracker for ``fget`` and traces into it.
+        """
         # Mirrors property_descr_get: if obj is NULL or None, return self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
         if obj is None:
             return self
+
+        if self.descriptor.fget is None:
+            display_name = getattr(self.descriptor, "__name__", None)
+            try:
+                cls_name = obj.python_type().__qualname__
+            except NotImplementedError:
+                cls_name = obj.python_type_name()
+            if display_name is not None:
+                msg = f"property '{display_name}' of '{cls_name}' object has no getter"
+            else:
+                msg = f"property of '{cls_name}' object has no getter"
+            raise_attribute_error(tx, msg)
+
+        # If the instance is a Python constant and the property getter is an
+        # opaque C/pybind builtin, Dynamo cannot trace into fget. Eagerly invoke
+        # the descriptor to avoid a spurious "Dynamo does not know how to trace
+        # the builtin" warning from SkipFunctionVariable before falling back.
+        if obj.is_python_constant() and not isinstance(
+            self.descriptor.fget, types.FunctionType
+        ):
+            try:
+                owner_val = (
+                    owner.as_python_constant()
+                    if owner is not None and owner.is_python_constant()
+                    else type(obj.as_python_constant())
+                )
+                res = self.descriptor.__get__(obj.as_python_constant(), owner_val)
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            attr_name = getattr(self.descriptor, "__name__", None)
+            if not attr_name and self.source:
+                if hasattr(self.source, "index") and isinstance(self.source.index, str):
+                    attr_name = self.source.index
+                elif hasattr(self.source, "member") and isinstance(
+                    self.source.member, str
+                ):
+                    attr_name = self.source.member
+            if not attr_name:
+                fget_name = getattr(self.descriptor.fget, "__name__", None)
+                if fget_name and fget_name.isidentifier():
+                    attr_name = fget_name
+            result_source = (
+                AttrSource(obj.source, attr_name)
+                if obj.source and attr_name is not None
+                else None
+            )
+            if ConstantVariable.is_literal(res):
+                return ConstantVariable.create(res, source=result_source)
+            return VariableTracker.build(tx, res, source=result_source)
+
         fget_source = AttrSource(self.source, "fget") if self.source else None
         fget_vt = VariableTracker.build(
             tx, self.descriptor.fget, source=fget_source, realize=True

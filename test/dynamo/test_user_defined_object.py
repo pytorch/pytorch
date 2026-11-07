@@ -2048,6 +2048,58 @@ class TestConstantTypeProperty(TestCase):
         finally:
             common_constant_types.discard(Holder)
 
+    def test_c_builtin_property_on_constant_type_no_warning(self):
+        """Reading an opaque C/pybind builtin property on a constant type does not emit
+        the spurious 'Dynamo does not know how to trace the builtin' warning."""
+
+        class Holder:
+            def __init__(self, val):
+                self._val = val
+
+        Holder.sz = property(sys.getsizeof)
+        holder = Holder([1, 2, 3])
+
+        def fn(x):
+            return x + holder.sz
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            torch._dynamo.reset()
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x), fn(x))
+
+            trace_warnings = [
+                w
+                for w in caught
+                if "does not know how to trace the builtin" in str(w.message)
+            ]
+            self.assertEqual(len(trace_warnings), 0)
+        finally:
+            common_constant_types.discard(Holder)
+
+    def test_property_missing_getter_raises_attribute_error(self):
+        """Accessing a write-only property (fget is None) raises AttributeError."""
+
+        class Holder:
+            val = property(fset=lambda self, v: None)
+
+        holder = Holder()
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            self.assertRaises(AttributeError, fn, x)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertRaisesRegex(Exception, "has no getter", opt_fn, x)
+        finally:
+            common_constant_types.discard(Holder)
+
 
 class TestDevicePropertyConstants(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -2072,6 +2124,27 @@ class TestDevicePropertyConstants(TestCase):
         )
         if not capture_props:
             self.assertEqual(counters["unimplemented"], {})
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_clock_rate_on_cuda_device_properties_no_warning(self):
+        """Reading device_properties.clock_rate does not emit the spurious warning."""
+        props = torch.cuda.get_device_properties(0)
+
+        def fn(x):
+            return x + props.clock_rate
+
+        x = torch.randn(3, device="cuda")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+
+        trace_warnings = [
+            w
+            for w in caught
+            if "does not know how to trace the builtin" in str(w.message)
+        ]
+        self.assertEqual(len(trace_warnings), 0)
 
 
 class _LenZeroDict(dict):
