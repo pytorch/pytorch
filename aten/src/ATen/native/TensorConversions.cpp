@@ -24,6 +24,8 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/_to_dtype_rounded.h>
+#include <ATen/ops/_to_dtype_rounded_native.h>
 #include <ATen/ops/_to_sparse_bsc_native.h>
 #include <ATen/ops/_to_sparse_bsr_native.h>
 #include <ATen/ops/_to_sparse_csc_native.h>
@@ -35,8 +37,6 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_strided_native.h>
-#include <ATen/ops/round_to.h>
-#include <ATen/ops/round_to_native.h>
 #include <ATen/ops/to_dense_backward_native.h>
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_mkldnn_backward_native.h>
@@ -402,17 +402,18 @@ Tensor _to_copy(
   return r;
 }
 
-Tensor round_to(
+Tensor _to_dtype_rounded(
     const Tensor& self,
     ScalarType dtype,
-    std::string_view mode,
+    std::string_view round,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  check_round_to(self, dtype, mode);
+  check_to_dtype_rounded(self, dtype, round);
   auto result = empty_for_conversion(
       self,
       self.options().dtype(dtype),
       optional_memory_format.value_or(MemoryFormat::Preserve));
-  return at::round_to_out(result, self, dtype, mode, optional_memory_format);
+  return at::_to_dtype_rounded_out(
+      result, self, dtype, round, optional_memory_format);
 }
 
 template <typename T>

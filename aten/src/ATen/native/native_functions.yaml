@@ -7879,15 +7879,14 @@
 
 # Converts to a narrower floating-point dtype with an explicit IEEE 754
 # rounding direction; backs Tensor.to(..., round=...).
-- func: round_to(Tensor self, ScalarType dtype, str mode, *, MemoryFormat? memory_format=None) -> Tensor
-  variants: function, method
+- func: _to_dtype_rounded(Tensor self, ScalarType dtype, str round, *, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: round_to
+    CompositeExplicitAutograd: _to_dtype_rounded
 
 # memory_format only affects how the functional variant allocates its output.
-- func: round_to.out(Tensor self, ScalarType dtype, str mode, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
+- func: _to_dtype_rounded.out(Tensor self, ScalarType dtype, str round, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, Meta: round_to_out
+    CPU, CUDA, Meta: _to_dtype_rounded_out
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
