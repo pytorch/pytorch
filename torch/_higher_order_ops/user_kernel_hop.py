@@ -23,7 +23,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
-from torch._higher_order_ops.utils import redirect_to_mode
+from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
     clone_preserve_strides,
@@ -34,7 +34,12 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    guard_scalar,
+    GuardOnDataDependentSymNode,
+    statically_known_true,
+)
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -116,6 +121,13 @@ class ConstantRules:
         """What to pass instead of a value of type ``cls``, one of the DSL's objects
         that PT2 makes for each launch itself (a DSL tensor or stream, say), which a
         constant cannot be or hold; None for any other type."""
+        return None
+
+    def leaf_key(self, value: object) -> object:
+        """A key of the DSL's own for ``value``, a value the DSL compares its own way
+        (a function it compiles by its code, say): constant_key keys ``value`` by it,
+        at any depth, after refusing a tensor or a value refusal() names and ahead of
+        the other rules. None leaves ``value`` to them."""
         return None
 
 
@@ -236,10 +248,11 @@ def constant_key(value: object, rules: ConstantRules) -> object:
     content, floats by hex() (-0.0 is not 0.0, and every NaN is the same), numpy
     floats and complex values by type and the hex() of each float component (see
     _float_component_keys), a DSL scalar by its type and Python value (see
-    ConstantRules), other values by their own equality. Any other unhashable value,
-    and a tensor or a value the DSL refuses (ConstantRules.refusal), as the value or
-    in a container, are refused with a TypeError, and a value that contains itself
-    with a ValueError."""
+    ConstantRules), a value the DSL keys its own way by that key
+    (ConstantRules.leaf_key), other values by their own equality. Any other
+    unhashable value, and a tensor or a value the DSL refuses (ConstantRules.refusal),
+    as the value or in a container, are refused with a TypeError, and a value that
+    contains itself with a ValueError."""
     return _ContentWalk(rules).key(value)
 
 
@@ -328,6 +341,9 @@ class _ContentWalk:
 
     def key(self, value: object) -> object:
         self.refuse(value)
+        key = self.rules.leaf_key(value)
+        if key is not None:
+            return key
         scalar = self.rules.scalar_value(value)
         if scalar is not None:
             return (type(value), self.key(scalar))
@@ -458,6 +474,13 @@ class KernelSideTable(Generic[KernelT]):
         self.get_constant_args(idx)
         return self._constant_args_keys.get(idx, {})
 
+    # Joins a node's graph args and its side-table constant args back into the
+    # kernel's keyword arguments.
+    def kernel_kwargs(
+        self, constant_args_idx: int, kwargs: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return {**kwargs, **self.get_constant_args(constant_args_idx)}
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
@@ -498,6 +521,13 @@ class UserKernelWrapperHOP(HigherOrderOperator):
     Their tensors live inside the ``kwargs`` (and ``tensor_bases``) dicts, which the
     default overloaded-args scan does not look into.
     """
+
+    def __call__(self, /, **hop_kwargs: Any) -> Any:
+        # Every argument is passed by keyword and the node keeps them in the caller's
+        # order; an empty tensor_bases (no written views) is left out.
+        if "tensor_bases" in hop_kwargs and not hop_kwargs["tensor_bases"]:
+            del hop_kwargs["tensor_bases"]
+        return super().__call__(**hop_kwargs)
 
     def _get_overloaded_args(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -561,6 +591,143 @@ def clone_mutated_arg(
     return clone_preserve_strides(
         val, base=tensor_bases.get(key) if tensor_bases else None
     )
+
+
+def _same_storage(a: Tensor, b: Tensor) -> bool:
+    from torch.multiprocessing.reductions import StorageWeakRef
+
+    try:
+        a_storage, b_storage = a.untyped_storage(), b.untyped_storage()
+    except RuntimeError:  # no storage (NotImplementedError is a RuntimeError)
+        return False
+    return StorageWeakRef(a_storage) == StorageWeakRef(b_storage)
+
+
+def _rows_disjoint(a: Tensor, b: Tensor) -> bool:
+    """Whether two views of one storage, both 2-D with stride 1 in dim 1 and one
+    stride s in dim 0, are disjoint. With x the view with the lower storage offset,
+    y the other and d the distance between their offsets: one is empty, their
+    element ranges do not meet, or each row of y lies in the gap after a row of x
+    (s > 0, d % s >= x.size(1) and d % s + y.size(1) <= s)."""
+    if a.numel() == 0 or b.numel() == 0:
+        return True
+    x, y = (b, a) if a.storage_offset() > b.storage_offset() else (a, b)
+    s, d = x.stride(0), y.storage_offset() - x.storage_offset()
+    if (x.size(0) - 1) * s + x.size(1) <= d:
+        return True
+    if s == 0:
+        return False
+    return bool(d % s >= x.size(1) and d % s + y.size(1) <= s)
+
+
+def _may_overlap(a: Tensor, b: Tensor) -> bool:
+    """Whether two tensors may share memory. A tensor known to be empty
+    (statically_known_true, which neither guards nor raises) shares memory with no
+    tensor, not even itself. Otherwise the same tensor does, and so do two on one
+    storage that compute_overlapping_tensors, which reinplacing uses too, does not
+    find disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of
+    one stride). It guards on the symbolic sizes it compares, and a size it cannot
+    guard on (an unbacked one) counts as an overlap. It counts offsets and strides in
+    elements, so views of one storage with different element sizes are compared by
+    their byte ranges instead, without guards (statically_known_true)."""
+    # An empty tensor overlaps nothing, not even itself, though its byte range below
+    # need not be empty: a (5, 0) view with row stride s spans 4 * s elements.
+    if statically_known_true(a.numel() == 0) or statically_known_true(b.numel() == 0):
+        return False
+    if a is b:
+        return True
+    if not _same_storage(a, b):
+        return False
+    from torch._C._dynamo.guards import compute_overlapping_tensors
+
+    if a.element_size() == b.element_size():
+        try:
+            if compute_overlapping_tensors([a, b]):
+                return True
+            # TODO(zoranzhao): remove this check and _rows_disjoint once
+            # https://github.com/pytorch/pytorch/pull/202848 lands. Until then,
+            # compute_overlapping_tensors reports 2-D views whose rows start inside
+            # the other's rows, such as base[:4, :3] and base[1:5, 2:5], as disjoint.
+            rows = a.dim() == b.dim() == 2 and a.stride(1) == b.stride(1) == 1
+            if rows and a.stride(0) == b.stride(0):
+                return not _rows_disjoint(a, b)
+            return False
+        except GuardOnDataDependentSymNode:
+            return True
+
+    def byte_range(t: Tensor) -> tuple[Any, Any]:
+        # Exact unless t is empty, which it can be here only if that is not
+        # statically known: its range then errs toward an overlap.
+        start = t.storage_offset() * t.element_size()
+        last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
+        return start, start + (last + 1) * t.element_size()
+
+    (a_start, a_end), (b_start, b_end) = byte_range(a), byte_range(b)
+    return not (
+        statically_known_true(a_end <= b_start)
+        or statically_known_true(b_end <= a_start)
+    )
+
+
+def check_written_args_disjoint(
+    display_name: str,
+    kernel_name: str,
+    written: list[str],
+    kwargs: dict[str, Any],
+    wrapped: dict[str, Any],
+    *,
+    mutates_args: object,
+) -> list[str]:
+    """``written``, after checking that no two of those arguments may overlap in
+    memory. The functional HOP clones each written argument and writes each clone
+    back on its own, in kwargs order, so where two written arguments overlap the
+    later write-back overwrites the earlier one: an in-place call under
+    mutates_args="unknown" (the same tensor twice), or overlapping views of one base,
+    would lose a write. The error names the DSL (``display_name``), the kernel and
+    the write set the user gave (``mutates_args``). The check is conservative: views
+    that _may_overlap cannot prove disjoint, such as interleaved strided views
+    (buf[::2] and buf[1::2]) or the per-head views of a packed 3-D buffer, are
+    refused too.
+
+    ``kwargs`` holds the values unwrapped from the functional tensors in
+    ``wrapped``. Functional tensors that alias share a storage; where their
+    unwrapped values do not, functionalization copied the views
+    (torch.func.functionalize with remove="mutations_and_views"), and the copies do
+    not show where the views sit, so they count as overlapping, unless one of them
+    is known to be empty: a tensor known to be empty overlaps nothing (_may_overlap),
+    and the copy of an empty view is empty too."""
+    for i, later in enumerate(written):
+        for earlier in written[:i]:
+            a, b = kwargs[earlier], kwargs[later]
+            aliases = _same_storage(wrapped[earlier], wrapped[later])
+            if _may_overlap(a, b):
+                problem = "are the same tensor or views that may overlap"
+                fix = "Pass tensors that do not overlap."
+            elif (
+                aliases
+                and not _same_storage(a, b)
+                and not any(statically_known_true(t.numel() == 0) for t in (a, b))
+            ):
+                problem = (
+                    "are views of one tensor, which functionalization with "
+                    'remove="mutations_and_views" copied, so PT2 cannot tell whether '
+                    "they overlap"
+                )
+                fix = (
+                    'Functionalize with remove="mutations" (the default), which keeps '
+                    "views, or pass tensors that are not views of one tensor."
+                )
+            else:
+                continue
+            if mutates_args == "unknown":
+                fix += " Or give mutates_args naming only the parameters it writes."
+            raise RuntimeError(
+                f"{display_name} kernel {kernel_name}: {earlier!r} and {later!r} "
+                f"{problem}, and both count as written "
+                f"(mutates_args={mutates_args!r}). PT2 clones each written argument "
+                f"and writes it back on its own, so one write could be lost. {fix}"
+            )
+    return written
 
 
 def functionalize_mutation_hop(
@@ -720,8 +887,9 @@ class UserKernelHOPInfo:
     the same way (reinplacing, the functional decomposition, Inductor's layout
     constraint and mutation propagation, CSE, partitioning, ...).
 
-    Each DSL module registers one at import time; a pass looks a node's target up
-    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+    Each DSL module registers one at import time (register_user_kernel_hop_impls);
+    a pass looks a node's target up with get_user_kernel_hop_info instead of
+    comparing it with a DSL's HOP.
 
     Those passes read the HOP nodes' kwargs by name, so a registered pair must be
     traced with keyword arguments only, in this form:
@@ -774,6 +942,39 @@ class UserKernelHOPInfo:
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
+    # register_user_kernel_hop_impls sets the last two; a DSL that builds its entry
+    # itself and captures calls with code of its own may leave them out.
+    # The DSL's name in messages (e.g. "Triton"); dsl if empty.
+    display_name: str = ""
+    # The table the pair's kernel_idx and constant_args_idx index into, which the
+    # shared capture code reads (get_side_table).
+    side_table: KernelSideTable[Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.display_name:
+            object.__setattr__(self, "display_name", self.dsl)
+
+    def get_side_table(self) -> KernelSideTable[Any]:
+        if self.side_table is None:
+            raise AssertionError(f"the {self.dsl} DSL's entry has no side table")
+        return self.side_table
+
+    def get_node_mutated_tensors(
+        self, node: fx.Node, hop_kwargs: Mapping[str, Any] | None = None
+    ) -> list[str]:
+        """get_mutated_tensors for an FX node of the mutation HOP: the kernel kwargs
+        are the node's, with each FX node replaced by its meta value; the HOP kwargs
+        are ``hop_kwargs`` (default: the node's kwargs)."""
+        kwargs = node.kwargs["kwargs"]
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"Expected dict, got {type(kwargs)}")
+        return self.get_mutated_tensors(
+            node.kwargs if hop_kwargs is None else hop_kwargs,
+            {
+                k: v.meta["val"] if isinstance(v, fx.Node) else v
+                for k, v in kwargs.items()
+            },
+        )
 
 
 _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
@@ -873,6 +1074,165 @@ def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
     """Every registered DSL, in registration order."""
     with _user_kernel_hops_lock:
         return list(dict.fromkeys(_user_kernel_hops.values()))
+
+
+def register_user_kernel_hop_impls(
+    mutation: UserKernelWrapperHOP,
+    functional: UserKernelWrapperHOP,
+    *,
+    dsl: str,
+    display_name: str,
+    side_table: KernelSideTable[Any],
+    launch: Callable[..., None],
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]],
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint],
+    reinplace_trigger: ReInplaceTrigger,
+    serializable: bool,
+    get_kernel_name: Callable[[Mapping[str, Any]], str] | None = None,
+    functional_dense: Callable[..., dict[str, Any]] | None = None,
+    refuse_aliased_writes: bool = False,
+) -> UserKernelHOPInfo:
+    """Register every impl of one DSL's HOP pair and its registry entry (returned).
+
+    The DSL supplies how to launch a kernel (``launch``, the mutation HOP's dense
+    impl), how to find its write set (``get_mutated_tensors``) and the layout
+    constraint of its tensor arguments (``get_layout_constraint``). The rest is the
+    same for every DSL: fake and Meta impls of the mutation HOP that return nothing,
+    proxy tracing and functionalization of both HOPs, the fake impl of the functional
+    HOP, its dense impl (the mutation HOP launched on clones of the written
+    arguments; ``functional_dense`` replaces it, and must do the same), and the
+    dispatch keys of register_user_kernel_hop_dispatch. ``get_kernel_name`` defaults
+    to the name of the kernel's side-table record. With ``refuse_aliased_writes``,
+    the mutation HOP's functionalization refuses two written arguments that may
+    overlap in memory (check_written_args_disjoint, which names the DSL, the kernel
+    and the ``mutates_args`` of its side-table record); Triton does not set it.
+
+    Every impl takes the HOP arguments by keyword and forwards them unchanged, so a
+    node keeps the arguments, in the order, that the HOP's ``__call__`` produced.
+    """
+
+    def return_none(**node_args: Any) -> None:
+        return None
+
+    mutation.py_impl(DispatchKey.CompositeExplicitAutograd)(launch)
+    register_fake(mutation, return_none, skip_cache=True)
+    mutation.py_impl(DispatchKey.Meta)(return_none)
+
+    @mutation.py_impl(ProxyTorchDispatchMode)
+    def mutation_proxy(mode: ProxyTorchDispatchMode, /, **node_args: Any) -> None:
+        trace_user_kernel_wrapper(mode, mutation, node_args)
+        return None
+
+    @mutation.py_functionalize_impl
+    def mutation_functionalize(
+        ctx: "BaseFunctionalizeAPI", /, **node_args: Any
+    ) -> None:
+        hop_kwargs = {k: v for k, v in node_args.items() if k != "kwargs"}
+
+        def written(kwargs: dict[str, Any]) -> list[str]:
+            names = info.get_mutated_tensors(hop_kwargs, kwargs)
+            if not refuse_aliased_writes:
+                return names
+            kernel = side_table.get_kernel(hop_kwargs["kernel_idx"])
+            return check_written_args_disjoint(
+                info.display_name,
+                info.get_kernel_name(hop_kwargs),
+                names,
+                kwargs,
+                node_args["kwargs"],
+                mutates_args=kernel.mutates_args,
+            )
+
+        # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
+        # other, and one gets mutated in kernel, and later another gets mutated,
+        # they are no longer equal. Fix this by graph breaking on this condition
+        # earlier in dynamo.
+        functionalize_mutation_hop(
+            ctx,
+            functional,
+            written,
+            hop_kwargs=hop_kwargs,
+            kwargs=node_args["kwargs"],
+        )
+        return None
+
+    def launch_on_clones(
+        *,
+        kwargs: dict[str, Any],
+        tensors_to_clone: list[str],
+        tensor_bases: dict[str, Tensor] | None = None,
+        **hop_kwargs: Any,
+    ) -> dict[str, Any]:
+        return functional_hop_dense(
+            mutation,
+            hop_kwargs=hop_kwargs,
+            kwargs=kwargs,
+            tensors_to_clone=tensors_to_clone,
+            tensor_bases=tensor_bases,
+        )
+
+    functional_dense = functional_dense or launch_on_clones
+    functional.py_impl(DispatchKey.CompositeExplicitAutograd)(functional_dense)
+
+    @register_fake(functional, skip_cache=True)
+    def functional_fake(
+        *,
+        kwargs: dict[str, Any],
+        tensors_to_clone: list[str],
+        tensor_bases: dict[str, Tensor] | None = None,
+        **hop_kwargs: Any,
+    ) -> dict[str, Any]:
+        return functional_hop_fake(
+            kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+        )
+
+    @functional.py_impl(ProxyTorchDispatchMode)
+    def functional_proxy(
+        mode: ProxyTorchDispatchMode, /, **node_args: Any
+    ) -> dict[str, Any]:
+        ret = trace_user_kernel_wrapper(mode, functional, node_args)
+        if ret is None:
+            raise AssertionError("trace_user_kernel_wrapper returned None")
+        return ret
+
+    @functional.py_functionalize_impl
+    def functional_functionalize(
+        ctx: "BaseFunctionalizeAPI",
+        /,
+        *,
+        kwargs: dict[str, Any],
+        tensors_to_clone: list[str],
+        tensor_bases: dict[str, Tensor] | None = None,
+        **hop_kwargs: Any,
+    ) -> dict[str, Any]:
+        return functionalize_functional_hop(
+            ctx,
+            functional,
+            hop_kwargs=hop_kwargs,
+            kwargs=kwargs,
+            tensors_to_clone=tensors_to_clone,
+            tensor_bases=tensor_bases,
+        )
+
+    register_user_kernel_hop_dispatch(mutation, functional)
+
+    def record_name(hop_kwargs: Mapping[str, Any]) -> str:
+        return side_table.get_kernel(hop_kwargs["kernel_idx"]).name
+
+    info = UserKernelHOPInfo(
+        dsl=dsl,
+        display_name=display_name,
+        mutation=mutation,
+        functional=functional,
+        side_table=side_table,
+        get_mutated_tensors=get_mutated_tensors,
+        get_kernel_name=get_kernel_name or record_name,
+        get_layout_constraint=get_layout_constraint,
+        reinplace_trigger=reinplace_trigger,
+        serializable=serializable,
+    )
+    register_user_kernel_hop(info)
+    return info
 
 
 ###############################################################################
