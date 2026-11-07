@@ -2384,6 +2384,7 @@ class BenchmarkRunner:
                     is_same = False
             except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
+                log.exception("Failed to compare eager outputs for %s", name)
                 is_same = False
 
             if not is_same:
@@ -2524,6 +2525,7 @@ class BenchmarkRunner:
                         run_passed = False
                 except Exception:
                     # Sometimes torch.allclose may throw RuntimeError
+                    log.exception("Failed to compare optimized outputs for %s", name)
                     run_passed = False
 
                 if run_passed:
