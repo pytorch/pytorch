@@ -189,8 +189,12 @@ def use_helion_native_matmul(mat1) -> bool:
 def native_matmul_scaled_add(inp, alpha, beta, matmul):
     """beta * inp + alpha * matmul() for a native matmul addmm/baddbmm.
 
-    Unit and zero scales are skipped, so a fused Helion epilogue is a plain
-    tmp3 = tmp2 + acc rather than 1.0 * tmp2 + 1.0 * acc.
+    Unit and zero scales are skipped, so the fused epilogue of addmm(c, a, b)
+    is tmp3 = tmp2 + acc rather than
+        tmp3 = hl.full([], 1.0, dtype=torch.float32)
+        tmp4 = tmp3 * tmp2
+        tmp5 = tmp3 * acc
+        tmp6 = tmp4 + tmp5
     """
     from ..lowering import lowerings
 
@@ -214,18 +218,23 @@ def native_matmul_scaled_add(inp, alpha, beta, matmul):
 def use_native_matmul(mat1, mat2):
     """Whether to lower this matmul to native dot IR (ops.dot + reduction("dot"))."""
     if use_helion_native_matmul(mat1):
-        # Helion kernels take static FP16/BF16/FP32 matmuls with M, N, K > 1;
-        # anything else, e.g. a matrix-vector product, uses the regular lowering.
+        # Static FP16/BF16/FP32 matmuls with M, N > 1 (K == 1 is decomposed to
+        # a multiply before lowering). The others use the regular lowering, as
+        # HelionKernel fails on them:
+        #   M or N == 1: no tile_y or tile_x, KeyError: 'y' in tiled_view()
+        #   K == 0: AssertionError: dot not supported for zero-dimension tensors!
+        #   FP64: ControlFlowTensorMismatch: dtype torch.float32 != torch.float64
+        #   dynamic: NotImplementedError: Cannot read a Helion dot operand at r0_index + 72*yindex
+        # BF16x9 has no Helion dot_precision and, as for Triton native matmul,
+        # uses the regular lowering too.
         dtype = mat1.get_dtype()
-        *_, m, k = mat1.get_size()
         sizes = [*mat1.get_size(), *mat2.get_size()]
         return (
             dtype in (torch.float16, torch.bfloat16, torch.float32)
-            and mat2.get_dtype() == dtype
             and not is_bf16x9_matmul(mat1.get_device().type, dtype)
             and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
             and 0 not in sizes
-            and 1 not in (m, k, mat2.get_size()[-1])
+            and 1 not in (mat1.get_size()[-2], mat2.get_size()[-1])
         )
 
     if (

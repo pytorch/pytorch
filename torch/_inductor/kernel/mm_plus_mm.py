@@ -60,6 +60,8 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             mat2.get_size(), mat4.get_size()
         )
         or inductor_config.triton.native_matmul
+        # Instead of the Triton template, one Helion kernel with a K loop per
+        # product: acc and acc1, then tmp4 = acc + acc1.
         or use_helion_native_matmul(mat1)
     ):
         # TODO(jansel): support different K values when this is fixed:

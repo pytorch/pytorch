@@ -40,7 +40,6 @@ import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config
@@ -76,8 +75,11 @@ AXIS_ORDER = ("z", "y", "r0_", "x")
 class HelionPrinter(PythonPrinter):
     """Print index expressions over tile index tensors.
 
-    Python min/max cannot compare tiles, so ``Min(y, 5)`` prints as
-    ``torch.minimum(tile_y.index[:, None], hl.full([], 5, dtype=torch.int64))``.
+    PythonPrinter prints ``Min(y, 5)`` as ``min(tile_y.index[:, None], 5)``,
+    which fails on a tensor: ``RuntimeError: Boolean value of Tensor with more
+    than one value is ambiguous``. This prints
+    ``torch.minimum(tile_y.index[:, None], hl.full([], 5, dtype=torch.int64))``;
+    the constant is a 0-d tensor because torch.minimum takes no Python scalar.
     """
 
     def _print_min_max(self, expr: sympy.Expr, name: str) -> str:
@@ -110,8 +112,14 @@ class HelionOverrides(OpOverrides):
 
     @staticmethod
     def constant(value: bool | float | int, dtype: torch.dtype) -> str:
-        # hl.full([], 2.0, dtype=torch.float32): a 0-d tensor broadcasts against
-        # any tile and, unlike a Python scalar, keeps its dtype explicit.
+        # A 0-d tensor, as torch.minimum/maximum take no Python scalar. With the
+        # bare literal, torch.clamp(a @ b, min=0.0) would emit
+        #   tmp2 = 0.0
+        #   tmp3 = torch.maximum(acc, tmp2)
+        #   TypeError: maximum(): argument 'other' (position 2) must be Tensor, not float
+        # and repr(-inf) is not Python:
+        #   tmp3 = hl.full([], -inf, dtype=torch.float32)
+        #   UndefinedVariable: inf is not defined.
         literal = repr(value)
         if isinstance(value, float) and not math.isfinite(value):
             literal = f"float({literal!r})"
@@ -127,8 +135,12 @@ class HelionOverrides(OpOverrides):
     ) -> CSEVariable | str:
         if use_compute_types:
             dtype = upcast_compute_type(dtype)
-        # No cast for a value that already has the dtype, e.g. a bf16 operand
-        # that the native matmul body casts back to bf16 before the dot.
+        # No cast for a value that already has the dtype. The native matmul
+        # body casts each dot operand to its own dtype, which would emit
+        #   tmp0 = in0[tile_y, tile_r]
+        #   tmp1 = tmp0.to(torch.bfloat16)
+        #   ...
+        #   acc = torch.addmm(acc, tmp1, tmp3)
         if x.dtype == dtype:
             return x
         return f"{x}.to({dtype})"
@@ -139,9 +151,11 @@ class HelionOverrides(OpOverrides):
 
     @staticmethod
     def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
-        # SIMDScheduling rewrites index_expr ops that compute values (not
-        # indices) to value_expr, which keeps the requested dtype.
-        return cast(HelionKernel, V.kernel).tile_expr(expr, dtype)
+        # SIMDScheduling turns an index_expr that computes a value into
+        # value_expr, e.g. torch.arange(40 * 136).reshape(40, 136) in an
+        # epilogue, which the OpsHandler default rejects with NotImplementedError:
+        #   tmp2 = (tile_x.index + 136*tile_y.index[:, None]).to(torch.float32)
+        return cast(HelionKernel, V.kernel).index_expr(expr, dtype)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -165,6 +179,9 @@ class HelionOverrides(OpOverrides):
     def fma(x: str, y: str, z: str) -> str:
         # x * y + z rounded once: Helion's Triton backend lowers
         # torch.addcmul(z, x, y) to tl.fma(x, y, z), Inductor's ops.fma.
+        # Without it, torch.addcmul(c, a @ b, d) is not fused:
+        #   helion_fused_mm_0(arg0_1, arg1_1, buf0)
+        #   triton_poi_fused_addcmul_1.run(buf1, arg2_1, arg3_1, 5440, ...)
         return f"torch.addcmul({z}, {x}, {y})"
 
     @staticmethod
@@ -283,6 +300,8 @@ class HelionOverrides(OpOverrides):
 
 
 # Ops a Helion kernel may contain; a node using any other op stays out of it.
+# E.g. a @ b + c[i] reads c through indirect_indexing, which HelionKernel does
+# not implement (NotImplementedError from check_bounds), so c[i] stays Triton.
 HELION_OPS = OrderedSet(
     [
         # Handled by the kernel itself.
@@ -315,7 +334,8 @@ HELION_OPS = OrderedSet(
 
 
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
-    # is_native_matmul() asserts on template nodes.
+    # is_native_matmul() asserts on templates, e.g. flex_attention in the graph:
+    # AssertionError: type(self.node)=<class 'torch._inductor.ir.TritonTemplateBuffer'>
     return not node.is_template() and node.is_native_matmul()
 
 
@@ -355,8 +375,9 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         roots = {tree.prefix: tree for tree in self.range_trees}
         self.symbols = {axis: roots[axis].index_sym() for axis in self.axes}
         self.tile_ranges = {self.symbols[axis]: self.numels[axis] for axis in self.axes}
-        # Buffers stored to memory; the others are only read back by fused
-        # nodes, through the CSE store cache.
+        # Buffers stored to memory. A fused intermediate is read back through
+        # the CSE store cache instead; storing it too would add
+        # out0[tile_y, tile_x] = acc.to(torch.bfloat16) to relu(a @ b + c).
         nodes = tuple(self.features.scheduler_nodes())
         fused_names = OrderedSet(node.get_name() for node in nodes)
         self.outputs = OrderedSet(
@@ -370,19 +391,20 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         )
         self.arguments: dict[tuple[Any, ...], HelionTensorArg] = {}
         self.argument_counts: collections.Counter[str] = collections.Counter()
-        # Loads and compute share one buffer, so a masked load can follow the
-        # computation of its mask.
+        # Loads and compute share one buffer, so that a masked load follows the
+        # computation of its mask. With loads first, as in Triton, cat((f, s))
+        # would emit
+        #   tmp7 = hl.load(in2, [tile_x.index], extra_mask=tmp6).to(torch.float32)
+        # above tmp6 = tmp2 < tmp5: UndefinedVariable: tmp6 is not defined.
         self.loads = self.compute
         # Masks of the enclosing ops.masked() bodies, outermost first.
         self.load_masks: list[CSEVariable] = []
         # Dot node name -> its FP32 accumulator.
         self.accumulators: dict[str, CSEVariable] = {}
 
-    def should_use_persistent_reduction(self) -> bool:
-        # The reduction is always the K loop.
-        return False
-
     def dtype_to_str(self, dtype: torch.dtype) -> str:
+        # Dtype propagation reads SIMDKernel.index_dtype for an index_expr, e.g.
+        # the mask of a cat input, which raises NotImplementedError without this.
         return str(dtype)
 
     def outer_shape(self, axes: Sequence[str] | None = None) -> TileShape:
@@ -417,31 +439,24 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             return name
         return f"{name}[{', '.join(':' if a == axis else 'None' for a in axes)}]"
 
-    def align(
-        self, value: CSEVariable, target: TileShape, *, full_rank: bool = False
-    ) -> str:
+    def align(self, value: CSEVariable, target: TileShape) -> str:
         """View `value` so that it broadcasts against a tensor of shape `target`.
 
         For target (tile_y, tile_x):
             tmp0 of shape (tile_y,) -> tmp0.reshape([tile_y, 1])
             tmp0 of shape (tile_x,) -> tmp0, which broadcasts as is
-        A tile axis that `target` lacks must have size 1 and is dropped, e.g.
-        acc stored to out0[tile_x] when M == 1 is acc.reshape([tile_x]).
-        With `full_rank` the view has every dim of `target`, as hl.load's
-        extra_mask requires: tmp0 of shape (tile_x,) -> tmp0.reshape([1, tile_x]).
         """
         shape = tuple(value.shape or ())
         present = [TILE_AXES[str(dim)] for dim in shape if dim != 1]
         target_axes = [TILE_AXES[str(dim)] for dim in target if dim != 1]
-        kept = [axis for axis in present if axis in target_axes]
-        if kept != sorted(kept, key=target_axes.index) or any(
-            axis not in kept and self.numels[axis] != 1 for axis in present
+        if any(axis not in target_axes for axis in present) or present != sorted(
+            present, key=target_axes.index
         ):
             raise NotImplementedError(f"Cannot broadcast Helion {shape} to {target}")
-        if not kept:
+        if not present:
             return str(value)
-        names = [TILE_NAMES[axis] for axis in kept]
-        dims = list(target) if full_rank else list(target[target.index(names[0]) :])
+        names = [TILE_NAMES[axis] for axis in present]
+        dims = target[target.index(names[0]) :]
         aligned = tuple(dim if dim in names else 1 for dim in dims)
         if aligned == shape:
             return str(value)
@@ -450,10 +465,11 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def tile_index(self, index: sympy.Expr) -> sympy.Expr:
         """Rewrite `index` over the range tree indices, i.e. the tile indices.
 
-        A node's index uses the range tree entries that split a tile, e.g.
+        A node's index uses the range tree entries of its own ranges, e.g.
         y1 = yindex // 8 and y0 = yindex % 8 for a [5, 8, 136] view of a
-        [40, 136] tile. Rewriting them in yindex lets the kernel read a tile
-        directly instead of computing y1 and y0.
+        [40, 136] tile, and then y0 = yindex for the dot. Without the rewrite,
+        (a @ b).reshape(5, 8, 136) + c fails on the dot operand:
+            NotImplementedError: Cannot read a Helion dot operand at r0_2 + 72*y0
         """
         index = sympy.sympify(index)
         entries = {
@@ -461,24 +477,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             for symbol in index.free_symbols
             if symbol in self.range_tree_nodes
         }
-        index = sympy_subs(index, entries)
-        # A size-1 tile always has index 0, so drop its symbol. align() then
-        # drops such tiles from values.
-        index = index.xreplace(
-            {self.symbols[axis]: 0 for axis in self.axes if self.numels[axis] == 1}
-        )
-        # Expose quotient/remainder cancellation before inferring tensor axes:
-        # x % B + B * (x // B) becomes x, so it no longer needs two indices.
-        expanded = index.replace(
-            ModularIndexing,
-            lambda base, divisor, modulus: FloorDiv(base, divisor)
-            - modulus * FloorDiv(base, divisor * modulus),
-        )
-        simplified = V.graph.sizevars.simplify_with_ranges(
-            sympy.expand(expanded), self.tile_ranges
-        )
-        # Keep genuine nonlinear maps compact for flat_subscript().
-        return index if simplified.has(FloorDiv) else simplified
+        index = sympy.expand(sympy_subs(index, entries))
+        return V.graph.sizevars.simplify_with_ranges(index, self.tile_ranges)
 
     def tensor_arg(self, operand: IRNode, *, output: bool = False) -> HelionTensorArg:
         layout = operand.get_layout()
@@ -514,8 +514,11 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if not all(isinstance(value, (int, sympy.Integer)) for value in values):
             return None
         expected = offset + sum(self.symbols[a] * s for a, s in zip(axes, strides))
-        # The view reads exactly what `index` reads at every tile position, so
-        # it only needs to stay within the storage (masked loads may not).
+        # Only views inside the storage. F.pad(x, (8, 0)) reads x at
+        # 128*yindex + xindex - 8 where xindex >= 8, which as a view would be
+        # reinterpret_tensor(arg2_1, (40, 136), (128, 1), -8), starting before
+        # x's storage; the masked load reads the flat storage instead:
+        #   hl.load(in2, [(-8) + tile_x.index + 128*tile_y.index[:, None]], extra_mask=...)
         end = offset + sum((size - 1) * stride for size, stride in zip(sizes, strides))
         if (
             offset < 0
@@ -564,7 +567,11 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             for size in layout.size
         ]
         for dims in itertools.product(*candidates):
-            # Tile dims in AXIS_ORDER, so that values broadcast without permutes.
+            # Tile dims in AXIS_ORDER only. c.t() for c of shape [136, 40] would
+            # match as in2[tile_x, tile_y], a (tile_x, tile_y) value:
+            #   NotImplementedError: Cannot broadcast Helion ('tile_x', 'tile_y') to ('tile_y', 'tile_x')
+            # tiled_view() reads it as in2[tile_y, tile_x] instead, passing
+            # reinterpret_tensor(arg2_1, (40, 136), (1, 40), 0).
             if [dim for dim in dims if dim is not None] != axes:
                 continue
             expected = layout.offset + sum(
@@ -619,8 +626,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 self.body.splice(self.compute)
             # Reduction results are stored after the loop.
             self.body.splice(self.stores)
-            # Values from the loop body are out of scope after it.
-            self.cse.invalidate(OrderedSet(self.accumulators.values()))
         else:
             self.body.splice(self.compute)
             self.body.splice(self.stores)
@@ -641,32 +646,32 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 "import torch",
                 "import helion",
                 "import helion.language as hl",
-                "from torch._inductor.runtime.helion import HelionKernelWrapper",
                 "",
             ]
         )
         # FP32 dots follow torch.backends.cuda.matmul.fp32_precision, like
-        # Inductor's Triton dots. ref_mode=OFF keeps HELION_INTERPRET from
-        # swapping in eager reference mode.
+        # Inductor's Triton dots. With Helion's default, TF32, an FP32
+        # [40, 72] @ [72, 136] differs from eager by up to 3e-2 instead of 1e-5.
         precision = (
             "tf32" if torch.backends.cuda.matmul.fp32_precision == "tf32" else "ieee"
         )
         code.writeline(
             f'@helion.kernel(backend="{config.helion.backend}", static_shapes=True, '
             f'autotune_effort="{config.helion.autotune_effort}", '
-            f'dot_precision="{precision}", ref_mode=helion.RefMode.OFF)'
+            f'dot_precision="{precision}")'
         )
         signature = ", ".join(f"{arg.name}: torch.Tensor" for arg in self.kernel_args())
         code.writeline(f"def kernel({signature}) -> None:")
         with code.indent():
             tiles = ", ".join(TILE_NAMES[axis] for axis in self.outer_axes)
             sizes = ", ".join(str(self.numels[axis]) for axis in self.outer_axes)
-            # hl.tile([40]) would yield 1-tuples.
+            # One axis is hl.tile(40): hl.tile([40]) yields 1-tuples, on which
+            # tile_x.index fails with TypeInferenceError: Attributes are not
+            # supported on SequenceType((TileIndexType(0), )).
             sizes = sizes if len(self.outer_axes) == 1 else f"[{sizes}]"
             code.writeline(f"for {tiles} in hl.tile({sizes}):")
             with code.indent():
                 code.splice(self.body)
-        code.writeline("kernel = HelionKernelWrapper(kernel)")
         return code.getvalue()
 
     def kernel_args(self) -> list[HelionTensorArg]:
@@ -675,10 +680,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def call_kernel(
         self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
     ) -> None:
-        # helion_fused_add_mm_relu_0(arg0_1, reinterpret_tensor(arg1_1, ...), buf1)
-        # An output that reuses an input's storage replaces that input in the
-        # wrapper (buf1 = buf0; del buf0  # reuse), so the input is passed as a
-        # view of the output: reinterpret_tensor(buf1, ...).
+        # An output can take over an input's storage, e.g. for a @ b + cumsum(x):
+        #   buf2 = buf0; del buf0  # reuse
+        # Passing the input by its own name would then fail:
+        #   helion_fused_add_1(arg0_1, arg1_1, buf0, buf2)
+        #   UnboundLocalError: cannot access local variable 'buf0' where it is not associated with a value
+        # so it is passed as the output, or as a view of it:
+        #   helion_fused_add_1(arg0_1, arg1_1, buf2, buf2)
         reused = {inp: out for out, inp in self.inplace_update_buffers.items()}
         args = []
         for arg in self.kernel_args():
@@ -710,10 +718,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             line = f"{arg.name}[{subscript}]{cast_suffix}"
         else:
             # hl.load zero-fills masked lanes; masked() then selects `other`.
-            mask = self.align(mask, shape, full_rank=True)
+            mask = self.align(mask, shape)
             line = f"hl.load({arg.name}, [{subscript}], extra_mask={mask}){cast_suffix}"
         value = self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
-        # A row vector continues as tmp1 = tmp0.reshape([tile_y, 1]).
+        # A row vector continues as tmp3 = tmp2.reshape([tile_y, 1]). Left as
+        # (tile_y,), a @ b + c for c of shape [40, 1] fails Inductor's shape
+        # propagation, which broadcasts trailing dims:
+        #   AssertionError: expected str(d1) == str(d2), got tile_x != tile_y
         aligned = self.outer_shape([TILE_AXES[str(dim)] for dim in shape if dim != 1])
         if aligned == shape:
             return value
@@ -727,8 +738,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def load_dot_operand(self, buffer: IRNode, index: sympy.Expr) -> CSEVariable:
         """Load a dot operand in the K loop: in0[tile_y, tile_r] or in1[tile_r, tile_x].
 
-        The tile keeps its storage dtype: Helion lowers torch.addmm to its
-        tensor core GEMM only on such tiles.
+        The tile keeps its storage dtype. The dot body casts the operand to it
+        anyway, so the upcast that load() applies would only emit a round trip:
+            tmp0 = in0[tile_y, tile_r].to(torch.float32)
+            tmp1 = tmp0.to(torch.bfloat16)
         """
         batch = ("z",) if "z" in self.numels else ()
         for axes in [(*batch, "y", "r0_"), (*batch, "r0_", "x")]:
@@ -753,7 +766,9 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         buffer = V.graph.get_buffer(name)
         layout = buffer.get_layout()
         if isinstance(layout, MutationLayoutSHOULDREMOVE):
-            # x.add_(a @ b) writes into x: in0[tile_y, tile_x] = tmp3.to(...).
+            # x.add_(a @ b) writes into x: in2[tile_y, tile_x] = tmp3.to(...).
+            # The mutation buffer itself is not an output, so without this x
+            # would be left unchanged.
             buffer = layout.get_buffer()
         elif name not in self.outputs:
             return
@@ -769,26 +784,20 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         )
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
-        # As in Triton, integer indices use the kernel's index dtype.
-        if dtype in (torch.int32, torch.int64):
-            dtype = self.get_index_dtype_as_torch_dtype()
-        return self.tile_expr(expr, dtype)
-
-    def tile_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
         """Index arithmetic on tile index tensors.
 
         torch.arange(40 * 136).reshape(40, 136) in an epilogue reads
-        (136*tile_y.index[:, None] + tile_x.index).to(torch.int32).
+        (tile_x.index + 136*tile_y.index[:, None]).to(torch.float32).
         """
         index = self.tile_index(expr)
         dtype = upcast_compute_type(dtype)
-        axes = [
-            axis for axis in self.outer_axes if self.symbols[axis] in index.free_symbols
-        ]
         if not index.free_symbols:
             value = int(index) if index.is_Integer else float(index)
             line = HelionOverrides.constant(value, dtype)
             return self.cse.generate(self.compute, line, dtype=dtype, shape=())
+        axes = [
+            axis for axis in self.outer_axes if self.symbols[axis] in index.free_symbols
+        ]
         return self.cse.generate(
             self.compute,
             f"({self.index_tensor_expr(index, axes)}).to({dtype})",
@@ -803,15 +812,16 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         """
         if index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes):
             raise NotImplementedError(f"Unsupported Helion index: {index}")
-        # tile.index is int32; widen it first if int32 arithmetic could overflow.
-        bounds = bound_sympy(
-            index,
-            {
-                self.symbols[axis]: ValueRanges(0, self.numels[axis] - 1)
-                for axis in axes
-            },
-        )
-        widen = not (-(2**31) <= bounds.lower and bounds.upper < 2**31)
+        # tile.index is int32 (int64 only for tensors past 2**31 elements), so
+        # widen it if any subexpression could overflow. Otherwise the mask of
+        # torch.where((torch.arange(40 * 136).reshape(40, 136) * 10**8) % 7 == 0, a @ b, 0)
+        # is ((100000000*tile_x.index + ...) % 7) in int32 and picks the wrong
+        # elements.
+        ranges = {
+            self.symbols[axis]: ValueRanges(0, self.numels[axis] - 1) for axis in axes
+        }
+        bounds = [bound_sympy(term, ranges) for term in sympy.preorder_traversal(index)]
+        widen = any(not (-(2**31) <= b.lower and b.upper < 2**31) for b in bounds)
         suffix = ".to(torch.int64)" if widen else ""
         replacements = {
             self.symbols[axis]: sympy.Symbol(self.index_tensor(axis) + suffix)
@@ -825,8 +835,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         A mask over axes the load does not use cannot move its address, e.g.
         cat((bias.expand(10, N), c)) masks rows while bias is read as
         in2[tile_x]: every column is read for some kept row, so that load needs
-        no mask and masked() alone selects the rows.
+        no mask and masked() alone selects the rows. Passing the (tile_y, 1)
+        mask to that load would fail:
+            NotImplementedError: Cannot broadcast Helion ('tile_y', 1) to ('tile_x',)
         """
+        # A broadcast dim is 1, not a tile name: torch.bmm(a, b).view(2, 3, 40,
+        # 136) + c for c of shape [2, 1, 1, 136] would otherwise fail with
+        # KeyError: '1'.
         load_axes = OrderedSet(TILE_AXES[str(dim)] for dim in shape if dim != 1)
         guards = []
         for mask in self.load_masks:
@@ -917,17 +932,13 @@ class HelionScheduling(TritonScheduling):
         # import torch
         # ..."""
         # helion_fused_mm_0 = PyCodeCache.load(helion_fused_mm_0_source).kernel
+        # Escaped so that e.g. a source line value = """x""" cannot end the
+        # string early: SyntaxError when the wrapper module is loaded.
         escaped = source.replace("\\", "\\\\").replace('"""', '\\"""')
         return (
             f'{name}_source = """\\\n{escaped}"""\n'
             f"{name} = PyCodeCache.load({name}_source).kernel"
         )
-
-    @staticmethod
-    def _native_matmul_row_split(nodes: Sequence[BaseSchedulerNode]) -> None:
-        # No [M, N] -> [M] row epilogues yet: the row reductions run as Triton
-        # kernels after the Helion matmul.
-        return None
 
     def can_fuse(self, node1, node2):
         if not (is_helion_matmul(node1) or is_helion_matmul(node2)):
@@ -942,19 +953,13 @@ class HelionScheduling(TritonScheduling):
                 why("Helion kernels do not support %s", unsupported)
                 return False
         dots = [node for node in nodes if node.is_native_matmul()]
-        if len(OrderedSet(tuple(map(tuple, node.get_ranges())) for node in dots)) > 1:
-            why("Helion matmul kernel tiles one dot shape")
-            return False
-        # (a + 1) @ b: the operand producer stays a Triton kernel, and the
-        # Helion kernel reads in0[tile_y, tile_r] from its output.
-        operands = OrderedSet(
-            dep.name for node in dots for dep in node.read_writes.reads
-        )
-        if operands & (node1.get_buffer_names() | node2.get_buffer_names()):
-            why("Helion matmul kernel does not fuse operand producers")
-            return False
         # An epilogue node runs once per output element, (B*)M*N, split into
-        # the (z,) y, x tiles.
+        # the (z,) y, x tiles. A node that also iterates over K, e.g.
+        # (a.unsqueeze(-1) * b.unsqueeze(0)).sum(1) next to a @ b, has the
+        # dot's group (5440, 72) and would land in the K loop:
+        #   NotImplementedError: Unsupported Helion index: r0_index + 72*yindex
+        # Row reductions of the output, [M, N] -> [M], are rejected here too
+        # and run as Triton kernels after the Helion matmul.
         tiles = list(dots[0].get_ranges()[0])
         numel, groups = sympy_product(tiles), [*tiles, sympy.S.One]
         for node in nodes:
@@ -964,6 +969,9 @@ class HelionScheduling(TritonScheduling):
             if not pointwise or not SIMDKernel.is_compatible(groups, node.get_ranges()):
                 why("Helion epilogue must iterate over the matmul output tiles")
                 return False
+            # a @ b + torch.tensor(2.0) reads a CPU scalar, which the kernel
+            # would get as a CPU tensor:
+            #   ValueError: Pointer argument cannot be accessed from Triton (cpu tensor?)
             if any(V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads):
                 why("Helion kernels do not read CPU scalars")
                 return False
@@ -978,23 +986,6 @@ class HelionScheduling(TritonScheduling):
         return super().create_kernel_choices(
             kernel_features, kernel_args, kernel_kwargs
         )
-
-    def generate_kernel_code_from_nodes(self, nodes, *args, **kwargs):
-        if not any(is_helion_matmul(node) for node in nodes):
-            return super().generate_kernel_code_from_nodes(nodes, *args, **kwargs)
-        # Fusion benchmarking skips Helion matmuls (see Scheduler), so this
-        # only serves debug output such as TORCH_LOGS=ir_post_fusion.
-        features = self._kernel_features_from_nodes(nodes)
-        tiling, _ = self.get_tiling_and_scores(
-            features.node_schedule,
-            features.numel,
-            features.reduction_numel,
-            features.coalesce_analysis,
-        )
-        kernel = HelionKernel(tiling, features=features)
-        self.codegen_node_schedule_with_kernel(features.node_schedule, kernel)
-        with V.set_kernel_handler(kernel):
-            return kernel.codegen_kernel()
 
     def define_kernel(self, src_code, node_schedule, kernel):
         if not isinstance(kernel, HelionKernel):
@@ -1014,7 +1005,10 @@ class HelionScheduling(TritonScheduling):
         )
         wrapper.src_to_kernel[src_code] = name
         wrapper.add_import_once("from torch._inductor.codecache import PyCodeCache")
-        # gpu=False keeps the module out of the Triton compile-time autotune block.
+        # gpu=False keeps the module out of the Triton compile-time autotune
+        # block, which has no PyCodeCache import: with
+        # triton.autotune_at_compile_time=True it would fail with
+        #   RuntimeError: Failed to run autotuning code block: name 'PyCodeCache' is not defined
         wrapper.define_kernel(
             name,
             self.format_kernel_definition(name, src_code),
