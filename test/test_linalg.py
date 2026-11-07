@@ -6413,6 +6413,13 @@ class TestLinalg(TestCase):
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
+    @onlyCUDA
+    def test_addmm_out_row_size_one_stride(self, device):
+        # A (1, N) out is contiguous for any stride(0); here stride(0) == 1 < N
+        a, b, bias = (torch.randn(*s, device=device) for s in ((1, 8), (8, 16), (16,)))
+        out = torch.zeros(16, 1, device=device).t()
+        self.assertEqual(torch.addmm(bias, a, b, out=out), torch.addmm(bias, a, b))
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
