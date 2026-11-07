@@ -47,6 +47,7 @@ torch.utils.module_tracker <utils/module_tracker>
     :nosignatures:
 
     generate_methods_for_privateuse1_backend
+    register_device_autocast_entry
     rename_privateuse1_backend
 ```
 
