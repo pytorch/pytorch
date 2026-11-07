@@ -41,7 +41,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    running_on_tdm_device,
+)
 from torch.utils._triton import has_datacenter_blackwell_tma_device
 
 
@@ -97,6 +102,85 @@ def tearDownModule():
     if _PRIOR_FP32_MATMUL_PRECISION is not None:
         torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
         _PRIOR_FP32_MATMUL_PRECISION = None
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+@instantiate_parametrized_tests
+class TestMaxAutotuneMI450(TestCase):
+    @staticmethod
+    def _compile_and_get_code(fn, *args):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tdm",
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    def test_mi450_max_autotune_regular_mm_persistent_tdm(
+        self, a_transposed: bool, b_transposed: bool
+    ):
+        M, N, K = 256, 128, 384
+        a = torch.randn(
+            *((K, M) if a_transposed else (M, K)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        b = torch.randn(
+            *((N, K) if b_transposed else (K, N)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        if a_transposed:
+            a = a.T
+        if b_transposed:
+            b = b.T
+
+        expected = torch.mm(a.cpu().float(), b.cpu().float()).half()
+        actual, code = self._compile_and_get_code(torch.mm, a, b)
+
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
+        FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
+            "\n".join(code)
+        )
+
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    def test_mi450_max_autotune_addmm_persistent_tdm(
+        self, a_transposed: bool, b_transposed: bool
+    ):
+        M, N, K = 256, 128, 384
+        a = torch.randn(
+            *((K, M) if a_transposed else (M, K)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        b = torch.randn(
+            *((N, K) if b_transposed else (K, N)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        if a_transposed:
+            a = a.T
+        if b_transposed:
+            b = b.T
+        bias = torch.randn(N, dtype=torch.float16, device=GPU_TYPE)
+
+        expected = torch.addmm(
+            bias.cpu().float(), a.cpu().float(), b.cpu().float()
+        ).half()
+        actual, code = self._compile_and_get_code(torch.addmm, bias, a, b)
+
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
+        FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
+            "\n".join(code)
+        )
 
 
 @instantiate_parametrized_tests
