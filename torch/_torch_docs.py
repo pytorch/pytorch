@@ -1027,7 +1027,7 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 .. warning::
     Prefer using other view functions, like :meth:`torch.Tensor.view` or
     :meth:`torch.Tensor.expand`, to setting a view's strides manually with
-    `as_strided`, as this function will throw an error on non-standard Pytorch
+    `as_strided`, as this function will throw an error on non-standard PyTorch
     backends (that do not have a concept of stride) and the result will depend
     on the current layout in memory. The constructed view must only refer to
     elements within the Tensor's storage or a runtime error will be thrown.
@@ -3094,7 +3094,7 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 """
     + r"""
 Args:
-    abs (Tensor): The absolute value the complex tensor. Must be float or double.
+    abs (Tensor): The absolute value of the complex tensor. Must be float or double.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 
@@ -3815,7 +3815,7 @@ add_docstr(
     r"""
 diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
 
-Returns a partial view of :attr:`input` with the its diagonal elements
+Returns a partial view of :attr:`input` with its diagonal elements
 with respect to :attr:`dim1` and :attr:`dim2` appended as a dimension
 at the end of the shape.
 
@@ -6245,7 +6245,7 @@ add_docstr(
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
+spaced from :attr:`start` to :attr:`end`, inclusive. That is, the values are:
 
 .. math::
     (\text{start},
@@ -8108,7 +8108,7 @@ Indices are ordered from left to right according to when each was sampled
 
 If :attr:`input` is a vector, :attr:`out` is a vector of size :attr:`num_samples`.
 
-If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
+If :attr:`input` is a matrix with `m` rows, :attr:`out` is a matrix of shape
 :math:`(m \times \text{{num\_samples}})`.
 
 If replacement is ``True``, samples are drawn with replacement.
@@ -10063,7 +10063,7 @@ This function returns a view of the original tensor with the given dimension rem
 
 .. note:: If :attr:`input` is a sparse tensor and returning a view of
           the tensor is not possible, a RuntimeError exception is
-          raised. In this is the case, consider using
+          raised. If this is the case, consider using
           :func:`torch.select_copy` function.
 
 Args:
@@ -10644,7 +10644,7 @@ add_docstr(
 
 Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
-in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
+in CSR format are typically faster than that for sparse tensors in COO format. Make sure you have a look
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 {sparse_factory_device_note}
@@ -10707,7 +10707,7 @@ Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
 <sparse-csc-docs>` with specified values at the given
 :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in CSC format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-csc-docs>`.
 
 {sparse_factory_device_note}
@@ -10770,7 +10770,7 @@ Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
 <sparse-bsr-docs>` with specified 2-dimensional blocks at the given
 :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
 multiplication operations in BSR format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-bsr-docs>`.
 
 {sparse_factory_device_note}
@@ -10838,7 +10838,7 @@ Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
 Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
 given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in BSC format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-bsc-docs>`.
 
 {sparse_factory_device_note}
@@ -11449,7 +11449,7 @@ always be real-valued, even if :attr:`input` is complex.
              have zero nor repeated singular values.
 
 .. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
-             `U` and `V` will be numerically unstable, as they depends on
+             `U` and `V` will be numerically unstable, as they depend on
              :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
              has small singular values, as these gradients also depend on `S^{-1}`.
 
@@ -12123,7 +12123,7 @@ Example::
 """.format(**common_args),
 )
 
-# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# docstr is split in two parts to avoid format mis-capturing :math: braces '{}'
 # as common args.
 add_docstr(
     torch.tril_indices,
@@ -13022,7 +13022,7 @@ a negative determinant.
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
-    be unstable in when :attr:`input` doesn't have distinct singular values. See
+    be unstable when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
 
 .. seealso::
@@ -13625,7 +13625,7 @@ used to specify arbitrary spacing along :attr:`dim`.
 
 For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
 and this function is that, :func:`torch.trapezoid` returns a value for each integration,
-where as this function returns a cumulative value for every spacing within the integration. This
+whereas this function returns a cumulative value for every spacing within the integration. This
 is analogous to how `.sum` returns a value and `.cumsum` returns a cumulative sum.
 
 Arguments:
@@ -14048,7 +14048,7 @@ Arguments:
         numbers indicate higher priority. By default, streams have priority 0.
 
 Returns:
-    Stream: An torch.Stream object.
+    Stream: A torch.Stream object.
 
 Example::
 
@@ -14194,7 +14194,7 @@ Arguments:
     interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
 
 Returns:
-    Event: An torch.Event object.
+    Event: A torch.Event object.
 
 Example::
 
@@ -14375,7 +14375,7 @@ Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
 
 Returns:
-    Generator: An torch.Generator object.
+    Generator: A torch.Generator object.
 
 .. seealso::
     :class:`torch.Generator` is stateful. For a stateless, key-based PRNG API
@@ -14569,7 +14569,7 @@ Arguments:
         `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
-    Generator: An torch.Generator object.
+    Generator: A torch.Generator object.
 
 Example::
 
@@ -14691,7 +14691,7 @@ Keyword args:
     right (bool, optional): if False, return the first suitable location that is found. If True, return the
                             last such index. If no suitable index found, return 0 for non-numerical value
                             (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
-                            (one pass the last index of the *innermost* dimension). In other words, if False,
+                            (one past the last index of the *innermost* dimension). In other words, if False,
                             gets the lower bound index for each value in :attr:`values` on the corresponding
                             *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
                             bound index instead. Default value is False. :attr:`side` does the same and is
