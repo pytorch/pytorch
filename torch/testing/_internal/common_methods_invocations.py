@@ -788,6 +788,14 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 
+def error_inputs_pow(op_info, device, **kwargs):
+    # Integer tensor raised to a negative integer scalar (NumPy compatibility).
+    for dtype in (torch.uint8, torch.int32, torch.int64):
+        for exponent in (-1, -2):
+            yield ErrorInput(
+                SampleInput(make_tensor((3,), device=device, dtype=dtype, low=1, high=5), exponent),
+                error_regex="Integers to negative integer powers are not allowed")
+
 def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
     if dtype.is_complex and not requires_grad:
@@ -18185,6 +18193,7 @@ op_db: list[OpInfo] = [
                     dtypesIfMPS=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     ref=np.power,
                     sample_inputs_func=sample_inputs_pow,
+                    error_inputs_func=error_inputs_pow,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
