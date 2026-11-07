@@ -33,9 +33,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    RUN_CPU,
 )
 
 
@@ -2423,9 +2423,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         use_static_shapes = False
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
         test_pattern_fails_with_reuse_cpu = (
@@ -2527,6 +2528,7 @@ if HAS_CPU:
         use_static_shapes = False
 
     class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
