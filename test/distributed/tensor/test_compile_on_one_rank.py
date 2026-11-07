@@ -17,7 +17,9 @@ import torch.utils._pytree as pytree
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._utils import compute_local_shape_and_chunks
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -2792,6 +2794,64 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         gm = make_fx(self._fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
+    """compute_local_shape_and_chunks traced under compile_on_one_rank.
+
+    The graph reads the mesh coordinate when it runs, so every rank traces the same
+    graph. Single process with a fake PG, initialized as each rank of a 2 x 2 mesh
+    in turn.
+    """
+
+    @staticmethod
+    def _chunk_values(global_shape, mesh, placements, x):
+        # make_fx traces a function of tensors; x is unused.
+        return pytree.tree_leaves(
+            compute_local_shape_and_chunks(global_shape, mesh, placements)
+        )
+
+    def test_compute_local_shape_and_chunks(self):
+        # (global_shape, placements, number of mesh dims that shard)
+        cases = [
+            ((8, 2), [_StridedShard(0, split_factor=2), Replicate()], 1),
+            ((7, 6), [_StridedShard(0, split_factor=2), Shard(0)], 2),
+            ((7, 6), [Shard(1), _StridedShard(0, split_factor=3)], 2),
+            ((13, 4), [Shard(0), _StridedShard(0, split_factor=2)], 2),
+            ((5, 3), [Replicate(), Replicate()], 0),
+        ]
+        for global_shape, placements, num_shard_dims in cases:
+            graphs = set()
+            for rank in range(4):
+                dist.init_process_group(
+                    backend="fake", store=FakeStore(), rank=rank, world_size=4
+                )
+                try:
+                    mesh = init_device_mesh("cpu", (2, 2))
+                    chunks = functools.partial(
+                        self._chunk_values, global_shape, mesh, placements
+                    )
+                    with compiler_config.patch(compile_on_one_rank=True):
+                        gm = make_fx(chunks, tracing_mode="symbolic")(torch.zeros(1))
+                    graphs.add(gm.code)
+                    msg = f"{global_shape=} {placements=} {rank=}"
+                    # The coordinate is read only for the mesh dims that shard.
+                    self.assertEqual(
+                        _call_targets(gm).count(
+                            "device_mesh._runtime_compute_coordinate_on_dim.default"
+                        ),
+                        num_shard_dims,
+                        msg=msg,
+                    )
+                    self.assertEqual(
+                        [int(v) for v in gm(torch.zeros(1))],
+                        chunks(torch.zeros(1)),
+                        msg=msg,
+                    )
+                finally:
+                    dist.destroy_process_group()
+            self.assertEqual(len(graphs), 1, msg=f"{global_shape=} {placements=}")
 
 
 if __name__ == "__main__":
