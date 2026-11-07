@@ -590,7 +590,8 @@ def region_activation_memory_budget(
     activations to save versus recompute in the backward pass to stay under a
     memory budget. ``budget`` is a ratio in ``[0, 1]``: ``0.0`` corresponds to
     the activation memory from applying activation checkpointing to the full
-    region, and ``1.0`` corresponds to the activation memory from the default
+    region, except that reads of inputs the forward mutates are still saved,
+    and ``1.0`` corresponds to the activation memory from the default
     runtime-optimized strategy. So ``0.4`` would result in a strategy that saves
     40% of the activations compared to the default strategy. It solves a 0-1
     knapsack to find the minimum recompute necessary to stay below the budget.
