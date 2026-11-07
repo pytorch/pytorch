@@ -11,6 +11,7 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+from torch._inductor.codegen.common import get_custom_backend_config_for_device
 
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
@@ -18,6 +19,7 @@ from torch._inductor.utils import (
     _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
+    get_triton_type,
     GPU_TYPES,
     is_big_gpu,
     is_gpu,
@@ -66,6 +68,7 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+HAS_TRITON_INC_CPU = has_triton(include_cpu=True)
 # Respect triton_disable_device_detection when probing the CPU backend.
 TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
@@ -86,6 +89,7 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
+TRITON_TYPE: str | None = get_triton_type(include_cpu=True)
 
 def running_on_tdm_device() -> bool:
     """Return whether the active ROCm device and Triton support gfx1250 TDM."""
@@ -212,6 +216,7 @@ requires_gpu = functools.partial(
     unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu"
 )
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+requires_triton_inc_cpu = functools.partial(unittest.skipIf, not HAS_TRITON_INC_CPU, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 # Only run tests that assert Triton block-pointer codegen where the frontend API
 # still exists (removed in triton-lang/triton#10833); elsewhere Inductor falls back
@@ -466,7 +471,6 @@ def patch_inductor_backend(
     Patch the inductor backend for a specific device.
     """
     from torch._inductor.codegen.common import (
-        get_custom_backend_config_for_device,
         get_custom_backend_pass_for_device,
         get_scheduling_for_device,
         get_wrapper_codegen_for_device,
@@ -516,6 +520,7 @@ def patch_inductor_backend(
             original_custom_pass,
             original_custom_backend_config,
         )
+
 
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
