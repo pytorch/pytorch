@@ -1527,6 +1527,14 @@ except RuntimeError as e:
             ValueError, "timeout option should be non-negative"
         ):
             self._get_data_loader(self.dataset, timeout=-1)
+        with self.assertRaisesRegex(
+            ValueError, "prefetch_factor option should be greater than 0"
+        ):
+            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=0)
+        with self.assertRaisesRegex(
+            ValueError, "prefetch_factor option should be greater than 0"
+        ):
+            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=-1)
 
         # disable auto-batching
         with self.assertRaisesRegex(
