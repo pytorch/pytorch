@@ -246,6 +246,60 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
 
 class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
+    def test_write_scalar_sub_tensor_to_file_optimized(self) -> None:
+        """A zero-dimensional scalar has one element despite its empty shape."""
+        for dtype in (torch.float16, torch.float32, torch.float64):
+            with self.subTest(dtype=dtype):
+                scalar = torch.tensor(7.25, dtype=dtype)
+                buffer = bytearray(scalar.element_size())
+                _write_sub_tensor_to_file_optimized(
+                    memoryview(buffer),
+                    scalar.numpy().tobytes(),
+                    scalar.element_size(),
+                    [],  # Full tensor shape
+                    [],  # Shard offsets
+                    [],  # Shard shape
+                )
+                restored = torch.frombuffer(buffer, dtype=dtype)
+                self.assertEqual(restored.item(), scalar.item())
+
+    @with_temp_dir
+    def test_consolidate_scalar_tensors(self) -> None:
+        """Scalar values survive the Hugging Face DCP save/consolidate path."""
+        if importlib.util.find_spec("safetensors") is None:
+            self.skipTest("safetensors not installed")
+        from safetensors.torch import load_file
+
+        state_dict = {
+            "scale": torch.tensor(7.25),
+            "half_scale": torch.tensor(-2.5, dtype=torch.float16),
+            "double_scale": torch.tensor(2.25, dtype=torch.float64),
+            "weight": torch.tensor([1.0, 2.0, 3.0]),
+            "empty": torch.empty(0),
+        }
+        input_dir = os.path.join(self.temp_dir, "input")
+        output_dir = os.path.join(self.temp_dir, "consolidated")
+        os.makedirs(input_dir)
+        os.makedirs(output_dir)
+
+        dist_cp.save(
+            state_dict=state_dict,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=input_dir, save_distributed=True
+            ),
+        )
+        consolidate_safetensors_files(
+            input_dir,
+            output_dir,
+            fqn_to_index_mapping={name: 1 for name in state_dict},
+        )
+        loaded = load_file(
+            os.path.join(output_dir, "model-00001-of-00001.safetensors")
+        )
+        self.assertEqual(loaded.keys(), state_dict.keys())
+        for name, expected in state_dict.items():
+            self.assertTrue(torch.equal(loaded[name], expected), name)
+
     def test_calculate_max_contiguous_elements_validations(self) -> None:
         """Test validation logic in _calculate_max_contiguous_elements function."""
 
