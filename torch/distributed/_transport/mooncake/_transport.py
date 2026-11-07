@@ -64,16 +64,17 @@ class MooncakeTransport(Transport):
 
     There is no per-peer disconnect; ``close`` releases all peers. A failed
     transfer fails only its Work. A timed-out transfer also pins its local
-    memory, which is never unregistered and rejects further transfers, because
+    memory on the legacy batch path if native status cannot establish drainage.
+    That memory is never unregistered and rejects further transfers because
     Mooncake may still be accessing it. Descriptors are not tied to the peer that
     sent them, so an endpoint serving several peers must authorize each request,
     for example by checking ``remote_buffer.endpoint``.
 
     Mooncake has no completion callback or fd yet, so transfers are submitted
-    with ``batch_transfer_async`` and a single poller thread per transport checks
-    them with ``transfer_check_status``, backing off while nothing completes and
-    sleeping while nothing is in flight. The poller settles each Work, which
-    wakes ``write_async``/``read_async``/``close_async`` through the asyncio
+    with managed ``submit_transfer`` tickets when available, falling back to
+    ``batch_transfer_async`` on older wheels. A single poller thread checks them,
+    backing off while nothing completes and sleeping while nothing is in flight.
+    The poller settles each Work, which wakes ``write_async``/``read_async``/``close_async`` through the asyncio
     future bridge without blocking the loop. The short lock-guarded
     submit/cleanup sections are offloaded with ``asyncio.to_thread`` rather than
     spinning on the lock.
@@ -104,7 +105,15 @@ class MooncakeTransport(Transport):
             raise RuntimeError("Mooncake transport initialization failed")
         self._backend = backend
         self._engine: Any = engine
-        self._endpoint = f"{host}:{engine.get_rpc_port()}"
+        self._managed = all(
+            callable(getattr(engine, name, None))
+            for name in ("submit_transfer", "get_endpoint", "refresh_remote")
+        )
+        self._endpoint = (
+            engine.get_endpoint()
+            if self._managed
+            else f"{host}:{engine.get_rpc_port()}"
+        )
         self._protocol = protocol
         self._timeout = timeout
         self._default_timeout = timeout
@@ -113,7 +122,8 @@ class MooncakeTransport(Transport):
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
-        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration]] = {}
+        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration, Any]] = {}
+        self._query_errors: dict[int, Exception] = {}
         self._poll_cv = Condition()
         self._poller: Thread | None = None
         self._poller_stopped = False
@@ -197,6 +207,14 @@ class MooncakeTransport(Transport):
         key = tensor.data_ptr(), length, str(tensor.device)
         if registration := self._registrations.get(key):
             return MooncakeMemory(self, registration)
+        address = tensor.data_ptr()
+        for registration in self._registrations.values():
+            if address < registration.address + registration.length and (
+                registration.address < address + length
+            ):
+                raise ValueError(
+                    "overlapping registration; use registered memory views"
+                )
         device_id = max(tensor.get_device(), 0)
         location = f"cuda:{device_id}" if tensor.is_cuda else "cpu:0"
         if engine.register_memory(tensor.data_ptr(), length, location) != 0:
@@ -311,15 +329,30 @@ class MooncakeTransport(Transport):
             if opcode == "READ"
             else self._backend.TransferOpcode.Write
         )
-        batch_id = engine.batch_transfer_async(
-            remote_buffer.endpoint,
-            [registration.address + local_buffer._offset],
-            [remote_buffer.address],
-            [size],
-            operation,
-        )
-        if batch_id == 0:
-            raise RuntimeError("Mooncake transfer submission failed")
+        ticket = None
+        if self._managed:
+            # The existing descriptor has no registration generation. Refresh on
+            # submission so re-registration at the same address cannot use stale
+            # keys, while preserving the upstream wire format.
+            engine.refresh_remote(remote_buffer.endpoint)
+            ticket = engine.submit_transfer(
+                remote_buffer.endpoint,
+                registration.address + local_buffer._offset,
+                remote_buffer.address,
+                size,
+                operation,
+            )
+            batch_id = id(ticket)
+        else:
+            batch_id = engine.batch_transfer_async(
+                remote_buffer.endpoint,
+                [registration.address + local_buffer._offset],
+                [remote_buffer.address],
+                [size],
+                operation,
+            )
+            if batch_id == 0:
+                raise RuntimeError("Mooncake transfer submission failed")
         future: _ThreadFuture[None] = _ThreadFuture()
         work = _MooncakeWork(self, local_buffer, remote_buffer, future, timeout)
         self._pending[id(work)] = work
@@ -328,7 +361,7 @@ class MooncakeTransport(Transport):
         future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
         with self._poll_cv:
-            self._batches[batch_id] = (future, registration)
+            self._batches[batch_id] = (future, registration, ticket)
             if self._poller is None:
                 self._poller = Thread(target=self._poll, name="mooncake", daemon=True)
                 self._poller.start()
@@ -349,21 +382,40 @@ class MooncakeTransport(Transport):
                     return
                 batches = list(self._batches.items())
             settled = []
-            for batch_id, (future, registration) in batches:
-                # Every non-zero status is final: Mooncake frees the batch, so it
+            for batch_id, (future, registration, ticket) in batches:
+                # Legacy non-zero status is final: Mooncake frees the batch, so it
                 # must not be polled again. 1 and -1 mean every slice of the one
                 # request has completed or failed. -2 (TIMEOUT, with
                 # MC_SLICE_TIMEOUT) or an unknown status may leave slices in
                 # flight, so the local memory stays pinned.
-                status = engine.transfer_check_status(batch_id)
+                try:
+                    if ticket is None:
+                        status = engine.transfer_check_status(batch_id)
+                    else:
+                        done, message = ticket.poll()
+                        status = (1 if not message else -1) if done else 0
+                        if done and message:
+                            self._query_errors.setdefault(
+                                batch_id, RuntimeError(message)
+                            )
+                except Exception as error:
+                    # A failed query does not establish that DMA has drained.
+                    # Keep the ticket and buffers, and report the error only
+                    # after a later poll confirms completion.
+                    self._query_errors.setdefault(batch_id, error)
+                    continue
                 if status != 0:
                     settled.append((batch_id, future, registration, status))
             with self._poll_cv:
                 for batch_id, *_ in settled:
                     del self._batches[batch_id]
-            for _, future, registration, status in settled:
+            for batch_id, future, registration, status in settled:
+                error = self._query_errors.pop(batch_id, None)
                 if status == 1:
-                    future.set_result(None)
+                    if error is None:
+                        future.set_result(None)
+                    else:
+                        future.set_exception(error)
                     continue
                 message = "Mooncake transfer failed"
                 if status != -1:
@@ -372,7 +424,7 @@ class MooncakeTransport(Transport):
                         f" with status {status}; it may still be running, so its "
                         "local memory stays pinned"
                     )
-                future.set_exception(RuntimeError(message))
+                future.set_exception(error or RuntimeError(message))
             delay = 0.0 if settled else min(max(delay * 2, 1e-6), 1e-3)
 
     def _prune(self, key: int) -> None:
@@ -563,7 +615,8 @@ class MooncakeTransport(Transport):
             if registration.pinned:
                 _pinned_registrations.append((engine, registration))
             else:
-                engine.unregister_memory(registration.address)
+                if engine.unregister_memory(registration.address) != 0:
+                    raise RuntimeError("Mooncake memory unregistration failed")
             registration.active = False
             del self._registrations[key]
         self._pending.clear()
