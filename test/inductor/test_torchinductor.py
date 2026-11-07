@@ -20861,6 +20861,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = torch.compile(fn)(x_base.clone()[:, 2:, :], index, source)
         self.assertEqual(result, expected)
 
+    def test_index_reduce_scalar_shape_mismatch(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202938
+        def fn(x, index, source):
+            return x.index_reduce(0, index, source, "mean")
+
+        def fn_inplace(x, index, source):
+            return x.clone().index_reduce_(0, index, source, "amax")
+
+        scalar = torch.tensor(2.0, device=self.device)
+        vector = torch.tensor([5.0], device=self.device)
+        index = torch.tensor([0], device=self.device)
+        msg = "source tensor shape must match self tensor shape"
+        for f in (fn, fn_inplace):
+            # A scalar self or source only matches a scalar, as in eager.
+            for x, source in ((scalar, vector), (vector, scalar)):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    f(x, index, source)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch.compile(f)(x, index, source)
+            expected = f(scalar, index, scalar)
+            self.assertEqual(torch.compile(f)(scalar, index, scalar), expected)
+
     def test_pad_after_gelu(self):
         # Regression test for Voxtral compilation on MPS
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
