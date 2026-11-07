@@ -531,6 +531,8 @@ def jagged_from_list(
     offsets: Optional[torch.Tensor],
     dtype=None,
     device=None,
+    *,
+    jagged_dim: Optional[int] = None,
 ) -> tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
@@ -553,15 +555,28 @@ def jagged_from_list(
         raise RuntimeError(
             "Cannot construct a nested tensor from a list of zero-dim tensors"
         )
+    if jagged_dim is not None:
+        if not isinstance(jagged_dim, int) or isinstance(jagged_dim, bool):
+            raise TypeError("jagged_dim must be an integer or None")
+        if not 1 <= jagged_dim <= component_dim:
+            raise ValueError(
+                f"Expected jagged_dim between 1 and {component_dim}, but got {jagged_dim}"
+            )
 
     # Check that the NT is representable by the jagged layout, which
     # allows for a single ragged dimension after the batch dim.
     # e.g. (B, *, D_0, ..., D_N), (B, D_0, *, ..., D_N), etc.
     sizes = [t.shape for t in tensors]
-    ragged_idx = None
+    ragged_idx = jagged_dim
     for d in range(component_dim):
         dim_is_ragged = any(size[d] != sizes[0][d] for size in sizes)
-        if dim_is_ragged:
+        if jagged_dim is not None:
+            if dim_is_ragged and d != jagged_dim - 1:
+                raise RuntimeError(
+                    "All tensors must have the same shape except in the jagged dimension "
+                    f"(jagged_dim={jagged_dim})"
+                )
+        elif dim_is_ragged:
             if ragged_idx is None:
                 # add 1 to convert to outer NJT dim space
                 ragged_idx = d + 1
