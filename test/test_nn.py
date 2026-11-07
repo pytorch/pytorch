@@ -14649,6 +14649,127 @@ class TestNNDeviceType(NNTestCase):
                     for ref_g, act_g in zip(grads_ref, grads):
                         self.assertEqual(ref_g, act_g)
 
+    @parametrize_test("reduction", ["mean", "sum", "none"])
+    @parametrize_test("prob_target", [False, True])
+    @parametrize_test("chunked", [False, True])
+    def test_linear_cross_entropy_logit_softcap_gradcheck(
+        self, device, chunked, prob_target, reduction
+    ):
+        """``gradcheck`` with ``logit_softcap`` on the reference and the chunked
+        path. The cap is small relative to the logits, so ``tanh`` saturates and
+        a missing ``1 - tanh**2`` factor would show up in every gradient.
+        """
+        if "mps" in device:
+            self.skipTest("MPS does not support fp64")
+        torch.manual_seed(7)
+        N, F_, C = 4, 3, 5
+        inp = torch.randn(N, F_, device=device, dtype=torch.float64, requires_grad=True)
+        lw = torch.randn(C, F_, device=device, dtype=torch.float64, requires_grad=True)
+        lb = torch.randn(C, device=device, dtype=torch.float64, requires_grad=True)
+        if prob_target:
+            target = torch.randn(N, C, device=device, dtype=torch.float64).softmax(1)
+        else:
+            target = torch.randint(0, C, (N,), device=device)
+        cw = torch.rand(C, device=device, dtype=torch.float64) + 0.5
+        options = (
+            nn.LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)
+            if chunked else None
+        )
+
+        def f(i, w, b):
+            return nn.functional.linear_cross_entropy(
+                i, w, target, linear_bias=b, weight=cw, reduction=reduction,
+                logit_softcap=0.5, options=options,
+            )
+
+        torch.autograd.gradcheck(f, (inp, lw, lb))
+
+    @tf32_on_and_off(0.005)
+    @parametrize_test("acc_policy", ["accurate", "compact"])
+    @parametrize_test("reduction", ["mean", "sum", "none"])
+    @parametrize_test("prob_target", [False, True])
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    def test_linear_cross_entropy_logit_softcap_chunked_matches_reference(
+        self, device, dtype, prob_target, reduction, acc_policy
+    ):
+        """Chunked ``logit_softcap`` loss and gradients match an fp64 reference
+        across multiple chunks, with bias, class weight and ignored rows.
+        """
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        torch.manual_seed(0)
+        N, F_, C = 37, 16, 50
+        softcap = 3.0
+        inp = torch.randn(N, F_, device=device, dtype=dtype)
+        # Logits well beyond the cap, so softcapping changes the result.
+        lw = torch.randn(C, F_, device=device, dtype=dtype) * 2
+        lb = torch.randn(C, device=device, dtype=dtype)
+        cw = torch.rand(C, device=device, dtype=dtype) + 0.5
+        if prob_target:
+            target = torch.randn(N, C, device=device, dtype=dtype).softmax(1)
+        else:
+            target = torch.randint(0, C, (N,), device=device)
+            target[::5] = -100
+        upstream = torch.rand(N, dtype=torch.float64)
+
+        def loss_and_grads(tensors, softcap, options):
+            i, w, b, t, weight = (x.detach().clone() for x in tensors)
+            params = [p.requires_grad_() for p in (i, w, b)]
+            loss = nn.functional.linear_cross_entropy(
+                i, w, t, linear_bias=b, weight=weight, reduction=reduction,
+                logit_softcap=softcap, options=options,
+            )
+            g = upstream.to(loss) if reduction == "none" else torch.ones_like(loss)
+            return [loss.detach(), *torch.autograd.grad(loss, params, g)]
+
+        tensors = (inp, lw, lb, target, cw)
+        ref_tensors = [
+            x.cpu().double() if x.is_floating_point() else x.cpu()
+            for x in tensors
+        ]
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=8, chunking_method=None, acc_policy=acc_policy
+        )
+        actual = loss_and_grads(tensors, softcap, options)
+        expected = loss_and_grads(ref_tensors, softcap, None)
+        uncapped = loss_and_grads(ref_tensors, None, None)
+
+        rtol = {torch.float32: 2e-4, torch.bfloat16: 3e-2, torch.float16: 1e-2}[dtype]
+        # tf32_on_and_off raises self.precision for its TF32 leg.
+        rtol = max(rtol, self.precision)
+        for a, e, u in zip(actual, expected, uncapped):
+            scale = e.abs().max().item()
+            self.assertEqual(a.cpu().double(), e, atol=rtol * scale, rtol=0)
+            self.assertGreater((u - e).abs().max().item(), 10 * rtol * scale)
+
+    @parametrize_test("out_features", [(), (3,)])
+    def test_linear_cross_entropy_logit_softcap_reference(self, device, out_features):
+        """The reference path caps the logits before ``cross_entropy``."""
+        torch.manual_seed(0)
+        N, F_, C, softcap = 5, 7, 4, 2.0
+        inp = torch.randn(N, F_, device=device)
+        lw = torch.randn(C, *out_features, F_, device=device) * 3
+        target = torch.randint(0, C, (N, *out_features), device=device)
+        logits = nn.functional.linear(inp, lw.reshape(-1, F_))
+        logits = (softcap * torch.tanh(logits / softcap)).reshape(N, C, *out_features)
+        expected = nn.functional.cross_entropy(logits, target)
+        actual = nn.functional.linear_cross_entropy(
+            inp, lw, target, logit_softcap=softcap
+        )
+        self.assertEqual(expected, actual)
+        loss = nn.LinearCrossEntropyLoss(F_, C, out_features=out_features, logit_softcap=softcap)
+        with torch.no_grad():
+            loss.linear.weight.copy_(lw.reshape(-1, F_))
+        self.assertEqual(expected, loss.to(device)(inp, target))
+
+    @parametrize_test("logit_softcap", [0.0, -1.0, math.inf, math.nan])
+    def test_linear_cross_entropy_logit_softcap_invalid_raises(self, device, logit_softcap):
+        inp = torch.randn(3, 4, device=device)
+        lw = torch.randn(5, 4, device=device)
+        target = torch.randint(0, 5, (3,), device=device)
+        with self.assertRaisesRegex(ValueError, "logit_softcap must be a positive finite number"):
+            nn.functional.linear_cross_entropy(inp, lw, target, logit_softcap=logit_softcap)
+
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     def test_linear_cross_entropy_none_reduction_chunked(
