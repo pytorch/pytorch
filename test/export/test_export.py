@@ -11466,6 +11466,25 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
+    # scan is not supported in sigmoid yet
+    @testing.expectedFailureCppRuntime
+    def test_export_scan_reverse(self):
+        def combine_fn(carry, x):
+            next_carry = carry * 0.5 + x
+            return next_carry.clone(), (next_carry * x).clone()
+
+        class M(torch.nn.Module):
+            def forward(self, init, xs):
+                return scan(combine_fn, init, xs, reverse=True)
+
+        init, xs = torch.randn(3), torch.randn(5, 3)
+        ep = export(M(), (init, xs))
+        (scan_node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.scan
+        )
+        self.assertEqual(scan_node.kwargs, {"reverse": True})
+        self.assertEqual(ep.module()(init, xs), M()(init, xs))
+
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:

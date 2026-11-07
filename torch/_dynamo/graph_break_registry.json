@@ -6295,6 +6295,16 @@
       ]
     }
   ],
+  "GB4570": [
+    {
+      "Gb_type": "torch.scan: improper reverse",
+      "Context": "str(reverse_var)",
+      "Explanation": "Expected reverse to be a constant bool.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0334": [
     {
       "Gb_type": "wrap_with_autocast: unexpected freevars",

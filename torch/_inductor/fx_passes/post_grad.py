@@ -814,6 +814,8 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
             final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
             return final_carry, ys
+
+    A scan with reverse=True reads and writes row ``xs.shape[0] - 1 - loop_idx`` instead.
     """
 
     graph_pass = PatternMatcherPass()
@@ -826,7 +828,8 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
-        if len(kwargs) != 0:
+        reverse = kwargs.get("reverse", False)
+        if OrderedSet(kwargs) - OrderedSet(["reverse"]):
             raise AssertionError(
                 "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
             )
@@ -915,6 +918,8 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 )
 
                 idx_int = loop_idx.item()
+                if reverse:
+                    idx_int = scan_length - 1 - idx_int
                 torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
                 torch.ops.aten._assert_scalar.default(idx_int < scan_length, "")
                 sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]

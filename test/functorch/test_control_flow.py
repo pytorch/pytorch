@@ -2696,14 +2696,12 @@ class GraphModule(torch.nn.Module):
         l_init_1_ = L_init_1_
         l_xs_ = L_xs_
 
-        flip: "f32[3, 10, 2]" = torch.flip(l_xs_, [0]);  l_xs_ = None
         scan_combine_fn_0 = self.scan_combine_fn_0
-        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], []);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
+        scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [l_xs_], [], reverse = True);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = l_xs_ = None
         getitem: "f32[1, 10, 2]" = scan[0]
         getitem_1: "f32[1, 10, 2]" = scan[1]
         out: "f32[3, 1, 10, 2]" = scan[2];  scan = None
-        out_1: "f32[3, 1, 10, 2]" = out.flip([0]);  out = None
-        return (getitem, getitem_1, out_1)
+        return (getitem, getitem_1, out)
 
     class scan_combine_fn_0(torch.nn.Module):
         def forward(self, child: "f32[1, 10, 2]", child_1: "f32[1, 10, 2]", child_2: "f32[10, 2]"):
@@ -2920,17 +2918,15 @@ class GraphModule(torch.nn.Module):
             gm.code.strip(),
             """\
 def forward(self, fct_1, init_1, xs_1):
-    flip = torch.ops.aten.flip.default(xs_1, [0])
     sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2)
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3), reverse = True);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
-    flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
-    return (getitem, flip_1)""",
+    return (getitem, getitem_1)""",
         )
 
         # Check graph
@@ -2944,14 +2940,164 @@ def forward(self, fct_1, init_1, xs_1):
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
-    flip = torch.flip(l_xs_, [0]);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], []);  scan_combine_fn_0 = l_init_ = flip = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [], reverse = True);  scan_combine_fn_0 = l_init_ = l_xs_ = None
     carry = scan[0]
     out = scan[1];  scan = None
-    out_1 = out.flip([0]);  out = None
-    return (carry, out_1)""",
+    return (carry, out)""",
         )
+
+    @skipIfTorchDynamo("calls scan_op with a plain function, which Dynamo rejects")
+    @parametrize("autograd", [False, True])
+    def test_scan_op_reverse_matches_flip(self, autograd):
+        # reverse=True visits rows n-1, ..., 0 and writes ys[i] back at row i,
+        # i.e. it equals flipping xs going in and ys coming out.
+        from torch._higher_order_ops.scan import scan_op
+
+        def combine_fn(c, x, w):
+            next_c = torch.tanh(c * x + w)
+            return [next_c, (next_c * 2 + x).clone()]
+
+        init = torch.randn(4, requires_grad=autograd)
+        xs = torch.randn(6, 4, requires_grad=autograd)
+        w = torch.randn(4, requires_grad=autograd)
+        carry, ys = scan_op(combine_fn, [init], [xs], (w,), reverse=True)
+        ref_carry, ref_ys = scan_op(combine_fn, [init], [xs.flip(0)], (w,))
+        self.assertEqual(carry, ref_carry)
+        self.assertEqual(ys, ref_ys.flip(0))
+        if autograd:
+            g_out = (torch.randn_like(carry), torch.randn_like(ys))
+            grads = torch.autograd.grad((carry, ys), (init, xs, w), g_out)
+            ref_grads = torch.autograd.grad(
+                (ref_carry, ref_ys.flip(0)), (init, xs, w), g_out
+            )
+            self.assertEqual(grads, ref_grads)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @parametrize("reverse", [False, True])
+    def test_scan_backward_has_no_flip(self, reverse):
+        def combine_fn(c, x):
+            next_c = torch.sin(c) * x
+            return next_c, (next_c + x).clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, reverse=reverse)
+
+        init = torch.randn(3, requires_grad=True)
+        xs = torch.randn(5, 3, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        carry, ys = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        grads = torch.autograd.grad(carry.sum() + ys.pow(2).sum(), (init, xs))
+
+        exp_carry, exp_ys = _fake_scan(combine_fn, init, xs, reverse=reverse)
+        exp_grads = torch.autograd.grad(
+            exp_carry.sum() + exp_ys.pow(2).sum(), (init, xs)
+        )
+        self.assertEqual((carry, ys), (exp_carry, exp_ys))
+        self.assertEqual(grads, exp_grads)
+
+        # The backward runs the other way round, by flag rather than by flip.
+        for gm, exp_reverse in (
+            (backend.fw_graphs[0], reverse),
+            (backend.bw_graphs[0], not reverse),
+        ):
+            self.assertEqual(
+                len(
+                    gm.graph.find_nodes(
+                        op="call_function", target=torch.ops.aten.flip.default
+                    )
+                ),
+                0,
+            )
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            self.assertEqual(scan_node.kwargs.get("reverse", False), exp_reverse)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @parametrize("compile_mode", ["none", "eager", "compile_dynamic_shape"])
+    def test_scan_reverse_dynamic_shapes(self, compile_mode):
+        def combine_fn(c, x):
+            next_c = c * 0.5 + x.cos()
+            return next_c.clone(), (next_c * x).clone()
+
+        scan_fct = compile_mode_helper(
+            lambda init, xs: scan(combine_fn, init, xs, reverse=True), compile_mode
+        )
+        for n in (3, 5, 8):
+            init = torch.randn(2, 4, requires_grad=True)
+            xs = torch.randn(n, 2, 4, requires_grad=True)
+            carry, ys = scan_fct(init, xs)
+            exp_carry, exp_ys = _fake_scan(combine_fn, init, xs, reverse=True)
+            self.assertEqual((carry, ys), (exp_carry, exp_ys))
+            grads = torch.autograd.grad(carry.sum() + ys.sum(), (init, xs))
+            exp_grads = torch.autograd.grad(exp_carry.sum() + exp_ys.sum(), (init, xs))
+            self.assertEqual(grads, exp_grads)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    def test_scan_reverse_symbolic_trace(self):
+        def combine_fn(c, x):
+            return c + x, (c * x).clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, reverse=True)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(4), torch.randn(3, 4))
+        (scan_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.scan
+        )
+        self.assertEqual(scan_node.kwargs, {"reverse": True})
+        self.assertNotIn("flip", gm.code)
+        init, xs = torch.randn(4), torch.randn(7, 4)
+        self.assertEqual(gm(init, xs), _fake_scan(combine_fn, init, xs, reverse=True))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    @parametrize("outer_reverse", [False, True])
+    @parametrize("inner_reverse", [False, True])
+    def test_scan_reverse_nested(self, compile_mode, outer_reverse, inner_reverse):
+        def inner_fn(c, x):
+            next_c = torch.sin(c + x) * 1.0
+            return next_c.clone(), (next_c * x).clone()
+
+        def make_outer(scan_impl):
+            def outer_fn(c, x):
+                inner_c, inner_ys = scan_impl(inner_fn, c, x, reverse=inner_reverse)
+                return inner_c * 2, inner_ys.sum(0)
+
+            return outer_fn
+
+        def run(scan_impl, init, xs):
+            return scan_impl(make_outer(scan_impl), init, xs, reverse=outer_reverse)
+
+        init = torch.randn(3, requires_grad=True)
+        xs = torch.randn(4, 5, 3, requires_grad=True)
+        scan_fct = compile_mode_helper(functools.partial(run, scan), compile_mode)
+        carry, ys = scan_fct(init, xs)
+        exp_carry, exp_ys = run(_fake_scan, init, xs)
+        self.assertEqual((carry, ys), (exp_carry, exp_ys))
+        grads = torch.autograd.grad(carry.sum() + ys.pow(2).sum(), (init, xs))
+        exp_grads = torch.autograd.grad(
+            exp_carry.sum() + exp_ys.pow(2).sum(), (init, xs)
+        )
+        self.assertEqual(grads, exp_grads)
+
+    def test_scan_reverse_vmap(self):
+        def combine_fn(c, x):
+            next_c = c * x + 1
+            return next_c, next_c.clone()
+
+        init = torch.randn(2, 3)
+        xs = torch.randn(2, 4, 3)
+        out = torch.vmap(lambda i, x: scan(combine_fn, i, x, reverse=True))(init, xs)
+        exp = torch.vmap(lambda i, x: _fake_scan(combine_fn, i, x, reverse=True))(
+            init, xs
+        )
+        self.assertEqual(out, exp)
 
     def test_scan_length_validation_pass(self):
         def add(c, x):
@@ -12786,6 +12932,42 @@ class <lambda>(torch.nn.Module):
 
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
+    def test_scan_auto_functionalize_buffer_mutation_reverse(self, dynamic):
+        # Each step reads the buffer the previous step wrote, so the visiting
+        # order shows up in ys.
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf", torch.ones(4, requires_grad=False, device=device)
+                )
+
+            def forward(self, init, xs):
+                def combine_fn(carry, x):
+                    self.buf.add_(x)
+                    return carry + x, carry * x + self.buf.sum()
+
+                return scan(combine_fn, init, xs, dim=0, reverse=True)
+
+        init = torch.zeros(4, requires_grad=False)
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        buf, carry, ys = torch.ones(4), init.clone(), [None] * 5
+        for i in reversed(range(5)):
+            buf += xs[i]
+            ys[i] = carry * xs[i] + buf.sum()
+            carry = carry + xs[i]
+        with torch.no_grad():
+            self.assertEqual(M()(init, xs), (carry, torch.stack(ys)))
+
+        fw_gm = self._check_eager_and_aot_eager_only(M, (init, xs), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+        self.assertIn("reverse = True", graph_str)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
     def test_scan_auto_functionalize_multiple_buffer_mutation(self, dynamic):
         device = "cpu"
 
@@ -14137,6 +14319,22 @@ class TestHopSchema(TestCase):
         self.assertExpectedInline(
             str(schema),
             """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0, Tensor(a4!) additional_input1, Tensor(a5!) additional_input2) -> (Tensor, Tensor)""",
+        )
+
+    def test_scan_gen_schema_reverse(self):
+        def combine_fn(carry, x):
+            return carry + x, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (),
+            reverse=True,
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, bool reverse) -> (Tensor, Tensor)""",
         )
 
     def test_associative_scan_gen_schema_tensor_inputs(self):
