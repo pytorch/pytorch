@@ -16,7 +16,7 @@ struct NormBackwardRow {
   uint size, index, tid, lsize;
 };
 
-template <typename T, typename Op>
+template <typename T, typename Op, int reads = c10::metal::ILP_PER_THREAD>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void norm_backward_single_row(
     device const T* grad_out [[buffer(0)]],
@@ -31,7 +31,6 @@ kernel void norm_backward_single_row(
     uint2 tsize [[threads_per_threadgroup]]) {
   using opmath = opmath_t<T>;
   const uint row = tg.y, tid = pos.x, lsize = tsize.x;
-  constexpr int reads = ILP_PER_THREAD;
   const uint base = tid * reads;
   const ulong row_offset = ulong(row) * row_size + base;
   device const T* dy = grad_out + row_offset;
@@ -62,7 +61,7 @@ kernel void norm_backward_single_row(
   }
 }
 
-template <typename T, typename Op>
+template <typename T, typename Op, int reads = c10::metal::ILP_PER_THREAD>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void norm_backward_looped(
     device const T* grad_out [[buffer(0)]],
@@ -77,7 +76,6 @@ kernel void norm_backward_looped(
     uint2 tsize [[threads_per_threadgroup]]) {
   using opmath = opmath_t<T>;
   const uint row = tg.y, tid = pos.x, lsize = tsize.x;
-  constexpr int reads = ILP_PER_THREAD;
   const ulong row_offset = ulong(row) * row_size;
   device const T* dy = grad_out + row_offset;
   device const T* x = input + row_offset;
