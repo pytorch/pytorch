@@ -4662,6 +4662,57 @@ def upsample_trilinear3d(
     )
 
 
+def _canonicalize_trilinear(dims: list[int], total_dim: int) -> tuple[int, ...]:
+    canonical = utils.canonicalize_dims(total_dim, dims)
+    utils.validate_no_repeating_dims(canonical)
+    return canonical
+
+
+@register_decomposition([aten._trilinear.default, aten._trilinear.out])
+@out_wrapper()
+def _trilinear(
+    i1: Tensor,
+    i2: Tensor,
+    i3: Tensor,
+    expand1: list[int],
+    expand2: list[int],
+    expand3: list[int],
+    sumdim: list[int],
+    unroll_dim: int = 1,
+) -> Tensor:
+    total_dim = i1.dim() + len(expand1)
+    torch._check(
+        unroll_dim >= 0 and unroll_dim < total_dim,
+        lambda: f"unroll_dim must be in [0,{total_dim - 1}]",
+    )
+
+    _expand1, _expand2, _expand3, _sumdim = (
+        _canonicalize_trilinear(dims, total_dim)
+        for dims in (expand1, expand2, expand3, sumdim)
+    )
+
+    dims1 = [d for d in range(total_dim) if d not in _expand1]
+    dims2 = [d for d in range(total_dim) if d not in _expand2]
+    dims3 = [d for d in range(total_dim) if d not in _expand3]
+
+    dims12 = [
+        d
+        for d in range(total_dim)
+        if (d in dims1 or d in dims2) and not (d in _sumdim and d in _expand3)
+    ]
+    out_dims = [d for d in range(total_dim) if d not in _sumdim]
+    present_out_dims = [d for d in out_dims if d in dims12 or d in dims3]
+
+    result = torch.einsum(i1, dims1, i2, dims2, dims12)
+    result = torch.einsum(result, dims12, i3, dims3, present_out_dims)
+
+    for pos, d in enumerate(out_dims):
+        if d not in present_out_dims:
+            result = result.unsqueeze(pos)
+
+    return result
+
+
 def _compute_scale(in_size, out_size, align_corners, scale=None):
     if align_corners:
         return (in_size - 1.0) / (out_size - 1.0) if out_size > 1 else 0
