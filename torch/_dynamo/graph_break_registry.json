@@ -1786,6 +1786,30 @@
       "Hints": []
     }
   ],
+  "GB7433": [
+    {
+      "Gb_type": "cmath.isclose with unsupported __complex__ conversion",
+      "Context": "",
+      "Explanation": "Dynamo cannot trace this __complex__ conversion.",
+      "Hints": []
+    }
+  ],
+  "GB6561": [
+    {
+      "Gb_type": "__complex__ returned a complex subclass",
+      "Context": "",
+      "Explanation": "Dynamo cannot model the deprecation warning for a complex subclass return.",
+      "Hints": []
+    }
+  ],
+  "GB5497": [
+    {
+      "Gb_type": "complex of symbolic zero",
+      "Context": "",
+      "Explanation": "Symbolic float specialization does not preserve the sign of zero.",
+      "Hints": []
+    }
+  ],
   "GB0109": [
     {
       "Gb_type": "Tensor.tolist() with non-integer tensor",
