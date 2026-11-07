@@ -11757,6 +11757,77 @@ class TestNNDeviceType(NNTestCase):
         actual = jvp(torch.ops.aten.cudnn_grid_sampler)
         self.assertEqual(actual, expected)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_2d_reflection_far_coordinates(self, device, dtype):
+        # Reflection has period 2*span in the unnormalized source coordinate, so
+        # sampling at a far coordinate must equal sampling at the coordinate folded
+        # into one period. The shared reflection helpers count reflection folds in
+        # an int, whose value is undefined past INT32_MAX and flips the parity of
+        # the reflection there. Far coordinates need double: float32 cannot
+        # resolve a voxel this far out. The backward counts folds the same way,
+        # so its grid gradient is checked too. Bicubic still resolves its taps
+        # around the unclipped index (the 3-D path does not; see
+        # test_grid_sample_3d_bicubic_far_coordinates).
+        image = torch.arange(16, device=device, dtype=dtype).view(1, 1, 4, 4)
+        size = 4
+        for align_corners in (True, False):
+            span = size - 1 if align_corners else size
+            low = 0.0 if align_corners else -0.5
+            # floor((far - low) / span) is one past INT32_MAX and odd
+            far = (2 ** 31 + 1) * span + low + 1.25
+            near = low + ((far - low) % (2 * span))
+
+            def unnormalize(x):
+                if align_corners:
+                    return 2 * x / (size - 1) - 1
+                return (2 * x + 1) / size - 1
+            grid_far = torch.tensor([[[[unnormalize(far), 0.5]]]], device=device, dtype=dtype)
+            grid_near = torch.tensor([[[[unnormalize(near), 0.5]]]], device=device, dtype=dtype)
+            for mode in ('bilinear', 'bicubic'):
+                grid_far.requires_grad_()
+                grid_near.requires_grad_()
+                out_far = F.grid_sample(image, grid_far, mode=mode,
+                                        padding_mode='reflection', align_corners=align_corners)
+                out_near = F.grid_sample(image, grid_near, mode=mode,
+                                         padding_mode='reflection', align_corners=align_corners)
+                self.assertEqual(out_far, out_near, msg=f"mode={mode} align_corners={align_corners}")
+                grad_far = torch.autograd.grad(out_far.sum(), grid_far)[0]
+                grad_near = torch.autograd.grad(out_near.sum(), grid_near)[0]
+                self.assertEqual(grad_far, grad_near, msg=f"mode={mode} align_corners={align_corners}")
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_reflection_far_coordinates(self, device, dtype):
+        # Same fold-count check as the 2-D test, on the shared helpers' 3-D
+        # bilinear/nearest paths. Unlike 2-D, this is CPU-visible too: the CPU
+        # 3-D path dispatches double, and the x86 saturation of the int cast
+        # (INT32_MIN, even) flips odd fold counts to the wrong side there.
+        image = torch.arange(64, device=device, dtype=dtype).view(1, 1, 4, 4, 4)
+        size = 4
+        for align_corners in (True, False):
+            span = size - 1 if align_corners else size
+            low = 0.0 if align_corners else -0.5
+            # floor((far - low) / span) is one past INT32_MAX and odd
+            far = (2 ** 31 + 1) * span + low + 0.25
+            near = low + ((far - low) % (2 * span))
+
+            def unnormalize(x):
+                if align_corners:
+                    return 2 * x / (size - 1) - 1
+                return (2 * x + 1) / size - 1
+            grid_far = torch.zeros(1, 1, 1, 1, 3, device=device, dtype=dtype)
+            grid_near = torch.zeros(1, 1, 1, 1, 3, device=device, dtype=dtype)
+            grid_far[..., 0] = unnormalize(far)
+            grid_near[..., 0] = unnormalize(near)
+            grid_far[..., 2] = grid_near[..., 2] = unnormalize(1.5)
+            for mode in ('bilinear', 'nearest'):
+                out_far = F.grid_sample(image, grid_far, mode=mode,
+                                        padding_mode='reflection', align_corners=align_corners)
+                out_near = F.grid_sample(image, grid_near, mode=mode,
+                                         padding_mode='reflection', align_corners=align_corners)
+                self.assertEqual(out_far, out_near, msg=f"mode={mode} align_corners={align_corners}")
+
     @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
