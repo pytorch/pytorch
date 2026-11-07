@@ -92,9 +92,9 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
         TORCH_CHECK(dim_bins_dim == 1, "torch.histogramdd: bins tensor should have one dimension,",
                 " but got ", dim_bins_dim, " dimensions in the bins tensor for dimension ", dim);
 
-        const int64_t numel = dim_bins.numel();
-        TORCH_CHECK(numel > 0, "torch.histogramdd: bins tensor should have at least 1 element,",
-                " but got ", numel, " elements in the bins tensor for dimension ", dim);
+        const auto numel = dim_bins.sym_numel();
+        TORCH_SYM_CHECK(numel.sym_gt(0), "torch.histogramdd: bins tensor should have at least 1 element,",
+            " but got ", numel, " elements in the bins tensor for dimension ", dim);
     }
 
     if (weight.has_value()) {
@@ -105,18 +105,25 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
         /* If a weight tensor is provided, we expect its shape to match that of
          * the input tensor excluding its innermost dimension N.
          */
-        auto input_sizes = input.sizes().vec();
+        auto input_sizes = input.sym_sizes().vec();
         input_sizes.pop_back();
 
-        auto weight_sizes = weight.value().sizes().vec();
+        auto weight_sizes = weight.value().sym_sizes().vec();
         if (weight_sizes.empty()) {
             // correctly handle scalars
             weight_sizes = {1};
         }
 
-        TORCH_CHECK(input_sizes == weight_sizes, "torch.histogramdd: if weight tensor is provided it should have"
+        TORCH_CHECK(input_sizes.size() == weight_sizes.size(),
+            "torch.histogramdd: if weight tensor is provided it should have"
+            " the same shape as the input tensor excluding its innermost dimension, but got input with shape ",
+            input.sizes(), " and weight with shape ", weight.value().sizes());
+        for (const auto dim : c10::irange(input_sizes.size())) {
+            TORCH_SYM_CHECK(input_sizes[dim].sym_eq(weight_sizes[dim]),
+                "torch.histogramdd: if weight tensor is provided it should have"
                 " the same shape as the input tensor excluding its innermost dimension, but got input with shape ",
                 input.sizes(), " and weight with shape ", weight.value().sizes());
+        }
     }
 }
 
@@ -386,11 +393,83 @@ histogram_out(const Tensor& self, const Tensor& bins,
 }
 
 std::tuple<Tensor, Tensor>
+histogram_meta(const Tensor& self, const Tensor& bins,
+        const std::optional<Tensor>& weight, bool density) {
+    (void)density;
+    Tensor reshaped_self = self.reshape_symint({ self.sym_numel(), 1 });
+    std::optional<Tensor> reshaped_weight = weight.has_value()
+        ? weight.value().reshape_symint({ weight.value().sym_numel() }) : weight;
+    TensorList bins_in = bins;
+    histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
+
+    Tensor hist = at::empty_symint({bins.sym_numel() - 1}, self.options(), MemoryFormat::Contiguous);
+    Tensor bin_edges = at::empty_symint({bins.sym_numel()}, bins.options(), MemoryFormat::Contiguous);
+    return std::make_tuple(std::move(hist), std::move(bin_edges));
+}
+
+std::tuple<Tensor, Tensor>
+histogram_bin_ct_meta(const Tensor& self, int64_t bin_ct,
+        std::optional<c10::ArrayRef<double>> range,
+        const std::optional<Tensor>& weight, bool density) {
+    (void)density;
+    Tensor reshaped_self = self.reshape_symint({ self.sym_numel(), 1 });
+    std::optional<Tensor> reshaped_weight = weight.has_value()
+        ? weight.value().reshape_symint({ weight.value().sym_numel() }) : weight;
+
+    Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    Tensor bin_edges = at::empty({0}, self.options(), MemoryFormat::Contiguous);
+    TensorList bins = bin_edges;
+    histogramdd_prepare_out(reshaped_self, std::vector<int64_t>{bin_ct}, hist, bins);
+    if (range.has_value()) {
+        select_outer_bin_edges(reshaped_self, range);
+    }
+    histogramdd_check_inputs(reshaped_self, bins, reshaped_weight);
+
+    return std::make_tuple(std::move(hist), std::move(bin_edges));
+}
+
+std::tuple<Tensor, Tensor>
 histogram(const Tensor& self, const Tensor& bins,
         const std::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges = at::empty({0}, bins.options(), MemoryFormat::Contiguous);
     return histogram_out(self, bins, weight, density, hist, bin_edges);
+}
+
+static std::tuple<Tensor&, Tensor&> histogram_resize_meta_outputs(
+        const Tensor& self, const Tensor& hist_meta, const Tensor& bin_edges_meta,
+        Tensor& hist, Tensor& bin_edges) {
+    TORCH_CHECK(self.dtype() == hist.dtype(), "torch.histogram: input tensor and hist tensor should",
+            " have the same dtype, but got input ", self.dtype(), " and hist ", hist.dtype());
+    TORCH_CHECK(self.dtype() == bin_edges.dtype(), "torch.histogram: input tensor and bin_edges tensor should",
+            " have the same dtype, but got input ", self.dtype(), " and bin_edges ", bin_edges.dtype(),
+            " for dimension 0");
+    if (resize_output_check_symint(bin_edges, bin_edges_meta.sym_sizes())) {
+        bin_edges.resize__symint(bin_edges_meta.sym_sizes());
+    }
+    if (resize_output_check_symint(hist, hist_meta.sym_sizes())) {
+        hist.resize__symint(hist_meta.sym_sizes());
+    }
+    return std::forward_as_tuple(hist, bin_edges);
+}
+
+std::tuple<Tensor&, Tensor&>
+histogram_out_meta(const Tensor& self, const Tensor& bins,
+        const std::optional<Tensor>& weight, bool density,
+        Tensor& hist, Tensor& bin_edges) {
+    TORCH_SYM_CHECK(bins.sym_numel().sym_gt(1),
+            "torch.histogram(): bins must be > 0, but got ", bins.sym_numel() - 1,
+            " for dimension 0");
+    auto [hist_meta, bin_edges_meta] = histogram_meta(self, bins, weight, density);
+    return histogram_resize_meta_outputs(self, hist_meta, bin_edges_meta, hist, bin_edges);
+}
+
+std::tuple<Tensor&, Tensor&>
+histogram_out_meta(const Tensor& self, int64_t bin_ct, std::optional<c10::ArrayRef<double>> range,
+        const std::optional<Tensor>& weight, bool density,
+        Tensor& hist, Tensor& bin_edges) {
+    auto [hist_meta, bin_edges_meta] = histogram_bin_ct_meta(self, bin_ct, range, weight, density);
+    return histogram_resize_meta_outputs(self, hist_meta, bin_edges_meta, hist, bin_edges);
 }
 
 /* Versions of histogram in which bins is an integer specifying the number of equal-width bins.

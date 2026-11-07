@@ -44,7 +44,6 @@ export_failures = {
 
 # following are failing fake export on gpu device
 fake_export_failures = {
-    xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
