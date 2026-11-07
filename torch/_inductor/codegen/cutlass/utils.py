@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -248,13 +249,52 @@ def toolkit_version(device_type: str) -> str:
         return get_cuda_version()
 
 
+@dataclass(frozen=True)
+class CutlassDeviceInterface:
+    """
+    CUTLASS-specific device hooks for cuda/xpu.
+    """
+
+    get_config: Callable[[], Any]
+    get_code_cache: Callable[[], type]
+    get_compile_command: Callable[[list[str], str, str, list[str] | None], str]
+    support_debug_trace: Callable[[], bool]
+
+
+@functools.cache
+def get_cutlass_device_interface(device_type: str) -> CutlassDeviceInterface:
+    if device_type == "xpu":
+        import torch._inductor.codecache
+
+        from ... import config
+        from ..xpu.compile_utils import xpu_compile_command
+
+        return CutlassDeviceInterface(
+            get_config=lambda: config.xpu,
+            get_code_cache=lambda: torch._inductor.codecache.XPUCodeCache,
+            get_compile_command=xpu_compile_command,
+            support_debug_trace=lambda: False,
+        )
+    if device_type == "cuda":
+        import torch._inductor.codecache
+
+        from ...config import cutlass as inductor_cutlass_config
+        from ..cuda.compile_utils import cuda_compile_command
+
+        return CutlassDeviceInterface(
+            get_config=lambda: inductor_cutlass_config,
+            get_code_cache=lambda: torch._inductor.codecache.CUDACodeCache,
+            get_compile_command=cuda_compile_command,
+            support_debug_trace=lambda: True,
+        )
+    raise NotImplementedError(
+        f"CUTLASS backend does not support device type: {device_type}"
+    )
+
+
 def get_device_cutlass_config(device_type: str):
     """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
+    return get_cutlass_device_interface(device_type).get_config()
 
 
 @dataclass
@@ -580,13 +620,8 @@ class CUTLASSCompileSourceCapturingContext:
     def __enter__(self, *args, **kwargs):
         import unittest.mock as mock
 
-        import torch._inductor.codecache
-
-        codecache_cls = (
-            torch._inductor.codecache.XPUCodeCache
-            if self.device_type == "xpu"
-            else torch._inductor.codecache.CUDACodeCache
-        )
+        iface = get_cutlass_device_interface(self.device_type)
+        codecache_cls = iface.get_code_cache()
         _compile_method_orig = codecache_cls.compile
 
         def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
@@ -611,14 +646,10 @@ def cutlass_standalone_runner_compile_command(
     # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
 
     extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
-    if device_type != "xpu":
+    iface = get_cutlass_device_interface(device_type)
+    if iface.support_debug_trace():
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
-    cutlass_compile_command = (
-        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
-        if device_type == "xpu"
-        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
-    )
-    compile_command = cutlass_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    compile_command = iface.get_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args
     )
     return compile_command
