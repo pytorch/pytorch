@@ -46,7 +46,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
-    IS_S390X,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -528,13 +527,11 @@ class TestOperatorsDevice(TestCase):
                 [
                     tol1(
                         "grid_sampler_2d",
-                        {
-                            torch.float32: tol(atol=1e-04, rtol=1e-04)
-                        },  # Adjust values as needed
+                        {torch.float32: tol(atol=1e-04, rtol=1e-04)},
                         device_type="cpu",
                     )
                 ]
-                if IS_S390X
+                if torch._C._get_cpu_capability() == "Z VECTOR"
                 else []
             ),
         ),
@@ -831,6 +828,17 @@ class TestOperatorsDevice(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+            *(
+                [
+                    tol1(
+                        "grid_sampler_2d",
+                        {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                        device_type="cpu",
+                    )
+                ]
+                if torch._C._get_cpu_capability() == "Z VECTOR"
+                else []
+            ),
         ),
     )
     def test_vjp(self, device, dtype, op):
