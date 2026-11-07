@@ -824,8 +824,10 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertEqual(
                     xblocks,
                     [DEFAULT_COMBO_BLOCK_SIZE_1D],
-                    lambda msg: f"{msg}\n{name} got xblocks={xblocks}, "
-                    f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
+                    lambda msg: (
+                        f"{msg}\n{name} got xblocks={xblocks}, "
+                        f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]"
+                    ),
                 )
 
     def test_cudagraph_no_partition(self):
@@ -1149,7 +1151,9 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         self.assertEqual(
             r.returncode,
             0,
-            lambda msg: f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+            lambda msg: (
+                f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}"
+            ),
         )
 
 
@@ -1289,9 +1293,11 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         self.assertEqual(
             result.returncode,
             0,
-            lambda msg: f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
-            f"returncode: {result.returncode}\n"
-            f"stderr tail:\n{stderr_tail}",
+            lambda msg: (
+                f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
+                f"returncode: {result.returncode}\n"
+                f"stderr tail:\n{stderr_tail}"
+            ),
         )
 
 
@@ -1365,7 +1371,7 @@ def make_test_case(
                 )
 
                 _, code = test_torchinductor.run_and_get_cpp_code(
-                    func, *func_inputs if func_inputs else []
+                    func, *func_inputs or []
                 )
                 if check_code:
                     self.assertEqual("CppWrapperCodeCache" in code, True)
@@ -1398,6 +1404,10 @@ if RUN_GPU:
         device: str = GPU_TYPE
         tests: InductorTestCase = test_torchinductor.GPUTests()
         check_code: bool = True
+
+    foreach_cpp_wrapper_tests = getattr(
+        test_foreach, f"ForeachCppWrapperTests{device_type.upper()}"
+    )
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
@@ -1454,11 +1464,13 @@ if RUN_GPU:
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
             "test_foreach_cpp_wrapper",
-            tests=test_foreach.ForeachTests(),
+            device=device_type,
+            tests=foreach_cpp_wrapper_tests(),
         ),  # test foreach
         BaseTest(
             "test_enable_dynamic_shapes_cpp_wrapper",
-            tests=test_foreach.ForeachTests(),
+            device=device_type,
+            tests=foreach_cpp_wrapper_tests(),
         ),
         BaseTest(
             "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
