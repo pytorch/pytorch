@@ -73,6 +73,9 @@ fastSpecializedAtomicAdd
 _isnan
 _isinf
 
+# torch/headeronly/util/TypeSafeSignMath.h
+_signbit
+
 # aten/src/ATen/core/PhiloxRNGEngine.h
 Philox4_32
 randn
