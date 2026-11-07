@@ -8,7 +8,7 @@ from torch.nn.modules import Module
 from torch.nn.utils import parametrize
 
 
-__all__ = ["orthogonal", "spectral_norm", "weight_norm"]
+__all__ = ["orthogonal", "partial_freeze", "spectral_norm", "weight_norm"]
 
 
 def _is_orthogonal(Q, eps=None):
@@ -633,4 +633,144 @@ def spectral_norm(
     parametrize.register_parametrization(
         module, name, _SpectralNorm(weight, n_power_iterations, dim, eps)
     )
+    return module
+
+
+class _PartialFreeze(Module):
+    def __init__(self, mask: Tensor, weight: Tensor) -> None:
+        super().__init__()
+        if mask.dtype != torch.bool:
+            raise TypeError(
+                f"partial_freeze: mask must be a boolean tensor, but got dtype {mask.dtype}"
+            )
+        try:
+            broadcast_shape = torch.broadcast_shapes(mask.shape, weight.shape)
+        except RuntimeError:
+            broadcast_shape = None
+        if broadcast_shape != weight.shape:
+            raise ValueError(
+                "partial_freeze: mask of shape "
+                f"{tuple(mask.shape)} is not broadcastable to the shape of the tensor "
+                f"{tuple(weight.shape)}"
+            )
+        self.register_buffer("mask", mask.detach().to(device=weight.device).clone())
+        self.register_buffer("frozen", weight.detach().clone())
+
+    def forward(self, X: Tensor) -> Tensor:
+        return torch.where(self.mask, self.frozen, X)
+
+    def right_inverse(self, X: Tensor) -> Tensor:
+        # Assigning to the parametrized tensor sets every entry, frozen ones included.
+        # Validate before writing so that a failed assignment leaves the frozen values
+        # untouched.
+        if X.shape != self.frozen.shape or X.dtype != self.frozen.dtype:
+            raise ValueError(
+                "partial_freeze: cannot assign a tensor of shape "
+                f"{tuple(X.shape)} and dtype {X.dtype} to a partially frozen tensor of "
+                f"shape {tuple(self.frozen.shape)} and dtype {self.frozen.dtype}"
+            )
+        with torch.no_grad():
+            self.frozen.copy_(X)
+        return X
+
+
+def partial_freeze(module: Module, name: str = "weight", *, mask: Tensor) -> Module:
+    r"""Freeze an arbitrary subset of the entries of a tensor in a module.
+
+    This is the entry-wise analogue of setting ``requires_grad=False`` on a whole
+    parameter. The entries selected by :attr:`mask` keep the value they had when this
+    function was called, while the remaining entries are trained as usual:
+
+    .. math::
+        W = \operatorname{where}(M, W_{\text{frozen}}, W_{\text{original}})
+
+    where :math:`M` is :attr:`mask`, :math:`W_{\text{frozen}}` is a buffer holding a
+    copy of the tensor taken at registration, and :math:`W_{\text{original}}` is the
+    tensor being optimized, accessible under
+    ``module.parametrizations[name].original``.
+
+    The frozen entries of :math:`W` are bit-for-bit constant regardless of the
+    optimizer and its options (momentum, weight decay, ``maximize``, ``foreach``,
+    ``fused``, ...), because the optimizer only ever updates
+    :math:`W_{\text{original}}`, whose frozen entries do not influence :math:`W`.
+    The gradient of the frozen entries of :math:`W_{\text{original}}` is exactly zero,
+    so they do not contribute to gradient norms (e.g. in
+    :func:`~torch.nn.utils.clip_grad_norm_`) or to the inf/NaN checks of
+    :class:`~torch.amp.GradScaler`.
+
+    The frozen entries of :math:`W_{\text{original}}` are never used, and the optimizer
+    may still change them (e.g. through weight decay, momentum, or the dense updates of
+    :class:`~torch.optim.Muon`). For optimizers whose update of an entry only depends on
+    that entry (e.g. :class:`~torch.optim.SGD`, :class:`~torch.optim.Adam`,
+    :class:`~torch.optim.AdamW`) and for those whose update only depends on the
+    gradient (e.g. :class:`~torch.optim.Muon`, :class:`~torch.optim.LBFGS`), this does
+    not matter: the trained entries follow exactly the trajectory of projected
+    optimization, where the optimizer step is computed from the gradient with the
+    frozen entries set to zero and the frozen entries are then reset to their value.
+    Optimizers that also read the values of the whole parameter read
+    :math:`W_{\text{original}}`. Among the built-in optimizers, this is only the case
+    for the relative step size of :class:`~torch.optim.Adafactor`, which uses the RMS
+    of the parameter and hence differs from projected optimization when
+    ``weight_decay`` is non-zero.
+
+    .. note::
+        The mask and the frozen values are stored as buffers, so they are part of the
+        ``state_dict`` and follow the module across ``.to()`` calls, and a
+        ``state_dict`` can only be loaded into a module registered with a mask of the
+        same shape. The frozen copy has the same size as the tensor, and it is
+        broadcast with the other buffers by
+        :class:`~torch.nn.parallel.DistributedDataParallel` when
+        ``broadcast_buffers=True``. The mask is stored with its own (possibly
+        broadcastable) shape, so freezing whole rows, columns or channels is cheap.
+        Optimizer state is still allocated for the whole tensor.
+
+    .. note::
+        The frozen values are taken when this function is called, so call it after the
+        tensor has been initialized (e.g. not on a module created on the ``meta``
+        device before ``to_empty()``). Assigning to ``module.<name>`` sets all entries,
+        frozen ones included. To make the result a plain parameter again while keeping
+        its values, use
+        :func:`~torch.nn.utils.parametrize.remove_parametrizations` with
+        ``leave_parametrized=True``.
+
+    .. note::
+        When the tensor has several parametrizations, :func:`partial_freeze` freezes
+        entries of the output of the parametrizations registered before it. Register
+        it last so that the frozen entries are those of ``module.<name>``.
+
+    Args:
+        module (nn.Module): module on which to register the parametrization.
+        name (str, optional): name of the tensor to partially freeze.
+            Default: ``"weight"``.
+        mask (Tensor): boolean tensor broadcastable to the shape of the tensor. Entries
+            where :attr:`mask` is ``True`` are frozen.
+
+    Returns:
+        The original module with the parametrization registered to the specified tensor.
+
+    Example::
+
+        >>> m = nn.Linear(4, 3)
+        >>> # freeze the first two output rows
+        >>> mask = torch.tensor([[True], [True], [False]])
+        >>> m = partial_freeze(m, "weight", mask=mask)
+        >>> w0 = m.weight.detach().clone()
+        >>> opt = torch.optim.AdamW(m.parameters(), lr=0.1)
+        >>> m(torch.randn(8, 4)).sum().backward()
+        >>> opt.step()
+        >>> torch.equal(m.weight[:2], w0[:2])
+        True
+        >>> torch.equal(m.weight[2], w0[2])
+        False
+    """
+    weight = getattr(module, name, None)
+    if not isinstance(weight, Tensor):
+        raise ValueError(
+            f"Module '{module}' has no parameter or buffer with name '{name}'"
+        )
+    if not isinstance(mask, Tensor):
+        raise TypeError(
+            f"partial_freeze: mask must be a boolean tensor, but got {type(mask)}"
+        )
+    parametrize.register_parametrization(module, name, _PartialFreeze(mask, weight))
     return module
