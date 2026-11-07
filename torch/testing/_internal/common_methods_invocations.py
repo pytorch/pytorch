@@ -12114,6 +12114,82 @@ def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **k
     if dtype in large_integer_vals:
         yield SampleInput(torch.tensor([large_integer_vals[dtype]], device=device, dtype=dtype))
 
+# The beta family has no batch rules yet; vmap over it takes the fallback.
+_beta_family_vmap_skips = (
+    DecorateInfo(unittest.skip("no batch rule"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
+    DecorateInfo(unittest.skip("no batch rule"), "TestOperatorsDevice", "test_vmapjvpall_has_batch_rule"),
+    DecorateInfo(unittest.skip("no batch rule"), "TestOperatorsDevice", "test_vmapvjp_has_batch_rule"),
+)
+
+
+def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg_probs = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+        high=0.9,
+    )
+
+    make_arg_params = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+    )
+    li_make_arg = [make_arg_params, make_arg_params, make_arg_probs]
+
+    test_cases = [
+        (((S, S), (S, S), (S, S)), False),
+        (((S, 1), (1, S), (S, S)), False),
+        (((S, S, 1), (1, S), (1,)), True),
+        (((), (), ()), False),
+        (((), (), (S, S)), True),
+        (((S, S, 1), (1, S), ()), True),
+    ]
+
+    for input_args, broadcasts_input in test_cases:
+        args = tuple(
+            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+            for idx, arg in enumerate(input_args)
+        )
+        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+
+    # A probability of exactly 0.5 equals the initial upper bracket of betaincinv in double
+    half = torch.full((S,), 0.5, dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(make_arg_params((S,)), make_arg_params((S,)), half)
+
+def sample_inputs_binary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg_params = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+    )
+
+    li_make_arg = [make_arg_params, make_arg_params]
+
+    test_cases = [
+        (((S, S), (S, S)), False),
+        (((S, S), (S, 1)), False),
+        (((1,), (S, S)), True),
+        (((), ()), False),
+        (((S, S), ()), True),
+        (((), (1, S)), True),
+    ]
+    for input_args, broadcasts_input in test_cases:
+        args = tuple(
+            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+            for idx, arg in enumerate(input_args)
+        )
+        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+
 
 # Operator database (sorted alphabetically)
 op_db: list[OpInfo] = [
@@ -12485,6 +12561,90 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
            )),
+    OpInfo('special.betainc',
+           aten_name='special_betainc',
+           ref=scipy.special.betainc if TEST_SCIPY else None,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=False,
+           supports_gradgrad=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=_beta_family_vmap_skips),
+    OpInfo('special.betaincinv',
+           aten_name='special_betaincinv',
+           ref=scipy.special.betaincinv if TEST_SCIPY else None,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=False,
+           supports_gradgrad=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=_beta_family_vmap_skips),
+    OpInfo('special.betaln',
+           aten_name='special_betaln',
+           ref=scipy.special.betaln if TEST_SCIPY else None,
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_binary_beta_family,
+           skips=_beta_family_vmap_skips),
+    OpInfo('special.beta',
+           aten_name='special_beta',
+           ref=scipy.special.beta if TEST_SCIPY else None,
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_binary_beta_family,
+           skips=_beta_family_vmap_skips),
+    OpInfo('special.betaincc',
+           aten_name='special_betaincc',
+           # scipy.special.betaincc needs SciPy 1.11; CI pins 1.10 for Python <= 3.11
+           ref=(lambda a, b, x: 1 - scipy.special.betainc(a, b, x)) if TEST_SCIPY else None,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=False,
+           supports_gradgrad=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=_beta_family_vmap_skips),
+    OpInfo('special.betainccinv',
+           aten_name='special_betainccinv',
+           # scipy.special.betainccinv needs SciPy 1.11; CI pins 1.10 for Python <= 3.11
+           ref=(lambda a, b, y: scipy.special.betaincinv(a, b, 1 - y)) if TEST_SCIPY else None,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=False,
+           supports_gradgrad=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=_beta_family_vmap_skips),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
            method_variant=None,
