@@ -145,6 +145,9 @@ def get_ema_avg_fn(decay=0.999):
 
     @torch.no_grad()
     def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):
+        # lerp form, like get_ema_multi_avg_fn: exact when current_param == ema_param
+        if torch.is_floating_point(ema_param) or torch.is_complex(ema_param):
+            return ema_param + (1 - decay) * (current_param - ema_param)
         return decay * ema_param + (1 - decay) * current_param
 
     return ema_update
