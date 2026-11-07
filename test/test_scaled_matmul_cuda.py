@@ -2499,7 +2499,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on SM10x/SM11x")
         if "xpu" in device:
             if fast_accum:
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
@@ -2740,7 +2740,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on SM10x/SM11x")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
         BLOCK_SIZE_MN = 128
@@ -3040,7 +3040,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on SM10x/SM11x")
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
