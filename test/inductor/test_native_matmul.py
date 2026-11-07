@@ -28,8 +28,16 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 aten = torch.ops.aten
 
+# Native matmul kernels are reductions. Use one heuristic config per reduction
+# instead of compiling and benchmarking every candidate; tests here check
+# codegen and numerics, not tuning.
+NATIVE_MATMUL_TEST_CONFIG = {
+    "triton.native_matmul": True,
+    "test_configs.force_filter_reduction_configs": True,
+}
 
-@inductor_config.patch({"triton.native_matmul": True})
+
+@inductor_config.patch(NATIVE_MATMUL_TEST_CONFIG)
 class TestTritonDotReduction(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
@@ -272,7 +280,7 @@ class TestTritonDotReduction(TestCase):
         ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
 
 
-@inductor_config.patch({"triton.native_matmul": True})
+@inductor_config.patch(NATIVE_MATMUL_TEST_CONFIG)
 @instantiate_parametrized_tests
 class TestNativeMatmulRowReduction(TestCase):
     """[M, N] -> [M] reductions of a native matmul fuse into the matmul kernel."""
@@ -529,7 +537,7 @@ class TestNativeMatmulRowReductionScheduling(TestCase):
             fresh_inductor_cache(),
             inductor_config.patch(
                 {
-                    "triton.native_matmul": True,
+                    **NATIVE_MATMUL_TEST_CONFIG,
                     "benchmark_fusion": True,
                     "triton.coalesce_tiling_analysis": coalesce,
                 }
@@ -557,7 +565,7 @@ class TestNativeMatmulRowReductionScheduling(TestCase):
             fresh_inductor_cache(),
             inductor_config.patch(
                 {
-                    "triton.native_matmul": True,
+                    **NATIVE_MATMUL_TEST_CONFIG,
                     "combo_kernels": True,
                     "combo_kernels_autotune": autotune,
                     "combo_kernel_peak_memory_pct_threshold": None,
@@ -589,7 +597,7 @@ class TestNativeMatmulRowReductionScheduling(TestCase):
             fresh_inductor_cache(),
             inductor_config.patch(
                 {
-                    "triton.native_matmul": True,
+                    **NATIVE_MATMUL_TEST_CONFIG,
                     "combo_kernels": True,
                     "combo_kernels_autotune": autotune,
                     "combo_kernel_peak_memory_pct_threshold": None,
@@ -625,7 +633,7 @@ class TestNativeMatmulRowReductionHeuristic(TestCase):
         z = torch.ones(n, device=device, dtype=torch.float16)
         metrics.reset()
         torch._dynamo.reset()
-        with inductor_config.patch({"triton.native_matmul": True}):
+        with inductor_config.patch(NATIVE_MATMUL_TEST_CONFIG):
             actual, _ = run_and_get_code(torch.compile(f), x, weight, z)
         self.assertEqual(actual, f(x, weight, z))
         self.assertEqual(metrics.generated_kernel_count, 1 if k <= 512 else 2)

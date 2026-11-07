@@ -5,6 +5,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import sympy
+
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
@@ -174,7 +176,58 @@ def scale_mm_epilogue():
     return epilogue
 
 
+def use_helion_native_matmul(mat1) -> bool:
+    """Whether config.helion.native_matmul applies to this CUDA matmul."""
+    return (
+        config.helion.native_matmul
+        and config.cuda_backend == "triton"
+        and mat1.get_device().type == "cuda"
+        and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+    )
+
+
+def native_matmul_scaled_add(inp, alpha, beta, matmul):
+    """beta * inp + alpha * matmul() for a native matmul addmm/baddbmm.
+
+    Unit and zero scales are skipped, so a fused Helion epilogue is a plain
+    tmp3 = tmp2 + acc rather than 1.0 * tmp2 + 1.0 * acc.
+    """
+    from ..lowering import lowerings
+
+    aten = torch.ops.aten
+    # beta == 0 ignores inp, NaN and inf included.
+    if beta == 0:
+        bias = 0
+    elif beta == 1:
+        bias = inp
+    else:
+        bias = lowerings[aten.mul](beta, inp)
+    if alpha == 0:
+        product = 0
+    elif alpha == 1:
+        product = matmul()
+    else:
+        product = lowerings[aten.mul](alpha, matmul())
+    return lowerings[aten.add](bias, product)
+
+
 def use_native_matmul(mat1, mat2):
+    """Whether to lower this matmul to native dot IR (ops.dot + reduction("dot"))."""
+    if use_helion_native_matmul(mat1):
+        # Helion kernels take static FP16/BF16/FP32 matmuls with M, N, K > 1;
+        # anything else, e.g. a matrix-vector product, uses the regular lowering.
+        dtype = mat1.get_dtype()
+        *_, m, k = mat1.get_size()
+        sizes = [*mat1.get_size(), *mat2.get_size()]
+        return (
+            dtype in (torch.float16, torch.bfloat16, torch.float32)
+            and mat2.get_dtype() == dtype
+            and not is_bf16x9_matmul(mat1.get_device().type, dtype)
+            and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
+            and 0 not in sizes
+            and 1 not in (m, k, mat2.get_size()[-1])
+        )
+
     if (
         is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
         or not config.triton.native_matmul
