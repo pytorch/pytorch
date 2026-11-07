@@ -354,16 +354,56 @@ def in_namespace(
     return False
 
 
+def _get_pointwise_device(
+    inputs: Sequence[IRNode], override_device: torch.device | None = None
+) -> torch.device:
+    if override_device is not None:
+        return override_device
+    for arg in inputs:
+        device = arg.get_device()
+        if device is not None and is_gpu(device.type):
+            return device
+    device = inputs[0].get_device()
+    if device is None:
+        raise AssertionError("Pointwise inputs must have a device")
+    return device
+
+
 def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """Prepare CPU scalar operands for pointwise codegen on another device.
+
+    Inlining an expression over non-scalar CPU storage would pass a CPU pointer
+    to Triton. Realized zero-dimensional CPU buffers can instead be registered
+    by the scheduler and unwrapped by `should_unwrap_unspec_arg`. Immutable
+    tensor constants are already safe: codegen loads a copy on the kernel's device.
     """
-    Copy cpu scalar if doesn't not match with given `device`
-    """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and not ir.is_storage_and_layout(x)
+            and any(
+                (
+                    name not in V.graph.constants
+                    or V.graph.allocated_constant_name.get(name, name)
+                    in V.graph.mutated_named_buffers
+                )
+                and not V.graph.is_zero_dim_cpu_buffer(name)
+                for name in x.get_read_names()
+            )
+        ):
+            if isinstance(x.data, ir.StorageBox):
+                x.realize()
+            else:
+                # Preserve the scalar view's shape, not its backing buffer's.
+                return ir.ExternKernel.copy_input(x)
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
@@ -408,9 +448,9 @@ def transform_args(
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
             )
 
-        device = (
-            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
-        ).get_device()
+        device = _get_pointwise_device(
+            [args[i] for i in args_indices] + [kwargs[k] for k in kwargs_indices]
+        )
 
         for i in args_indices:
             args[i] = maybe_copy_cpu_scalar(args[i], device)
@@ -874,18 +914,7 @@ def make_pointwise(
                     return ops.to_dtype(downcast, dtype)
                 return out
 
-        if not override_device:
-            device = None
-            for i in inputs:
-                # pyrefly: ignore [missing-attribute]
-                if is_gpu(i.get_device().type):
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0].get_device()
-
-        # pyrefly: ignore [unbound-name]
-        device = override_device or device
+        device = _get_pointwise_device(inputs, override_device)
 
         return Pointwise.create(
             device=device,  # type: ignore[arg-type]

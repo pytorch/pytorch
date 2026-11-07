@@ -3281,14 +3281,27 @@ class GraphLowering(torch.fx.Interpreter):
     def get_output_names(self) -> list[str]:
         return self._get_output_names(self.graph_outputs)
 
+    def is_zero_dim_cpu_buffer(self, name: str) -> bool:
+        """Check CPU scalar eligibility, not whether codegen unwraps the buffer.
+
+        GPU consumers must first register intermediate buffers with the
+        scheduler; `should_unwrap_unspec_arg` decides whether to unwrap them.
+        """
+        buffer = self.name_to_buffer.get(name, self.graph_inputs.get(name))
+        return (
+            isinstance(buffer, (ir.Buffer, TensorBox))
+            and get_device_type(buffer) == "cpu"
+            and not isinstance(
+                buffer.get_output_spec(), (ir.NoneLayout, ir.MultiOutputLayout)
+            )
+            and buffer.get_size() == []
+        )
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs
-            and self.graph_inputs[name].get_numel() == 1
-            and len(self.graph_inputs[name].get_size()) == 0
-            and get_device_type(self.graph_inputs[name]) == "cpu"
+            name in self.graph_inputs and self.is_zero_dim_cpu_buffer(name)
         ) or name in self.zero_dim_cpu_tensor_list
 
 
