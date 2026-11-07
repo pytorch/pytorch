@@ -90,6 +90,8 @@ from .object_protocol import (
 
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -2175,6 +2177,12 @@ class ByteArrayVariable(VariableTracker):
         else "{!r} is not in bytearray"
     )
 
+    # Note [bytearray copy on write]
+    #
+    # Every mutator must build a new bytearray and assign it to self.data,
+    # never change it in place: a sourced object must not be mutated during
+    # tracing, and bytearray_join detects a separator mutated during iteration
+    # by checking whether self.data was replaced.
     _nonvar_fields = {
         "data",
         *VariableTracker._nonvar_fields,
@@ -2188,6 +2196,11 @@ class ByteArrayVariable(VariableTracker):
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
+
+    @staticmethod
+    def create(data: bytearray) -> "ByteArrayVariable":
+        """Wrap a bytearray allocated by the traced operation as a new, writable value."""
+        return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
@@ -2746,6 +2759,70 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(result)
 
+    def bytearray_join(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        iterable = args[0].realize()
+        sep = self.data
+        if istype(iterable, (ListVariable, TupleVariable)):
+            items = iterable.items
+        else:
+            # CPython exports the separator's buffer for the whole call, so
+            # resizing it raises BufferError. A changed self.data means the
+            # separator was mutated (see Note [bytearray copy on write]):
+            # leave that to eager, also when iteration raised.
+            def unimplemented_mutated_separator() -> "NoReturn":
+                unimplemented(
+                    gb_type="bytearray.join with a separator mutated during iteration",
+                    context=f"iterable: {iterable}",
+                    explanation="The iterable passed to bytearray.join mutated the "
+                    "separator. CPython holds a buffer export on the separator "
+                    "during the call, which Dynamo does not model.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            try:
+                items = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.sequence_fast),
+                    [iterable, ConstantVariable.create("can only join an iterable")],
+                    {},
+                ).items
+            except ObservedException:
+                if self.data is sep:
+                    raise
+                handle_observed_exception(tx)
+                unimplemented_mutated_separator()
+            if self.data is not sep:
+                unimplemented_mutated_separator()
+        parts = []
+        for item in items:
+            item = item.realize()
+            if isinstance(item, ByteArrayVariable):
+                parts.append(item.data)
+            elif istype(item, ConstantVariable):
+                # Not UserDefinedConstantVariable: a str or int subclass may
+                # define __buffer__, which must not run at trace time.
+                parts.append(item.as_python_constant())
+            else:
+                unimplemented(
+                    gb_type="bytearray.join with an unsupported item",
+                    context=f"item: {item}",
+                    explanation="Dynamo only traces bytearray.join when every item "
+                    "is a bytearray or a plain constant: bytes and bytearray items "
+                    "are joined, and other constants raise TypeError. Other items "
+                    "run in eager, which raises TypeError for items without the "
+                    "buffer protocol.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        try:
+            return ByteArrayVariable.create(self.data.join(parts))
+        except (MemoryError, OverflowError, TypeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def _bytearray_case_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2816,6 +2893,7 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "join": Method(bytearray_join),
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
@@ -3416,6 +3494,20 @@ class ByteArrayIteratorVariable(IteratorVariable):
         self.index += 1
         return value
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # bytearrayiter_length_hint: bytes left, floored at 0.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -3602,6 +3694,22 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.index += len(remaining)
         self.it_index = -1
         return remaining
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # listreviter_len: it_index + 1 items left, or 0 once exhausted or
+        # once the list has shrunk below that.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
+        remaining = self.it_index + 1
+        if self.is_exhausted or len(self.source_seq.items) < remaining:  # type: ignore[attr-defined]
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(remaining)
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]

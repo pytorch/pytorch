@@ -14,7 +14,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ge, gt, le, lt, ne
+from operator import eq, ge, gt, le, length_hint, lt, ne
 from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
@@ -96,6 +96,31 @@ def index(
     # Callers pass the message their sequence type raises in CPython, which is
     # not uniform: list/deque repr the value, tuple ignores it.
     raise ValueError(not_found_msg.format(item))
+
+
+def sequence_fast(iterable: Iterable[T], message: str) -> list[T]:
+    # Mirrors CPython's PySequence_Fast for an argument that is not a list or
+    # tuple. list(it) is spelled out because Dynamo's list() does not ask for a
+    # length hint: call iter() on it once more, ask it for a hint with list()'s
+    # default of 8, then read with next(), since a for loop would call
+    # __iter__ a third time.
+    # CPython replaces the TypeError instead of chaining to it, so raise
+    # outside the handler.
+    it: Iterator[T] | None = None
+    try:
+        it = iter(iterable)
+    except TypeError:
+        pass
+    if it is None:
+        raise TypeError(message)
+    inner = iter(it)
+    length_hint(it, 8)
+    items: list[T] = []
+    while True:
+        try:
+            items.append(next(inner))
+        except StopIteration:
+            return items
 
 
 def repeat(item: T, count: int) -> Iterator[T]:

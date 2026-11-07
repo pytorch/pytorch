@@ -2,10 +2,9 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
+import operator
 import sys
 
 import torch
@@ -37,6 +36,14 @@ class Indexable:
 
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
+
+    def assertGraphBreakReason(self, reason):
+        # A break inside a try block is counted as unimplemented.
+        reasons = [
+            *torch._dynamo.utils.counters["graph_break"],
+            *torch._dynamo.utils.counters["unimplemented"],
+        ]
+        self.assertTrue(any(reason in r for r in reasons), reasons)
 
     type2test = bytearray
 
@@ -470,6 +477,814 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         for parts in result[1:]:
             for part in parts:
                 self.assertIs(type(part), bytearray)
+
+    @make_dynamo_test
+    def test_join(self):
+        self.assertEqual(self.type2test(b"").join([]), b"")
+        self.assertEqual(self.type2test(b"").join([b""]), b"")
+        for lst in [[b"abc"], [b"a", b"bc"], [b"ab", b"c"], [b"a", b"b", b"c"]]:
+            lst = list(map(self.type2test, lst))
+            self.assertEqual(self.type2test(b"").join(lst), b"abc")
+            self.assertEqual(self.type2test(b"").join(tuple(lst)), b"abc")
+            self.assertEqual(self.type2test(b"").join(iter(lst)), b"abc")
+
+        dot_join = self.type2test(b".:").join
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([bytearray(b"ab"), b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([b"ab", bytearray(b"cd")]), b"ab.:cd")
+        self.assertEqual(dot_join(x for x in (b"a", b"b")), b"a.:b")
+
+        # The result is a new bytearray, also for a single item.
+        self.assertIsInstance(dot_join([b"ab", b"cd"]), self.type2test)
+        ba = self.type2test(b"ab")
+        self.assertIsNot(self.type2test(b"").join([ba]), ba)
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(None)
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(0)
+        dot_join = self.type2test(b".:").join
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            dot_join([bytearray(b"ab"), "cd", b"ef"])
+
+    @parametrize(
+        "error_case",
+        [
+            "first_type_error",
+            "first_type_error_subclass",
+            "first_value_error",
+            "second_type_error",
+            "next_type_error",
+            "next_value_error",
+        ],
+    )
+    @parametrize("outer", [False, True])
+    def test_join_iterator_errors(self, error_case, outer):
+        class MyTypeError(TypeError):
+            pass
+
+        class Items:
+            def __init__(self, iter_error=None, next_error=None):
+                self.iter_error = iter_error
+                self.next_error = next_error
+
+            def __iter__(self):
+                if self.iter_error is not None:
+                    raise self.iter_error
+                return self
+
+            def __next__(self):
+                raise self.next_error
+
+        class Outer:
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __iter__(self):
+                return self.inner
+
+        def join_error(make_items):
+            try:
+                bytearray(b",").join(make_items())
+            except Exception as e:
+                return type(e), str(e), type(e.__context__), e.__suppress_context__
+            return None
+
+        def f(make_items, outer, x):
+            if outer:
+                # Errors raised while another exception is handled chain to it.
+                try:
+                    raise ValueError("outer")
+                except ValueError:
+                    return join_error(make_items), x + 1
+            return join_error(make_items), x + 1
+
+        make_items = {
+            "first_type_error": lambda: Items(iter_error=TypeError("first iter")),
+            "first_type_error_subclass": lambda: Items(
+                iter_error=MyTypeError("first iter")
+            ),
+            "first_value_error": lambda: Items(iter_error=ValueError("first iter")),
+            "second_type_error": lambda: Outer(
+                Items(iter_error=TypeError("second iter"))
+            ),
+            "next_type_error": lambda: Items(next_error=TypeError("next")),
+            "next_value_error": lambda: Items(next_error=ValueError("next")),
+        }[error_case]
+        x = torch.ones(1)
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(make_items, outer, x), f(make_items, outer, x))
+
+    def test_join_length_hint_first_iterator(self):
+        seen = []
+
+        class Second:
+            def __init__(self):
+                self.done = False
+
+            def __iter__(self):
+                return self
+
+            def __length_hint__(self):
+                seen.append("second hint")
+                return 1
+
+            def __next__(self):
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                return b"A"
+
+        class First:
+            def __init__(self):
+                self.second = Second()
+
+            def __iter__(self):
+                return self.second
+
+            def __length_hint__(self):
+                seen.append("first hint")
+                return 1
+
+            def __next__(self):
+                raise StopIteration
+
+        class Iterable:
+            def __init__(self):
+                self.first = First()
+
+            def __iter__(self):
+                return self.first
+
+        def f(iterable, x):
+            seen.clear()
+            return bytearray(b",").join(iterable), list(seen), x + 1
+
+        x = torch.ones(1)
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(Iterable(), x), f(Iterable(), x))
+
+    def test_join_length_hint(self):
+        class Iterator:
+            def __init__(self):
+                self.seen = []
+                self.done = False
+
+            def __iter__(self):
+                self.seen.append("iter")
+                return self
+
+            def __length_hint__(self):
+                self.seen.append("hint")
+                return 1
+
+            def __next__(self):
+                self.seen.append("next")
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                return b"A"
+
+        def f(x):
+            it = Iterator()
+            return bytearray(b",").join(it), it.seen, x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    @parametrize(
+        "length_source,error_kind",
+        [
+            ("len", "type_error"),
+            ("len", "type_error_subclass"),
+            ("len", "value_error"),
+            ("hint", "type_error"),
+            ("hint", "type_error_subclass"),
+            ("hint", "value_error"),
+        ],
+    )
+    def test_join_length_hint_errors(self, length_source, error_kind):
+        class MyTypeError(TypeError):
+            pass
+
+        class Items:
+            def __init__(self, error):
+                self.error = error
+                self.items = [b"a", b"b"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        class LenRaises(Items):
+            def __len__(self):
+                raise self.error
+
+        class HintRaises(Items):
+            def __length_hint__(self):
+                raise self.error
+
+        def f(cls, error_type, x):
+            try:
+                return bytearray(b",").join(cls(error_type("x"))), x + 1
+            except Exception as e:
+                return type(e), str(e), x + 1
+
+        cls = LenRaises if length_source == "len" else HintRaises
+        error_type = {
+            "type_error": TypeError,
+            "type_error_subclass": MyTypeError,
+            "value_error": ValueError,
+        }[error_kind]
+        x = torch.ones(1)
+        # A TypeError, subclasses included, selects the default hint; any
+        # other error propagates.
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(cls, error_type, x), f(cls, error_type, x))
+
+    def test_join_separator_mutation_graph_break(self):
+        class Items:
+            def __init__(self, sep):
+                self.sep = sep
+                self.items = [b"A", b"B"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.sep.extend(b"")
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, x):
+            x = x + 1
+            return sep.join(Items(sep)), x * 2
+
+        self.assertEqual(
+            f(bytearray(b","), torch.ones(1)), (b"A,B", torch.full((1,), 4.0))
+        )
+        # Mutating the separator during join is left to eager.
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertGraphBreakReason("separator mutated during iteration")
+
+    def test_join_nonconstant_item_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, item, x):
+            x = x + 1
+            return sep.join([item, b"c"]), x * 2
+
+        result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
+        self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertGraphBreakReason("join with an unsupported item")
+
+    @parametrize("item_kind", ["bytes_iterator", "str_iterator"])
+    def test_join_iterator_item_error(self, item_kind):
+        # Eager names the real iterator type in the error.
+        def f(make_item, x):
+            try:
+                bytearray(b",").join([make_item()])
+            except TypeError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        make_item = (
+            (lambda: iter(b"ab"))
+            if item_kind == "bytes_iterator"
+            else (lambda: iter("ab"))
+        )
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(
+            compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
+        )
+        self.assertGraphBreakReason("join with an unsupported item")
+
+    def test_join_buffer_subclass_item(self):
+        if sys.version_info < (3, 12):
+            self.skipTest("a Python __buffer__ needs PEP 688, Python 3.12+")
+        log = []
+
+        class BufStr(str):
+            __slots__ = ()
+
+            def __buffer__(self, flags):
+                log.append("buffer")
+                return memoryview(b"S")
+
+        def f(item, x):
+            return bytearray(b"-").join([item, b"c"]), x + 1
+
+        compiled = torch.compile(f, backend="eager")
+        for _ in range(2):
+            self.assertEqual(compiled(BufStr("q"), torch.ones(1))[0], b"S-c")
+        # __buffer__ runs on every call, as in eager.
+        self.assertEqual(log, ["buffer", "buffer"])
+        self.assertGraphBreakReason("join with an unsupported item")
+
+    @parametrize("iterator_kind", ["next", "iter"])
+    def test_join_separator_mutation_then_raise(self, iterator_kind):
+        class NextRaises:
+            def __init__(self, sep):
+                self.sep = sep
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.sep.extend(b"x")
+                raise ValueError("next")
+
+        class IterRaises:
+            def __init__(self, sep):
+                self.sep = sep
+
+            def __iter__(self):
+                self.sep.extend(b"x")
+                raise TypeError("iter")
+
+        def f(sep, items, x):
+            try:
+                sep.join(items)
+            except (TypeError, ValueError) as e:
+                return type(e), x + 1
+            return None, x + 1
+
+        def run(fn, cls):
+            sep = bytearray(b",")
+            try:
+                result = fn(sep, cls(sep), torch.ones(1))[0]
+            except BufferError:
+                result = BufferError
+            return result, sep
+
+        cls = NextRaises if iterator_kind == "next" else IterRaises
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(run(compiled, cls), run(f, cls))
+        self.assertGraphBreakReason("separator mutated during iteration")
+
+    @parametrize(
+        "mutator_name",
+        [
+            "extend",
+            "iadd",
+            "imul",
+            "append",
+            "insert",
+            "pop",
+            "iadd_resize",
+            "imul_resize",
+        ],
+    )
+    def test_join_separator_mutators(self, mutator_name):
+        class Items:
+            def __init__(self, sep, mutate):
+                self.sep = sep
+                self.mutate = mutate
+                self.items = [b"A", b"B"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.mutate(self.sep)
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        def f(sep, mutate, x):
+            try:
+                return sep.join(Items(sep, mutate)), x + 1
+            except BufferError as e:
+                return str(e), x + 1
+
+        # Resizing mutators raise BufferError in eager while join holds the
+        # export; the others do not, but Dynamo still leaves them to eager.
+        mutators = {
+            "extend": lambda b: b.extend(b""),
+            "iadd": lambda b: operator.iadd(b, b""),
+            "imul": lambda b: operator.imul(b, 1),
+            "append": lambda b: b.append(0x2C),
+            "insert": lambda b: b.insert(0, 0x2C),
+            "pop": lambda b: b.pop(),
+            "iadd_resize": lambda b: operator.iadd(b, b"x"),
+            "imul_resize": lambda b: operator.imul(b, 2),
+        }
+        mutate = mutators[mutator_name]
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        sep, compiled_sep = bytearray(b","), bytearray(b",")
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(
+            compiled(compiled_sep, mutate, torch.ones(1)),
+            f(sep, mutate, torch.ones(1)),
+        )
+        self.assertEqual(compiled_sep, sep)
+        self.assertGraphBreakReason("separator mutated during iteration")
+
+    def test_join_other_iterables(self):
+        class Sequence:
+            def __getitem__(self, i):
+                if i >= 2:
+                    raise IndexError(i)
+                return (b"a", b"b")[i]
+
+        def f(x):
+            sep = bytearray(b",")
+            return (
+                sep.join({b"a": 1, b"b": 2}),
+                sep.join({b"a"}),
+                sep.join(Sequence()),
+                sep.join(reversed([b"a", b"b"])),
+                sep.join(iter(bytearray())),
+                x + 1,
+            )
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("length_case", ["normal", "value_error", "negative", "type_error"])
+    def test_join_sequence_length(self, length_case):
+        class Sequence:
+            def __init__(self, log):
+                self.log = log
+
+            def __len__(self):
+                self.log.append("len")
+                if length_case == "value_error":
+                    raise ValueError("sequence length failed")
+                if length_case == "type_error":
+                    raise TypeError("sequence length unavailable")
+                return -1 if length_case == "negative" else 2
+
+            def __getitem__(self, index):
+                self.log.append(index)
+                if index >= 2:
+                    raise IndexError(index)
+                return (b"a", b"b")[index]
+
+        def f(x):
+            log = []
+            try:
+                result = bytearray(b",").join(Sequence(log))
+            except ValueError as exc:
+                return str(exc), log, x + 1
+            return result, log, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize(
+        "length_case", ["normal", "value_error", "negative", "type_error", "shrinks"]
+    )
+    def test_join_reversed_sequence_length(self, length_case):
+        class Sequence:
+            def __init__(self):
+                self.calls = 0
+                self.log = []
+
+            def __len__(self):
+                self.calls += 1
+                self.log.append("len")
+                if self.calls > 1:
+                    if length_case == "value_error":
+                        raise ValueError("sequence length failed")
+                    if length_case == "type_error":
+                        raise TypeError("sequence length unavailable")
+                    if length_case == "negative":
+                        return -1  # noqa: PLE0303
+                    if length_case == "shrinks":
+                        return 0
+                return 2
+
+            def __getitem__(self, index):
+                self.log.append(index)
+                return (b"a", b"b")[index]
+
+        def f(x):
+            seq = Sequence()
+            try:
+                result = bytearray(b",").join(reversed(seq))
+            except ValueError as exc:
+                result = str(exc)
+            return result, seq.log, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("metaclass_kind", ["hides", "descriptor"])
+    def test_join_sequence_length_ignores_metaclass_lookup(self, metaclass_kind):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if metaclass_kind == "hides" and name == "__len__":
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+
+            @property
+            def __len__(cls):
+                raise AssertionError("metaclass lookup must not run")
+
+        class Sequence(metaclass=Meta):
+            def __len__(self):
+                raise ValueError("sequence length failed")
+
+            def __getitem__(self, index):
+                if index >= 2:
+                    raise IndexError(index)
+                return (b"a", b"b")[index]
+
+        def f(seq, x):
+            try:
+                result = bytearray(b",").join(seq)
+            except ValueError as exc:
+                return str(exc), x + 1
+            return result, x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
+        self.assertEqual(
+            compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
+        )
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("consumer", ["extend", "length_hint"])
+    def test_sequence_iterator_with_custom_metaclass(self, consumer):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return super().__getattribute__(name)
+
+        class Sequence(metaclass=Meta):
+            def __len__(self):
+                return 2
+
+            def __getitem__(self, index):
+                if index >= 2:
+                    raise IndexError(index)
+                return (97, 98)[index]
+
+        def f(seq, x):
+            iterator = iter(seq)
+            if consumer == "extend":
+                result = bytearray()
+                result.extend(iterator)
+            else:
+                result = operator.length_hint(iterator)
+            return result, x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
+        self.assertEqual(
+            compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
+        )
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reversed_sequence_iterator_length_hint(self):
+        class Sequence:
+            def __init__(self):
+                self.items = [b"a", b"b", b"c"]
+                self.calls = 0
+
+            def __len__(self):
+                self.calls += 1
+                return len(self.items)
+
+            def __getitem__(self, index):
+                return self.items[index]
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            seq.items.append(b"d")
+            hints.append(operator.length_hint(it))
+            seq.items[1:] = []
+            hints.append(operator.length_hint(it))
+            seq.items.extend([b"b", b"c"])
+            hints.append(operator.length_hint(it))
+            consumed = next(it), next(it)
+            # Before 3.14 the final yield still permits another length query.
+            hints.append(operator.length_hint(it))
+            next(it, None)
+            hints.append(operator.length_hint(it))
+            return hints, consumed, seq.calls, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("size", [0, 1])
+    def test_reversed_sequence_iterator_length_hint_at_end(self, size):
+        class Sequence:
+            def __init__(self):
+                self.fail = False
+                self.calls = 0
+
+            def __len__(self):
+                self.calls += 1
+                if self.fail:
+                    raise ValueError("length queried")
+                return size
+
+            def __getitem__(self, index):
+                return b"a"
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            if size:
+                next(it)
+            seq.fail = True
+            try:
+                hint = operator.length_hint(it)
+            except ValueError as exc:
+                hint = str(exc)
+            return hint, seq.calls, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    @parametrize("error", [IndexError, StopIteration, ValueError])
+    def test_reversed_sequence_iterator_length_hint_after_error(self, error):
+        class Sequence:
+            def __init__(self):
+                self.calls = 0
+                self.failed = False
+
+            def __len__(self):
+                self.calls += 1
+                return 2
+
+            def __getitem__(self, index):
+                if not self.failed:
+                    self.failed = True
+                    raise error("getitem failed")
+                return b"a"
+
+        def f(x):
+            seq = Sequence()
+            it = reversed(seq)
+            before = operator.length_hint(it)
+            try:
+                next(it, None)
+            except error:
+                pass
+            after = operator.length_hint(it)
+            result = bytearray(b",").join(it)
+            return before, after, seq.calls, result, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_sequence_iterator_length_hint(self):
+        class Sequence:
+            def __init__(self):
+                self.items = [b"a", b"b"]
+
+            def __len__(self):
+                return len(self.items)
+
+            def __getitem__(self, index):
+                return self.items[index]
+
+        def f(x):
+            seq = Sequence()
+            it = iter(seq)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            seq.items[:] = []
+            hints.append(operator.length_hint(it))
+            list(it)
+            seq.items.extend([b"c", b"d"])
+            hints.append(operator.length_hint(it))
+            return hints, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_sequence_iterator_length_hint_without_len(self):
+        class Sequence:
+            def __getitem__(self, index):
+                if index >= 1:
+                    raise IndexError(index)
+                return b"a"
+
+        def f(x):
+            it = iter(Sequence())
+            before = operator.length_hint(it, 8)
+            list(it)
+            return before, operator.length_hint(it, 8), x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_iterator_length_hint(self):
+        def f(x):
+            ba = bytearray(b"abc")
+            it = iter(ba)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            ba.pop()
+            ba.pop()
+            ba.pop()
+            hints.append(operator.length_hint(it))
+            list(it)
+            hints.append(operator.length_hint(it))
+            ba.extend(b"xyz")
+            hints.append(operator.length_hint(it))
+            return hints, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_list_reverse_iterator_length_hint(self):
+        def f(x):
+            items = [b"a", b"b", b"c"]
+            it = reversed(items)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            # Growing the list does not change the hint.
+            items.append(b"d")
+            hints.append(operator.length_hint(it))
+            # Shrinking it below the iterator position makes the hint zero.
+            items[1:] = []
+            hints.append(operator.length_hint(it))
+            consumed = list(it)
+            hints.append(operator.length_hint(it))
+            # Once exhausted, growing the list does not revive the hint.
+            items.extend([b"e", b"f"])
+            hints.append(operator.length_hint(it))
+            return hints, consumed, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_input_bytearray_join(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(sep, ba, items, x):
+            return sep.join([ba, b"x"]), sep.join(items), sep.join([ba]), x + 1
+
+        def check(frames):
+            *results, _ = fn(sep, ba, items, torch.ones(1))
+            self.assertEqual(results, [sep.join([ba, b"x"]), sep.join(items), ba])
+            self.assertIsNot(results[2], ba)
+            for r in results:
+                self.assertIs(type(r), bytearray)
+            self.assertEqual(cnt.frame_count, frames)
+
+        # Each step changes one input, which must fail its guard and recompile.
+        sep, ba, items = bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]
+        check(1)
+        sep = bytearray(b"+")
+        check(2)
+        ba = bytearray(b"yz")
+        check(3)
+        items = [b"ef", items[1]]
+        check(4)
+        items[1][0] = ord("x")
+        check(5)
+        ba[0] = ord("q")
+        check(6)
+
+    def test_join_result_mutated_in_graph(self):
+        def f(sep, ba, x):
+            out = sep.join([ba, b"c"])
+            out += b"!"
+            single = sep.join([ba])
+            single.append(ord("?"))
+            return out, single, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        sep, ba = bytearray(b"-"), bytearray(b"ab")
+        self.assertEqual(
+            compiled(sep, ba, torch.ones(1)),
+            f(bytearray(b"-"), bytearray(b"ab"), torch.ones(1)),
+        )
+        self.assertEqual((sep, ba), (b"-", b"ab"))
 
     @make_dynamo_test
     def test_hex(self):

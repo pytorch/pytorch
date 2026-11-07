@@ -17,6 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from types import NotImplementedType
 
 
 __all__ = [
@@ -109,6 +110,17 @@ class _SequenceIterator:
     def __iter__(self) -> _SequenceIterator:
         return self
 
+    def __length_hint__(self) -> int | NotImplementedType:
+        if self.exhausted:
+            return 0
+        # Length slots come from type dictionaries, not metaclass attribute
+        # lookup, which can hide __len__ or invoke a descriptor.
+        iterable_type = type(self.iterable)
+        for cls in type.__dict__["__mro__"].__get__(iterable_type, type(iterable_type)):
+            if "__len__" in type.__dict__["__dict__"].__get__(cls, type(cls)):
+                return max(len(self.iterable) - self.index, 0)
+        return NotImplemented
+
     def __next__(self) -> object:
         if self.exhausted:
             raise StopIteration
@@ -151,14 +163,25 @@ class _ReversedSequenceIterator:
     def __iter__(self) -> _ReversedSequenceIterator:
         return self
 
+    def __length_hint__(self) -> int:
+        # Python 3.14 also skips the length query after the final yield.
+        if self.seq is None or (sys.version_info >= (3, 14) and self.index < 0):
+            return 0
+        length = len(self.seq)
+        return self.index + 1 if self.index < length else 0
+
     def __next__(self) -> object:
         if self.index < 0:
+            self.seq = None
             raise StopIteration
         try:
             result = self.seq[self.index]
-        except (IndexError, StopIteration):
+        except BaseException as exc:
             self.index = -1
-            raise StopIteration from None
+            self.seq = None
+            if isinstance(exc, (IndexError, StopIteration)):
+                raise StopIteration from None
+            raise
         self.index -= 1
         return result
 
