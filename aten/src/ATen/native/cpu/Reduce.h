@@ -298,7 +298,7 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   auto loop = [&](char** data, const int64_t* strides, int64_t size) {
     char* out = data[0];
     char* in = data[1];
-    for (int64_t i = 0; i < size; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(size)) {
       reduce_op(out, in, dim_size);
       out += strides[0];
       in += strides[1];
