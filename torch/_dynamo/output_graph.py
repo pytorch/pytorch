@@ -1705,6 +1705,9 @@ class OutputGraph(OutputGraphCommon):
             )
             self.tracers.append(tracer)
             yield tracer
+            # Successful ordinary HOP traces contribute to enclosing reuse conditions.
+            if tracer.parent is not None:
+                tracer.parent.traced_sources.update(tracer.traced_sources)
         finally:
             new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
