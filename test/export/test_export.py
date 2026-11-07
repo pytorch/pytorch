@@ -4167,6 +4167,10 @@ def forward(self, add_tensor):
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    # Distribution._validate_args is process-global and TorchPatcher.patch()
+    # turns it off for good on the first torch.compile, so this test cannot
+    # rely on the default surviving whatever ran before it in the process.
+    @patch.object(torch.distributions.Distribution, "_validate_args", True)
     def test_non_strict_export_distribution_validation(self):
         class SquashedNormal(torch.distributions.TransformedDistribution):
             def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
