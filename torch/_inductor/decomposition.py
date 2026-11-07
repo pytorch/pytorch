@@ -1318,6 +1318,59 @@ def index_reduce(
             f"and (source) {src.device}"
         ),
     )
+    torch._check(
+        index.dim() <= 1,
+        lambda: (
+            f"index_reduce_(): Index is supposed to be a vector, but got dim: "
+            f"{index.dim()} with type: {index.dtype} and size: {index.shape}"
+        ),
+    )
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: (
+            f"index_reduce_(): Expected dtype int32/int64 for index but got: "
+            f"{index.dtype}"
+        ),
+    )
+    torch._check(
+        self.dtype == src.dtype,
+        lambda: (
+            f"index_reduce_(): self ({self.dtype}) and source ({src.dtype}) "
+            f"must have the same scalar type"
+        ),
+    )
+    dim_ = dim + self.dim() if dim < 0 else dim
+    torch._check(
+        dim_ == 0 or dim_ < src.dim(),
+        lambda: (
+            f"index_reduce_(): Indexing dim {dim} is out of bounds of the "
+            f"source tensor with dim {src.dim()}"
+        ),
+    )
+    numel = index.numel()
+    torch._check(
+        numel == (1 if src.dim() == 0 else src.shape[dim_]),
+        lambda: (
+            f"index_reduce_(): Number of indices ({numel}) should be equal to "
+            f"source.size(dim): ({src.shape[dim_]}), for dim: {dim}"
+        ),
+    )
+    if src.dim() != 0 and self.dim() != 0:
+        shape_matches = all(
+            self.shape[d] == src.shape[d] for d in range(self.dim()) if d != dim_
+        )
+    else:
+        shape_matches = self.dim() == src.dim() and all(
+            self.shape[d] == src.shape[d] for d in range(self.dim())
+        )
+    torch._check(
+        shape_matches,
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {tuple(self.shape)} "
+            f"source.shape = {tuple(src.shape)}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
