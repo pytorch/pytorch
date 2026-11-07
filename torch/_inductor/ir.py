@@ -9180,8 +9180,8 @@ class UserDefinedFlyDSLKernel(UserDefinedKernel):
     torch._library.flydsl.wrap_flydsl.
 
     Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
-    generated code launches the host function (Python wrapper) on the wrapper's
-    stream.
+    generated code launches the host function (Python wrapper) or calls the C entry
+    point exported for it (C++ wrapper), on the wrapper's stream.
     """
 
     def __init__(

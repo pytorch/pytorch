@@ -651,7 +651,10 @@ class CompiledFxGraph(OutputCode):
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
         self.process_local_kernels = sorted(
-            graph.wrapper_code.user_defined_flydsl_launchers
+            [
+                *graph.wrapper_code.user_defined_flydsl_launchers,
+                *getattr(graph.wrapper_code, "flydsl_exported_kernels", ()),
+            ]
         )
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
@@ -1029,8 +1032,9 @@ class CompiledFxGraph(OutputCode):
             raise RuntimeError(
                 "This compiled graph launches user FlyDSL kernels "
                 f"({', '.join(self.process_local_kernels)}) through objects bound in "
-                "this process, so it cannot be serialized (aot_compile, precompile). "
-                "Compile it in the process that runs it."
+                "this process or object files it links by path, so it cannot be "
+                "serialized (aot_compile, precompile). Compile it in the process that "
+                "runs it."
             )
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
