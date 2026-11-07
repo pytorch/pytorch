@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _get_rocm_dlink_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     COMMON_MSVC_FLAGS,
@@ -1370,6 +1371,126 @@ except RuntimeError as e:
                 timestamp = os.stat(objects[0]).st_mtime_ns
                 self.assertEqual(alone, compile_first_only(1))
                 self.assertEqual(timestamp, os.stat(objects[0]).st_mtime_ns)
+
+
+class TestRocmDlinkArgs(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_dlink_arch_flags_forward_user_flags(self):
+        flags = ["-O2", "--offload-arch=gfx942", "-fgpu-rdc"]
+        self.assertEqual(_get_rocm_dlink_arch_flags(flags), ["--offload-arch=gfx942"])
+        self.assertEqual(
+            _get_rocm_dlink_arch_flags(["--amdgpu-target=gfx90a", "-fgpu-rdc"]),
+            ["--amdgpu-target=gfx90a"],
+        )
+        self.assertEqual(
+            _get_rocm_dlink_arch_flags(["--offload-arch", "gfx942", "-O2", "-fgpu-rdc"]),
+            ["--offload-arch", "gfx942"],
+        )
+        self.assertEqual(
+            _get_rocm_dlink_arch_flags(["--no-offload-arch=gfx90a", "-fgpu-rdc"]),
+            ["--no-offload-arch=gfx90a"],
+        )
+
+    def test_dlink_arch_flags_default_to_pytorch_rocm_arch(self):
+        with mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a;gfx942"}):
+            self.assertEqual(
+                _get_rocm_dlink_arch_flags(["-O2", "-fgpu-rdc"]),
+                ["--offload-arch=gfx90a", "--offload-arch=gfx942"],
+            )
+
+    def test_dlink_on_windows_rocm_raises(self):
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", True),
+            mock.patch.object(torch.utils.cpp_extension, "ROCM_HOME", None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not supported for ROCm extensions on Windows"):
+                torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], dlink=True)
+
+    def _rocm_cuda_extension(self, **kwargs):
+        # CUDAExtension as on Linux ROCm, without needing a ROCm install.
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", False),
+            mock.patch.object(torch.utils.cpp_extension, "library_paths", return_value=[]),
+            mock.patch.object(torch.utils.cpp_extension, "include_paths", return_value=[]),
+            mock.patch("torch.utils.hipify.hipify_python.hipify", return_value={}),
+            mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx942"}),
+        ):
+            return torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], **kwargs)
+
+    def test_dlink_does_not_modify_shared_compile_args(self):
+        args = {"cxx": [], "nvcc": ["-O2"]}
+        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=args)
+        self.assertEqual(args["nvcc"], ["-O2"])
+        self.assertIn("-fgpu-rdc", ext.extra_compile_args["nvcc"])
+        self.assertIn("--offload-arch=gfx942", ext.extra_link_args)
+
+    def test_dlink_drops_cuda_rdc_flags(self):
+        ext = self._rocm_cuda_extension(
+            dlink=True,
+            extra_compile_args={
+                "cxx": [],
+                "nvcc": ["-O2", "-rdc=true", "-dc", "-dlto", "-rdc", "true"],
+                "nvcc_dlink": ["-dlto"],
+            },
+        )
+        self.assertEqual(ext.extra_compile_args["nvcc"], ["-O2", "-fgpu-rdc"])
+        self.assertNotIn("nvcc_dlink", ext.extra_compile_args)
+
+    def test_dlink_list_compile_args(self):
+        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=["-g"])
+        self.assertEqual(ext.extra_compile_args, {"cxx": ["-g"], "nvcc": ["-g", "-fgpu-rdc"]})
+
+    def test_dlink_libraries_alone(self):
+        ext = self._rocm_cuda_extension(dlink_libraries=["dlink_lib"])
+        self.assertIn("dlink_lib", ext.libraries)
+        self.assertIn("-fgpu-rdc", ext.extra_compile_args["nvcc"])
+        self.assertIn("--hip-link", ext.extra_link_args)
+
+    @unittest.skipIf(IS_WINDOWS, "unix compiler only")
+    def test_hip_dlink_link_uses_hipcc(self):
+        from setuptools._distutils.ccompiler import new_compiler
+
+        compiler = new_compiler(compiler="unix")
+        # A launcher in front of the compiler, as with CXX="ccache g++".
+        for attr in ("compiler_cxx", "linker_exe", "linker_exe_cxx"):
+            setattr(compiler, attr, ["ccache", "g++"])
+        for attr in ("linker_so", "linker_so_cxx"):
+            setattr(compiler, attr, ["ccache", "g++", "-shared"])
+        cmds = []
+        compiler.spawn = lambda cmd, **kwargs: cmds.append(cmd)
+        # A link override set before ours still handles the non-dlink links.
+        plain_links = []
+        default_link = compiler.link
+
+        def custom_link(*args, **kwargs):
+            plain_links.append(args[2])
+            return default_link(*args, **kwargs)
+
+        compiler.link = custom_link
+        with mock.patch.object(
+            torch.utils.cpp_extension, "_get_hipcc_path", return_value="/rocm/bin/hipcc"
+        ):
+            torch.utils.cpp_extension._wrap_hip_dlink_link(compiler)
+            wrapped_link = compiler.link
+            torch.utils.cpp_extension._wrap_hip_dlink_link(compiler)
+            self.assertIs(compiler.link, wrapped_link)  # a second call must not stack
+            with tempfile.TemporaryDirectory() as d:
+                for name, post in (("dlink", ["-fgpu-rdc", "--hip-link"]), ("plain", [])):
+                    compiler.link_shared_object(
+                        ["a.o"], os.path.join(d, f"{name}.so"),
+                        extra_postargs=post, target_lang="c++",
+                    )
+        dlink_cmd, plain_cmd = cmds
+        self.assertEqual(dlink_cmd[0], "/rocm/bin/hipcc")
+        self.assertNotIn("g++", dlink_cmd)
+        self.assertNotIn("ccache", dlink_cmd)
+        self.assertIn("--hip-link", dlink_cmd)
+        self.assertEqual(plain_cmd[:2], ["ccache", "g++"])
+        self.assertEqual(compiler.compiler_cxx, ["ccache", "g++"])
+        self.assertEqual([os.path.basename(p) for p in plain_links], ["plain.so"])
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not found")
