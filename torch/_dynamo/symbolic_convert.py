@@ -106,6 +106,7 @@ from .exc import (
     format_frame_info,
     format_user_stack,
     get_stack_above_dynamo,
+    raise_name_error,
     raise_observed_exception,
     raise_value_error,
     ResumePrologueTracingError,
@@ -2537,6 +2538,18 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst: Instruction) -> None:
         self.push(self._load_const(inst))
 
+    def _load_builtin_if_global_deleted(
+        self, variable: VariableTracker, name: str, inst: Instruction
+    ) -> bool:
+        side_effects = self.output.side_effects
+        if not side_effects.has_pending_mutation_of_attr(variable, name):
+            return False
+        pending = side_effects.load_attr(variable, name, deleted_ok=True)
+        if not isinstance(pending, variables.DeletedVariable):
+            return False
+        self.load_builtin(inst)
+        return True
+
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
 
@@ -2553,6 +2566,8 @@ class InstructionTranslatorBase(
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
+            if self._load_builtin_if_global_deleted(variable, name, inst):
+                return
             self.push(self.output.side_effects.load_global(variable, name))
             return
 
@@ -2575,15 +2590,17 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
 
+    def _global_variable(self, name: str) -> VariableTracker:
+        if name not in self.symbolic_globals:
+            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
+        return self.output.side_effects.track_global_existing(
+            GlobalSource(name), self.symbolic_globals[name]
+        )
+
     def STORE_GLOBAL(self, inst: Instruction) -> None:
         value = self.pop()
         name = inst.argval
-        source = GlobalSource(name)
-        if name not in self.symbolic_globals:
-            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
-        variable = self.output.side_effects.track_global_existing(
-            source, self.symbolic_globals[name]
-        )
+        variable = self._global_variable(name)
         if isinstance(value, RemovableHandleVariable):
             unimplemented(
                 gb_type="Storing Tensor hook handle in globals",
@@ -2592,6 +2609,73 @@ class InstructionTranslatorBase(
                 hints=[],
             )
         self.output.side_effects.store_global(variable, name, value)
+
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        self._delete_global(inst, self._global_variable(inst.argval))
+
+    def _delete_global(self, inst: Instruction, target: VariableTracker) -> None:
+        name = inst.argval
+        present = name in self.f_globals
+        self._install_globals_membership_guard(name, present)
+        self._check_global_delete(name, target, present)
+        if isinstance(target, variables.NewGlobalVariable):
+            self.output.side_effects.store_global(
+                target, name, variables.DeletedVariable()
+            )
+        else:
+            self.output.side_effects.store_attr(
+                target, name, variables.DeletedVariable()
+            )
+
+    def _check_global_delete(
+        self,
+        name: str,
+        item: VariableTracker,
+        present: bool,
+    ) -> None:
+        """Raise what eager raises, and keep a dropped tensor's dealloc sync."""
+        side_effects = self.output.side_effects
+        if side_effects.has_pending_mutation_of_attr(item, name):
+            pending = side_effects.load_attr(item, name, deleted_ok=True)
+            if isinstance(pending, variables.DeletedVariable):
+                # An earlier delete in this trace already removed the name.
+                raise_name_error(self, name)
+        elif not present:
+            # Nothing ever bound the name.
+            raise_name_error(self, name)
+        # A pre-existing global's tensor is not covered: syncing its dealloc
+        # would need a guard on the tensor identity, which is not tracked.
+        self._maybe_sync_dealloc_attr(item, name)
+
+    @functools.cached_property
+    def _globals_dict_source(self) -> Source:
+        # Whether a DELETE_GLOBAL replays depends on membership, and
+        # GlobalSource(name) raises for an absent name, so membership is guarded
+        # on the dict itself. Root that guard at the module (as
+        # get_globals_source_and_value does) when the dict is a registered
+        # module's, so a loaded artifact can bind it again; a dict that is no
+        # module's has no import source, so fall back to an unnamed-scope key.
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is not None:
+            module_name, _ = registered_module
+            return AttrSource(self.import_source(module_name), "__dict__")
+        return GlobalSource(
+            self.output.install_global_by_id(UNNAMED_SCOPE_PREFIX, self.f_globals)
+        )
+
+    def _install_globals_membership_guard(self, name: str, present: bool) -> None:
+        # The trace-time membership is baked into the generated code; if it
+        # flips, the replayed delete no longer matches the globals.
+        guard_builder = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        install_guard(
+            self._globals_dict_source.make_guard(
+                functools.partial(guard_builder, key=name)
+            )
+        )
 
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
@@ -2752,14 +2836,8 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            # Name is neither a global nor a builtin: matches CPython raising
-            # NameError with `name` set to the missing identifier.
-            raise_observed_exception(
-                NameError,
-                self,
-                args=[f"name '{argval}' is not defined"],
-                kwargs={"name": ConstantVariable.create(argval)},
-            )
+            # Name is neither a global nor a builtin.
+            raise_name_error(self, argval)
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -6443,6 +6521,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
+                if self._load_builtin_if_global_deleted(fglobals_vt, name, inst):
+                    return
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
                 value = self.f_globals[name]
@@ -6478,6 +6558,28 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
+
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        if self.output.global_scope is self.f_globals:
+            super().DELETE_GLOBAL(inst)
+        else:
+            self._delete_global_other_module(inst)
+
+    def _delete_global_other_module(self, inst: Instruction) -> None:
+        name = inst.argval
+        _, value, source = self.get_globals_source_and_value(name)
+        if isinstance(source, DictGetItemSource):
+            unimplemented(
+                gb_type="DELETE_GLOBAL in non-module globals",
+                context=name,
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for an inlined "
+                    "function whose globals dict is not the registered module "
+                    "__dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self._delete_global(inst, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
