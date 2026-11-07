@@ -118,6 +118,8 @@
 #include <ATen/ops/nonzero_numpy_native.h>
 #include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
+#include <ATen/ops/put_along_dim.h>
+#include <ATen/ops/put_along_dim_native.h>
 #include <ATen/ops/put_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/scatter_add_meta.h>
@@ -128,6 +130,7 @@
 #include <ATen/ops/scatter_reduce_native.h>
 #include <ATen/ops/take_along_dim_native.h>
 #include <ATen/ops/take_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros_like.h>
 #endif
 
@@ -2754,6 +2757,83 @@ Tensor& take_along_dim_out(
 
   // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
   return at::gather_out(result, self.view(-1), 0, indices.view(-1));
+}
+
+// Returns (dim, indices, values) ready for self.scatter(dim, indices, values).
+// With dim=None the caller scatters into self.reshape(-1).
+// Unlike take_along_dim, self never broadcasts here (the result has self's
+// shape), so indices broadcast towards self and values towards indices.
+static std::tuple<int64_t, Tensor, Tensor> _put_along_dim_helper(
+    const Tensor& self,
+    const Tensor& indices,
+    const Tensor& values,
+    std::optional<int64_t> opt_dim) {
+  // Same as index_put_: allow a CPU scalar for values on any device.
+  auto vals = values.dim() == 0 ? values.to(self.device()) : values;
+  checkDevice("torch.put_along_dim():", {self, indices, vals}, self.device());
+  TORCH_CHECK(
+      indices.scalar_type() == ScalarType::Long,
+      "torch.put_along_dim(): dtype of indices should be Long but got ",
+      indices.scalar_type())
+  TORCH_CHECK(
+      vals.scalar_type() == self.scalar_type(),
+      "torch.put_along_dim(): expected values to have the same dtype as input (",
+      self.scalar_type(),
+      ") but got ",
+      vals.scalar_type())
+
+  int64_t dim = 0;
+  SymDimVector shape;
+  if (opt_dim.has_value()) {
+    TORCH_CHECK(
+        self.dim() == indices.dim(),
+        "torch.put_along_dim(): input and indices should have the same number of dimensions, ",
+        "but got ",
+        self.dim(),
+        " dimensions for input, and ",
+        indices.dim(),
+        " dimensions for indices")
+    dim = at::maybe_wrap_dim(opt_dim.value(), self.dim());
+    shape = SymDimVector{self.sym_sizes()};
+    shape[dim] = indices.sym_size(dim);
+  } else {
+    TORCH_CHECK(
+        indices.dim() == 1,
+        "torch.put_along_dim(): indices must be 1-D when dim is None, but got ",
+        indices.dim(),
+        " dimensions")
+    shape = SymDimVector{indices.sym_sizes()};
+  }
+
+  // Only wrap negative indices, so out of range ones still hit scatter's
+  // bounds check (remainder() as in take_along_dim would hide them). Wrap
+  // before broadcasting to keep the broadcast a free stride-0 view.
+  auto size = opt_dim.has_value() ? self.sym_size(dim) : self.sym_numel();
+  auto idx = at::where(indices < 0, indices + size, indices);
+  return std::make_tuple(
+      dim, idx.broadcast_to_symint(shape), vals.broadcast_to_symint(shape));
+}
+
+Tensor put_along_dim(
+    const Tensor& self,
+    const Tensor& indices,
+    const Tensor& values,
+    std::optional<int64_t> opt_dim) {
+  auto [dim, idx, vals] = _put_along_dim_helper(self, indices, values, opt_dim);
+  if (opt_dim.has_value()) {
+    return self.scatter(dim, idx, vals);
+  }
+  return self.reshape(-1).scatter(0, idx, vals).view_symint(self.sym_sizes());
+}
+
+Tensor& put_along_dim_(
+    Tensor& self,
+    const Tensor& indices,
+    const Tensor& values,
+    std::optional<int64_t> opt_dim) {
+  // Not scatter_: it has no vmap batch rule, and the dim=None path would need
+  // to check aliasing, which BatchedTensor does not allow. Costs one full copy.
+  return self.copy_(at::put_along_dim(self, indices, values, opt_dim));
 }
 
 Tensor _gather_sparse_backward(
