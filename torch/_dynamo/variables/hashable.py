@@ -706,7 +706,7 @@ class HashableTracker:
 
     @staticmethod
     def iter_keys_by_identity(
-        mapping: dict["HashableTracker", VariableTracker],
+        mapping: Iterable["HashableTracker"],
     ) -> Iterator["HashableTracker"]:
         # OrderedDict's iterator looks up each stored key. Those internal lookups
         # must not trace user equality; the iterator's current key is already known.
