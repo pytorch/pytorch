@@ -32,6 +32,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     foreach_all_gather,
     foreach_reduce,
@@ -1670,12 +1671,16 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
                 )
             )
         self.run_subtests(
-            {"mesh": meshes, "reshard_after_forward": [True, False, 2]},
+            {
+                "mesh": meshes,
+                "reshard_after_forward": [True, False, 2],
+                "python_copies": [False, True],
+            },
             self._test_train_parity_uneven_shard_dim1,
         )
 
     def _test_train_parity_uneven_shard_dim1(
-        self, mesh: DeviceMesh, reshard_after_forward: bool | int
+        self, mesh: DeviceMesh, reshard_after_forward: bool | int, python_copies: bool
     ):
         class FeedForward(nn.Module):
             # Stacked gate and up projections, sharded on F like w2. Scaled like
@@ -1704,7 +1709,18 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         )
         for layer in model:
             fully_shard_fn(layer)
+            if python_copies:
+                # A copy-out other than the default one, here delegating to it,
+                # takes the Python copies instead of the native one
+                group = fully_shard.state(layer)._fsdp_param_group
+                group._all_gather_output_fn = functools.partial(
+                    _default_all_gather_output_fn
+                )
         fully_shard_fn(model)
+        if python_copies:
+            model.set_reduce_scatter_input_fn(
+                functools.partial(_default_reduce_scatter_input_fn)
+            )
         # Unlike foreach, fused requires each gradient to have its parameter's
         # strides, including the empty shards of rank 7
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
@@ -3418,6 +3434,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            **kwargs,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3429,6 +3446,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                **kwargs,
             )
 
         orig_foreach_reduce = foreach_reduce
