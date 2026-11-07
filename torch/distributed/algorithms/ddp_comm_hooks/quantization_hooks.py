@@ -102,10 +102,15 @@ def quantization_pertensor_hook(
         ).get_future()
 
         fut.wait()
-        return all_ranks_quantized_tensor
+        # Also return the scales and zero points: dequantize_and_aggregate can run on
+        # another stream, and the Future records the streams of its value's tensors
+        # only, not of tensors a callback reads through its closure.
+        return all_ranks_quantized_tensor + all_ranks_s_and_z
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()
+        gathered = fut.wait()
+        all_ranks_quantized_tensor = gathered[:world_size]
+        gathered_s_and_z = gathered[world_size:]
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32
@@ -114,7 +119,7 @@ def quantization_pertensor_hook(
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
             aggregated_dequantized_tensor += _dequantize_per_tensor_backend(
-                quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
+                quantized_tensor, gathered_s_and_z[r][0], gathered_s_and_z[r][1]
             )
 
         return aggregated_dequantized_tensor / world_size
@@ -201,10 +206,15 @@ def quantization_perchannel_hook(
         ).get_future()
 
         fut.wait()
-        return all_ranks_quantized_tensor
+        # Also return the scales and zero points: dequantize_and_aggregate can run on
+        # another stream, and the Future records the streams of its value's tensors
+        # only, not of tensors a callback reads through its closure.
+        return all_ranks_quantized_tensor + all_ranks_s_and_z
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()
+        gathered = fut.wait()
+        all_ranks_quantized_tensor = gathered[:world_size]
+        gathered_s_and_z = gathered[world_size:]
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32
@@ -213,7 +223,7 @@ def quantization_perchannel_hook(
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
             aggregated_dequantized_tensor += _dequantize_per_channel_backend(
-                quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
+                quantized_tensor, gathered_s_and_z[r][0], gathered_s_and_z[r][1]
             )
 
         return (
