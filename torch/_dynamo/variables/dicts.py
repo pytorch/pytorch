@@ -18,6 +18,7 @@ in sets.py.
 """
 
 import collections
+import copyreg
 import functools
 import gc
 import sys
@@ -78,7 +79,9 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
+    generic_getattr,
     generic_getitem,
+    generic_getiter,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -1087,10 +1090,63 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
+    def reduce(
+        self: "OrderedDictVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # odict_reduce returns (type(od), (), state, None, iter(od.items())),
+        # with state from _PyObject_GetState: an overridden __getstate__, or
+        # the instance __dict__ (None when empty) plus any set __slots__.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c (odict_reduce)
+        py_type = self.python_type()
+        state: VariableTracker = ConstantVariable.create(None)
+        unmodeled_state = False
+        if py_type.__getstate__ is not object.__getstate__:
+            state = self.call_method(tx, "__getstate__", [], {})
+        else:
+            # The state depends on which attributes an input has, and the
+            # __dict__ VT does not guard on its keys.
+            dict_source = self.source and AttrSource(self.source, "__dict__")
+            if dict_source:
+                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            if istype(self, OrderedDictVariable):
+                # Dynamo does not model the __dict__ of a plain OrderedDict
+                # (setattr on one graph-breaks), so only an input can have one.
+                unmodeled_state = bool(
+                    dict_source and tx.output.resolve_source_value(dict_source)
+                )
+            else:
+                unmodeled_state = bool(copyreg._slotnames(py_type))  # type: ignore[attr-defined]
+                state = generic_getattr(tx, self, "__dict__")
+                if not generic_is_true(tx, state).as_python_constant():
+                    state = ConstantVariable.create(None)
+        if unmodeled_state:
+            unimplemented(
+                gb_type="Unsupported OrderedDict.__reduce__ state",
+                context=f"{py_type.__qualname__}.__reduce__()",
+                explanation="Dynamo models neither the instance attributes of a "
+                "plain OrderedDict nor the __slots__ of an OrderedDict subclass, "
+                "so it cannot build their pickle state.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        items = self.call_method(tx, "items", [], {})
+        return variables.TupleVariable(
+            [
+                VariableTracker.build(tx, type).call_function(tx, [self], {}),
+                variables.TupleVariable([]),
+                state,
+                ConstantVariable.create(None),
+                generic_getiter(tx, items),
+            ]
+        )
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
+        "__reduce__": Method(reduce),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
