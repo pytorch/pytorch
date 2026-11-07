@@ -116,6 +116,36 @@ struct GetScalarType<at::vec::VectorizedN<T, N>> {
 };
 #endif
 
+// std::sqrt for float / double without the errno update -fmath-errno keeps.
+// With errno, each sqrt is a call with a side effect that the compiler must
+// keep as is: it can't hoist it out of a loop or, under fast-math, rewrite
+// 1 / sqrt(x) as a reciprocal-sqrt estimate. Uses sqrtss / sqrtsd where the
+// compiler reports SSE2 (__SSE2__ for gcc / clang; _M_X64 but not ARM64EC, or
+// _M_IX86_FP >= 2 on 32-bit, for MSVC); elsewhere this is std::sqrt.
+#if defined(__SSE2__) || (defined(_M_X64) && !defined(_M_ARM64EC)) || \
+    (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#define INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2 1
+#include <emmintrin.h>
+#else
+#define INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2 0
+#endif
+
+template <typename T>
+inline auto sqrt_without_errno(T x) {
+#if INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2
+  if constexpr (std::is_same_v<T, float>) {
+    return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
+  } else if constexpr (std::is_same_v<T, double>) {
+    __m128d v = _mm_set_sd(x);
+    return _mm_cvtsd_f64(_mm_sqrt_sd(v, v));
+  } else {
+    return std::sqrt(x);
+  }
+#else
+  return std::sqrt(x);
+#endif
+}
+
 inline uint64_t ceil_log2_u64(uint64_t n) {
   if (n <= 1) {
     return 0;
