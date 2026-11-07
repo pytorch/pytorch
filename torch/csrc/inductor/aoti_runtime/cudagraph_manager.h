@@ -91,8 +91,9 @@ class CudaGraphManager {
   // - fn returns only tensors on the manager's device, or its capture fails.
   // - fn doesn't mutate its inputs (a replay would only mutate the graph's
   //   copies), and doesn't read other parts of their storage: the graph's
-  //   buffers hold only the inputs' elements, at other storage offsets
-  //   (aot_inductor.cudagraphs rejects models that would).
+  //   buffers, at other storage offsets, hold the inputs' elements, and
+  //   for a gapped input copied as a block also the caller's storage
+  //   between them (aot_inductor.cudagraphs rejects models that would).
   // - fn doesn't use random numbers: graphs have no RNG state, so its capture
   //   fails.
   // - fn is safe to call from several threads at once, including while another
@@ -197,6 +198,9 @@ class CudaGraphManager {
   // rather than frozen: live keys just warm up again, while a frozen table
   // would keep any later key from ever being captured.
   static constexpr size_t kMaxWarmupEntries = 1024;
+  // Inputs and outputs of at least this size are copied one by one: on a B200,
+  // the fused kernel stops beating memcpys for a pair of them around here.
+  static constexpr int64_t kMaxFusedCopyBytes = 16 << 10;
 
  private:
   static constexpr size_t kNoOutput = std::numeric_limits<size_t>::max();
@@ -213,19 +217,15 @@ class CudaGraphManager {
     return result;
   }
 
-  struct Graph {
-    AOTICudaGraph graph;
-    // Buffers covering each input's storage extent, and the views over them
-    // that fn was captured with.
-    std::vector<RAIIAtenTensorHandle> input_buffers;
-    std::vector<RAIIAtenTensorHandle> static_inputs;
-    std::vector<int64_t> input_extents;
-    // Whether each input overlaps itself, e.g. an expand.
-    std::vector<bool> input_overlaps;
-    // Distinct outputs, and for each output slot its index into them, or
-    // kNoOutput for a null output.
-    std::vector<RAIIAtenTensorHandle> static_outputs;
-    std::vector<size_t> output_slots;
+  // How a tensor covers its storage extent: every element once, some more than
+  // once (e.g. an expand), or with gaps (e.g. a slice).
+  enum class Storage { kDense, kOverlapping, kGapped };
+
+  // Same-dtype inputs, copied in with one _foreach_copy_, which the CUDA
+  // kernel fuses for the dtypes it dispatches.
+  struct CopyGroup {
+    std::vector<size_t> inputs;
+    std::vector<AtenTensorHandle> destinations;
   };
 
   struct TensorLayout {
@@ -233,6 +233,29 @@ class CudaGraphManager {
     int64_t dim = 0;
     int64_t* sizes = nullptr;
     int64_t* strides = nullptr;
+  };
+
+  struct Graph {
+    AOTICudaGraph graph;
+    // Buffers covering each input's storage extent, and the views over them
+    // that fn was captured with.
+    std::vector<RAIIAtenTensorHandle> input_buffers;
+    std::vector<RAIIAtenTensorHandle> static_inputs;
+    std::vector<int64_t> input_extents;
+    std::vector<Storage> input_storage;
+    std::vector<CopyGroup> copy_groups;
+    // Inputs copied one by one.
+    std::vector<size_t> separate_inputs;
+    // Distinct outputs, and for each output slot its index into them, or
+    // kNoOutput for a null output.
+    std::vector<RAIIAtenTensorHandle> static_outputs;
+    std::vector<size_t> output_slots;
+    // Small dense outputs, by dtype, cloned with one _foreach_copy_ per group,
+    // and the others, cloned one by one.
+    std::vector<std::vector<size_t>> output_groups;
+    std::vector<size_t> separate_outputs;
+    // Each output's layout, read once; static outputs are never restrided.
+    std::vector<TensorLayout> output_layouts;
   };
 
   static TensorLayout layout_of(AtenTensorHandle tensor) {
@@ -258,9 +281,11 @@ class CudaGraphManager {
   }
 
   // Possible overlap counts as overlap, which only costs a block copy.
-  static bool overlaps(const TensorLayout& layout) {
+  static Storage storage_of(const TensorLayout& layout) {
     std::vector<std::pair<int64_t, int64_t>> dims; // (stride, size)
+    int64_t numel = 1;
     for (int64_t d = 0; d < layout.dim; ++d) {
+      numel *= layout.sizes[d];
       if (layout.sizes[d] > 1) {
         dims.emplace_back(layout.strides[d], layout.sizes[d]);
       }
@@ -269,14 +294,150 @@ class CudaGraphManager {
     int64_t max_offset = 0;
     for (const auto& [stride, size] : dims) {
       if (stride <= max_offset) {
-        return true;
+        return Storage::kOverlapping;
       }
       max_offset += (size - 1) * stride;
     }
-    return false;
+    return storage_extent(layout) > numel ? Storage::kGapped : Storage::kDense;
   }
 
-  // An overlapping input's view overlaps itself, so copy the block it covers.
+  // The dtypes _foreach_copy_'s CUDA kernel fuses; it throws on lists of
+  // others, such as float8_e8m0fnu. Copying the rest one by one is always
+  // correct, so a model built from this header just won't fuse dtypes the
+  // kernel learns later. Read from the shim once.
+  static bool fused_dtype(int32_t dtype) {
+    static const int32_t kFused[] = {
+        aoti_torch_dtype_float32(),
+        aoti_torch_dtype_float64(),
+        aoti_torch_dtype_float16(),
+        aoti_torch_dtype_bfloat16(),
+        aoti_torch_dtype_float8_e4m3fn(),
+        aoti_torch_dtype_float8_e4m3fnuz(),
+        aoti_torch_dtype_float8_e5m2(),
+        aoti_torch_dtype_float8_e5m2fnuz(),
+        aoti_torch_dtype_complex64(),
+        aoti_torch_dtype_complex128(),
+        aoti_torch_dtype_bool(),
+        aoti_torch_dtype_uint8(),
+        aoti_torch_dtype_int8(),
+        aoti_torch_dtype_int16(),
+        aoti_torch_dtype_int32(),
+        aoti_torch_dtype_int64()};
+    return std::find(std::begin(kFused), std::end(kFused), dtype) !=
+        std::end(kFused);
+  }
+
+  // Whether an input, or a dense output, covering `extent` elements joins a
+  // fused copy: the kernel fuses its dtype, it isn't empty, and it is small
+  // enough that the fused kernel copies it no slower than a memcpy.
+  static bool fusable(int32_t dtype, int64_t extent) {
+    auto element_size =
+        static_cast<int64_t>(aoti_torch_dtype_element_size(dtype));
+    return fused_dtype(dtype) && extent > 0 &&
+        extent * element_size < kMaxFusedCopyBytes;
+  }
+
+  // Groups tensors[i], for each i in `indices`, by dtype. A dtype with only
+  // one goes to `separate`, as fusing saves nothing.
+  static std::vector<std::vector<size_t>> group_by_dtype(
+      const std::vector<RAIIAtenTensorHandle>& tensors,
+      const std::vector<size_t>& indices,
+      std::vector<size_t>& separate) {
+    std::map<int32_t, size_t> group_of_dtype;
+    std::vector<std::vector<size_t>> groups;
+    for (size_t i : indices) {
+      int32_t dtype = 0;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensors[i], &dtype));
+      auto [it, added] = group_of_dtype.try_emplace(dtype, groups.size());
+      if (added) {
+        groups.emplace_back();
+      }
+      groups[it->second].push_back(i);
+    }
+    std::vector<std::vector<size_t>> fused;
+    for (auto& group : groups) {
+      if (group.size() == 1) {
+        separate.push_back(group[0]);
+      } else {
+        fused.push_back(std::move(group));
+      }
+    }
+    return fused;
+  }
+
+  static void group_input_copies(Graph& graph) {
+    std::vector<size_t> candidates;
+    for (size_t i = 0; i < graph.input_storage.size(); ++i) {
+      bool fuse = fusable(
+          layout_of(graph.static_inputs[i]).dtype, graph.input_extents[i]);
+      (fuse ? candidates : graph.separate_inputs).push_back(i);
+    }
+    for (auto& inputs : group_by_dtype(
+             graph.static_inputs, candidates, graph.separate_inputs)) {
+      CopyGroup group{std::move(inputs), {}};
+      for (size_t i : group.inputs) {
+        group.destinations.push_back(
+            graph.input_storage[i] == Storage::kDense
+                ? graph.static_inputs[i].get()
+                : graph.input_buffers[i].get());
+      }
+      graph.copy_groups.push_back(std::move(group));
+    }
+  }
+
+  static void group_output_copies(Graph& graph) {
+    std::vector<size_t> candidates;
+    for (size_t i = 0; i < graph.static_outputs.size(); ++i) {
+      const auto& layout =
+          graph.output_layouts.emplace_back(layout_of(graph.static_outputs[i]));
+      bool fuse = storage_of(layout) == Storage::kDense &&
+          fusable(layout.dtype, storage_extent(layout));
+      (fuse ? candidates : graph.separate_outputs).push_back(i);
+    }
+    graph.output_groups = group_by_dtype(
+        graph.static_outputs, candidates, graph.separate_outputs);
+  }
+
+  // Clones, so later replays can't overwrite the returned outputs, with the
+  // captured outputs' sizes and strides.
+  std::vector<RAIIAtenTensorHandle> clone_outputs(Graph& graph) {
+    std::vector<RAIIAtenTensorHandle> clones(graph.static_outputs.size());
+    std::vector<AtenTensorHandle> destinations;
+    std::vector<AtenTensorHandle> sources;
+    for (const auto& group : graph.output_groups) {
+      destinations.clear();
+      sources.clear();
+      for (size_t i : group) {
+        const auto& layout = graph.output_layouts[i];
+        AtenTensorHandle clone = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+            layout.dim,
+            layout.sizes,
+            layout.strides,
+            layout.dtype,
+            aoti_torch_device_type_cuda(),
+            device_index_,
+            &clone));
+        clones[i] = RAIIAtenTensorHandle(clone);
+        destinations.push_back(clone);
+        sources.push_back(graph.static_outputs[i].get());
+      }
+      auto n = static_cast<int64_t>(sources.size());
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+          destinations.data(), n, sources.data(), n, 0));
+    }
+    for (size_t i : graph.separate_outputs) {
+      AtenTensorHandle clone = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_clone_preserve_strides(graph.static_outputs[i], &clone));
+      clones[i] = RAIIAtenTensorHandle(clone);
+    }
+    return clones;
+  }
+
+  // The block of storage an input covers, for copying a non-dense input: an
+  // overlapping view can't be a copy destination, and a gapped one is copied
+  // with its gaps when fused.
   static RAIIAtenTensorHandle block_of(AtenTensorHandle input, int64_t extent) {
     int64_t stride = 1;
     AtenTensorHandle block = nullptr;
@@ -286,8 +447,24 @@ class CudaGraphManager {
   }
 
   static void copy_inputs(Graph& graph, AtenTensorHandle* inputs) {
-    for (size_t i = 0; i < graph.input_overlaps.size(); ++i) {
-      if (graph.input_overlaps[i]) {
+    std::vector<RAIIAtenTensorHandle> blocks;
+    std::vector<AtenTensorHandle> sources;
+    for (auto& group : graph.copy_groups) {
+      sources.clear();
+      for (size_t i : group.inputs) {
+        if (graph.input_storage[i] == Storage::kDense) {
+          sources.push_back(inputs[i]);
+          continue;
+        }
+        blocks.push_back(block_of(inputs[i], graph.input_extents[i]));
+        sources.push_back(blocks.back().get());
+      }
+      auto n = static_cast<int64_t>(sources.size());
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+          group.destinations.data(), n, sources.data(), n, 0));
+    }
+    for (size_t i : graph.separate_inputs) {
+      if (graph.input_storage[i] == Storage::kOverlapping) {
         auto block = block_of(inputs[i], graph.input_extents[i]);
         AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_copy_(graph.input_buffers[i], block.get(), 0));
@@ -472,9 +649,10 @@ class CudaGraphManager {
             buffer, layout.dim, layout.sizes, layout.strides, 0, &view));
         graph->static_inputs.emplace_back(view);
         graph->input_extents.push_back(extent);
-        graph->input_overlaps.push_back(overlaps(layout));
+        graph->input_storage.push_back(storage_of(layout));
         input_handles.push_back(view);
       }
+      group_input_copies(*graph);
 
       // The region's allocations come from the pool.
       AOTICudaStreamGuard capture_guard(capture_stream_.get(), device_index_);
@@ -497,6 +675,7 @@ class CudaGraphManager {
               device_index == device_index_,
           "CudaGraphManager: an output of fn is not on the manager's device");
     }
+    group_output_copies(*graph);
     return graph;
   }
 
@@ -521,15 +700,7 @@ class CudaGraphManager {
     OnExit cleanup([&] { delete_outputs(outputs, num_outputs); });
     copy_inputs(graph, inputs);
     graph.graph.replay();
-    // Clones, so later replays can't overwrite the returned outputs.
-    std::vector<RAIIAtenTensorHandle> clones;
-    clones.reserve(graph.static_outputs.size());
-    for (auto& output : graph.static_outputs) {
-      AtenTensorHandle clone = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_clone_preserve_strides(output, &clone));
-      clones.emplace_back(clone);
-    }
+    auto clones = clone_outputs(graph);
     for (size_t i = 0; i < num_outputs; ++i) {
       if (graph.output_slots[i] != kNoOutput) {
         AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
