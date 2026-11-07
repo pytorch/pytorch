@@ -14104,8 +14104,7 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCPUIfNoMklSparse,
-               skipXPU],
+               skipCPUIfNoMklSparse],
            skips=(
                # Reduced-precision sampled_addmm needs CC >= 5.3 (cuSPARSE SDDMM);
                # skip the dtype check on older CUDA arches that have no CI runner.
