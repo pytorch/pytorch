@@ -10969,6 +10969,110 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta(self):
+        # Scan re-traces its body twice to build the joint graph that min-cut
+        # partitions. An annotate() region set in the body must survive both.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+        out.sum().backward()
+
+        # The forward and backward bodies are min-cut's output. The backward
+        # one recomputes the sin, and the copy must keep the region too.
+        for gm in (*backend.fw_graphs, *backend.bw_graphs):
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(gm, scan_node.args[0].target)
+            sins = body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+            self.assertGreater(len(sins), 0)
+            for sin in sins:
+                self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
+        # A plain-function body is re-run, not interpreted, by the first
+        # re-trace. Its annotate() region must still survive functionalization.
+        from torch._higher_order_ops.partitioner import create_hop_joint_graph
+        from torch.fx.traceback import annotate, preserve_node_meta
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        joint = {}
+
+        def f(carry, x):
+            joint["gm"] = create_hop_joint_graph(
+                body, (carry, x), functionalize=True
+            ).joint_gm
+            return carry.clone()
+
+        carry = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        with preserve_node_meta():
+            make_fx(f, tracing_mode="fake")(carry, x)
+        (sin,) = joint["gm"].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_steers_partition(self):
+        # A "recompute" tag on a node in the scan body decides whether min-cut
+        # saves it for the backward or recomputes it there.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        def saved_by_forward_body(policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag the sin in Dynamo's body graph, before AOTAutograd runs.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.target in (torch.sin, "sin"):
+                                node.meta["recompute"] = policy
+                return record(gm, example_inputs)
+
+            init = torch.randn(4, requires_grad=True)
+            xs = torch.randn(3, 4, requires_grad=True)
+            torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return [n.target for n in body_gm.graph.output_node().args[0]]
+
+        sin = torch.ops.aten.sin.default
+        self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
+        self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x

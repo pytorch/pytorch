@@ -985,7 +985,8 @@ class ScanAutogradImpl:
 
             grad_fw_outputs = (*grad_carry, *grad_y)
 
-            flat_out = self.hop_partitioned_graph.bw_gm(
+            # Interpret bw_gm so the nodes traced from it keep their meta.
+            flat_out = _maybe_run_with_interpreter(self.hop_partitioned_graph.bw_gm)(
                 *fw_intermediates,
                 *grad_fw_outputs,
             )

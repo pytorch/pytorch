@@ -3,7 +3,11 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    create_bw_fn,
+    materialize_as_graph,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -329,7 +333,12 @@ def create_hop_joint_graph(
         )
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
-    joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+    # Interpret graph modules so re-traced nodes keep their meta (e.g. recompute
+    # tags). A plain fw_fn sets its meta again when re-run. fw_gm can't replace
+    # fw_fn: it dropped the body's no_grad regions.
+    joint_fn = create_bw_fn(
+        _maybe_run_with_interpreter(fw_fn), fw_args, return_fw_outputs=True
+    )
     joint_gm = materialize_as_graph(
         joint_fn, fw_args + example_grads, force_enable_grad=True
     )
@@ -337,8 +346,11 @@ def create_hop_joint_graph(
         # Need to first trace out the joint_fn with autograd info on
         # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
-            # pyrefly: ignore [bad-argument-type]
-            torch.func.functionalize(joint_gm, remove="mutations_and_views"),
+            torch.func.functionalize(
+                # pyrefly: ignore [bad-argument-type]
+                _maybe_run_with_interpreter(joint_gm),
+                remove="mutations_and_views",
+            ),
             fw_args + example_grads,
         )
 
@@ -369,10 +381,15 @@ class HopGraphMinCutPartitioner:
         Returns a HopPartitionedGraph
         """
         from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch.utils.checkpoint import _tag_recompute_for_partitioner
 
-        joint_graph: HopJointGraph = create_hop_joint_graph(
-            fw_fn, fw_args, functionalize=True
-        )
+        # SAC's eager path traces the recompute into the joint graph, and
+        # min-cut's CSE merges it back into the forward. Make checkpoint write
+        # recompute tags instead, so min-cut follows the policy.
+        with _tag_recompute_for_partitioner():
+            joint_graph: HopJointGraph = create_hop_joint_graph(
+                fw_fn, fw_args, functionalize=True
+            )
         return joint_graph.partition(
             min_cut_rematerialization_partition, always_recompute_complex_exprs
         )
