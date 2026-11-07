@@ -463,7 +463,7 @@ def is_reuse_eligible(
 
     It is possible that a subgraph is morally reusable but does not fall
     into the limited support that Dynamo has today. Current limitations:
-      - The subgraph must not have side effects.
+      - The subgraph must not have side effects or builtin-method key guards.
       - No sourceful variable accessed by the subgraph may have been
         mutated, because guards are snapshotted on source values at trace
         time — if the underlying object changed since then, the cached
@@ -483,6 +483,7 @@ def is_reuse_eligible(
         if tracing_info.has_builtin_method_keys:
             # Stamp-out does not replay remapped receiver-alias guards. Trace
             # each region to retain its runtime identity constraints.
+            hc_log.debug("subgraph_reuse: not eligible -- builtin-method key guards")
             return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
@@ -622,7 +623,7 @@ def build_reuse_condition(
             ) from None
 
         # Tensor aliases determine which captures were deduplicated into one input.
-        # Keep non-tensor callable/module alias specialization on its existing path.
+        # Non-tensor aliases remain unchecked by reuse, as before this guard replay.
         if type_str == "DUPLICATE_INPUT" and not isinstance(value, torch.Tensor):
             continue
 
@@ -637,10 +638,15 @@ def build_reuse_condition(
             if has_mutated_vars(tx, extra_sources):
                 return None
             traced_sources.update(extra_sources)
-            value = (
-                value,
-                *(tx.output.resolve_source_value(dep) for dep in extra_sources),
-            )
+            try:
+                value = (
+                    value,
+                    *(tx.output.resolve_source_value(dep) for dep in extra_sources),
+                )
+            except Exception:
+                raise RuntimeError(
+                    f"subgraph_reuse: failed to resolve dependencies of '{source.name}' for {type_str} guard"
+                ) from None
         expected = handler.get_metadata_fn(guard, value)
         guard_tuples.append((source, handler, expected, guard))
 
@@ -678,6 +684,8 @@ class SubgraphReuseMatch:
     Guard checks record dependencies without copying Guard objects. Stamp-out builds
     them only for the selected candidate. A hash-keyed match has no condition and
     deliberately relies on the user's hash contract instead of replaying guards.
+    Dependencies of hash-keyed children are not replayed into an outer region;
+    its reuse must therefore also satisfy that contract.
     """
 
     entry: InvokeSubgraphReuseEntry
@@ -746,13 +754,7 @@ def static_capture_policy_matches(
     tx: "InstructionTranslatorBase", source: Source, new_source: Source, value: Any, /
 ) -> bool:
     """A static dimension in the cached body cannot become symbolic during replay."""
-    from torch._dynamo import config
-    from torch._dynamo.pgo import CodeId, get_code_state
-    from torch._dynamo.variables.builder import (
-        is_dynamic_source,
-        is_dynamic_value,
-        is_unbacked_source,
-    )
+    from .builder import VariableBuilder
 
     cached = tx.output.input_source_to_var.get(source)
     if not isinstance(cached, TensorVariable):
@@ -764,37 +766,21 @@ def static_capture_policy_matches(
     if not static_dims:
         return True
     current = tx.output.input_source_to_var.get(new_source)
-    if isinstance(current, TensorVariable):
-        current_example = current.proxy.node.meta.get("example_value")
-        return current_example is not None and all(
-            type(current_example.shape[i]) is int for i in static_dims
-        )
-    # An explicit shape spec may have source-specific policies. Trace it afresh.
-    if config._dynamic_shapes_spec is not None:
+    if not isinstance(current, TensorVariable):
+        # Use the same source-specific policy and merged PGO state as stamp-out.
+        current = VariableBuilder(tx, new_source)(value)
+    if not isinstance(current, TensorVariable):
         return False
-    state = get_code_state().get(CodeId.make(tx.f_code, tx.closure))
-    entry = state.automatic_dynamic.get(new_source.name) if state is not None else None
+    current_example = current.proxy.node.meta.get("example_value")
+    if current_example is None:
+        return False
     for dim in static_dims:
-        if (
-            any(
-                dim in getattr(value, name, ())
-                for name in (
-                    "_dynamo_dynamic_indices",
-                    "_dynamo_weak_dynamic_indices",
-                    "_dynamo_propagated_dynamic_indices",
-                    "_dynamo_unbacked_indices",
-                    "_dynamo_strict_unbacked_indices",
-                )
+        if type(current_example.shape[dim]) is not int:
+            hc_log.debug(
+                "subgraph_reuse: reuse failed -- captured source %s dimension %d became symbolic",
+                new_source.name,
+                dim,
             )
-            or is_dynamic_source(new_source.name, dim)
-            or is_unbacked_source(new_source.name, dim)
-        ):
-            return False
-        if is_dynamic_value(value.shape[dim]) or (
-            config.automatic_dynamic_shapes
-            and entry is not None
-            and entry.is_size_dynamic(dim)
-        ):
             return False
     return True
 
