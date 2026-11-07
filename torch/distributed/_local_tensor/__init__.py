@@ -315,6 +315,24 @@ def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> 
     rank_ids = rank_results.keys()
     rank_value = rank_results[next(iter(rank_ids))]
 
+    # Combine nested results, e.g. tuples of tuples, leaf by leaf when every rank
+    # returns the same structure. Flat results, and nested ones whose structure
+    # differs between ranks, use the one-level combine below.
+    if isinstance(rank_value, (list, tuple)) and any(
+        isinstance(v, (list, tuple)) for v in rank_value
+    ):
+        flat_results = {r: pytree.tree_flatten(v) for r, v in rank_results.items()}
+        specs = [spec for _, spec in flat_results.values()]
+        if all(spec == specs[0] for spec in specs):
+            num_leaves = len(next(iter(flat_results.values()))[0])
+            leaves = [
+                _combine_any_rank_results(
+                    {r: rank_leaves[i] for r, (rank_leaves, _) in flat_results.items()}
+                )
+                for i in range(num_leaves)
+            ]
+            return pytree.tree_unflatten(leaves, specs[0])
+
     if isinstance(rank_value, (list, tuple)):
         max_rank_result_len = max(len(v) for v in rank_results.values())
         ret_list = []
