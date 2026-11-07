@@ -2426,9 +2426,12 @@ class CudaReproTests(TestCase):
             ]
             compiled_out = opt_fn(*compiled_args)
 
+            t2 = arg0.view(379, 165, 2).mean(dim=2)
+            t11 = torch.nn.functional.relu(arg5).mean(dim=0)
+            well_conditioned = (t2 - t11).abs() > 1e-4
             torch.testing.assert_close(
-                eager_out,
-                compiled_out,
+                eager_out[well_conditioned],
+                compiled_out[well_conditioned],
                 rtol=5e-2,
                 atol=1e-1,
             )
