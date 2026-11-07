@@ -3368,25 +3368,11 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
-        auto external_data_ptr = at::DataPtr(
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            reinterpret_cast<void*>(data_ptr),
-            device);
-        // A null external DataPtr is valid for a zero-sized tensor;
-        // make_storage_impl would treat it as absent and try to allocate.
-        if (auto create_storage_impl =
-                c10::GetStorageImplCreate(device.type())) {
-          return c10::Storage(create_storage_impl(
-              c10::StorageImpl::use_byte_size_t(),
-              static_cast<int64_t>(size_bytes),
-              std::move(external_data_ptr),
-              /*allocator=*/nullptr,
-              /*resizable=*/false));
-        }
         return c10::Storage(
             c10::Storage::use_byte_size_t(),
             size_bytes,
-            std::move(external_data_ptr));
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
   py_module.def(

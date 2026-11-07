@@ -66,6 +66,10 @@ class GraphTreeGraphInterface(Protocol):
 
 @runtime_checkable
 class GraphTreeAllocatorInterface(Protocol):
+    def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
+        """Rebuild storage for recorded tensor metadata, including null data pointers."""
+        ...
+
     def begin_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None: ...
 
     def end_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None: ...
@@ -231,6 +235,15 @@ class CUDAGraphTreeGraphInterface(GraphTreeGraphInterface):
 
 
 class CUDAGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
+    def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
+        if metadata["data_ptr"] == 0:
+            return cast(
+                torch.types.Storage, torch.UntypedStorage(0, device=metadata["device"])
+            )
+        return torch._C._construct_storage_from_data_pointer(
+            metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+        )
+
     def begin_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None:
         torch._C._cuda_beginAllocateCurrentThreadToPool(device, pool)
 

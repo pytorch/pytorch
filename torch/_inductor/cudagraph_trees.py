@@ -990,6 +990,7 @@ class CUDAGraphNode:
         self.stream = stream
 
         allocator = tree_backend.get_allocator_interface()
+        self.create_storage = allocator.create_storage
         self._construct_tensor_from_storage_and_metadata = (
             allocator.construct_tensor_from_storage_and_metadata
         )
@@ -2017,11 +2018,6 @@ class CUDAGraphNode:
         s = self.create_storage(metadata) if storage is None else storage
         return self._construct_tensor_from_storage_and_metadata(
             metadata, cast(torch.types.Storage, s)
-        )
-
-    def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
-        return torch._C._construct_storage_from_data_pointer(
-            metadata["data_ptr"], metadata["device"], metadata["nbytes"]
         )
 
     def _allocate_and_copy_recording_inputs(
