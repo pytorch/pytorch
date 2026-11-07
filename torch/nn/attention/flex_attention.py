@@ -148,7 +148,9 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal[
+    "AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE", "HELION"
+]
 _R = TypeVar("_R")
 
 
@@ -317,9 +319,19 @@ class FlexKernelOptions(TypedDict, total=False):
           for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
           Unsupported backward configurations fall back to Triton, including GQA,
           decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
+        - "HELION": Experimental: Helion kernels compiled with Helion's CuTe backend
+          (Blackwell GPUs, float16 / bfloat16, static shapes), user needs to have helion installed
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested forward backend cannot be used. Default: "AUTO"
+    """
+
+    HELION_AUTOTUNE_EFFORT: NotRequired[Literal["none", "quick", "full"]]
+    """Helion autotuning effort with ``BACKEND="HELION"``.
+
+    "none" uses a pretuned config for the call's shape class, or Helion's default
+    config; "quick" and "full" autotune the Helion kernels when compiling (minutes
+    per kernel; Helion caches the result on disk). Default: "none"
     """
 
 
@@ -2224,9 +2236,9 @@ def _apply_kernel_options(
     # If forward kernel needs to return max is decided by this rule internally.
     if "OUTPUT_MAX" in kernel_options:
         raise AssertionError("OUTPUT_MAX must not be in kernel_options")
-    if kernel_options["BACKEND"] == "FLASH" and output_max:
+    if kernel_options["BACKEND"] in ("FLASH", "HELION") and output_max:
         raise NotImplementedError(
-            "Returning max scores is not supported with BACKEND='FLASH'. "
+            f"Returning max scores is not supported with BACKEND={kernel_options['BACKEND']!r}. "
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
