@@ -584,8 +584,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_native_matmul(mat1, mat2):
         if use_helion_native_matmul(mat1):
             # The Helion kernel reads in0[tile_y, tile_r] and in1[tile_r, tile_x]
-            # from memory: a.reshape(M, K) stays a view of a's storage, and
-            # (a + 1) becomes a buffer of its own.
+            # from a buffer or a strided view of one. Without this,
+            # a.permute(1, 0, 2).reshape(40, 64) @ b fails with
+            #   NotImplementedError: Cannot read a Helion dot operand at
+            #   8*yindex + 320*((r0_index//8)) + (ModularIndexing(r0_index, 1, 8))
+            # and (a + 1) @ b recomputes a + 1 in the K loop of every N tile.
             mat1, mat2 = realize_inputs(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 0)
@@ -909,8 +912,10 @@ def _tuned_addmm_out_dtype(inp, mat1, mat2, out_dtype, *, alpha, beta, layout):
         lambda: "self dtype must match either out_dtype or mat1 dtype",
     )
     # TODO: drop the cpp_wrapper fallback once aten.addmm.dtype_out has an AOTI
-    # C shim (torchgen/aoti/fallback_ops.py). Helion native matmul also takes
-    # this path, so that the product is a dot with a fused bias add.
+    # C shim (torchgen/aoti/fallback_ops.py). Helion native matmul takes this
+    # path too, so that addmm(c, a, b, out_dtype=torch.float32) is one Helion
+    # kernel, tmp3 = acc + tmp2; out0[tile_y, tile_x] = tmp3, rather than
+    # extern_kernels.addmm_dtype(arg0_1, arg1_1, arg2_1, out_dtype=torch.float32, ...).
     if V.graph.cpp_wrapper or use_helion_native_matmul(mat1):
         result = lowerings[aten.mm](mat1, mat2, out_dtype, layout=layout)
         if alpha != 1:

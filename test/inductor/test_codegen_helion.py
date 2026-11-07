@@ -19,7 +19,6 @@ from torch._inductor.codegen.helion import (
     HelionPrinter,
     HelionScheduling,
 )
-from torch._inductor.runtime.helion import HelionKernelWrapper
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -98,9 +97,8 @@ class TestHelionNativeMatmul(TestCase):
 import torch
 import helion
 import helion.language as hl
-from torch._inductor.runtime.helion import HelionKernelWrapper
 
-@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee", ref_mode=helion.RefMode.OFF)
+@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee")
 def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.Tensor) -> None:
     for tile_y, tile_x in hl.tile([40, 136]):
         acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
@@ -112,7 +110,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         tmp3 = acc + tmp2
         tmp4 = torch.relu(tmp3)
         out0[tile_y, tile_x] = tmp4.to(torch.bfloat16)
-kernel = HelionKernelWrapper(kernel)
 """,
         )
         self.assertIn(
@@ -302,6 +299,14 @@ kernel = HelionKernelWrapper(kernel)
         self.assertIn("tile_x.index", source)
         if batched:
             self.assertIn("5440*tile_z.index[:, None, None]", source)
+
+    def test_index_expr_wider_than_int32(self):
+        def fn(a, b):
+            index = torch.arange(40 * 136, device=a.device).reshape(40, 136)
+            return torch.where(index * 10**8 % 7 == 0, a @ b, 0.0)
+
+        (source,) = self.compile(fn, randn(40, 72), randn(72, 136))
+        self.assertIn("tile_x.index.to(torch.int64)", source)
 
     @parametrize("case", ["reshape", "offset_transpose", "same_storage"])
     def test_operand_views(self, case):
@@ -621,8 +626,6 @@ kernel = HelionKernelWrapper(kernel)
 
     @parametrize("backend", BACKENDS)
     def test_training_cudagraph(self, backend):
-        # The first CuTe compile runs inside the CUDA graph tree warmup; see
-        # HelionKernelWrapper for why it collects garbage afterwards.
         def fn(a, b):
             return torch.relu((a + 1) @ b).sum()
 
@@ -646,17 +649,18 @@ kernel = HelionKernelWrapper(kernel)
     @parametrize("effort", ["none", "quick", "full"])
     def test_kernel_settings(self, effort):
         # Only the decorator is checked, so skip running (and autotuning) it.
+        import helion
+
         with (
             config.patch({"helion.autotune_effort": effort}),
-            patch.object(HelionKernelWrapper, "__call__", lambda self, *args: None),
+            patch.object(helion.Kernel, "__call__", lambda self, *args: None),
         ):
             _, (code,) = run_and_get_code(
                 torch.compile(lambda a, b: a @ b), randn(32, 64), randn(64, 48)
             )
         self.assertIn(
             '@helion.kernel(backend="triton", static_shapes=True, '
-            f'autotune_effort="{effort}", dot_precision="ieee", '
-            "ref_mode=helion.RefMode.OFF)",
+            f'autotune_effort="{effort}", dot_precision="ieee")',
             code,
         )
 
@@ -721,29 +725,6 @@ class TestHelionCodegenUnits(TestCase):
             values, torch.tensor(2**25 + 1)
         ) - values
         self.assertEqual(result, reference)
-
-    def test_wrapper_requires_warmup_before_capture(self):
-        kernel = Mock()
-        kernel.specialization_key.return_value = ("shape",)
-        wrapper = HelionKernelWrapper(kernel)
-        arg = Mock(device=torch.device("cuda:0"))
-        arg.data_ptr.return_value = 16
-        with patch("torch.cuda.is_current_stream_capturing", return_value=True):
-            with self.assertRaisesRegex(RuntimeError, "warmed up"):
-                wrapper(arg)
-        with patch("torch.cuda.is_current_stream_capturing", return_value=False):
-            wrapper(arg)
-            wrapper(arg)
-        with patch("torch.cuda.is_current_stream_capturing", return_value=True):
-            arg.data_ptr.return_value = 32
-            wrapper(arg)
-            # An unaligned pointer is a different specialization.
-            arg.data_ptr.return_value = 17
-            with self.assertRaisesRegex(RuntimeError, "warmed up"):
-                wrapper(arg)
-        self.assertEqual(kernel.call_count, 3)
-        # Static shapes: Helion's key is taken once, after the first run.
-        self.assertEqual(kernel.specialization_key.call_count, 1)
 
 
 if __name__ == "__main__":

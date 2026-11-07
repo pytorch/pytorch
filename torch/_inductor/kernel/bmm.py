@@ -312,7 +312,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_native_matmul(mat1, mat2):
         if use_helion_native_matmul(mat1):
-            # As in tuned_mm, the Helion kernel reads the operands from memory.
+            # The Helion kernel reads the operands from memory; see tuned_mm.
             mat1, mat2 = realize_inputs(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 1)

@@ -5306,7 +5306,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
-        # Combo kernels are Triton; Helion matmul kernels stay standalone.
+        # Combo kernels are Triton; Helion matmul kernels stay standalone. A
+        # combo kernel of (a @ b, a.sin(), b.cos()) cannot emit the dot:
+        #   AssertionError: expected native matmul kernel
         if config.helion.native_matmul:
             filtered_nodes = [
                 node for node in filtered_nodes if not node.is_native_matmul()
@@ -7585,7 +7587,8 @@ class Scheduler:
             for node in (node1, node2)
         ):
             # Fusion benchmarking compiles Triton kernels, so it cannot measure
-            # a Helion matmul kernel; keep the fusion.
+            # a Helion matmul kernel; keep the fusion. With benchmark_fusion it
+            # would fail with AttributeError: module '...' has no attribute 'get_args'.
             return FusionResult.fuse(True)
 
         # Staged reductions cannot be represented by generic benchmark codegen.
