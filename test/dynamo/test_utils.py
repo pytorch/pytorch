@@ -6,6 +6,7 @@ import os
 import pprint
 import sys
 import unittest
+from collections import OrderedDict
 from unittest import mock
 from unittest.mock import patch
 
@@ -21,8 +22,10 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
+    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -32,6 +35,7 @@ from torch.testing._internal.common_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
+@instantiate_parametrized_tests
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -398,13 +402,14 @@ class TestUtils(TestCase):
         self.assertIsInstance(parsed, dict)
         self.assertNotIn("ignore_logging_functions", parsed)
 
-    def test_enumerate_items_with_dict_position_snapshots(self):
+    @parametrize("mapping_type", [dict, OrderedDict])
+    def test_enumerate_items_with_dict_position_snapshots(self, mapping_type):
         # VariableBuilder wraps a dict by consuming this generator lazily inside
         # dict(...). When the dict is a frame-globals dict, Dynamo can add or
         # drop generated globals (e.g. __resume_at removed by a CleanupHook) on
         # it mid-iteration. A live items view would raise "dictionary changed
         # size during iteration"; the snapshot must tolerate the mutation.
-        d = {f"k{i}": i for i in range(8)}
+        d = mapping_type((f"k{i}", i) for i in range(8))
         d["__resume_at_stale"] = -1
 
         out = {}

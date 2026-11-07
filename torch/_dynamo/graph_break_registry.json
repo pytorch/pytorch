@@ -1219,6 +1219,16 @@
       "Hints": []
     }
   ],
+  "GB9636": [
+    {
+      "Gb_type": "Builtin method keys with mutated equality",
+      "Context": "hashable key comparison",
+      "Explanation": "Dynamo cannot compare builtin method keys after their peer's class equality changes inside the compiled function.",
+      "Hints": [
+        "Move the class equality change outside the compiled function."
+      ]
+    }
+  ],
   "GB8974": [
     {
       "Gb_type": "synchronize with no accelerator available",
@@ -4042,6 +4052,28 @@
       "Hints": []
     }
   ],
+  "GB3320": [
+    {
+      "Gb_type": "Builtin method keys with custom metaclass equality",
+      "Context": "builtin method key hashing",
+      "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
+      "Hints": [
+        "Avoid mixing class keys with custom equality and builtin method keys.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2418": [
+    {
+      "Gb_type": "Builtin method keys with custom equality and local receivers",
+      "Context": "builtin method key hashing",
+      "Explanation": "Custom key equality can observe hash collisions with builtin methods, but a locally created receiver cannot be identity-guarded.",
+      "Hints": [
+        "Avoid mixing keys with custom equality and methods of locally created containers.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0223": [
     {
       "Gb_type": "torch.compile call with > 1 args",
@@ -5181,6 +5213,16 @@
       "Explanation": "The attribute '{name}' does not exist on opaque class {self.value}.",
       "Hints": [
         "Ensure '{name}' is a valid attribute of {type(self.value)}."
+      ]
+    }
+  ],
+  "GB8756": [
+    {
+      "Gb_type": "Conversion of compile-time-only hash value",
+      "Context": "FakeIdVariable",
+      "Explanation": "An identity-dependent hash cannot be converted to a constant result.",
+      "Hints": [
+        "Compute the hash outside the compiled function."
       ]
     }
   ],
@@ -7126,6 +7168,56 @@
       "Hints": [
         "Clone one of the aliased inputs before the call, or stop mutating it.",
         "Please open an issue."
+      ]
+    }
+  ],
+  "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB5295": [
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "Bind the method on an input or another stable object.",
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    },
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0580": [
+    {
+      "Gb_type": "Dictionary mutated during iteration",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "str(type(dict_vt))",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

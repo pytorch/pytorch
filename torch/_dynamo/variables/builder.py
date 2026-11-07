@@ -186,6 +186,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     get_type_dict_no_user_code,
+    InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -204,6 +205,7 @@ from ..utils import (
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
     namedtuple_fields,
+    odict_keys,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -250,6 +252,8 @@ from .dicts import (
     ConstDictVariable,
     DictKeysVariable,
     MappingProxyVariable,
+    NNModuleGlobalHookFlagsDictVariable,
+    NNModuleGlobalOrderedHookFlagsDictVariable,
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -664,7 +668,7 @@ def lookup_spec_from_dynamo_source(
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
 
     method_self = value.__self__
@@ -944,6 +948,44 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
+    try:
+        return list(enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        unimplemented(
+            gb_type="OrderedDict storage differs from linked keys",
+            context="OrderedDict input snapshot",
+            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            hints=[
+                "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                *graph_break_hints.FUNDAMENTAL,
+            ],
+            skip_frame=True,
+            apply_to_code=False,
+        )
+
+
+def _build_dict_items(
+    value: dict[Any, Any],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
+    snapshot = _dict_input_snapshot(value)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return {key: item for _, key, item in entries}
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1171,7 +1213,22 @@ class VariableBuilder:
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                is_from_attr_proxy_source(self.source)
+                isinstance(result, ConstDictVariable)
+                and any(
+                    isinstance(source, AttrSource)
+                    and source.member
+                    in (
+                        "_backward_hooks",
+                        "_backward_pre_hooks",
+                        "_forward_hooks",
+                        "_forward_pre_hooks",
+                        "_forward_hooks_with_kwargs",
+                        "_forward_pre_hooks_with_kwargs",
+                        "_forward_hooks_always_called",
+                    )
+                    for source in (self.source, result.source)
+                )
+                or is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1183,10 +1240,9 @@ class VariableBuilder:
             ):
                 if result.source is None:
                     raise AssertionError("Tracked alias must have a source")
-                # make_dupe_guard cannot relate local and global sources. Reusing
-                # the tracker still requires both sources to resolve to the same
-                # object (a base module, or the mapping behind a mappingproxy), so
-                # pin each source to its compile-time object.
+                # make_dupe_guard cannot relate local and global sources, e.g.
+                # G._forward_hooks is m._forward_hooks. Reusing the tracker still
+                # requires both sources to resolve to that same object, so pin both.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
@@ -1485,7 +1541,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1517,7 +1573,15 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
-                    key = ConstantVariable.create(k)
+                    # OrderedDict replay rebuilds linked order and must retain
+                    # the input key objects; plain dict replay can update in place.
+                    # Read values by literal key to avoid guarding input order.
+                    key_source = (
+                        ConstDictKeySource(base, i)
+                        if istype(value, collections.OrderedDict)
+                        else None
+                    )
+                    key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
@@ -1527,12 +1591,22 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
-            )
+            result = _build_dict_items(value, build_key_value)
 
-            if istype(value, collections.defaultdict):
+            if istype(value, (dict, collections.OrderedDict)) and any(
+                value is getattr(torch.nn.modules.module, name)
+                for name in (
+                    "_global_forward_hooks_with_kwargs",
+                    "_global_forward_hooks_always_called",
+                )
+            ):
+                flags_cls = (
+                    NNModuleGlobalOrderedHookFlagsDictVariable
+                    if istype(value, collections.OrderedDict)
+                    else NNModuleGlobalHookFlagsDictVariable
+                )
+                result = flags_cls(result, source=self.source)
+            elif istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,  # type: ignore[arg-type]
@@ -1615,7 +1689,10 @@ class VariableBuilder:
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
-                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                (
+                    issubclass(type(x), types.BuiltinMethodType)
+                    and x.__module__ == "torch"
+                )
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
@@ -1821,7 +1898,7 @@ class VariableBuilder:
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
-            isinstance(value, types.BuiltinMethodType)
+            issubclass(type(value), types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
@@ -2538,11 +2615,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif (
-            isinstance(value, (dict, collections.OrderedDict))
-            and type(value).__new__ is dict.__new__
-        ):
-            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2563,12 +2636,9 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
-            )
+            kv_items = _build_dict_items(value, build_key_value)
 
-            if isinstance(value, collections.defaultdict):
+            if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = UserDefinedDefaultDictVariable(
                     value,
@@ -2581,7 +2651,7 @@ class VariableBuilder:
             else:
                 udf_cls = (
                     UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
+                    if issubclass(type(value), collections.OrderedDict)
                     else UserDefinedDictVariable
                 )
                 result = udf_cls(value, items=kv_items, source=self.source)
@@ -2691,6 +2761,7 @@ class VariableBuilder:
             result = FrozenDataClassVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             if all(ConstantVariable.is_literal(k) for k in value):
                 # Model the view over its owning dict (the view's only gc
                 # referent) so mutations of the dict are visible through it.
@@ -2698,11 +2769,15 @@ class VariableBuilder:
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
                 if not isinstance(dict_vt, ConstDictVariable):
-                    raise AssertionError(f"Expected a dict, got {dict_vt}")
-                # Same key guards as ConstDictVariable.dict_keys installs.
-                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
-                self.tx.output.guard_on_key_order.add(dict_source)
-                return DictKeysVariable(dict_vt, source=self.source)
+                    unimplemented(
+                        gb_type="Unsupported dictionary view owner",
+                        context=str(type(dict_vt)),
+                        explanation="Dynamo cannot access this dictionary view's owner storage.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                return DictKeysVariable(
+                    dict_vt, source=self.source, is_ordered=type(value) is odict_keys
+                )
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",

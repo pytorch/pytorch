@@ -115,6 +115,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     attr_getset,
     AttrMutationKind,
+    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -126,7 +127,13 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import (
+    ConstDictVariable,
+    NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
+    OrderedDictVariable,
+    pydict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -143,6 +150,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
+    type_is_immutable,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -1570,6 +1578,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return CurrentDeviceVariable.create(device_arg.value)
 
         if self.can_constant_fold_through() and constant_args:
+            # Constant-folded constructors can consume mapping insertion order.
+            for arg in [*args, *kwargs.values()]:
+                if isinstance(arg, variables.ConstDictVariable):
+                    arg.install_dict_order_guard(tx)
             # constant fold
             return VariableTracker.build(
                 tx,
@@ -3393,7 +3405,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
-                return self.method_setattr_standard(tx, *args, **kwargs)
+                check_setattr_args(tx, args, kwargs)
+                return self.method_setattr_standard(tx, *args)
 
             if is_standard_delattr(method):
                 return self.method_setattr_standard(
@@ -3423,6 +3436,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if (
+                isinstance(method, types.MethodDescriptorType)
+                and method.__objclass__ is not object
+                and not is_torch_class(method.__objclass__)
+                and name not in self._slotdefs
+                and not trace_rules.is_polyfilled_callable(method)
+            ):
+                # Dispatch C descriptors such as `copy = dict.copy` through their defining type.
+                return VariableBuilder.create_internal_method_descriptor(
+                    method, owner=VariableTracker.build(tx, method.__objclass__)
+                ).call_function(tx, [self, *args], kwargs)
+
+            # Keep specialized slot/Torch/polyfill dispatch and Python overrides below.
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -3432,10 +3458,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Non-overridden base-class methods dispatch to the base VT via super()
-            # (self is-a base VT under multiple inheritance).  Skip comparison ops:
-            # they go through tp_richcompare_impl on the UserDefined*Variable
-            # subclass, which avoids tracing tensor elements via list_cmp.
+            # Non-slot methods use the base VT; slots preserve subclass semantics.
+            # Comparisons use subclass slots rather than tracing tensor elements in list_cmp.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -4104,6 +4128,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
+        if not config.assume_dunder_attributes_remain_unchanged and self.cls_source:
+            source = mro_attr_source(
+                tx, type(self.value), self.cls_source, "__getattribute__"
+            )
+            if source is not None:
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -4114,13 +4144,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Keep this off VariableTracker.build. The builder installs
-                    # a guard on the accessor eagerly; constructing directly
-                    # records the source and leaves the guard to whoever
-                    # consumes it. This path is generic, but an nn.Module
-                    # reaching it with an eager guard here made the guard
-                    # manager tag-unsafe (test/dynamo/test_guard_manager.py,
-                    # test_nn_module_tag_overridden_getattr_safe).
+                    # Avoid disabling recursive module tags with an instance function guard.
+                    # See `test_nn_module_tag_overridden_getattr_safe`.
                     VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -4250,6 +4275,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
+            if isinstance(type_attr, types.MethodDescriptorType):
+                method = self.lookup_method_descriptor(type_attr)
+                if self.cls_source:
+                    # Keep shadowing/MRO guards even when the declaring builtin is immutable.
+                    descriptor_source = self.get_source_by_walking_mro(tx, name)
+                    owner = next(
+                        owner
+                        for owner, namespace in iter_mro_static_dicts(type(self.value))
+                        if name in namespace
+                    )
+                    if not type_is_immutable(owner):
+                        install_guard(
+                            descriptor_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+                        )
+                if method is not None:
+                    return variables.BoundBuiltinMethodVariable(
+                        type_attr, self, source=source
+                    )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -4587,7 +4630,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.as_python_constant(), True
+                    return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
                     return int(result.evaluate_expr()), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
@@ -5307,7 +5350,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     def __init__(
         self,
         value: object,
-        items: dict[VariableTracker, VariableTracker] | None = None,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker]
+        | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, items=items if items is not None else {}, **kwargs)
@@ -5402,6 +5447,18 @@ class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariabl
         *UserDefinedDictVariable._nonvar_fields,
         *OrderedDictVariable._nonvar_fields,
     }
+
+
+class UserDefinedNNModuleHooksDictVariable(
+    UserDefinedDictVariable, NNModuleHooksDictVariable
+):
+    """Preserve subclass protocols while deferring local hook-ID specialization."""
+
+
+class UserDefinedNNModuleHooksOrderedDictVariable(
+    UserDefinedOrderedDictVariable, NNModuleHooksOrderedDictVariable
+):
+    """Ordered hook storage with the subclass's attributes and overrides."""
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.
@@ -5569,7 +5626,7 @@ class DefaultDictVariable(ConstDictVariable):
             raise AssertionError(
                 f"Expected ConstDictVariable, got {type(left)}: {left}"
             )
-        items = left.items
+        items = left.materialize_keys()
 
         new = tx.output.side_effects.track_new_user_defined_object(
             VariableTracker.build(tx, dict),
@@ -5625,7 +5682,7 @@ class DefaultDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         if len(args) != 1:
             raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return self.mp_subscript_impl(tx, args[0])
+        return DefaultDictVariable.mp_subscript_impl(self, tx, args[0])
 
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
@@ -5766,7 +5823,12 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
-                    items = list(arg.items.keys())
+                    storage = (
+                        arg.materialize_keys()
+                        if isinstance(arg, ConstDictVariable)
+                        else arg.items
+                    )
+                    items = list(storage)
                 else:
                     items = unpack_iterable(tx, arg)
             else:
@@ -6244,6 +6306,8 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
+
+    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
