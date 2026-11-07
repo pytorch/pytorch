@@ -2159,8 +2159,9 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def event(self, *reviews, **kw):
+    def event(self, *reviews, files=(), **kw):
         gh = Rules(reviews=list(reviews), comments=[], **kw)
+        gh.files += [{"filename": f} for f in files]
         with mock.patch("post_review.warn") as warned:
             self.assertEqual(go(gh), 0)
         # A REQUEST_CHANGES must come from the check, not from it failing.
@@ -2203,10 +2204,7 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_the_rule_must_cover_every_changed_file(self):
-        gh = Rules(reviews=[approval(6, "alice")], comments=[])
-        gh.files.append({"filename": "docs/index.md"})
-        go(gh)
-        (body,) = gh.posted()
+        _, body = self.event(approval(6, "alice"), files=["docs/index.md"])
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_a_catch_all_rule_approver_covers_any_file(self):
@@ -2240,13 +2238,13 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
     def test_an_unposted_comment_withdraws_nothing(self):
         class PostFails(Rules):
             def request(self, method, path, body=None, idempotent=None):
-                if body and body.get("event"):
-                    raise GitHubError(500, "down")
+                if method == "POST" and path.endswith("/pulls/1/reviews"):
+                    raise GitHubError(500, "review post down")
                 return super().request(method, path, body)
 
         old = old_review(5, state="CHANGES_REQUESTED")
         gh = PostFails(reviews=[old, approval(6, "alice")], comments=[])
-        with self.assertRaises(GitHubError):
+        with self.assertRaisesRegex(GitHubError, "review post down"):
             go(gh)
         self.assertEqual(dismissed(gh), [])
 

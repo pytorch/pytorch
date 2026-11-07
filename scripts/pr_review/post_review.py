@@ -55,7 +55,7 @@ Invariants:
   such as one put back defused, is replaced. A change request it leaves
   standing stays after an opt-out until a maintainer dismisses it.
 - API errors are warnings. The step fails only when an earlier change request
-  may still stand after a clean verdict.
+  may still stand after a clean or approved verdict.
 """
 
 from __future__ import annotations
@@ -1434,7 +1434,7 @@ def run(
             raise
         warn(f"automated review not posted: {exc}")
         # Without our review id, spare this commit's requests (overlapping run).
-        return clear_after_clean(gh, pr, sha, author, keep_commit=sha, reason=reason)
+        return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
     if new_id is RETRACTED:
         return 0
     if new_id is None:
