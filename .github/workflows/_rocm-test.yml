@@ -45,6 +45,11 @@ on:
         default: ""
         description: |
           Space-separated tests to exclude (empty string implies none)
+      enable-aotriton-experimental:
+        required: false
+        type: boolean
+        default: false
+        description: Enable experimental AOTriton GPU architectures.
       dashboard-tag:
         required: false
         type: string
@@ -222,6 +227,7 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
+          TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: ${{ inputs.enable-aotriton-experimental && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           USE_ARC: "1"
@@ -282,6 +288,7 @@ jobs:
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e TESTS_TO_EXCLUDE \
+            -e TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             -e USE_ARC \
