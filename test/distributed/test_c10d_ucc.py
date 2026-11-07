@@ -32,12 +32,15 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
+    DEFAULT_WORLD_SIZE,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_ucc,
     skip_if_lt_x_gpu,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
@@ -115,6 +118,8 @@ def simple_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_logging_init(self):
@@ -144,6 +149,8 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_default_store_timeout_ucc(self):
@@ -151,6 +158,8 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupUCCTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_process_group_ucc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
@@ -265,6 +274,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 result = [result]
             self.assertEqual(expected_output, result)
 
+    @requires_ucc()
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
 
@@ -363,18 +373,16 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
 
 class DistributedDataParallelTest(
-    test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
+    test_c10d_common.CommonDistributedDataParallelTest, MultiProcContinuousTest
 ):
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    world_size = DEFAULT_WORLD_SIZE
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "ucc"
 
     def _get_process_group(self):
-        store = self._get_store()
-        c10d.init_process_group(
-            "ucc", store=store, rank=self.rank, world_size=self.world_size
-        )
-        return c10d.distributed_c10d._get_default_group()
+        return self.pg
 
     def _test_ucc_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -684,13 +692,6 @@ class DistributedDataParallelTest(
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
-        dist.init_process_group(
-            "ucc",
-            init_method=f"file://{self.file_name}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-
         class TestModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -841,6 +842,39 @@ class DistributedDataParallelTest(
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
 
+    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
+    @requires_ucc()
+    def test_ddp_comm_hook_sparse_gradients(self):
+        """
+        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        simple hook that does allreduce and works with ucc backend for this test.
+        """
+        process_group = self._get_process_group()
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        def allreduce_hook_ucc(
+            state: object, bucket: dist.GradBucket
+        ) -> torch.futures.Future[torch.Tensor]:
+            def div_by_world_size(fut):
+                # Divide the result by 2 * world_size.
+                return fut.wait()[0] / self.world_size
+
+            # Prepare allreduced grad bucket tensors by running an async work.
+            fut = process_group.allreduce([bucket.buffer()]).get_future()
+            return fut.then(div_by_world_size)
+
+        ddp_model.register_comm_hook(None, allreduce_hook_ucc)
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
+
     def _gpu_model_with_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
@@ -873,6 +907,28 @@ class DistributedDataParallelTest(
         # check whether the grads are equal to what simple_hook's then callback returns.
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
+
+
+class DistributedDataParallelUccCommHookValidationTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _get_process_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "ucc", store=store, rank=self.rank, world_size=self.world_size
+        )
+        return c10d.distributed_c10d._get_default_group()
 
     @requires_ucc()
     def test_ddp_invalid_comm_hook_init(self):
@@ -970,42 +1026,10 @@ class DistributedDataParallelTest(
         ):
             model.register_comm_hook(None, dummy_hook)
 
-    # TODO: backward pass: input tensor must be dense
-    @skip_but_pass_in_sandcastle("backward pass: input tensor has to be dense")
-    @requires_ucc()
-    def test_ddp_comm_hook_sparse_gradients(self):
-        """
-        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
-        simple hook that does allreduce and works with ucc backend for this test.
-        """
-        process_group = self._get_process_group()
-
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
-
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-        )
-
-        def allreduce_hook_ucc(
-            state: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future[torch.Tensor]:
-            def div_by_world_size(fut):
-                # Divide the result by 2 * world_size.
-                return fut.wait()[0] / self.world_size
-
-            # Prepare allreduced grad bucket tensors by running an async work.
-            fut = process_group.allreduce([bucket.buffer()]).get_future()
-            return fut.then(div_by_world_size)
-
-        ddp_model.register_comm_hook(None, allreduce_hook_ucc)
-
-        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
-
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def device(self):
         return "cpu"
@@ -1079,6 +1103,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 class UccProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.GENERIC
+
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
@@ -1097,7 +1123,7 @@ class UccProcessGroupWithDispatchedCollectivesTests(
             rank=self.rank,
             store=store,
         )
-        device = "cuda"
+        device = "cpu"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_single(output_tensor, tensor)
