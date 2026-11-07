@@ -548,6 +548,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         node: BaseSchedulerNode,
         require_epilogue_fusion: bool = False,
         min_tile_shape: tuple[int, int] = (0, 0),
+        *,
+        install_guards: bool = True,
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
         if not isinstance(node, SchedulerNode):
@@ -592,7 +594,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
                         ir_node
                     )
-            tensor_box = selected_choice.output_node()
+            tensor_box = selected_choice.output_node(install_guards=install_guards)
             # pyrefly: ignore [missing-attribute]
             return cast(NVUniversalGemmBuffer, tensor_box.data.data)
 
@@ -1269,6 +1271,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             template_node,
             require_epilogue_fusion=bool(epilogue_nodes),
             min_tile_shape=epilogue_program.min_tile_shape,
+            install_guards=not only_gen_src_code,
         )
         swap_ab = ctb.swap_ab
         reduction_geometries = epilogue_program.oriented_reduction_geometries(swap_ab)
