@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import builtins
 import copy
 import dataclasses
 import datetime
@@ -968,6 +967,8 @@ class TestClassSetattr(TestCase):
         self.assertNotEqual(Point.__doc__, original_doc)
 
     def test_builtin_mutable_class_doc_set_graph_breaks(self):
+        import builtins
+
         if not hasattr(builtins, "ExceptionGroup"):
             self.skipTest("ExceptionGroup is unavailable")
 
