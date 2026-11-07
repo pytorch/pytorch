@@ -1519,6 +1519,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.to_dense: lambda self, dtype=None, *, masked_grad=None: -1,
         Tensor._to_dense: lambda self, dtype=None, masked_grad=None: -1,
         Tensor.to_sparse: lambda self: -1,
+        Tensor.tobytes: lambda self, order="C": -1,
         Tensor.tolist: lambda self: -1,
         Tensor.to_mkldnn: lambda self: -1,
         Tensor.type_as: lambda self, other: -1,
