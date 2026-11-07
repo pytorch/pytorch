@@ -89,6 +89,7 @@ from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -176,6 +177,8 @@ class FailChoiceCaller(ChoiceCaller):
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
         make_matrix = functools.partial(
             random_matrix_with_scaled_reduction_dim,
@@ -1492,7 +1495,9 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     len(kernel_events),
                     1,
-                    lambda msg: f"{msg}\nExpected exactly 1 kernel event, but got {len(kernel_events)}",
+                    lambda msg: (
+                        f"{msg}\nExpected exactly 1 kernel event, but got {len(kernel_events)}"
+                    ),
                 )
 
                 # Check that grid size matches expected values based on carveout
@@ -1506,7 +1511,9 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     kernel_events[0]["grid_size"],
                     expected_grid_size,
-                    lambda msg: f"{msg}\nGrid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
+                    lambda msg: (
+                        f"{msg}\nGrid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}"
+                    ),
                 )
 
     @parametrize("dynamic", (False, True))
@@ -2157,7 +2164,9 @@ class TestMaxAutotune(TestCase):
 
                     self.assertTrue(
                         divisor_found,
-                        lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
+                        lambda msg: (
+                            f"{msg}\nCould not find a split in {divisors} in {kernel}"
+                        ),
                     )
 
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
@@ -2308,8 +2317,8 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.side_effect = (
-                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            decomp_mock.side_effect = lambda *args, **kwargs: (
+                kwargs.get("threshold_multiple", 1) == 1
             )
 
             out, code = run_and_get_code(compiled_func, a, b)
@@ -2363,8 +2372,8 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.side_effect = (
-                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            decomp_mock.side_effect = lambda *args, **kwargs: (
+                kwargs.get("threshold_multiple", 1) == 1
             )
 
             def fwd_bwd():
@@ -3373,7 +3382,9 @@ class TestMaxAutotune(TestCase):
                     self.assertIsInstance(
                         choice.layout,
                         expected_layout,
-                        lambda msg: f"{msg}\nExpected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                        lambda msg: (
+                            f"{msg}\nExpected {expected_layout.__name__} with max_autotune={max_autotune_enabled}"
+                        ),
                     )
             return choices
 
@@ -3740,7 +3751,9 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: (
+                f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}"
+            ),
         )
 
         with config.patch(
@@ -4045,7 +4058,9 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: (
+                f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}"
+            ),
         )
 
         with config.patch(
@@ -4626,13 +4641,17 @@ class TestTemplateConfigPruning(TestCase):
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    lambda msg: f"{msg}\nConfig {pinned} failed to compile due to shared memory, "
-                    "but the checker predicted it would NOT exceed shared memory limits.",
+                    lambda msg: (
+                        f"{msg}\nConfig {pinned} failed to compile due to shared memory, "
+                        "but the checker predicted it would NOT exceed shared memory limits."
+                    ),
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
+                    lambda msg: (
+                        f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}"
+                    ),
                 )
 
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
@@ -4666,6 +4685,8 @@ class TestTemplateConfigPruning(TestCase):
 
 
 class TestMaxAutotunePrecompile(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_precompilation_threads(self):
         import threading
         from typing import Any
@@ -4777,6 +4798,8 @@ class TestMaxAutotunePrecompile(TestCase):
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneSubproc(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _create_buffer(self, name, shape):
         return Buffer(
             name=name,
@@ -4997,12 +5020,16 @@ class TestMaxAutotuneSubproc(TestCase):
         self.assertGreater(
             len(finite_timings_ms),
             0,
-            lambda msg: f"{msg}\nExpected finite autotune benchmark timings, got {benchmark_timings_ms}",
+            lambda msg: (
+                f"{msg}\nExpected finite autotune benchmark timings, got {benchmark_timings_ms}"
+            ),
         )
         self.assertGreater(
             min(finite_timings_ms),
             0.0,
-            lambda msg: f"{msg}\nExpected autotune benchmark timing > 0, got {finite_timings_ms}",
+            lambda msg: (
+                f"{msg}\nExpected autotune benchmark timing > 0, got {finite_timings_ms}"
+            ),
         )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -5076,6 +5103,8 @@ class TestMaxAutotuneSubproc(TestCase):
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         PatchCaches.setUp()
@@ -5153,6 +5182,8 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def check_healthy(self, p: TuningProcess, device: int | None = None):
         result = random.random()
         bmreq = _TestBenchmarkRequest(result, device=device)
@@ -5210,6 +5241,8 @@ class TestTuningProcess(TestCase):
 
 
 class TestTuningProcessPool(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
     def assert_path_in_dir(self, path, expected_dir):
@@ -5545,6 +5578,8 @@ class TestTuningProcessPool(TestCase):
 
 @instantiate_parametrized_tests
 class TestPrologueFusion(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -6498,6 +6533,8 @@ def mock_benchmark_choice_wrapper(aten_time, triton_time):
 
 @instantiate_parametrized_tests
 class TestEpilogueFusionStaticAnalysis(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -7128,6 +7165,8 @@ def _tdm_fake_kernel(**overrides):
 )
 @instantiate_parametrized_tests
 class TestTDMConfigDenseAndGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     _PREREQS = "torch._inductor.utils._gfx1250_device_prereqs"
 
     def test_tdm_arch_gate_accepts_only_gfx1250(self):
@@ -7924,6 +7963,8 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
 
 class TestTensorDescriptorCompatibility(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tdm_generic_descriptor_checker_preserves_backend_dtype_policy(self):
         from torch._inductor.codegen.triton import TMACompatibilityChecker
 
@@ -8067,6 +8108,8 @@ def simple_fn():
 
 class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAnalysis):
     """Tests for AsyncPipelinedAutotuning path."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     SKIP_TESTS = {
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
@@ -8297,6 +8340,8 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 )
 @instantiate_parametrized_tests
 class TestTDMEndToEnd(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compile_and_get_code(self, fn, *args):
         with config.patch(
             {
