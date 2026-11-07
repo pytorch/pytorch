@@ -5032,13 +5032,15 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("mask_type", ["none", "bool", "float"])
     @parametrize("seq_len", [64, 704])
-    def test_cudnn_attention_low_lse_mask_grad_196678(self, device, dtype, mask_type, seq_len):
+    @parametrize("use_autocast", [False, True])
+    def test_cudnn_attention_low_lse_mask_grad_196678(self, device, dtype, mask_type, seq_len, use_autocast):
         # https://github.com/pytorch/pytorch/issues/196678
         head_dim = 64
         shape = (1, 1, seq_len, head_dim)
-        q = torch.randn(shape, device=device, dtype=dtype) * 0.1
-        k = torch.randn(shape, device=device, dtype=dtype) * 0.1
-        v = torch.randn(shape, device=device, dtype=dtype)
+        leaf_dtype = torch.float32 if use_autocast else dtype
+        q = torch.randn(shape, device=device, dtype=leaf_dtype) * 0.1
+        k = torch.randn(shape, device=device, dtype=leaf_dtype) * 0.1
+        v = torch.randn(shape, device=device, dtype=leaf_dtype)
         q[..., 0] = 1.0
         k[..., 0] = -120 * math.sqrt(head_dim)
         q.requires_grad_()
@@ -5052,7 +5054,8 @@ class TestSDPAAccelerator(NNTestCase):
             mask = torch.zeros(seq_len, seq_len, device=device, dtype=dtype)
 
         cudnn_version = torch.backends.cudnn.version() or 0
-        params = SDPAParams(q, k, v, mask, 0.0, False, False)
+        # Backend eligibility inspects tensor dtypes directly, without autocasting.
+        params = SDPAParams(q.to(dtype), k.to(dtype), v.to(dtype), mask, 0.0, False, False)
         self.assertEqual(
             torch.backends.cuda.can_use_cudnn_attention(params),
             cudnn_version >= 92600,
@@ -5062,9 +5065,13 @@ class TestSDPAAccelerator(NNTestCase):
             if cudnn_version >= 92600
             else contextlib.nullcontext()
         )
-        with backend_context:
+        with backend_context, torch.autocast("cuda", dtype=dtype, enabled=use_autocast):
             out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        self.assertEqual(out.dtype, dtype)
         grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+
+        for grad in grads:
+            self.assertEqual(grad.dtype, leaf_dtype)
 
         for name, result in zip(("output", "grad_q", "grad_k", "grad_v"), (out, *grads)):
             self.assertTrue(result.isfinite().all(), f"{name} contains non-finite values")
