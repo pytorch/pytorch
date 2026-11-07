@@ -2491,6 +2491,35 @@ class TestFlexFlash(InductorTestCase):
             lse_flash.float(), lse_triton.float(), atol=1e-4, rtol=1e-4
         )
 
+    @dtypes(torch.float16, torch.bfloat16)
+    @with_tf32_off
+    def test_flash_backend_lse_after_export(self, device, dtype):
+        """A non-strict export traced outside dynamo and then lowered with FLASH
+        returns natural-log lse."""
+        torch.manual_seed(0)
+        q, k, v = create_test_tensors(
+            batch_size=1, num_heads=1, seq_len=128, dim=32, dtype=dtype, device=device
+        )
+
+        class Attention(torch.nn.Module):
+            def forward(self, q, k, v):
+                _, aux = flex_attention(
+                    q,
+                    k,
+                    v,
+                    scale=1.0,
+                    kernel_options={"BACKEND": "FLASH"},
+                    return_aux=AuxRequest(lse=True),
+                )
+                return aux.lse
+
+        exported = torch.export.export(Attention(), (q, k, v), strict=False)
+        lse = torch.compile(exported.module())(q, k, v)
+        ref_lse = torch.logsumexp(
+            torch.matmul(q.float(), k.float().transpose(-2, -1)), dim=-1
+        )
+        torch.testing.assert_close(lse.float(), ref_lse, atol=1e-4, rtol=1e-4)
+
     @xfailIfSM8X
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)

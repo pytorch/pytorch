@@ -1,4 +1,5 @@
 import contextlib
+import dis
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -951,6 +952,78 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return grad_query, grad_key, grad_value, *none_grads, *grad_score_mod_captured
 
 
+def _needs_grad(x: Any) -> bool:
+    if isinstance(x, Tensor):
+        return x.requires_grad
+    if isinstance(x, torch.nn.Module) and not isinstance(x, GraphModule):
+        return any(p.requires_grad for p in x.parameters())
+    return False
+
+
+def _lift_score_mod_closure(
+    score_mod: Callable, score_mod_other_buffers: tuple
+) -> tuple[Callable, tuple]:
+    # Dynamo lifts tensors and module parameters captured by score_mod into
+    # score_mod_other_buffers so they receive gradients; do the same when the HOP
+    # runs eagerly.
+    from torch.nn.attention.flex_attention import (
+        _extract_callable_pytree,
+        _reconstruct_closure_fn,
+        _warn_once,
+    )
+    from torch.nn.utils.stateless import _reparametrize_module
+
+    fn = getattr(score_mod, "func", score_mod)
+    code = getattr(fn, "__code__", None)
+    if code is not None:
+        global_names = {
+            i.argval for i in dis.get_instructions(code) if i.opname == "LOAD_GLOBAL"
+        }
+        if any(_needs_grad(fn.__globals__.get(n)) for n in global_names):
+            _warn_once(
+                warning_id="flex_attention_eager_global_capture",
+                message=(
+                    "flex_attention is running without torch.compile and score_mod "
+                    "reads a global tensor or module that requires grad; it will "
+                    "not receive gradients. Capture it in a closure instead."
+                ),
+            )
+
+    leaves, spec, stripped = _extract_callable_pytree(score_mod)
+    tensor_idx = [
+        i for i, x in enumerate(leaves) if isinstance(x, Tensor) and x.requires_grad
+    ]
+    modules: dict[int, torch.nn.Module] = {
+        id(x): x
+        for x in (*leaves, score_mod)
+        if isinstance(x, torch.nn.Module) and _needs_grad(x)
+    }
+    module_params = [
+        (m, {n: t for n, t in m.named_parameters() if t.requires_grad})
+        for m in modules.values()
+    ]
+    if not tensor_idx and not module_params:
+        return score_mod, score_mod_other_buffers
+    n_buffers = len(score_mod_other_buffers)
+
+    def lifted_score_mod(score, b, h, m, n, *buffers):
+        extra = iter(buffers[n_buffers:])
+        closure_leaves = list(leaves)
+        for i in tensor_idx:
+            closure_leaves[i] = next(extra)
+        fn = _reconstruct_closure_fn(stripped, closure_leaves, spec)
+        with contextlib.ExitStack() as stack:
+            for mod, params in module_params:
+                lifted_params = {name: next(extra) for name in params}
+                stack.enter_context(_reparametrize_module(mod, lifted_params))
+            return fn(score, b, h, m, n, *buffers[:n_buffers])
+
+    lifted = [leaves[i] for i in tensor_idx]
+    for _, params in module_params:
+        lifted.extend(params.values())
+    return lifted_score_mod, (*score_mod_other_buffers, *lifted)
+
+
 # TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @flex_attention.py_impl(DispatchKey.Autograd)
 def flex_attention_autograd(
@@ -965,6 +1038,11 @@ def flex_attention_autograd(
     mask_mod_other_buffers: tuple[Tensor, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+    if torch.is_grad_enabled():
+        score_mod, score_mod_other_buffers = _lift_score_mod_closure(
+            score_mod, score_mod_other_buffers
+        )
 
     with TransformGetItemToIndex():
         input_requires_grad = any(
