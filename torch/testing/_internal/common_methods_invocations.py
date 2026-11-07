@@ -10241,6 +10241,31 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         ]
     )
 
+def error_inputs_pixel_shuffle(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(make_arg((4, 4)), upscale_factor=2),
+                     error_regex=r"at least 3 dimensions, but got input with 2 dimension\(s\)")
+    for factor in (0, -2):
+        yield ErrorInput(SampleInput(make_arg((1, 4, 4, 4)), upscale_factor=factor),
+                         error_regex=f"expects a positive upscale_factor, but got {factor}")
+    yield ErrorInput(SampleInput(make_arg((1, 4, 4, 4)), upscale_factor=2**32),
+                     error_type=ValueError,
+                     error_regex=r"upscale factor is too large, \(upscale_factor\)\^2 overflowed")
+    yield ErrorInput(SampleInput(make_arg((1, 5, 4, 4)), upscale_factor=2),
+                     error_regex=r"input.size\(-3\)=5 is not divisible by 4")
+
+def error_inputs_pixel_unshuffle(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(make_arg((4, 4)), downscale_factor=2),
+                     error_regex=r"at least 3 dimensions, but got input with 2 dimension\(s\)")
+    for factor in (0, -2):
+        yield ErrorInput(SampleInput(make_arg((1, 4, 4, 4)), downscale_factor=factor),
+                         error_regex=f"expects a positive downscale_factor, but got {factor}")
+    yield ErrorInput(SampleInput(make_arg((1, 4, 5, 4)), downscale_factor=2),
+                     error_regex=r"height to be divisible by downscale_factor, but input.size\(-2\)=5")
+    yield ErrorInput(SampleInput(make_arg((1, 4, 4, 5)), downscale_factor=2),
+                     error_regex=r"width to be divisible by downscale_factor, but input.size\(-1\)=5")
+
 def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -22707,6 +22732,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         "nn.functional.pixel_shuffle",
         sample_inputs_func=sample_inputs_pixel_shuffle,
+        error_inputs_func=error_inputs_pixel_shuffle,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -22723,6 +22749,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         "nn.functional.pixel_unshuffle",
         sample_inputs_func=sample_inputs_pixel_unshuffle,
+        error_inputs_func=error_inputs_pixel_unshuffle,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
