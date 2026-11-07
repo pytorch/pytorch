@@ -102,16 +102,6 @@ def normalize_as_list(x: object) -> list[object]:
     return [x]
 
 
-def _get_autocast_states() -> list[Any]:
-    return [
-        torch.is_autocast_enabled("cuda"),
-        torch.is_autocast_enabled("cpu"),
-        torch.get_autocast_dtype("cuda"),
-        torch.get_autocast_dtype("cpu"),
-        torch.is_autocast_cache_enabled(),
-    ]
-
-
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
     @simple_wraps(f)
     def g(args: list[Any]) -> Any:
