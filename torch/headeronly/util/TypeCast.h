@@ -87,16 +87,10 @@ inline constexpr bool rounds_through_float = [] {
       L::digits + 2 <= F::digits && L::max_exponent <= F::max_exponent &&
       L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
 }();
-
-// Whether T converts from double with a single rounding anyway: Half does on
-// aarch64 CPUs, where it is constructed from the native float16_t (Half.h).
-template <typename T>
-inline constexpr bool converts_from_double_once =
-#if defined(__aarch64__) && !defined(__CUDACC__)
-    std::is_same_v<T, Half>;
-#else
-    false;
-#endif
+// This includes Half on aarch64 CPUs, where it is constructed from the native
+// float16_t, which converts from double with a single rounding (fcvt h, d).
+// But GCC 13 to 15 vectorize that conversion for SVE as two roundings (fcvt
+// z.s, z.d then fcvt z.h, z.s).
 } // namespace detail
 
 template <typename dest_t, typename src_t>
@@ -116,8 +110,7 @@ struct static_cast_with_inter_type {
           static_cast_with_inter_type<part_t, double>::apply(r), part_t(0));
     } else if constexpr (
         std::is_same_v<decltype(r), double> &&
-        detail::rounds_through_float<dest_t> &&
-        !detail::converts_from_double_once<dest_t>) {
+        detail::rounds_through_float<dest_t>) {
       return static_cast<dest_t>(detail::round_to_odd_float(r));
     } else {
       return static_cast<dest_t>(r);
