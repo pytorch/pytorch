@@ -5127,6 +5127,7 @@ class CppScheduling(BaseScheduling):
             BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
+            BackendFeature.DEVICE_ASSERT_ASYNC,
         ]
     )
 
