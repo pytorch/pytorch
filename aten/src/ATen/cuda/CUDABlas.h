@@ -20,6 +20,8 @@
 
 namespace at::cuda::blas {
 
+TORCH_CUDA_CPP_API bool rowwise_scaled_mm_uses_cublaslt(c10::DeviceIndex device_index, bool scalar_scales);
+
 inline bool useBF16x9() {
   // NoTF32Guard is the existing force-IEEE override for CUDA FP32 matmul, so
   // it must also suppress other non-IEEE modes.

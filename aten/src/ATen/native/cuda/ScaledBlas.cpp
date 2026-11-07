@@ -764,10 +764,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // We are doing row-wise scaling
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
 #ifndef USE_ROCM
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
-        // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-        ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
+    if (!at::cuda::blas::rowwise_scaled_mm_uses_cublaslt(
+            mat1.get_device(), scale_a.dim() == 0 && scale_b.dim() == 0)) {
       TORCH_CHECK_VALUE(
           out.dtype() == kBFloat16 || out.dtype() == kHalf ||
               out.dtype() == kFloat,
@@ -891,12 +889,8 @@ bool rowwise_uses_cublas(
     const Tensor& scale_a,
     const Tensor& scale_b) {
 #ifndef USE_ROCM
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  // Blackwell cuBLAS only accepts tiled 1D factors, not 2D block scales.
-  return dprops->major >= 9 && CUBLAS_VERSION >= 120900 &&
-      cublasLtGetVersion() >= 120900 &&
-      (dprops->major < 10 ||
-       (scale_a.sizes().empty() && scale_b.sizes().empty()));
+  return at::cuda::blas::rowwise_scaled_mm_uses_cublaslt(
+      scale_a.get_device(), scale_a.dim() == 0 && scale_b.dim() == 0);
 #else
   return true;
 #endif

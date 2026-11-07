@@ -426,6 +426,13 @@ def to_fp8_saturated(
     return x.to(fp8_dtype)
 
 
+def scaled_mm_bias_shape(n, shape, m=32):
+    return {
+        "n": (n,), "1_n": (1, n), "n_1": (n, 1), "1_1_n": (1, 1, n),
+        "matrix": (m, n), "wrong_n": (n + 1,),
+    }[shape]
+
+
 def tensorwise_scaled_mm_args(
     mat1: torch.Tensor,
     mat2: torch.Tensor,
@@ -1693,6 +1700,326 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             atol, rtol = 3e-3, 3e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("bias_shape", ["n", "1_n", "n_1", "1_1_n"])
+    @parametrize("dynamic", [False, True])
+    def test_scaled_mm_vector_bias_uses_template(self, device, api, bias_shape, dynamic):
+        scale_a = torch.tensor(0.125, device=device)
+        scale_b = torch.tensor(0.25, device=device)
+        fn = self._scaled_mm_bias_fn(api, scale_a, scale_b)
+        # Square shapes keep an incorrect row-wise bias read in bounds.
+        shapes = ((32, 64), (48, 96)) if bias_shape in ("n", "1_n") else ((64, 64), (96, 96))
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for index, (m, n) in enumerate(shapes):
+            a = (torch.randint(0, 2, (m, 128), device=device) * 2 - 1).to(e4m3_type)
+            b = (torch.randint(0, 2, (n, 128), device=device) * 2 - 1).to(e4m3_type).t()
+            flat_bias = torch.arange(n, device=device).to(torch.bfloat16) / 16
+            bias = flat_bias.reshape(scaled_mm_bias_shape(n, bias_shape))
+            expected = ((a.float() @ b.float()) / 32 + flat_bias.float()).to(torch.bfloat16)
+            self.assertEqual(fn(a, b, bias), expected, atol=0, rtol=0)
+            actual = self._run_scaled_mm_template(compiled, a, b, bias) if not dynamic or index == 0 else compiled(a, b, bias)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("execution,dynamic", [
+        ("eager", False), ("inductor", False), ("inductor", True),
+        ("aot_eager", False), ("aot_eager", True), ("export", False),
+    ])
+    def test_scaled_mm_v1_rejects_matrix_bias(self, device, execution, dynamic):
+        a = torch.ones((32, 128), device=device, dtype=e4m3_type)
+        b = torch.ones((64, 128), device=device, dtype=e4m3_type).t()
+        bias = torch.ones((32, 64), device=device, dtype=torch.bfloat16)
+        scale = torch.ones((), device=device)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, bias, scale):
+                return torch._scaled_mm(a, b, scale, scale, bias=bias, out_dtype=torch.bfloat16)
+
+        model = Model()
+        with self.assertRaisesRegex(RuntimeError, "Bias must be size"):
+            if execution == "export":
+                torch.export.export(model, (a, b, bias, scale))
+            else:
+                fn = model if execution == "eager" else torch.compile(
+                    model, backend=execution, fullgraph=True, dynamic=dynamic,
+                )
+                fn(a, b, bias, scale)
+
+    @onlyOn(["cpu"])
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("fake_device", ["cpu", "cuda", "xpu"])
+    @parametrize("m", [32, 64])
+    @parametrize("bias_shape", [None, "n", "1_n", "n_1", "1_1_n", "matrix", "wrong_n"])
+    def test_scaled_mm_fake_bias_shape(self, device, api, fake_device, m, bias_shape):
+        valid = bias_shape in (None, "n", "1_n")
+        if bias_shape in ("n_1", "1_1_n"):
+            valid = fake_device == "cuda" or (bias_shape == "n_1" and m == 64)
+        with FakeTensorMode():
+            a = torch.empty((m, 128), device=fake_device, dtype=e4m3_type)
+            b = torch.empty((64, 128), device=fake_device, dtype=e4m3_type).t()
+            bias = None if bias_shape is None else torch.empty(scaled_mm_bias_shape(64, bias_shape), device=fake_device, dtype=torch.bfloat16)
+            scale = torch.ones((), device=fake_device)
+            fn = self._scaled_mm_bias_fn(api, scale, scale)
+            if valid:
+                result = fn(a, b, bias)
+                self.assertEqual(result.shape, (m, 64))
+                self.assertEqual(result.dtype, torch.bfloat16)
+            else:
+                error = "Bias must be size"
+                if bias_shape == "1_1_n":
+                    error = "output with shape.*doesn't match the broadcast shape|should be broadcastable"
+                elif bias_shape == "n_1":
+                    error = "should be broadcastable"
+                with self.assertRaisesRegex(RuntimeError, error):
+                    fn(a, b, bias)
+
+    @onlyOn(["cpu"])
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("fake_device", ["cpu", "xpu"])
+    @parametrize("bias_shape", ["n_1", "1_1_n"])
+    def test_scaled_mm_fake_empty_k_bias(self, device, api, fake_device, bias_shape):
+        with FakeTensorMode():
+            a = torch.empty((32, 0), device=fake_device, dtype=e4m3_type)
+            b = torch.empty((64, 0), device=fake_device, dtype=e4m3_type).t()
+            bias = torch.ones(scaled_mm_bias_shape(64, bias_shape), device=fake_device, dtype=torch.bfloat16)
+            scale = torch.ones((), device=fake_device)
+            fn = self._scaled_mm_bias_fn(api, scale, scale)
+            if fake_device == "xpu" or api == "v2":
+                result = fn(a, b, bias)
+                self.assertEqual(result.shape, (32, 64))
+            else:
+                error = "should be broadcastable" if bias_shape == "n_1" else "output with shape.*doesn't match the broadcast shape"
+                with self.assertRaisesRegex(RuntimeError, error):
+                    fn(a, b, bias)
+
+    @onlyOn(["cpu"])
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("fake_device", ["cpu", "xpu"])
+    @parametrize("bias_shape", ["n", "n_1", "1_1_n"])
+    def test_scaled_mm_fake_unbacked_bias(self, device, api, fake_device, bias_shape):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        m = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env), shape_env.ignore_fresh_unbacked_symbols():
+            a = torch.empty_strided((m, 128), (128, 1), device=fake_device, dtype=e4m3_type)
+            b = torch.empty((64, 128), device=fake_device, dtype=e4m3_type).t()
+            bias = torch.ones(scaled_mm_bias_shape(64, bias_shape), device=fake_device, dtype=torch.bfloat16)
+            scale = torch.ones((), device=fake_device)
+            fn = self._scaled_mm_bias_fn(api, scale, scale)
+            if api == "v1" and fake_device == "cpu" and bias_shape == "1_1_n":
+                with self.assertRaisesRegex(RuntimeError, "output with shape.*doesn't match the broadcast shape"):
+                    fn(a, b, bias)
+            else:
+                result = fn(a, b, bias)
+                self.assertEqual(result.size(1), 64)
+                self.assertEqual(str(result.size(0)), str(m))
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("use_fast_accum", [False, True])
+    def test_scaled_mm_v1_mxfp8_fast_accum(self, device, use_fast_accum):
+        n = k = 128
+        expected = torch.eye(n, device=device, dtype=torch.bfloat16)
+        a = expected.to(e4m3_type)
+        b = a.t()
+        scale = to_blocked(torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu))
+        actual = torch._scaled_mm(
+            a, b, scale, scale, out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum,
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("cublas_supported", [False, True])
+    def test_scaled_mm_bias_fallback_uses_native_selection(self, device, cublas_supported):
+        from unittest import mock
+
+        from torch._inductor.kernel.mm import _scaled_mm_bias_needs_native
+
+        bias = mock.Mock()
+        bias.get_size.return_value = [1, 64]
+        bias.get_device.return_value = torch.device(device)
+        with (
+            mock.patch("torch.version.hip", None),
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch._C._cuda_rowwiseScaledMMUsesCublasLt", return_value=cublas_supported) as selection,
+        ):
+            self.assertEqual(_scaled_mm_bias_needs_native(bias, True), not cublas_supported)
+            selection.assert_called_once_with(torch.device(device).index or 0, False)
+            self.assertFalse(_scaled_mm_bias_needs_native(bias, False))
+            bias.get_device.return_value = None
+            self.assertFalse(_scaled_mm_bias_needs_native(bias, True))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("bias_shape", ["1_n", "n_1", "1_1_n"])
+    def test_scaled_mm_rowwise_bias_preserves_native_validation(self, device, api, bias_shape):
+        a = torch.ones((64, 128), device=device, dtype=e4m3_type)
+        b = torch.ones((64, 128), device=device, dtype=e4m3_type).t()
+        sa = torch.ones((64, 1), device=device)
+        sb = torch.ones((1, 64), device=device)
+        shape = scaled_mm_bias_shape(64, bias_shape)
+        bias = torch.arange(64, device=device, dtype=torch.bfloat16).reshape(shape)
+
+        def fn(a, b, bias):
+            if api == "v1":
+                return torch._scaled_mm(a, b, sa, sb, bias=bias, out_dtype=torch.bfloat16)
+            rowwise = [ScalingType.RowWise.value]
+            return torch._scaled_mm_v2(
+                a, b, [sa], rowwise, [], [sb], rowwise, [], bias, torch.bfloat16,
+            )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        if not torch.version.hip and not torch._C._cuda_rowwiseScaledMMUsesCublasLt(
+            torch.device(device).index if torch.device(device).index is not None else torch.cuda.current_device(),
+            False,
+        ):
+            # A valid flat bias must execute before checking the rank rejection.
+            fn(a, b, bias.flatten())
+            with self.assertRaisesRegex(RuntimeError, re.escape("bias->dim() == 1")):
+                fn(a, b, bias)
+            with self.assertRaisesRegex(RuntimeError, re.escape("bias->dim() == 1")):
+                compiled(a, b, bias)
+        else:
+            actual = self._run_scaled_mm_template(compiled, a, b, bias)
+            self.assertEqual(actual, fn(a, b, bias), atol=0, rtol=0)
+
+    @onlyOn(["cpu"])
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("execution", ["eager", "inductor", "aot_eager", "export"])
+    @parametrize("bias_shape", ["n_1", "1_1_n"])
+    def test_scaled_mm_cpu_rejects_bias_shape(self, device, api, execution, bias_shape):
+        a = torch.ones((32, 128), device=device, dtype=e4m3_type)
+        b = torch.ones((64, 128), device=device, dtype=e4m3_type).t()
+        bias = torch.ones(scaled_mm_bias_shape(64, bias_shape), device=device, dtype=torch.bfloat16)
+        scale = torch.ones((), device=device)
+
+        bias_fn = self._scaled_mm_bias_fn(api, scale, scale)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, bias, scale):
+                return bias_fn(a, b, bias)
+
+        error = "must match.*non-singleton dimension|should be broadcastable" if bias_shape == "n_1" else "output with shape.*doesn't match the broadcast shape|should be broadcastable"
+        with self.assertRaisesRegex(RuntimeError, error):
+            if execution == "export":
+                torch.export.export(Model(), (a, b, bias, scale))
+            else:
+                fn = Model() if execution == "eager" else torch.compile(
+                    Model(), backend=execution, fullgraph=True,
+                )
+                fn(a, b, bias, scale)
+
+    def _run_scaled_mm_template(self, compiled, *args):
+        from unittest import mock
+
+        from torch._inductor import config
+        from torch._inductor.utils import run_and_get_code
+
+        with (
+            mock.patch("torch._inductor.utils.is_big_gpu", return_value=True),
+            config.patch({
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": False,
+                "test_configs.max_mm_configs": 1,
+                "force_disable_caches": True,
+            }),
+        ):
+            actual, codes = run_and_get_code(compiled, *args)
+        source = "\n".join(codes)
+        self.assertIn("@triton_heuristics.template(", source)
+        self.assertIn("tl.dot(", source)
+        for op in ("_scaled_mm(", "_scaled_mm.default(", "_scaled_mm_v2(", "_scaled_mm_v2.default("):
+            self.assertNotIn(f"extern_kernels.{op}", source)
+            self.assertNotIn(f"torch.ops.aten.{op}", source)
+        return actual
+
+    @staticmethod
+    def _scaled_mm_bias_fn(api, scale_a, scale_b):
+        def fn(a, b, bias):
+            if api == "v1":
+                return torch._scaled_mm(a, b, scale_a, scale_b, bias=bias, out_dtype=torch.bfloat16)
+            tensorwise, no_swizzle = [ScalingType.TensorWise.value], [SwizzleType.NO_SWIZZLE.value]
+            return torch._scaled_mm_v2(
+                a, b, [scale_a], tensorwise, no_swizzle, [scale_b], tensorwise, no_swizzle, bias, torch.bfloat16,
+            )
+        return fn
+
+    @onlyOn(["cpu"])
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("bias_shape", ["n", "1_n", "n_1"])
+    def test_scaled_mm_cpu_bias_matches_eager(self, device, api, bias_shape):
+        # CPU eager broadcasts the bias by shape, so a square [N, 1] bias is added
+        # per row; the lowering must not flatten it as it does on CUDA.
+        n = 32
+        a = (torch.randint(0, 2, (n, 64), device=device) * 2 - 1).to(e4m3_type)
+        b = (torch.randint(0, 2, (n, 64), device=device) * 2 - 1).to(e4m3_type).t()
+        view_shape = scaled_mm_bias_shape(n, bias_shape)
+        bias = (torch.arange(n, device=device).to(torch.bfloat16) / 16).reshape(view_shape)
+        scale = torch.tensor(0.5, device=device)
+        fn = self._scaled_mm_bias_fn(api, scale, scale)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(a, b, bias), fn(a, b, bias), atol=0, rtol=0)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("api", ["v1", "v2"])
+    @parametrize("bias_shape", ["1_n", "n_1", "1_1_n"])
+    def test_scaled_mm_lowering_flattens_bias(self, device, api, bias_shape):
+        # Every backend choice (Triton, CK, CUTLASS, ATen) is built from these
+        # kernel inputs, and CK/CUTLASS broadcast only a 1-D bias.
+        from unittest import mock
+
+        from torch._inductor import config
+        from torch._inductor.kernel import mm as mm_lowering
+
+        n = 64
+        a = torch.ones((32, 128), device=device, dtype=e4m3_type)
+        b = torch.ones((n, 128), device=device, dtype=e4m3_type).t()
+        view_shape = scaled_mm_bias_shape(n, bias_shape)
+        bias = torch.ones(view_shape, device=device, dtype=torch.bfloat16)
+        scale = torch.ones((), device=device)
+        fn = self._scaled_mm_bias_fn(api, scale, scale)
+
+        bias_sizes = []
+        real_kernel_inputs = mm_lowering.MMKernelInputs
+
+        def recording_kernel_inputs(input_nodes, *args, **kwargs):
+            if len(input_nodes) == 5:
+                bias_sizes.append([int(size) for size in input_nodes[4].get_size()])
+            return real_kernel_inputs(input_nodes, *args, **kwargs)
+
+        with (
+            config.patch({"force_disable_caches": True}),
+            mock.patch.object(mm_lowering, "MMKernelInputs", recording_kernel_inputs),
+        ):
+            actual = torch.compile(fn, fullgraph=True, dynamic=False)(a, b, bias)
+        self.assertTrue(bias_sizes)
+        self.assertTrue(all(size == [n] for size in bias_sizes), bias_sizes)
+        self.assertEqual(actual, fn(a, b, bias))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16])
+    def test_scaled_mm_v1_single_row_vector_compatibility(self, device, out_dtype):
+        x = (torch.randint(0, 2, (1, 128), device=device) * 2 - 1).to(e4m3_type)
+        y = (torch.randint(0, 2, (64, 128), device=device) * 2 - 1).to(e4m3_type).t()
+        sa = torch.tensor(0.125, device=device)
+        sb = torch.tensor(0.25, device=device)
+        bias = torch.arange(64, device=device, dtype=out_dtype).unsqueeze(0) / 16
+        expected = torch._scaled_mm(x, y, sa, sb, bias=bias.flatten(), out_dtype=out_dtype)
+        def fn(x, y, bias):
+            return torch._scaled_mm(x, y, sa, sb, bias=bias, out_dtype=out_dtype)
+
+        actual = torch.compile(fn, fullgraph=True)(x, y, bias)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias(self, device) -> None:

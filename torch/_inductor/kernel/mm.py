@@ -1575,6 +1575,33 @@ scaled_mm_v2_fallback = fallback_handler(
 )
 
 
+def _scaled_mm_bias_needs_native(bias, rowwise):
+    if bias is None or len(bias.get_size()) == 1 or not rowwise:
+        return False
+    device = bias.get_device()
+    if device is None or device.type != "cuda" or torch.version.hip is not None:
+        return False
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+    return not torch._C._cuda_rowwiseScaledMMUsesCublasLt(device_index, False)
+
+
+# Invoked only by the bias-specific branch in tuned_scaled_mm; keep the global
+# registration unchanged so valid inputs retain template/autotune choices.
+scaled_mm_fallback = fallback_handler(aten._scaled_mm.default, add_to_fallback_set=False)
+
+
+def _flatten_scaled_mm_bias(bias):
+    # BLAS bias epilogues read a flat vector; CPU/XPU broadcast by shape.
+    # CUDA's rowwise CUTLASS eager fallback instead requires a 1-D bias.
+    # Templates also need a 1-D bias for their column-wise epilogues.
+    if bias is None or len(bias.get_size()) == 1:
+        return bias
+    device = bias.get_device()
+    if device is None or device.type != "cuda":
+        return bias
+    return lowerings[aten.reshape](bias, [-1])
+
+
 @register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
 def tuned_scaled_mm_v2(
     mat_a,
@@ -1599,6 +1626,20 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+    def fallback():
+        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
+        return scaled_mm_v2_fallback(
+            mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b,
+            bias, out_dtype, fallback_contraction_dim, use_fast_accum,
+        )
+
+    if _scaled_mm_bias_needs_native(
+        bias,
+        recipe_a == [ScalingType.RowWise.value]
+        and recipe_b == [ScalingType.RowWise.value],
+    ):
+        return fallback()
+    bias = _flatten_scaled_mm_bias(bias)
 
     mxfp_format = _get_rocm_mxfp_v2_format(
         mat_a,
@@ -1686,25 +1727,6 @@ def tuned_scaled_mm_v2(
     #   - multi-level scales (two-level NVFP4)
     #   - any non-fp32 block scale
     # Call the eager v2 op directly to preserve its recipes and scale conventions.
-    def fallback():
-        # contraction_dim is a non-optional int[] in the schema (default []);
-        # this lowering defaults it to None, so coerce before the eager call.
-        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
-        return scaled_mm_v2_fallback(
-            mat_a,
-            mat_b,
-            scale_a,
-            recipe_a,
-            swizzle_a,
-            scale_b,
-            recipe_b,
-            swizzle_b,
-            bias,
-            out_dtype,
-            fallback_contraction_dim,
-            use_fast_accum,
-        )
-
     def check_supported_recipe(recipe: list[int]) -> bool:
         disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
         return all(ScalingType(r) not in disallowed for r in recipe)
@@ -1952,6 +1974,19 @@ def tuned_scaled_mm(
     Returns:
         Tensor: The result of the scaled matrix multiplication
     """
+    if _scaled_mm_bias_needs_native(
+        bias,
+        scale_a.get_dtype() == torch.float32
+        and scale_b.get_dtype() == torch.float32
+        and len(scale_a.get_size()) == 2 and len(scale_b.get_size()) == 2
+        and not (_is_tensorwise_scaling(scale_a.get_size()) and _is_tensorwise_scaling(scale_b.get_size()))
+        and _is_rowwise_scaling(scale_a.get_size(), transpose=False)
+        and _is_rowwise_scaling(scale_b.get_size(), transpose=True),
+    ):
+        return scaled_mm_fallback(
+            mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum,
+        )
+    bias = _flatten_scaled_mm_bias(bias)
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype

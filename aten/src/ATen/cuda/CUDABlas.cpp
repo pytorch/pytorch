@@ -219,6 +219,17 @@ static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
 
 namespace at::cuda::blas {
 
+bool rowwise_scaled_mm_uses_cublaslt(c10::DeviceIndex device_index, bool scalar_scales) {
+#ifdef USE_ROCM
+  return false;
+#else
+  const auto major = at::cuda::getDeviceProperties(device_index)->major;
+  // Blackwell's rowwise cuBLASLt path accepts scalar scales, not 2D factors.
+  return major >= 9 && CUBLAS_VERSION >= 120900 && cublasLtGetVersion() >= 120900 &&
+      (major < 10 || scalar_scales);
+#endif
+}
+
 using detail::CuBlasLtMatmulDescriptor;
 using detail::CuBlasLtMatrixLayout;
 using detail::CuBlasLtMatmulPreference;
