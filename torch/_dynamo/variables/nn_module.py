@@ -76,17 +76,59 @@ from ..utils import (
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
-from .base import Method, typestr, ValueMutationNew, VariableTracker
+from .base import (
+    Method,
+    typestr,
+    ValueAndAttributeMutationExisting,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .functions import invoke_and_store_as_constant
 from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
-from .user_defined import can_guard_class_function_code, UserDefinedObjectVariable
+from .object_protocol import generic_is_true
+from .user_defined import (
+    can_guard_class_function_code,
+    UserDefinedNNModuleHooksDictVariable,
+    UserDefinedNNModuleHooksOrderedDictVariable,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .constant import ConstantVariable
+
+
+def _build_hooks_dict(
+    hooks: dict[Any, Any],
+    items: dict[HashableTracker, VariableTracker],
+    source: Source | None,
+    *,
+    lazy_ids: bool,
+    flags: bool,
+) -> VariableTracker:
+    hooks_type: type[dict[Any, Any]] = type(hooks)
+    if hooks_type is not dict and hooks_type is not collections.OrderedDict:
+        if issubclass(hooks_type, collections.OrderedDict):
+            return UserDefinedNNModuleHooksOrderedDictVariable(
+                hooks, items=items, source=source
+            )  # noqa: RVT001
+        return UserDefinedNNModuleHooksDictVariable(hooks, items=items, source=source)  # noqa: RVT001
+    if lazy_ids:
+        if type(hooks) is collections.OrderedDict:
+            if flags:
+                return variables.NNModuleHookFlagsOrderedDictVariable(
+                    items, source=source
+                )  # noqa: RVT001
+            return variables.NNModuleHooksOrderedDictVariable(items, source=source)  # noqa: RVT001
+        if flags:
+            return variables.NNModuleHookFlagsDictVariable(items, source=source)  # noqa: RVT001
+        return variables.NNModuleHooksDictVariable(items, source=source)  # noqa: RVT001
+    if type(hooks) is collections.OrderedDict:
+        return variables.OrderedDictVariable(items, source=source)
+    return variables.ConstDictVariable(items, source=source)
 
 
 def initialize_lazy_module(
@@ -1425,13 +1467,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
 
-                def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
+                def _has_hooks(obj: VariableTracker, attr: str) -> bool:
                     vt = obj.tp_getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
-                    return vt.len()  # type: ignore[union-attr]
+                    if isinstance(vt, variables.ConstDictVariable) and not isinstance(
+                        vt, UserDefinedObjectVariable
+                    ):
+                        return bool(vt.len())
+                    return generic_is_true(tx, vt).as_python_constant()
 
                 has_hooks = any(
-                    _hooks_dict_len(self, attr)
+                    _has_hooks(self, attr)
                     for attr in (
                         "_backward_hooks",
                         "_backward_pre_hooks",
@@ -1441,7 +1487,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         "_forward_pre_hooks_with_kwargs",
                     )
                 ) or any(
-                    _hooks_dict_len(globals_vt, attr)
+                    _has_hooks(globals_vt, attr)
                     for attr in (
                         "_global_backward_pre_hooks",
                         "_global_backward_hooks",
@@ -1642,7 +1688,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     return VariableTracker.build(
                         tx, hooks_dict, source=AttrSource(self.source, name)
                     )
-                if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
+                if issubclass(type(hooks_dict), dict) and dict.__len__(hooks_dict) == 0:
                     hooks_source = (
                         AttrSource(self.source, name) if self.source else None
                     )
@@ -1652,26 +1698,25 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    hooks_vt_cls = (
-                        variables.OrderedDictVariable
-                        if isinstance(hooks_dict, collections.OrderedDict)
-                        else variables.ConstDictVariable
-                    )
-                    if hooks_source and name.startswith("_forward_"):
+                    lazy_ids = hooks_source is not None and name.startswith("_forward_")
+                    if lazy_ids:
                         install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
-                        hooks_vt_cls = (
-                            variables.NNModuleHookFlagsOrderedDictVariable
-                            if name.endswith(("with_kwargs", "always_called"))
-                            else variables.NNModuleHooksOrderedDictVariable
-                        )
-                        if not isinstance(hooks_dict, collections.OrderedDict):
-                            hooks_vt_cls = (
-                                variables.NNModuleHookFlagsDictVariable
-                                if name.endswith(("with_kwargs", "always_called"))
-                                else variables.NNModuleHooksDictVariable
-                            )
-                    result = hooks_vt_cls({}, source=hooks_source)
+                    # Validate even empty OrderedDicts, whose raw storage may have orphaned links.
+                    _dict_input_snapshot(hooks_dict)
+                    result = _build_hooks_dict(
+                        hooks_dict,
+                        {},
+                        hooks_source,
+                        lazy_ids=lazy_ids,
+                        flags=name.endswith(("with_kwargs", "always_called")),
+                    )
                     if hooks_source is not None:
+                        if isinstance(result, UserDefinedObjectVariable):
+                            return tx.output.side_effects.track_object_existing(
+                                hooks_dict,
+                                result,
+                                mutation_type_cls=ValueAndAttributeMutationExisting,
+                            )
                         return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return result
 
@@ -1691,6 +1736,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
+            if not issubclass(type(hooks_dict), dict):
+                return super().tp_getattro_impl(tx, name)
             hooks_dict_source = AttrSource(self.source, name)
             install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             tx.output.guard_on_key_order.add(hooks_dict_source)
@@ -1698,9 +1745,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             def build_key_value(
                 i: int, k: Any, v: Any
             ) -> tuple[HashableTracker, VariableTracker]:
-                # Read runtime hook IDs lazily; specialize observations such as repr(id).
+                # Read IDs from their storage position when returned; specialize
+                # only when the traced code observes their value (e.g. repr(id)).
                 source_key = ConstDictKeySource(hooks_dict_source, i)
-                # Internal hashing keeps IDs dynamic; explicit user hashing guards them.
+                # Hash existing keys without specializing their sourced values;
+                # hashing a key in user code must still realize and guard it.
                 key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
                 key = (
                     HashableTracker(key_vt, known_hash=hash(k))
@@ -1708,30 +1757,30 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     else HashableTracker(key_vt)
                 )
 
-                # Read values by storage position so equivalent modules can reuse graphs.
+                # Access values by storage position too, so equivalent modules
+                # can share a graph despite having different hook IDs.
                 source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value
 
-            result = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
-            )
+            from .builder import _build_dict_items
 
-            if isinstance(hooks_dict, collections.OrderedDict):
-                hooks_vt_cls = (
-                    variables.NNModuleHookFlagsOrderedDictVariable
-                    if name.endswith(("with_kwargs", "always_called"))
-                    else variables.NNModuleHooksOrderedDictVariable
-                )
-            else:
-                hooks_vt_cls = (
-                    variables.NNModuleHookFlagsDictVariable
-                    if name.endswith(("with_kwargs", "always_called"))
-                    else variables.NNModuleHooksDictVariable
-                )
-            return tx.output.side_effects.track_mutable(
-                hooks_dict, hooks_vt_cls(result, source=hooks_dict_source)
+            result = _build_dict_items(hooks_dict, build_key_value)
+
+            result_vt = _build_hooks_dict(
+                hooks_dict,
+                result,
+                hooks_dict_source,
+                lazy_ids=True,
+                flags=name.endswith(("with_kwargs", "always_called")),
             )
+            if isinstance(result_vt, UserDefinedObjectVariable):
+                return tx.output.side_effects.track_object_existing(
+                    hooks_dict,
+                    result_vt,
+                    mutation_type_cls=ValueAndAttributeMutationExisting,
+                )
+            return tx.output.side_effects.track_mutable(hooks_dict, result_vt)
         return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(

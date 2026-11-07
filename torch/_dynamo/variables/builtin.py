@@ -3582,6 +3582,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         no_keywords(tx, "dict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
+        if isinstance(args[0], ConstDictVariable):
+            args[0].materialize_keys()
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
@@ -3632,6 +3634,14 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
+            if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
+                )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)

@@ -7200,5 +7200,25 @@
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
+  ],
+  "GB0580": [
+    {
+      "Gb_type": "Dictionary mutated during iteration",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "str(type(dict_vt))",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
