@@ -11,8 +11,7 @@ flydsl_kernel_wrapper_mutation node.
 
 import types
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Never
+from typing import Any, Never, TYPE_CHECKING
 
 from torch._higher_order_ops.flydsl_kernel_wrap import FlyDSLHOPifier, MutatesArgs
 
@@ -159,9 +158,10 @@ class DynamoFlyDSLHOPifier(FlyDSLHOPifier):
                 # anything reached through it: a graph break.
                 side_effects = tx.output.side_effects
                 for other in side_effects.id_to_variable.values():
-                    source = other.source
-                    if source is None or not side_effects.is_modified(other):
+                    written = other.source
+                    if written is None or not side_effects.is_modified(other):
                         continue
+                    source = written
                     while isinstance(source, ChainedSource) and source != val.source:
                         source = source.base
                     if source == val.source:
@@ -169,7 +169,7 @@ class DynamoFlyDSLHOPifier(FlyDSLHOPifier):
                             {"kernel_idx": variable.kernel_idx}
                         )
                         self.raise_unsupported(
-                            f"{name}(): {other.source.name}, reached through {key!r}, "
+                            f"{name}(): {written.name}, reached through {key!r}, "
                             "is modified earlier in the compiled region, and the kernel "
                             "would not see the change"
                         )
@@ -266,7 +266,7 @@ class FlyDSLKernelVariable(VariableTracker):
 
     def with_mutates_args(self, mutates_args: object) -> "FlyDSLKernelVariable":
         """The variable wrap_flydsl(self.kernel, mutates_args=...) returns."""
-        return FlyDSLKernelVariable(
+        return FlyDSLKernelVariable(  # noqa: RVT001
             self.kernel,
             mutates_args,
             None,

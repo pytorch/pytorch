@@ -48,7 +48,7 @@ if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
 else
   # Explicitly set USE_DISTRIBUTED=0 to align with the default build config on mac. This also serves as the sole CI config that tests
   # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
-  USE_DISTRIBUTED=0 USE_OPENMP=1 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python -m build --wheel --no-isolation
+  USE_DISTRIBUTED=0 USE_OPENMP=1 WERROR=1 BUILD_TEST=OFF python -m build --wheel --no-isolation
 fi
 # print_sccache_stats self-guards (and warns) when sccache is absent.
 print_sccache_stats
