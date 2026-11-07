@@ -317,7 +317,7 @@ void validate_scaled_mm_v2_inputs(
   const auto K_unpacked = both_fp4 ? mat_a.sym_size(1) * 2 : mat_a.sym_size(1);
   // XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes, unlike the
   // L4-padded SWIZZLE_32_4_4 layout that CUDA expects.
-  const bool is_xpu = mat_a.is_xpu();
+  const bool is_xpu = at::globalContext().hasXPU();
 
   auto sym_ceil_div = [](const c10::SymInt& a, int64_t b) {
     return (a + b - 1) / b;

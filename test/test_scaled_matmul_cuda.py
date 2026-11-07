@@ -47,7 +47,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     skipCUDAIf,
     skipMPS,
-    skipXPUIf,
     skipCUDAIfNotRocm,
 )
 
@@ -1224,7 +1223,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1251,7 +1249,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
@@ -1273,7 +1270,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1301,7 +1297,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
@@ -1319,7 +1314,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5775")
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -1384,7 +1378,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
@@ -1400,7 +1393,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             padded_out = input.new_empty_strided(input.shape, (48, 1))
             with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
                 torch.ops.aten._scaled_addmm.out(
@@ -1417,7 +1410,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 )
 
         expected = scaled_addmm(input, *args)
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
             with self.assertRaisesRegex(ValueError, "16-byte aligned"):
                 scaled_addmm_(misaligned, *args)
@@ -1426,7 +1419,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         aligned_16 = input.new_empty(input.numel() + alignment_offset)[
             alignment_offset:
         ].view_as(input)
-        if torch.device(device).type == "cuda":
+        if torch.device(device).type in ("cuda", "xpu"):
             self.assertEqual(aligned_16.data_ptr() % 32, 16)
         aligned_16.copy_(input)
         self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
@@ -1462,7 +1455,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -1473,12 +1465,18 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = mat1_ref.to(e4m3_type)
         mat2 = mat2_ref.to(e4m3_type).t()
-        scale_a = to_blocked(
-            torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-        )
-        scale_b = to_blocked(
-            torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-        )
+        if self.device_type == "xpu":
+            scale_a = torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            scale_b = torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            scale_a = to_blocked(
+                torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            )
+            scale_b = to_blocked(
+                torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+            )
+            swizzle = SwizzleType.SWIZZLE_32_4_4
 
         args = (
             mat1,
@@ -1489,8 +1487,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             ScalingType.BlockWise1x32,
         )
         kwargs = {
-            "swizzle_a": SwizzleType.SWIZZLE_32_4_4,
-            "swizzle_b": SwizzleType.SWIZZLE_32_4_4,
+            "swizzle_a": swizzle,
+            "swizzle_b": swizzle,
         }
         actual = scaled_addmm(input, *args, **kwargs)
         reference = (
@@ -1502,7 +1500,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("two_level", [False, True])
@@ -1516,13 +1513,18 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = _bfloat16_to_float4_e2m1fn_x2(mat1_ref)
         mat2 = _bfloat16_to_float4_e2m1fn_x2(mat2_ref).t()
-        scale_a = to_blocked(
-            torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
-        )
-        scale_b = to_blocked(
-            torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
-        )
-        swizzle = SwizzleType.SWIZZLE_32_4_4
+        if self.device_type == "xpu":
+            scale_a = torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            scale_b = torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            swizzle = SwizzleType.NO_SWIZZLE
+        else:
+            scale_a = to_blocked(
+                torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            )
+            scale_b = to_blocked(
+                torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+            )
+            swizzle = SwizzleType.SWIZZLE_32_4_4
         gemm_scale = 1.0
         if two_level:
             global_scale_a = torch.full((1,), 0.5, device=device)
@@ -1587,7 +1589,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_fullgraph(self, device):
@@ -1632,7 +1633,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_cudagraph(self, device):
