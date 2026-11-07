@@ -425,13 +425,14 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
 
     @staticmethod
     @contextlib.contextmanager
-    def _delayed_foreach_reduce(sleep_ms: int):
-        """Inject a CUDA sleep after each reduce-scatter / all-reduce.
+    def _delayed_reduce(sleep_ms: int):
+        """Inject a CUDA sleep after each gradient reduction.
 
         Each process group gets its own delay stream so that delays for
         different groups run concurrently (just like real NCCL ops on
-        separate communicators).  The event returned to FSDP is replaced
-        with a delayed event on this per-group stream.
+        separate communicators). The event of the pending reduction, which
+        the compute stream waits on before reusing its buffers or at the end
+        of backward, is replaced with a delayed event on this per-group stream.
 
         This amplifies the difference between per-group and shared RS
         state:
@@ -440,47 +441,35 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         - Shared RS state: the compute stream waits on *all* groups'
           delayed events, serializing the dp and efsdp delays.
         """
-        import torch.distributed.fsdp._fully_shard._fsdp_param_group as _pg_mod
+        from torch.distributed.fsdp._flex_shard.bucket_runtime import BucketRuntime
 
-        orig = _pg_mod.foreach_reduce
+        orig = BucketRuntime.reduce_grads
         # One delay stream per process group so that sleeps for different
         # groups (e.g. dp vs efsdp reduce-scatter) execute in parallel,
         # mirroring how real NCCL ops on separate communicators overlap.
         delay_streams: dict[dist.ProcessGroup, torch.Stream] = {}
 
-        def wrapped(
-            fsdp_params,
-            unsharded_grads,
-            reduce_scatter_group,
-            reduce_scatter_stream,
-            *args,
-            **kwargs,
-        ):
-            result = orig(
-                fsdp_params,
-                unsharded_grads,
-                reduce_scatter_group,
-                reduce_scatter_stream,
-                *args,
-                **kwargs,
-            )
-            rs_input, rs_event, post_reduce_stream, *rest = result
-            if reduce_scatter_group not in delay_streams:
-                delay_streams[reduce_scatter_group] = device_module.Stream()
-            ds = delay_streams[reduce_scatter_group]
-            ds.wait_event(rs_event)
+        def wrapped(runtime, *args, **kwargs):
+            orig(runtime, *args, **kwargs)
+            if not runtime.context.reduce_grad_states:
+                return
+            result = runtime.context.reduce_grad_states[-1].result
+            group = runtime.bucket_storage.reduce_mesh.get_group()
+            if group not in delay_streams:
+                delay_streams[group] = device_module.Stream()
+            ds = delay_streams[group]
+            ds.wait_event(result.event)
             with device_module.stream(ds):
                 device_module._sleep(int(sleep_ms * get_cycles_per_ms(device.type)))
-                delayed_event = ds.record_event()
-            return (rs_input, delayed_event, post_reduce_stream, *rest)
+                result.event = ds.record_event()
 
         dist.barrier()
-        _pg_mod.foreach_reduce = wrapped
+        BucketRuntime.reduce_grads = wrapped
         try:
             yield
         finally:
             dist.barrier()
-            _pg_mod.foreach_reduce = orig
+            BucketRuntime.reduce_grads = orig
 
     # Hangs on MI200: RCCL deadlocks when three communicators make
     # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
@@ -517,8 +506,8 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         serialization in per-param-mesh FSDP with expert parallelism.
 
         When ``simulate_no_grad_input`` is True, block inputs are detached so
-        that autograd's RegisterPostBackwardFunction nodes are never inserted,
-        exercising the safety-net path in _root_post_backward_final_callback.
+        that the post-backward triggers (_InputGradsTrigger) are never inserted,
+        exercising the end-of-backward callback that finishes the buckets.
         """
         import types
 
@@ -598,10 +587,10 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             replicate(model, mesh=dp_mesh)
             return model
 
-        # Both models measured under _delayed_foreach_reduce so the delay
-        # applies uniformly to foreach_reduce (all-reduce for replicate,
-        # reduce-scatter for FSDP).
-        with self._delayed_foreach_reduce(comm_sleep_ms):
+        # Both models measured under _delayed_reduce so the delay
+        # applies uniformly to the gradient reduction (all-reduce for
+        # replicate, reduce-scatter for FSDP).
+        with self._delayed_reduce(comm_sleep_ms):
             # --- replicate + EP (baseline) ---
             rep_model = _build_replicate_model()
 
@@ -618,10 +607,9 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             fsdp_model = _build_fsdp_model()
 
             if simulate_no_grad_input:
-                # Detach inputs to each block so that autograd's
-                # RegisterPostBackwardFunction nodes are never inserted,
-                # forcing the safety-net path in
-                # _root_post_backward_final_callback.
+                # Detach inputs to each block so that the post-backward
+                # triggers are never inserted, forcing the end-of-backward
+                # callback to finish the buckets.
                 def _no_grad_input_forward(self, tokens):
                     h = self.tok_embeddings(tokens)
                     h = h + self.pos_embeddings(
