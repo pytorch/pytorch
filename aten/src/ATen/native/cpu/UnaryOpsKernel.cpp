@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -8,6 +9,7 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
@@ -328,6 +330,31 @@ static void sign_kernel(TensorIteratorBase& iter){
               return left - right;
           });
     });
+  }
+}
+
+// Number of set bits in |a|, matching np.bitwise_count (uint8 result). The
+// magnitude is negated in the unsigned domain so the minimum signed value
+// does not overflow.
+template <typename scalar_t>
+static inline uint8_t popcount_magnitude(scalar_t a) {
+  using unsigned_t = std::make_unsigned_t<scalar_t>;
+  auto u = static_cast<unsigned_t>(a);
+  if constexpr (std::is_signed_v<scalar_t>) {
+    if (a < 0) {
+      u = static_cast<unsigned_t>(~u + static_cast<unsigned_t>(1));
+    }
+  }
+  return static_cast<uint8_t>(std::popcount(static_cast<uint64_t>(u)));
+}
+
+static void bitwise_count_kernel(TensorIteratorBase& iter) {
+  if (iter.input_dtype() == ScalarType::Bool) {
+    cpu_kernel(iter, [](bool a) -> uint8_t { return a ? 1 : 0; });
+  } else {
+    AT_DISPATCH_V2(iter.input_dtype(), "bitwise_count_cpu", AT_WRAP([&]() {
+      cpu_kernel(iter, [](scalar_t a) -> uint8_t { return popcount_magnitude(a); });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   }
 }
 
@@ -868,6 +895,7 @@ REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel)
 REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel)
 REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel)
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel)
+REGISTER_DISPATCH(bitwise_count_stub, &CPU_CAPABILITY::bitwise_count_kernel)
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel)
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel)
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel)

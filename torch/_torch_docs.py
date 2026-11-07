@@ -1684,6 +1684,29 @@ Example::
 )
 
 add_docstr(
+    torch.bitwise_count,
+    r"""
+bitwise_count(input, *, out=None) -> Tensor
+
+Computes the number of 1-bits in the absolute value of each element of
+:attr:`input` (its population count), following ``numpy.bitwise_count``.
+The input tensor must be of integral or Boolean type; the result is always
+of dtype :attr:`torch.uint8`.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.bitwise_count(torch.tensor([0, 1, 255, -1, -128], dtype=torch.int16))
+    tensor([0, 1, 8, 1, 1], dtype=torch.uint8)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.bitwise_not,
     r"""
 bitwise_not(input, *, out=None) -> Tensor
