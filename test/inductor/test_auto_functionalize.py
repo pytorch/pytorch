@@ -1293,6 +1293,78 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             self.assertEqual(result_inductor, result_eager)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_graph_input_view_storage_offset_dynamic(self):
+        # Two disjoint views of a graph input that itself starts at a nonzero
+        # storage offset, mutated by a custom op under dynamic shapes. The
+        # second view's storage offset is symbolic, and the regenerated view
+        # must land on it: dropping it writes before the input's first element.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::write_into",
+                "(Tensor(a!) out, Tensor x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::write_into", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def write_into_impl(out, x):
+                out.copy_(x)
+
+            def f(x, y, buf):
+                nx, ny = x.shape[0], y.shape[0]
+                torch.ops.mylib.write_into(buf[: nx * 4].view(nx, 4), x)
+                torch.ops.mylib.write_into(buf[nx * 4 :].view(ny, 4), y)
+                return buf
+
+            opt_f = torch.compile(f, fullgraph=True, dynamic=True, backend="inductor")
+            for nx, ny in ((6, 3), (2, 7)):
+                x = torch.ones(nx, 4)
+                y = torch.full((ny, 4), 2.0)
+                eager_base = torch.zeros(3 + (nx + ny) * 4)
+                inductor_base = eager_base.clone()
+                f(x, y, eager_base[3:])
+                opt_f(x, y, inductor_base[3:])
+                self.assertEqual(inductor_base, eager_base)
+
+            # The same writes through an int32 view of the float32 input. A
+            # same-width dtype view stays a lazy view of the input, so this
+            # also exercises adding back the input's own offset.
+            def f_int32(x, y, buf):
+                nx, ny = x.shape[0], y.shape[0]
+                b32 = buf.view(torch.int32)
+                torch.ops.mylib.write_into(b32[: nx * 4].view(nx, 4), x)
+                torch.ops.mylib.write_into(b32[nx * 4 :].view(ny, 4), y)
+                return buf
+
+            # And through a uint8 view. Changing the element size lowers the
+            # view.dtype to a fallback that aliases the input, and both the
+            # regenerated view's base and its offset are relative to that
+            # fallback's output, so the offsets count bytes from it.
+            def f_bytes(x, y, buf):
+                nx, ny = x.shape[0], y.shape[0]
+                b8 = buf.view(torch.uint8)
+                torch.ops.mylib.write_into(b8[: nx * 16].view(nx, 16), x)
+                torch.ops.mylib.write_into(b8[nx * 16 :].view(ny, 16), y)
+                return buf
+
+            for fn, dtype, width in (
+                (f_int32, torch.int32, 4),
+                (f_bytes, torch.uint8, 16),
+            ):
+                opt_fn = torch.compile(
+                    fn, fullgraph=True, dynamic=True, backend="inductor"
+                )
+                for nx, ny in ((6, 3), (2, 7)):
+                    x = torch.ones(nx, width, dtype=dtype)
+                    y = torch.full((ny, width), 2, dtype=dtype)
+                    eager_base = torch.zeros(3 + (nx + ny) * 4)
+                    inductor_base = eager_base.clone()
+                    fn(x, y, eager_base[3:])
+                    opt_fn(x, y, inductor_base[3:])
+                    self.assertEqual(inductor_base, eager_base)
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
