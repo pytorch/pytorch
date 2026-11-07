@@ -3058,19 +3058,24 @@ class cuda(cutlass):
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
     # autotuning and records the solutions; with autotune_tunableop_ladder it also
     # tunes a range of sizes of each GEMM's dynamic dim, the traced shape among
-    # them. A GEMM the ladder skips -- maybe_range_pretune has the full list,
-    # which includes a static shape, a dynamic K, a CPU winner, a choice it
-    # cannot rebuild metas for, and an operand still flexible after finalize()
-    # -- has its traced shape tuned only where autotune leaves it more than one
-    # choice, so the aten candidate is benchmarked and routed through the
+    # them. The skips are spread across queue_range_pretune (mode and ladder
+    # flag), maybe_range_pretune (static shape, dynamic K, CPU winner, a choice
+    # whose metas cannot be rebuilt, an operand still flexible after
+    # finalize()) and Scheduler.finalize_multi_template_buffers (the layout
+    # conflict fallback). A GEMM any of them skips has its traced shape tuned
+    # only where autotune leaves it more than one choice, so the aten candidate
+    # is benchmarked and routed through the
     # worker. With max-autotune off there is only the aten choice,
     # autotune returns without benchmarking, and the shape is covered only with
     # PYTORCH_TUNABLEOP_ENABLED set on a later run. Tuning happens while
-    # lowering, so a warm FxGraphCache or AOTAutogradCache hit tunes nothing at
-    # all: a tune pass needs a cold cache, or force_disable_caches. "reuse"
-    # instead borrows the nearest recorded shape, benchmarks it against the
-    # default kernel, and records the winner. Run as separate passes: "tune"
-    # builds the results file, "reuse" borrows from it and appends its own
+    # lowering, so a graph that routes a CUDA GEMM skips the FX and autotune
+    # caches while a mode is set, and pipelined autotuning is turned off.
+    # "reuse" instead borrows the nearest recorded shape, benchmarks it against
+    # the default kernel, and records the winner. It borrows only where an aten
+    # GEMM is actually benchmarked, so it shares the precondition above: with
+    # max-autotune off, or on a single-choice or deterministic exit, or on an
+    # autotune cache hit, reuse does nothing. Run as separate passes:
+    # "tune" builds the results file, "reuse" borrows from it and appends its own
     # verdicts to the same file, so copy it first to keep the two apart.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(

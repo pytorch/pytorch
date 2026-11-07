@@ -1,12 +1,17 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <memory>
+#include <thread>
+#include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/util/env.h>
 #include <c10/util/tempfile.h>
 
@@ -19,9 +24,15 @@
 // Each test uses a fresh TuningResultsManager and saves/restores the global
 // context flags it touches, so tests do not leak flag state into each other.
 
+using at::cuda::tunable::Callable;
+using at::cuda::tunable::FAIL;
 using at::cuda::tunable::getTuningContext;
+using at::cuda::tunable::OK;
+using at::cuda::tunable::OpParams;
 using at::cuda::tunable::ResultEntry;
+using at::cuda::tunable::TunableOp;
 using at::cuda::tunable::TuningResultsManager;
+using at::cuda::tunable::TuningStatus;
 
 namespace {
 
@@ -60,8 +71,15 @@ struct FlagGuard {
     auto* ctx = getTuningContext();
     tuning_ = ctx->IsTuningEnabled();
     untuned_ = ctx->IsRecordUntunedEnabled();
-    nearest_ = ctx->IsNearestMatchEnabled();
     borrowed_ = ctx->IsRecordBorrowedEnabled();
+    // IsNearestMatchEnabled() folds in recording, so reading it directly
+    // would snapshot false whenever recording is off and the destructor would
+    // then clear the raw setting. Recording on makes it report the raw member.
+    // Not under an env kill switch, where it stays false -- but there nothing
+    // the restore could get wrong is reachable either.
+    ctx->EnableRecordBorrowed(true);
+    nearest_ = ctx->IsNearestMatchEnabled();
+    ctx->EnableRecordBorrowed(borrowed_);
   }
   ~FlagGuard() {
     auto* ctx = getTuningContext();
@@ -72,6 +90,18 @@ struct FlagGuard {
   }
   bool tuning_, untuned_, nearest_, borrowed_;
 };
+
+// Bytes out, megabytes in: GetRotatingBufferSize returns a byte count, or
+// the L2 size when unset, while SetRotatingBufferSize multiplies by 1 MiB.
+// Restoring the raw getter's value overflows int and silently turns rotation
+// off for the rest of the binary; rounding it turns "use L2" into a constant,
+// and into no rotation at all below 1 MiB. Any negative value means "use L2".
+int RotatingBufferMb(int bytes) {
+  if (bytes == at::cuda::getCurrentDeviceProperties()->l2CacheSize) {
+    return -1;
+  }
+  return bytes / (1024 * 1024);
+}
 
 // Read an entire file into a string for content assertions.
 std::string ReadFile(const std::string& path) {
@@ -122,6 +152,226 @@ class TunableNearestTest : public ::testing::Test {
     }
   }
 };
+
+// ---------------------------------------------------------------------------
+// A TunableOp with fake candidates.
+//
+// The borrow path's central promise -- that a donor is benchmarked against
+// Default before it is trusted -- cannot be pinned from Python: the in-process
+// tests only observe that something was recorded, and the subprocess test that
+// reads the log depends on a real tune producing a non-Default winner, so it
+// skips on hardware where Default wins. Here the candidates are ours, so the
+// decisions are observable by counting calls and no tuning outcome is
+// involved.
+// ---------------------------------------------------------------------------
+
+// No device work: these params exist to carry signatures through the resolve.
+struct FakeParams : OpParams {
+  FakeParams(std::string sig, std::string blas) :
+      sig_(std::move(sig)), blas_(std::move(blas)) {}
+  std::string Signature() const override { return sig_; }
+  std::string BLASSignature() const override { return blas_; }
+  FakeParams* DeepCopy(bool /*use_buffer_rotation*/) const {
+    return new FakeParams(sig_, blas_);
+  }
+  void Delete() { delete this; }
+  size_t GetSize(bool /*use_buffer_rotation*/) const { return 1024; }
+  TuningStatus NumericalCheck(FakeParams* /*other*/) const { return OK; }
+
+ private:
+  std::string sig_;
+  std::string blas_;
+};
+
+// Costs a fixed amount of wall time, so which candidate wins is the test's
+// choice. An idle stream means the events bracket the host sleep, which is
+// what makes a sleep show up as elapsed time at all.
+class FakeCallable : public Callable<FakeParams> {
+ public:
+  // fail_from: the 0-based call index from which Call starts returning FAIL.
+  // -1 never fails. A candidate that fails its first (screening) call is
+  // skipped; one that fails later throws out of WarmUp/ProfileStats, which is
+  // the path the catch in ResolveWithoutExactHit exists for.
+  explicit FakeCallable(int micros, int fail_from = -1)
+      : micros_(micros), fail_from_(fail_from) {}
+  TuningStatus Call(const FakeParams* /*params*/) override {
+    const int n = calls_++;
+    if (fail_from_ >= 0 && n >= fail_from_) {
+      return FAIL;
+    }
+    if (micros_ > 0) {
+      std::this_thread::sleep_for(std::chrono::microseconds(micros_));
+    }
+    return OK;
+  }
+  int calls() const { return calls_; }
+
+ private:
+  int micros_;
+  int fail_from_;
+  int calls_ = 0;
+};
+
+class FakeOp : public TunableOp<FakeParams> {
+ public:
+  // Default is candidate 0 for every real GEMM op, so the fake mirrors that.
+  FakeOp(int default_micros, const char* donor_key, int donor_micros,
+         int donor_fail_from = -1) {
+    auto def = std::make_unique<FakeCallable>(default_micros);
+    default_ = def.get();
+    RegisterOp(ResultEntry::Default().GetKey(), std::move(def));
+    if (donor_key != nullptr) {
+      auto donor = std::make_unique<FakeCallable>(donor_micros, donor_fail_from);
+      donor_ = donor.get();
+      RegisterOp(donor_key, std::move(donor));
+    }
+  }
+  std::string Signature() override { return kOp; }
+
+#ifndef USE_ROCM
+  // DonorIsUsable asks this before GetOp on non-ROCm builds, and the base
+  // returns false, so without it every fake donor is rejected: the three
+  // tests below that need a usable donor fail, and the one that needs an
+  // unusable donor passes for the wrong reason. Registration here is static,
+  // so "can this build run it" is exactly "is it registered".
+  bool RegisterOpForResult(
+      const ResultEntry& result, const FakeParams* /*params*/) override {
+    return HasOp(result.GetKey());
+  }
+#endif
+
+  FakeCallable* default_op() const { return default_; }
+  FakeCallable* donor_op() const { return donor_; }
+
+ private:
+  FakeCallable* default_ = nullptr;
+  FakeCallable* donor_ = nullptr;
+};
+
+// operator() reaches the process-wide manager, not a local one, so these
+// tests have to leave it as they found it.
+class GlobalManagerGuard {
+ public:
+  GlobalManagerGuard() {
+    auto* ctx = getTuningContext();
+    numerics_ = ctx->IsNumericsCheckEnabled();
+    rotating_mb_ = RotatingBufferMb(ctx->GetRotatingBufferSize());
+    tuning_iters_ = ctx->GetMaxTuningIterations();
+    warmup_iters_ = ctx->GetMaxWarmupIterations();
+    enabled_ = ctx->IsTunableOpEnabled();
+    ctx->GetTuningResultsManager().ClearAll();
+    // One copy, few iterations, no numerics: the sleeps below are the cost,
+    // and nothing here is trying to measure a kernel accurately.
+    ctx->EnableNumericsCheck(false);
+    ctx->SetRotatingBufferSize(0);
+    ctx->SetMaxTuningIterations(3);
+    ctx->SetMaxWarmupIterations(0);
+    ctx->EnableTunableOp(true);
+  }
+  ~GlobalManagerGuard() {
+    auto* ctx = getTuningContext();
+    ctx->GetTuningResultsManager().ClearAll();
+    ctx->EnableTunableOp(enabled_);
+    ctx->SetMaxWarmupIterations(warmup_iters_);
+    ctx->SetMaxTuningIterations(tuning_iters_);
+    ctx->SetRotatingBufferSize(rotating_mb_);
+    ctx->EnableNumericsCheck(numerics_);
+  }
+
+ private:
+  bool numerics_, enabled_;
+  int rotating_mb_, tuning_iters_, warmup_iters_;
+};
+
+// Put the pass in the state a reuse compile runs in.
+void EnterReusePass() {
+  auto* ctx = getTuningContext();
+  ctx->EnableTuning(false);
+  ctx->EnableRecordBorrowed(true);
+  ctx->EnableNearestMatch(true);
+}
+
+TEST_F(TunableNearestTest, BorrowIsBenchmarkedAndTheFasterCandidateWins) {
+  // The race itself. Replace FindFastestAmong with the borrow and neither
+  // candidate is ever called, which is what the call counts pin. The donor
+  // sleeps 2 ms per call against Default's 0, a margin no scheduling noise
+  // closes, so Default must be the recorded winner even though the donor is
+  // what was borrowed.
+  FlagGuard fg;
+  GlobalManagerGuard gg;
+  TempResultsFile results("tunableop-fake-race-");
+  auto& mgr = getTuningContext()->GetTuningResultsManager();
+  mgr.Add(kOp, kCSig, Donor("fake_donor"));
+
+  FakeOp op(/*default_micros=*/0, "fake_donor", /*donor_micros=*/2000);
+  EnterReusePass();
+  FakeParams params(kQSig, kQBlasSig);
+  EXPECT_EQ(op(&params), OK);
+
+  EXPECT_GT(op.default_op()->calls(), 0) << "Default was never benchmarked";
+  EXPECT_GT(op.donor_op()->calls(), 0) << "the donor was never benchmarked";
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Default()))
+      << "the slower donor was trusted without being measured";
+}
+
+TEST_F(TunableNearestTest, TheFasterDonorIsRecordedForTheBorrowShape) {
+  // The other way round, so the test above cannot be passing merely because
+  // Default is always recorded.
+  FlagGuard fg;
+  GlobalManagerGuard gg;
+  TempResultsFile results("tunableop-fake-donor-wins-");
+  auto& mgr = getTuningContext()->GetTuningResultsManager();
+  mgr.Add(kOp, kCSig, Donor("fake_donor"));
+
+  FakeOp op(/*default_micros=*/2000, "fake_donor", /*donor_micros=*/0);
+  EnterReusePass();
+  FakeParams params(kQSig, kQBlasSig);
+  EXPECT_EQ(op(&params), OK);
+
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), "fake_donor");
+}
+
+TEST_F(TunableNearestTest, AnUnregisteredDonorIsNeverBenchmarked) {
+  // DonorIsUsable's job. Without it the donor reaches FindFastestAmong, which
+  // benchmarks Default and then TORCH_CHECKs on the missing candidate -- so
+  // Default's call count is the tell, not what ends up recorded: both ways
+  // nothing is recorded, which is why the Python twin cannot see this.
+  FlagGuard fg;
+  GlobalManagerGuard gg;
+  TempResultsFile results("tunableop-fake-unusable-");
+  auto& mgr = getTuningContext()->GetTuningResultsManager();
+  mgr.Add(kOp, kCSig, Donor("not_registered_here"));
+
+  FakeOp op(/*default_micros=*/0, /*donor_key=*/nullptr, 0);
+  EnterReusePass();
+  FakeParams params(kQSig, kQBlasSig);
+  EXPECT_EQ(op(&params), OK);
+
+  // Exactly one call: the dispatch itself, no benchmarking.
+  EXPECT_EQ(op.default_op()->calls(), 1);
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()));
+}
+
+TEST_F(TunableNearestTest, ADonorThatFailsMidBenchmarkIsCaught) {
+  // The catch branch. The donor passes its screening call and then fails, so
+  // ProfileStats TORCH_CHECKs and throws out of FindFastestAmong. The compile
+  // must survive it with nothing recorded for the shape.
+  FlagGuard fg;
+  GlobalManagerGuard gg;
+  TempResultsFile results("tunableop-fake-throw-");
+  auto& mgr = getTuningContext()->GetTuningResultsManager();
+  mgr.Add(kOp, kCSig, Donor("fake_donor"));
+
+  FakeOp op(/*default_micros=*/0, "fake_donor", /*donor_micros=*/0,
+            /*donor_fail_from=*/1);
+  EnterReusePass();
+  FakeParams params(kQSig, kQBlasSig);
+  EXPECT_EQ(op(&params), OK) << "the throw must not escape to the caller";
+
+  EXPECT_GT(op.donor_op()->calls(), 1) << "the donor never got past screening";
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()))
+      << "a borrow that threw was measured nothing and must record nothing";
+}
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
   // Calling LookupNearest is itself the opt-in: ResolveWithoutExactHit checks
@@ -313,17 +563,20 @@ TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
 }
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresAnExistingExactEntry) {
-  // Unconditional by design: an exact entry, a recorded Default included, does
-  // not suppress the scan, because a candidate equal to the query differs in no
-  // dim and so never matches. Callers must miss Lookup first --
-  // ResolveWithoutExactHit is reached only on !concrete_hit, which is what
-  // keeps a recorded verdict from being validated twice.
+  // Unconditional by design: an exact entry does not suppress the scan,
+  // because a candidate equal to the query differs in no dim and so never
+  // matches. Callers must miss Lookup first -- ResolveWithoutExactHit is
+  // reached only on !concrete_hit, which is what keeps a recorded verdict
+  // from being validated twice.
   FlagGuard g;
   TempResultsFile results("tunableop-exact-skip-");
   TuningResultsManager mgr;
   SeedDonor(mgr);
-  mgr.RecordBorrowed(kOp, kQSig, ResultEntry::Default());
-  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Default()));
+  // Non-Default on purpose: the scan drops Default candidates before it
+  // compares any shape, so a recorded Default would pass this without the
+  // equal-shape rejection ever running.
+  mgr.RecordBorrowed(kOp, kQSig, Donor("exact"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(Donor("exact")));
   EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
 }
 

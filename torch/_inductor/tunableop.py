@@ -18,6 +18,7 @@ import copy
 import logging
 import math
 import os
+import sys
 import threading
 import time
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
@@ -93,7 +94,10 @@ def _warn_fault_once(status: WorkerStatus, detail: str) -> None:
     kind = f"{status}:{detail}"
     report = log.debug if kind in _warned_faults else log.warning
     _warned_faults.add(kind)
-    report("TunableOp benchmark %s: %s", status, detail, exc_info=True)
+    # Only when there is one to attach: callers outside an except block would
+    # otherwise have "NoneType: None" tacked onto every message.
+    in_handler = sys.exc_info()[0] is not None
+    report("TunableOp benchmark %s: %s", status, detail, exc_info=in_handler)
 
 
 def _warn_if_env_blocks(
@@ -121,7 +125,13 @@ def is_tune_mode() -> bool:
 
 
 def is_reuse_mode() -> bool:
-    """True while consuming the results file: borrow and validate, never tune."""
+    """True while reusing the results file: borrow, validate, record, never tune.
+
+    Reads the file for donors and appends its verdicts to the same one. Only
+    a routed ExternKernelCaller.benchmark borrows, so a compile that never
+    benchmarks an aten GEMM -- max-autotune off, a single-choice or
+    deterministic exit, an autotune cache hit -- reuses nothing.
+    """
     if _mode() != "reuse" or not torch.cuda.is_available():
         return False
     _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will not borrow or record")
@@ -130,6 +140,156 @@ def is_reuse_mode() -> bool:
 
 def is_enabled() -> bool:
     return is_tune_mode() or is_reuse_mode()
+
+
+def graph_has_routable_gemm(gm: Any) -> bool:
+    """Whether any node is a CUDA GEMM a TunableOp pass would act on.
+
+    The cache bypass costs a full recompile, so it must not fire for graphs
+    that do no compile-time TunableOp work at all -- CPU-only ones, and ones
+    with no GEMM. Keyed on the aten overload packet, the op the choice names
+    in _TUNABLEOP_ROUTING_CHOICES lower to.
+    """
+    routable = _routable_packets()
+    convs = _conv_packets()
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            packet = getattr(node.target, "overloadpacket", None)
+            if packet not in routable:
+                continue
+            # Most convs stay convs. Only the ones the lowering rewrites into
+            # an mm are GEMMs the graph does not show as GEMMs.
+            if packet in convs and not _conv_lowers_to_mm(node):
+                continue
+            val = node.meta.get("val")
+            if getattr(getattr(val, "device", None), "type", None) == "cuda":
+                return True
+    return False
+
+
+def _every(values: Any, expected: int) -> bool:
+    """Whether no element is known to differ from `expected`.
+
+    Not "every element equals": a value that cannot be decided statically
+    counts as matching, because the caller uses this to rule a conv OUT, and
+    ruling one out wrongly means its tuning silently never happens. Keeping
+    it costs a recompile, which is the cheaper way to be wrong.
+
+    Decided without guarding. int() on a backed SymInt specializes it, which
+    a cache validator has no business doing, and on an unbacked one it raises
+    GuardOnDataDependentSymNode -- a RuntimeError, so it would escape this
+    helper and fail the compile.
+    """
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    for v in values:
+        if isinstance(v, torch.fx.Node):
+            continue  # a traced value: nothing static to compare
+        if statically_known_true(v != expected):
+            return False
+    return True
+
+
+def _conv_lowers_to_mm(node: Any) -> bool:
+    """Whether this convolution node becomes an mm during lowering.
+
+    Mirrors the gate in the convolution lowering (torch/_inductor/kernel/
+    conv.py), which rewrites a 1x1 conv as L[aten.mm] or L[aten.addmm] --
+    choices TunableOp then routes like any other GEMM. _convolution shares
+    it: its lowering just calls convolution(), and its first nine arguments
+    are in the same positions. Reads the arguments the lowering reads rather
+    than re-deriving them:
+
+        convolution(input, weight, bias, stride, padding, dilation,
+                    transposed, output_padding, groups)
+
+    The lowering's last condition, that the input is non-empty, is left out:
+    it only excludes a degenerate graph, and over-bypassing costs a recompile
+    while under-bypassing tunes nothing and says nothing.
+    """
+    if not (config.conv_1x1_as_mm or config.max_autotune or config.max_autotune_gemm):
+        return False
+    args = node.args
+    if len(args) < 9:
+        # Not the shape this knows how to rule out; let the bypass stand.
+        return True
+    weight_val = getattr(args[1], "meta", {}).get("val")
+    kernel = getattr(weight_val, "shape", None)
+    return (
+        _every(() if kernel is None else kernel[2:], 1)  # 1x1 spatial extent
+        and _every(args[3], 1)  # stride
+        and _every(args[4], 0)  # padding
+        and _every(args[5], 1)  # dilation
+        and args[6] is not True  # transposed
+        and _every(args[7], 0)  # output_padding
+        and _every((args[8],), 1)  # groups
+    )
+
+
+_ROUTABLE_PACKETS: Any = None
+
+
+def _routable_packets() -> Any:
+    """aten packets whose lowering can put a GEMM in front of the worker.
+
+    Packets, not overloads: mm_dtype is aten.mm.dtype_out and bias_addmm
+    lowers from an addmm node, so the packet covers both. Built once rather
+    than per call, and kept beside _TUNABLEOP_ROUTING_CHOICES, the
+    choice-name set these are the graph-level counterpart of.
+    """
+    global _ROUTABLE_PACKETS
+    if _ROUTABLE_PACKETS is None:
+        aten = torch.ops.aten
+        _ROUTABLE_PACKETS = frozenset(
+            [
+                aten.mm,
+                aten.addmm,
+                aten.bmm,
+                aten.baddbmm,
+                aten._scaled_mm,
+                aten._scaled_mm_v2,
+                # Routable only when _conv_lowers_to_mm says so.
+                aten.convolution,
+                aten._convolution,
+            ]
+        )
+    return _ROUTABLE_PACKETS
+
+
+_CONV_PACKETS: Any = None
+
+
+def _conv_packets() -> Any:
+    """Conv packets a 1x1 can be rewritten out of.
+
+    _convolution is CompositeExplicitAutograd and untagged, so nothing
+    decomposes it: a direct torch._convolution call reaches the validator
+    as itself rather than as aten.convolution.
+    """
+    global _CONV_PACKETS
+    if _CONV_PACKETS is None:
+        aten = torch.ops.aten
+        _CONV_PACKETS = frozenset([aten.convolution, aten._convolution])
+    return _CONV_PACKETS
+
+
+def routes_to_worker(choices: list[Any]) -> bool:
+    """Whether any choice would be benchmarked in the TunableOp worker.
+
+    Mirrors the gate in ExternKernelCaller.benchmark, device included: submit()
+    runs the job on a CUDA worker, so a CPU extern candidate is timed inline
+    and must keep its cache entry. A non-extern choice has no .choice.
+    """
+    if not is_enabled():
+        return False
+    return any(
+        is_tunableop_gemm(getattr(getattr(c, "choice", None), "name", ""))
+        and getattr(getattr(c, "layout", None), "device", None) is not None
+        and c.layout.device.type == "cuda"
+        for c in choices
+    )
 
 
 def is_tunableop_gemm(choice_name: str) -> bool:
@@ -222,8 +382,8 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
-        # _nearest_match_enable reads this, so without it nothing is borrowed
-        # at all: it is the master switch of the pair, not just the write.
+        # The nearest-match getter reads this, so without it nothing is
+        # borrowed at all: master switch of the pair, not just the write.
         tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
@@ -587,8 +747,16 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "error")
     # inf is what a benchmark returns when it declines to run the op, and
     # select_algorithm drops an inf candidate silently rather than reporting it.
-    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-        log.warning("TunableOp benchmark returned %r; treating as a fault", value)
+    # bool is an int, and True would sail through as a 1 ms timing.
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        # Through the same helper as every other fault: a worker returning
+        # garbage does it for every GEMM, not once.
+        _warn_fault_once("error", f"benchmark returned {value!r}")
         return Outcome(None, "error")
     return Outcome(float(value), "ok")
 
@@ -612,6 +780,53 @@ _pretuned_gemms = clear_on_fresh_cache(_PretunedGemms())
 # Attempts a faulting bucket gets per process. One retry covers a transient
 # fault; more lets a reproducible hang charge the budget once per layer.
 _TUNABLEOP_MAX_BUCKET_ATTEMPTS = 2
+
+# Consecutive routed-candidate faults before routing is given up. Each fault
+# costs a forced worker kill and a cold restart, and for a hang the whole
+# autotune_tunableop_timeout as well; a worker that keeps dying is not
+# containing anything. Giving up is safe because the inline fallback runs with
+# tuning off, and tuning is the part that aborts and hangs. The ladder keeps
+# its own per-bucket memo and is unaffected.
+_TUNABLEOP_MAX_ROUTING_FAULTS = 3
+
+
+class _RoutingBreaker:
+    """Consecutive routing faults, cleared by a success or a fresh cache."""
+
+    def __init__(self) -> None:
+        self.faults = 0
+
+    def cache_clear(self) -> None:
+        self.faults = 0
+
+
+_routing_breaker = clear_on_fresh_cache(_RoutingBreaker())
+
+
+def routing_is_open() -> bool:
+    """Whether a routed aten candidate should still reach the worker."""
+    return _routing_breaker.faults < _TUNABLEOP_MAX_ROUTING_FAULTS
+
+
+def note_routing_outcome(status: WorkerStatus) -> None:
+    """Count consecutive routing faults. Any success clears the run.
+
+    Not counted inside submit(): the ladder submits too, and its faults are
+    already bounded per bucket. This is only about candidates the autotuner
+    routes, which is what routing_is_open() gates.
+    """
+    if status == "ok":
+        _routing_breaker.faults = 0
+        return
+    _routing_breaker.faults += 1
+    if _routing_breaker.faults == _TUNABLEOP_MAX_ROUTING_FAULTS:
+        log.warning(
+            "TunableOp routing disabled after %d consecutive worker faults; "
+            "aten GEMMs are timed inline with tuning off for the rest of "
+            "this compile.",
+            _routing_breaker.faults,
+        )
+
 
 # Least budget worth giving a bucket. Below this a timeout says more about the
 # deadline than the rung, and it would kill the worker and charge a fault.
@@ -790,15 +1005,13 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     entries are always recorded concrete -- the mask is deliberately not carried
     into the jobs.
     """
+    # Both are guards for direct callers, tests included: queue_range_pretune
+    # already filters on them, so nothing in production reaches here with the
+    # mode off or the ladder off. What is still covered without the ladder is
+    # described on autotune_tunableop_ladder in config.py.
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # No ladder entries. The traced shape is covered only when autotune
-        # leaves this GEMM more than one choice, so the aten candidate is
-        # benchmarked and routed through the worker (see
-        # ExternKernelCaller.benchmark). The single-choice and deterministic
-        # exits return without benchmarking, so with max-autotune off nothing
-        # is tuned here and only PYTORCH_TUNABLEOP_ENABLED covers the shape.
         return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
