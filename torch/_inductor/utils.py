@@ -80,6 +80,14 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+
+def _get_launch_params_file() -> str:
+    path = os.path.abspath(sys.argv[0])
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker:
+        path = f"{path}.{worker}"
+    return f"{path}.launch_params"
+
 from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,

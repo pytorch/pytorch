@@ -55,6 +55,7 @@ from ..utils import (
     sanitize_constexpr_for_repr,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
+    _get_launch_params_file,
     XPU_KERNEL_FORMAT,
 )
 from . import triton_helpers
@@ -378,8 +379,7 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     args_str = [*call_args]
     args_str.extend(f"{k}={v}" for k, v in call_kwargs.items())
     args_str = ", ".join(args_str)
-    abs_path = os.path.abspath(sys.argv[0])
-    with open(f"{abs_path}.launch_params", "a") as f:
+    with open(_get_launch_params_file(), "a") as f:
         f.write(f"{kernel_name} | {args_str} | {grid!r}\n")
 
 
