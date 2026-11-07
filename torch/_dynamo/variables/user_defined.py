@@ -2285,6 +2285,40 @@ def can_guard_class_function_code(tx: "InstructionTranslatorBase", fn: object) -
     return tx.output.package is None or is_portable_function_guard("CLOSURE_MATCH", fn)
 
 
+def build_mro_method(
+    tx: "InstructionTranslatorBase",
+    fn: types.FunctionType,
+    fn_source: Source,
+    im_self: VariableTracker,
+    method_source: Source | None,
+) -> VariableTracker:
+    """Bind fn, a function found on the class MRO of an object constructed
+    during tracing.
+
+    Such an object has no source of its own, so its methods are sourced through
+    its class: fn_source is the function's entry in the defining class's
+    __dict__, which lets bind_args track the function's closure cells. Guard the
+    function's code as resolve_type_attr does, so that rebinding it on the class
+    recompiles instead of replaying the traced body. A torch.compile wrapper is
+    traced through its _torchdynamo_inline target, whose closure is not the
+    wrapper's, so it gets a wrapper VT (as in resolve_type_attr) instead.
+    """
+    from .builder import VariableBuilder
+
+    if inspect.getattr_static(fn, "_torchdynamo_inline", False):
+        wrapper_vt = VariableBuilder.create_internal_wrapper_user_function(
+            fn, "_torchdynamo_inline", source=fn_source
+        )
+        return variables.WrapperUserMethodVariable.create(
+            wrapper_vt, im_self, source=method_source
+        )
+    if can_guard_class_function_code(tx, fn):
+        fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
+    else:
+        fn_vt = VariableBuilder.create_internal_user_function(fn, source=fn_source)
+    return variables.UserMethodVariable(fn_vt, im_self, source=method_source)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -3445,15 +3479,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = self.source
+                source = self.source and AttrSource(self.source, name)
                 source_fn = None
-                if source:
+                if self.cls_source:
                     source_fn = self.get_source_by_walking_mro(tx, name)
                 # TODO(jansel): add a guard to check for monkey patching?
                 from ..mutation_guard import unpatched_nn_module_init
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
+                if source_fn is not None and self.source is None:
+                    # An object constructed during tracing: see build_mro_method.
+                    return build_mro_method(
+                        tx, method, source_fn, self, source
+                    ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
                 # Preserve the MRO-selected function and source. GenerationTracker
                 # intentionally makes them differ for torch.nn.Module.__init__.
                 return UserMethodVariable(
@@ -4150,7 +4189,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
-            if self.source:
+            if self.cls_source is not None:
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable.create(type_attr, source)
             return prop_vt.tp_descr_get_impl(
@@ -4237,7 +4276,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             type_attr = unpatched_nn_module_init
 
-        can_use_mro_source = self.cls_source is not None and self.source is not None
+        can_use_mro_source = self.cls_source is not None
 
         # LOAD_ATTR + CALL (3.11+) never hits call_method unless getattr
         # returns CallMethodVariable. object_generic_getattr already does this;
@@ -4294,8 +4333,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
+            fn_source = source
+            # An object constructed during tracing has no attribute source; give
+            # the wrapped function its MRO source (see build_mro_method).
+            if can_use_mro_source and self.source is None:
+                fn_source = self.get_source_by_walking_mro(tx, name)
             fn_vt = VariableBuilder.create_internal_wrapper_user_function(
-                type_attr, "__wrapped__", source=source
+                type_attr, "__wrapped__", source=fn_source
             )
             return variables.WrapperUserMethodVariable.create(
                 fn_vt, self, source=source
@@ -4370,8 +4414,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # without __get__, etc.).
         if can_use_mro_source:
             source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
@@ -4396,16 +4438,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         owner_var = VariableTracker.build(tx, type(self.value))
-        return variables.UserMethodVariable(
-            VariableBuilder.create_internal_user_function(
-                # descriptor_get_source is type(descriptor).__get__, which is
-                # already the function; it has no __func__ to unwrap.
-                descriptor.__get__.__func__,  # type: ignore[union-attr]
+        # descriptor_get_source is type(descriptor).__get__, which is already
+        # the function; it has no __func__ to unwrap.
+        get_fn = descriptor.__get__.__func__  # type: ignore[union-attr]
+        if descriptor_get_source is not None and self.source is None:
+            # An object constructed during tracing: see build_mro_method.
+            method_vt = build_mro_method(
+                tx, get_fn, descriptor_get_source, descriptor_var, descriptor_get_source
+            )
+        else:
+            method_vt = variables.UserMethodVariable(
+                VariableBuilder.create_internal_user_function(
+                    get_fn, source=descriptor_get_source
+                ),
+                descriptor_var,
                 source=descriptor_get_source,
-            ),
-            descriptor_var,
-            source=descriptor_get_source,
-        ).call_function(tx, [self, owner_var], {})
+            )
+        return method_vt.call_function(tx, [self, owner_var], {})
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
@@ -4456,16 +4505,42 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 new_source = None
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                out = variables.UserMethodVariable(
-                    # See the note in tp_getattro_impl above: off the builder so
-                    # the accessor guard is not installed eagerly.
-                    VariableBuilder.create_internal_user_function(
+                # getattr_static(type(value), "__getattr__") also finds a
+                # __getattr__ defined on the *metaclass* (e.g. EnumType on
+                # Python < 3.12), which is not in type(value).__mro__ and
+                # therefore cannot be sourced by walking the MRO.  Only
+                # source (and guard) the function when a class in the MRO
+                # actually defines it.
+                if (
+                    self.source is None
+                    and self.cls_source is not None
+                    and any(
+                        "__getattr__" in klass.__dict__
+                        for klass in type(self.value).__mro__
+                    )
+                ):
+                    # An object constructed during tracing: see build_mro_method.
+                    method_vt = build_mro_method(
+                        tx,
                         getattr_fn,
-                        source=new_source and AttrSource(new_source, "__func__"),
-                    ),
-                    self,
-                    source=new_source,
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+                        self.get_source_by_walking_mro(tx, "__getattr__"),
+                        self,
+                        new_source,
+                    )
+                else:
+                    method_vt = variables.UserMethodVariable(
+                        # See the note in tp_getattro_impl above: off the builder so
+                        # the accessor guard is not installed eagerly.
+                        VariableBuilder.create_internal_user_function(
+                            getattr_fn,
+                            source=new_source and AttrSource(new_source, "__func__"),
+                        ),
+                        self,
+                        source=new_source,
+                    )
+                out = method_vt.call_function(
+                    tx, [variables.ConstantVariable.create(name)], {}
+                )
 
             if self.source and getattr_fn is torch.nn.Module.__getattr__:
                 if isinstance(
