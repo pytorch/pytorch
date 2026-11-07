@@ -898,10 +898,9 @@ class FSDPParamGroup:
         output = self._partial_reduce_output
         if output is None or param not in self._partial_reduce_output_layout:
             return None
-        offset, _ = self._partial_reduce_output_layout[param]
-        return output.narrow(0, offset, param.sharded_size.numel()).view(
-            param.sharded_size
-        )
+        # The padded flat shard, as the reduce-scatter output holds it
+        offset, size = self._partial_reduce_output_layout[param]
+        return output.narrow(0, offset, size)
 
     def _validate_unused_param_grad_dtypes(self) -> None:
         # Check configuration rather than gradient presence so every rank raises
@@ -1037,9 +1036,9 @@ class FSDPParamGroup:
             if repacked_output is not None:
                 grad_pending_all_reduce = self._get_partial_reduce_grad(param)
                 if grad_pending_all_reduce is not None:
-                    repacked_output.narrow(
-                        0, offset, grad_pending_all_reduce.numel()
-                    ).copy_(grad_pending_all_reduce.reshape(-1))
+                    repacked_output.narrow(0, offset, size).copy_(
+                        grad_pending_all_reduce
+                    )
             offset += size
         self._partial_reduce_output_layout = new_layout
         self._partial_reduce_output = repacked_output

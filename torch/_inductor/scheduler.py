@@ -6171,6 +6171,8 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
+        # Templates with a fused node whose device assert generated inputs could trip.
+        self.templates_with_unsafe_asserts = OrderedSet[str]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
@@ -7697,6 +7699,28 @@ class Scheduler:
 
             from torch._inductor.codegen.simd import CantSplit
 
+            # Benchmarking launches kernels on generated inputs, which can trip a
+            # device assert and leave the device unusable. So a fusion whose
+            # standalone side, or an earlier fusion into the template, has such an
+            # assert is judged by estimate. With multi_kernel_hints the fused choice
+            # for each hint can only be picked by benchmarking, so it is not made.
+            template_name = multi_node.get_name()
+            needs_real_inputs = template_name in self.templates_with_unsafe_asserts
+            if not (needs_real_inputs or has_atomic_add) and (
+                config.benchmark_template_fusion or config.multi_kernel_hints
+            ):
+                standalone = PyCodeCache.load(
+                    self.generate_kernel_code_from_nodes(
+                        node_list_2 if consumer_fusion else node_list_1,
+                        benchmark_kernel=True,
+                    )
+                )
+                needs_real_inputs = bool(
+                    standalone.triton_.inductor_meta.get("asserts_need_real_inputs")
+                )
+            if needs_real_inputs and config.multi_kernel_hints and not has_atomic_add:
+                return FusionResult.fuse(False)
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7761,7 +7785,9 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            benchmark_template_fusion = config.benchmark_template_fusion
+            benchmark_template_fusion = (
+                config.benchmark_template_fusion and not needs_real_inputs
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -8049,6 +8075,8 @@ class Scheduler:
                     if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
+                    if needs_real_inputs:
+                        self.templates_with_unsafe_asserts.add(template_name)
                     return True
                 else:
                     return False
