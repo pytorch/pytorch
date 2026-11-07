@@ -131,6 +131,28 @@ class TestXpu(TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_triangular_solve_out_xpu_kernel(self):
+        dispatch_table = torch._C._dispatch_dump("aten::triangular_solve.X")
+        xpu_registration = next(
+            (
+                line
+                for line in dispatch_table.splitlines()
+                if line.startswith("XPU: registered at ")
+            ),
+            "",
+        )
+        self.assertIn("RegisterXPU_", xpu_registration)
+
+        b = torch.tensor([[2.0], [5.0]], device="xpu")
+        a = torch.tensor([[2.0, 0.0], [1.0, 2.0]], device="xpu")
+        out = torch.empty_like(b)
+        cloned_a = torch.empty_like(a)
+        solution, cloned = torch.ops.aten.triangular_solve.X(
+            b, a, upper=False, X=out, M=cloned_a
+        )
+        self.assertEqual(solution, torch.tensor([[1.0], [2.0]], device="xpu"))
+        self.assertEqual(cloned, a)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
