@@ -8503,6 +8503,29 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
     )
 
 
+@register_meta(aten._upsample_bicubic2d_aa_backward.default)
+def meta_upsample_bicubic2d_aa_backward(
+    grad_output,
+    output_size,
+    input_size,
+    align_corners,
+    scales_h=None,
+    scales_w=None,
+):
+    """Match the C++ meta for bicubic AA backward.
+
+    The C++ structured meta uses a bare grad_output.options() output, so eager
+    returns contiguous grad_input strides regardless of grad_output's memory
+    format. The shared AA meta propagates memory format; bilinear's C++ meta
+    does the same, while lanczos' C++ meta has the same pre-existing
+    bare-options divergence. Bicubic stays contiguous here until its C++ meta
+    is changed to propagate memory format too.
+    """
+    return meta_upsample_bimode2d_aa_backward(
+        grad_output, output_size, input_size, align_corners, scales_h, scales_w
+    ).contiguous()
+
+
 # From aten/src/ATen/native/cuda/AmpKernels.cu
 @register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
 def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
