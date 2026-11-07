@@ -798,6 +798,44 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
 
+    @requires_gpu_and_triton
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_checkpointed_dropout_graph_capture(self, device, backend):
+        def gn(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.ones(1024, device=device, requires_grad=True)
+        device_mod = torch.get_device_module(device)
+        stream = device_mod.Stream()
+        stream.wait_stream(device_mod.current_stream())
+        with device_mod.stream(stream):
+            for _ in range(3):
+                x.grad = None
+                compiled(x).sum().backward()
+        device_mod.current_stream().wait_stream(stream)
+
+        x.grad = None
+        # torch.accelerator.Graph has no CUDA backend.
+        is_xpu = self.device_type == "xpu"
+        graph = torch.xpu.XPUGraph() if is_xpu else torch.cuda.CUDAGraph()
+        with device_mod.graph(graph, stream=stream):
+            out = compiled(x)
+            out.sum().backward()
+        device_mod.current_stream().wait_stream(stream)
+
+        outs = []
+        for _ in range(2):
+            graph.replay()
+            device_mod.synchronize()
+            # x is all ones, so both out and x.grad are the replayed mask times 2.
+            self.assertEqual(x.grad, out)
+            outs.append(out.clone())
+        self.assertNotEqual(outs[0], outs[1])
+
     @skipIfHpu
     @torch._functorch.config.patch(recompute_views=True)
     @torch._inductor.config.patch(fx_graph_cache=False)
