@@ -30,6 +30,10 @@ class _ReplicateState(_State):
         self._init_args: tuple[Any, ...] | None = None
         self._init_kwargs: dict[str, Any] = {}
         self._comm_hook_args: list[Any] = []
+        # Value of DistributedDataParallel._active_ddp_module before this
+        # module's forward started, restored when the forward finishes (or
+        # raises) so nested replicate() modules keep the outer context.
+        self._saved_active_ddp_module: Any = None
 
     def _collect_params(
         self,
@@ -132,6 +136,7 @@ class _ReplicateState(_State):
         if self._init_args or self._init_kwargs:
             self.lazy_init()
         self._ddp.require_backward_grad_sync = not self._no_sync
+        self._saved_active_ddp_module = DistributedDataParallel._active_ddp_module
         DistributedDataParallel._active_ddp_module = self._ddp
         return self._ddp._pre_forward(*args, **kwargs)
 
@@ -141,8 +146,20 @@ class _ReplicateState(_State):
         input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
-        DistributedDataParallel._active_ddp_module = None
+        DistributedDataParallel._active_ddp_module = self._saved_active_ddp_module
         return self._ddp._post_forward(output)
+
+    def forward_cleanup_hook(
+        self,
+        module: nn.Module,
+        input: tuple[torch.Tensor],
+        output: Any,
+    ) -> None:
+        # Registered with always_call=True so it also runs when the user's
+        # forward raises (ordinary post-hooks are skipped in that case).
+        # No-op on the success path, where forward_post_hook already restored.
+        if DistributedDataParallel._active_ddp_module is self._ddp:
+            DistributedDataParallel._active_ddp_module = self._saved_active_ddp_module
 
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
@@ -238,6 +255,7 @@ def replicate(
             module.register_forward_hook(_localize_dtensor)
 
     module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
+    module.register_forward_hook(state.forward_cleanup_hook, always_call=True)  # type: ignore[arg-type]
 
     state.record_init_args(module, ignored_modules, **kwargs)
 
