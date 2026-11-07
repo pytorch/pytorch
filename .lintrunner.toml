@@ -570,6 +570,33 @@ command = [
 ]
 
 [[linter]]
+code = 'GNU_COMMA_PASTE'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+    '**/*.cc',
+    '**/*.cu',
+    '**/*.cuh',
+    '**/*.hpp',
+    '**/*.mm',
+]
+exclude_patterns = [
+    'third_party/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=##\s*__VA_ARGS__',
+    '--linter-name=GNU_COMMA_PASTE',
+    '--error-name=GNU comma paste before __VA_ARGS__',
+    """--error-description=\
+        Use __VA_OPT__(,) __VA_ARGS__ instead of the GNU , ## __VA_ARGS__ extension\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'C10_NODISCARD'
 include_patterns = [
     '**/*.cpp',

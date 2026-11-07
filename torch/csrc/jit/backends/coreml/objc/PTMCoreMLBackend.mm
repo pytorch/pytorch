@@ -27,8 +27,8 @@
         " Localized_description: ", error.localizedDescription.UTF8String,       \
         " Domain: ", error.domain.UTF8String,                                    \
         " Code: ", error.code,                                                   \
-        " User Info: ", error.userInfo.description.UTF8String,                   \
-        ##__VA_ARGS__);                                                          \
+        " User Info: ", error.userInfo.description.UTF8String                    \
+        __VA_OPT__(, ) __VA_ARGS__);                                             \
   } while (false)
 
 namespace torch {
