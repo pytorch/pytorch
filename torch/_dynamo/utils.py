@@ -1429,12 +1429,15 @@ def unpack_and_apply_fn(
 def lazily_unpack(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
+    *,
+    allow_fast_path: bool = True,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
     iterable = iterable.realize()
-    if istype(iterable, _unpack_fast_types()):
+    # Interleaved callbacks may require observing the live iterator state.
+    if allow_fast_path and istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
