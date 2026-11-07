@@ -2269,6 +2269,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # exception so a surrounding except can catch it, instead of
                 # escaping the compiled region.
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
+            if type(r) is type:
+                from .user_defined import TraceLocalUserDefinedClassVariable
+
+                return TraceLocalUserDefinedClassVariable.create_new(r)
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
@@ -3890,6 +3894,10 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
+            obj, variables.UserDefinedClassVariable
+        ) and name_var.is_constant_match("__doc__"):
+            return obj._set_doc(tx, val)
         elif isinstance(
             obj, variables.UserDefinedClassVariable
         ) and name_var.is_constant_match("__bases__"):

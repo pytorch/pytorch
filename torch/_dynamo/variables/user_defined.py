@@ -116,12 +116,16 @@ from .base import (
     attr_getset,
     AttrMutationKind,
     GetSet,
+    getset_load_or_build,
+    is_immutable_type,
     Member,
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
+    raise_type_doc_error,
     readonly_setter,
     REPR_ADDRESS_PLACEHOLDER,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -387,6 +391,22 @@ class UserDefinedVariable(VariableTracker):
         return None
 
 
+def _get_class_doc(
+    vt: "UserDefinedClassVariable", tx: "InstructionTranslatorBase"
+) -> VariableTracker:
+    side_effects = tx.output.side_effects
+    tracked = side_effects.id_to_variable.get(id(vt.value))
+    if tracked is not None and side_effects.has_pending_mutation_of_attr(
+        tracked, "__doc__"
+    ):
+        return side_effects.load_attr(tracked, "__doc__")
+    getter = getset_load_or_build(lambda item: item.value.__doc__, "__doc__")
+    result = getter(vt, tx)
+    if result is None:
+        raise AssertionError("class __doc__ getter unexpectedly declined")
+    return result
+
+
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
@@ -395,7 +415,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         "__name__": attr_getset("__name__", lambda vt: vt.value),
         "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
         "__module__": attr_getset("__module__", lambda vt: vt.value),
-        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        "__doc__": GetSet(_get_class_doc, lambda vt, tx, value: vt._set_doc(tx, value)),
         # missing:
         # "__bases__": GetSet(...),
         # "__mro__": GetSet(...),
@@ -424,6 +444,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if mod == "torch" or mod.startswith(("torch.", "torch_")):
             return None
         return self.value
+
+    def _set_doc(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> VariableTracker:
+        if type(self.value) is not type:
+            unmodeled_setter(self, tx, value)
+        if value is None:
+            raise_type_doc_error(tx, self.value, deleting=True)
+        if is_immutable_type(self.value):
+            raise_type_doc_error(tx, self.value)
+
+        if self.source is None:
+            if not isinstance(self, TraceLocalUserDefinedClassVariable):
+                unmodeled_setter(self, tx, value)
+            if not value.is_python_constant():
+                unmodeled_setter(self, tx, value)
+            self.value.__doc__ = value.as_python_constant()
+            return value
+
+        module = type.__getattribute__(self.value, "__module__")
+        if module == "builtins" or self.get_value_for_setattr() is None:
+            unmodeled_setter(self, tx, value)
+
+        side_effects = tx.output.side_effects
+        tracked = side_effects.id_to_variable.get(id(self.value))
+        if tracked is None:
+            tracked = side_effects.track_object_existing(self.value, self)
+        if not (
+            isinstance(tracked, UserDefinedClassVariable)
+            and side_effects.is_attribute_mutation(tracked)
+        ):
+            unmodeled_setter(self, tx, value)
+        side_effects.store_attr(tracked, "__doc__", value)
+        return value
 
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
@@ -814,8 +868,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.TupleVariable(items, source=source)
         if name == "__base__":
             return VariableTracker.build(tx, self.value.__base__, source)
-        # __name__, __qualname__, __doc__, __module__,
-        # __abstractmethods__, etc. — all C-level getset descriptors on type.
+        if name == "__doc__" and meta_attr is type.__dict__["__doc__"]:
+            result = self.tp_getset["__doc__"].getter(self, tx)
+            if result is not None:
+                return result
+        # __name__, __qualname__, __module__, __abstractmethods__, etc. — all
+        # C-level getset descriptors on type.
         resolved = type.__getattribute__(self.value, name)
         if source:
             return VariableTracker.build(tx, resolved, source)
@@ -2201,6 +2259,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+
+class TraceLocalUserDefinedClassVariable(UserDefinedClassVariable):
+    """A class created by the current trace's ``__build_class__`` call."""
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):

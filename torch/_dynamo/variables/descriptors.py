@@ -37,8 +37,10 @@ from .base import (
     getset_load_or_build,
     getset_read,
     getset_set,
+    is_immutable_type,
     Member,
     NO_SUCH_SUBOBJ,
+    raise_type_doc_error,
     readonly_setter,
     store_attr_mutation,
     type_qualified_name,
@@ -48,7 +50,7 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -1232,6 +1234,16 @@ class GetSetDescriptorVariable(DescriptorVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        if (
+            self.descriptor is type.__dict__["__doc__"]
+            and not isinstance(obj, UserDefinedClassVariable)
+            and obj.is_python_constant()
+        ):
+            target = obj.as_python_constant()
+            if type(target) is type:
+                if value is None or is_immutable_type(target):
+                    raise_type_doc_error(tx, target, deleting=value is None)
+                unmodeled_setter(obj, tx, value)
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
         if entry is None:
