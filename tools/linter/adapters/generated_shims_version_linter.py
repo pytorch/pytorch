@@ -3,7 +3,7 @@
 GENERATED_SHIMS_VERSION: Ensures that newly added entries (or vN variants) in
 torchgen/aoti/fallback_ops.py carry a "since" key set to the current
 TORCH_VERSION, and that "since" values on already-shipped entries are not
-modified.
+modified. Backend-specific "since_<device>" overrides follow the same rules.
 """
 
 from __future__ import annotations
@@ -28,15 +28,17 @@ from tools.linter.adapters._stable_shim_utils import (
     read_file_at_revision,
 )
 
+from torchgen.aoti.fallback_ops import AOTI_SUPPORTED_DEVICES
+
 
 LINTER_CODE = "GENERATED_SHIMS_VERSION"
 
 _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
 
-# {op_name: {op_version: (since_value_or_None, lineno)}}
+# {(op_name, device_or_None): {op_version: (since_value_or_None, lineno)}}
 # op_version == 1 represents the base op (top-level "since" in the per-op dict);
 # op_version >= 2 represents a "vN" variant.
-ParsedOps = dict[str, dict[int, tuple[str | None, int]]]
+ParsedOps = dict[tuple[str, str | None], dict[int, tuple[str | None, int]]]
 
 
 def _const_str(node: ast.expr | None) -> str | None:
@@ -66,6 +68,7 @@ def _ingest_op_dict(dict_node: ast.Dict) -> ParsedOps:
         per_op: dict[int, tuple[str | None, int]] = {
             1: (_str_value_for_key(op_val_node, "since"), op_key_node.lineno),
         }
+        metadata_by_version = {1: op_val_node}
         for var_key_node, var_val_node in zip(op_val_node.keys, op_val_node.values):
             if var_key_node is None:
                 continue
@@ -83,7 +86,18 @@ def _ingest_op_dict(dict_node: ast.Dict) -> ParsedOps:
                 else None
             )
             per_op[ver_id] = (since, var_key_node.lineno)
-        out[op_name] = per_op
+            if isinstance(var_val_node, ast.Dict):
+                metadata_by_version[ver_id] = var_val_node
+        out[op_name, None] = per_op
+        for ver_id, metadata in metadata_by_version.items():
+            for key, value in zip(metadata.keys, metadata.values):
+                version_key = _const_str(key)
+                if version_key is not None and version_key.startswith("since_"):
+                    device = version_key.removeprefix("since_")
+                    out.setdefault((op_name, device), {})[ver_id] = (
+                        _const_str(value),
+                        value.lineno,
+                    )
     return out
 
 
@@ -138,10 +152,22 @@ def _check_one_dict(
     filename: str,
 ) -> list[LintMessage]:
     messages: list[LintMessage] = []
-    for op_name, variants in current.items():
-        prev_variants = base.get(op_name, {})
+    for (op_name, device), variants in current.items():
+        prev_variants = base.get((op_name, device), {})
         for ver_id, (since, lineno) in variants.items():
             label = f"'{op_name}'" if ver_id == 1 else f"'{op_name}' v{ver_id}"
+            if device is not None:
+                label += f" ({device})"
+                if device not in AOTI_SUPPORTED_DEVICES:
+                    messages.append(
+                        _msg(
+                            filename,
+                            lineno,
+                            "unknown-backend",
+                            f"{label} has an unknown backend in 'since_{device}'.",
+                        )
+                    )
+                    continue
             prev = prev_variants.get(ver_id)
 
             if prev is None:
@@ -190,6 +216,24 @@ def _check_one_dict(
                         )
                     )
 
+    for (op_name, device), variants in base.items():
+        if device is None:
+            continue
+        for ver_id, (since, lineno) in variants.items():
+            if ver_id not in current.get((op_name, device), {}):
+                current_variants = current.get((op_name, None), {})
+                _, lineno = current_variants.get(
+                    ver_id, current_variants.get(1, (None, lineno))
+                )
+                label = f"'{op_name}'" if ver_id == 1 else f"'{op_name}' v{ver_id}"
+                messages.append(
+                    _msg(
+                        filename,
+                        lineno,
+                        "op-version-modified",
+                        f"{label} lost its 'since_{device}' value {since!r}.",
+                    )
+                )
     return messages
 
 

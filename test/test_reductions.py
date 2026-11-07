@@ -19,8 +19,8 @@ from torch.testing._internal.common_dtype import (
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    parametrize, serialTest, subtest,
+    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict, TEST_CUDA_GRAPH,
+    parametrize, serialTest, subtest, DeterministicGuard,
     gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfTorchDynamo, HardwareClassification,
@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
-    precisionOverride, skipXPUIf)
+    precisionOverride, deviceCountAtLeast, skipCUDAIf, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -3454,7 +3454,7 @@ class TestReductionsDevice(TestCase):
         x = torch.randn(8, dtype=dtype, device=device)
         # Mismatched out dtype should raise
         out_wrong = torch.empty(4, dtype=torch.int64, device=device)
-        msg = "torch.histogram: input tensor and hist tensor should have the same dtype"
+        msg = r"Expected tensor for 'hist' to have scalar type.*torch\.histc"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wrong)
         # Safe widening (float32 in, float64 out) should also raise — histc
@@ -3918,11 +3918,15 @@ class TestReductionsOnCPU(TestCase):
             self.assertEqual(torch.tensor([0, 2, 1, 0], dtype=dtype), actual)
             self.assertEqual(actual.dtype, dtype)
 
+
+class TestHistogramDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
     """
-    def _test_histogram_numpy(self, t, bins, bin_range, weights, density, eq_func=None):
+    def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
             if not torch.is_tensor(t):
                 return t
@@ -3931,6 +3935,9 @@ class TestReductionsOnCPU(TestCase):
         # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
         def reference_histogram(t, bins, bin_range, weights, density, dtype):
             np_t, np_bins, np_weights = map(to_np, [t, bins, weights])
+            # Avoid cancellation in NumPy's cumulative weighted sums.
+            if np_weights is not None:
+                np_weights = np_weights.astype(np.float64)
             np_hist, np_bin_edges = np.histogram(
                 np_t, np_bins, range=bin_range, weights=np_weights, density=density
             )
@@ -3938,9 +3945,6 @@ class TestReductionsOnCPU(TestCase):
                 torch.from_numpy(np_hist).to(dtype),
                 torch.from_numpy(np_bin_edges).to(dtype),
             )
-
-        if eq_func is None:
-            eq_func = self.assertEqual
 
         # Doesn't pass a 'range' kwarg unless necessary because the override of
         # histogram with Tensor bins doesn't accept one.
@@ -3965,26 +3969,26 @@ class TestReductionsOnCPU(TestCase):
         Issue: https://github.com/pytorch/pytorch/issues/58758
         """
         if not torch.is_tensor(bins):
-            eq_func(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
+            self.assertEqual(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
             # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins
             # argument.
             expected_hist, expected_bin_edges = reference_histogram(
                 t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype,
             )
 
-        eq_func(actual_hist, expected_hist)
-        eq_func(actual_bin_edges, expected_bin_edges)
+        self.assertEqual(actual_hist, expected_hist)
+        self.assertEqual(actual_bin_edges, expected_bin_edges)
 
         # Test passing non-contiguous output tensors
         hist_out = make_tensor(
             expected_hist.shape,
-            device=expected_hist.device,
+            device=t.device,
             dtype=expected_hist.dtype,
             noncontiguous=True,
         )
         bin_edges_out = make_tensor(
             expected_bin_edges.shape,
-            device=expected_bin_edges.device,
+            device=t.device,
             dtype=expected_bin_edges.dtype,
             noncontiguous=True,
         )
@@ -4005,10 +4009,10 @@ class TestReductionsOnCPU(TestCase):
                 t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out)
             )
 
-        eq_func(hist_out, expected_hist)
-        eq_func(bin_edges_out, expected_bin_edges)
+        self.assertEqual(hist_out, expected_hist)
+        self.assertEqual(bin_edges_out, expected_bin_edges)
 
-    def test_histogram(self):
+    def test_histogram(self, device):
         shapes = (
             (),
             (0,),
@@ -4020,8 +4024,8 @@ class TestReductionsOnCPU(TestCase):
 
         for contig, bins_contig, bin_ct, weighted, density, shape in \
                 product([True, False], [True, False], range(1, 10), [True, False], [True, False], shapes):
-            values = make_tensor(shape, dtype=torch.float32, device="cpu", low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape, dtype=torch.float32, device="cpu", low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, dtype=torch.float32, device=device, low=-9, high=9, noncontiguous=not contig)
+            weights = make_tensor(shape, dtype=torch.float32, device=device, low=0, high=9, noncontiguous=not contig) if weighted else None
 
             # Tests passing just the bin_ct
             self._test_histogram_numpy(values, bin_ct, None, weights, density)
@@ -4032,25 +4036,13 @@ class TestReductionsOnCPU(TestCase):
 
             # Tests with range min=max
             bin_range[1] = bin_range[0]
-            self._test_histogram_numpy(
-                values,
-                bin_ct,
-                bin_range,
-                weights,
-                density,
-                # TODO: investigate why torch.histogram differs from numpy.histogram
-                # so strongly on this particular test.  There seems to be more
-                # differences here than the linspace issue, which is itself fairly
-                # easily patched around.  Likely, the other tests also differ
-                # significantly, but below the default threshold for assertEqual.
-                eq_func=partial(self.assertEqual, rtol=3e-5, atol=0.0),
-            )
+            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
-            bin_edges = make_tensor(bin_ct + 1, dtype=torch.float32, device="cpu", low=-9, high=9).msort()
+            bin_edges = make_tensor(bin_ct + 1, dtype=torch.float32, device=device, low=-9, high=9).msort()
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = make_tensor(bin_ct + 1, dtype=torch.float32, device="cpu", noncontiguous=not bins_contig)
+                bin_edges_noncontig = make_tensor(bin_ct + 1, dtype=torch.float32, device=device, noncontiguous=not bins_contig)
                 bin_edges_noncontig.copy_(bin_edges)
                 bin_edges = bin_edges_noncontig
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
@@ -4058,13 +4050,13 @@ class TestReductionsOnCPU(TestCase):
 
             # Tests with input tensor in which all elements are equal
             elt = random.uniform(-9, 9)
-            values = make_tensor(shape, dtype=torch.float32, device="cpu", low=elt, high=elt, noncontiguous=not contig)
+            values = make_tensor(shape, dtype=torch.float32, device=device, low=elt, high=elt, noncontiguous=not contig)
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
             weights = (
-                make_tensor(bin_ct + 1, dtype=torch.float32, device="cpu", low=0, high=9, noncontiguous=not contig)
+                make_tensor(bin_ct + 1, dtype=torch.float32, device=device, low=0, high=9, noncontiguous=not contig)
                 if weighted
                 else None
             )
@@ -4072,13 +4064,17 @@ class TestReductionsOnCPU(TestCase):
 
         # Tests values of default args
         for bin_ct, shape in product(range(1, 10), shapes):
-            values = make_tensor(shape, dtype=torch.float32, device="cpu", low=-9, high=9)
+            values = make_tensor(shape, dtype=torch.float32, device=device, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
             (expected_hist, expected_bin_edges) = torch.histogram(
                 values, bin_ct, range=None, weight=None, density=False)
             self.assertEqual(actual_hist, expected_hist)
             self.assertEqual(actual_bin_edges, expected_bin_edges)
 
+        expanded = torch.tensor([[-1., 0., 1.]], device=device).expand(31, -1)
+        weights = torch.tensor(0.5, device=device).expand_as(expanded)
+        edges = torch.tensor([-2., -0.5, 0.5, 2.], device=device)
+        self._test_histogram_numpy(expanded, edges, None, weights, False)
 
     """
     Runs torch.histogramdd and numpy.histogramdd on the specified input parameters
@@ -4086,7 +4082,7 @@ class TestReductionsOnCPU(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) is list:
+            if isinstance(t, (list, tuple)):
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t
@@ -4140,7 +4136,7 @@ class TestReductionsOnCPU(TestCase):
             self.assertEqual(actual_bin_edges[dim], expected_bin_edges[dim])
 
     @skipIfTorchDynamo("histogramdd parameter combinations exceed the recompilation limit")
-    def test_histogramdd(self):
+    def test_histogramdd(self, device):
         shapes = (
             (1, 5),
             (3, 5),
@@ -4156,9 +4152,9 @@ class TestReductionsOnCPU(TestCase):
                 product([True, False], [True, False], [True, False], [True, False], shapes):
             D = shape[-1]
 
-            values = make_tensor(shape, dtype=torch.float32, device="cpu", low=-9, high=9, noncontiguous=not contig)
+            values = make_tensor(shape, dtype=torch.float32, device=device, low=-9, high=9, noncontiguous=not contig)
             weights = (
-                make_tensor(shape[:-1], dtype=torch.float32, device="cpu", low=0, high=9, noncontiguous=not contig)
+                make_tensor(shape[:-1], dtype=torch.float32, device=device, low=0, high=9, noncontiguous=not contig)
                 if weighted
                 else None
             )
@@ -4182,11 +4178,11 @@ class TestReductionsOnCPU(TestCase):
             self._test_histogramdd_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
-            bin_edges = [make_tensor(ct + 1, dtype=torch.float32, device="cpu", low=-9, high=9).msort() for ct in bin_ct]
+            bin_edges = [make_tensor(ct + 1, dtype=torch.float32, device=device, low=-9, high=9).msort() for ct in bin_ct]
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
                 bin_edges_noncontig = [
-                    make_tensor(ct + 1, dtype=torch.float32, device="cpu", noncontiguous=not bins_contig)
+                    make_tensor(ct + 1, dtype=torch.float32, device=device, noncontiguous=not bins_contig)
                     for ct in bin_ct
                 ]
                 for dim in range(D):
@@ -4196,67 +4192,536 @@ class TestReductionsOnCPU(TestCase):
                 self.assertEqual(bin_edges[dim].is_contiguous(), bins_contig)
             self._test_histogramdd_numpy(values, bin_edges, None, weights, density)
 
-    def test_histogram_error_handling(self):
+        expanded = torch.tensor([[-1., 0., 1.]], device=device).expand(31, -1)
+        weights = torch.tensor(0.5, device=device).expand(31)
+        edges = torch.tensor([-2., -0.5, 0.5, 2.], device=device)
+        self._test_histogramdd_numpy(expanded, [edges] * 3, None, weights, False)
+
+    def test_histogram_error_handling(self, device):
         with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
-            values = make_tensor((), dtype=torch.int32, device="cpu")
+            values = make_tensor((), dtype=torch.int32, device=device)
             torch.histogram(values, 1)
 
         inconsistent_dtype = torch.float64
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensors should have the same dtype'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
-            bins = make_tensor((), dtype=inconsistent_dtype, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, r'bins.*scalar type.*torch\.histogram\)'):
+            values = make_tensor((), dtype=torch.float32, device=device)
+            bins = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, bins)
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have the same dtype'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
-            weight = make_tensor((), dtype=inconsistent_dtype, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, r'weight.*scalar type.*torch\.histogram\)'):
+            values = make_tensor((), dtype=torch.float32, device=device)
+            weight = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, 1, weight=weight)
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and hist tensor should have the same dtype'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
-            hist = make_tensor((), dtype=inconsistent_dtype, device="cpu")
-            bin_edges = make_tensor((), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, r'hist.*scalar type.*torch\.histogram\)'):
+            values = make_tensor((), dtype=torch.float32, device=device)
+            hist = make_tensor((), dtype=inconsistent_dtype, device=device)
+            bin_edges = make_tensor((), dtype=torch.float32, device=device)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
-        with self.assertRaisesRegex(RuntimeError, 'input tensor and bin_edges tensor should have the same dtype'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
-            hist = make_tensor((), dtype=torch.float32, device="cpu")
-            bin_edges = make_tensor((), dtype=inconsistent_dtype, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, r'bin_edges.*scalar type.*torch\.histogram\)'):
+            values = make_tensor((), dtype=torch.float32, device=device)
+            hist = make_tensor((), dtype=torch.float32, device=device)
+            bin_edges = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
-        with self.assertRaisesRegex(RuntimeError, 'bins tensor should have one dimension'):
-            t = make_tensor((2, 2), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, '1-dimensional tensor.*bins'):
+            t = make_tensor((2, 2), dtype=torch.float32, device=device)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins tensor should have at least 1 element'):
-            t = make_tensor((0), dtype=torch.float32, device="cpu")
+            t = make_tensor((0), dtype=torch.float32, device=device)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
+            values = make_tensor((), dtype=torch.float32, device=device)
             torch.histogram(values, -1)
 
-        with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided it should have the same shape \
-as the input tensor excluding its innermost dimension'):
-            values = make_tensor((2, 2), dtype=torch.float32, device="cpu")
-            weight = make_tensor((1), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, 'size.*weight'):
+            values = make_tensor((2, 2), dtype=torch.float32, device=device)
+            weight = make_tensor((1), dtype=torch.float32, device=device)
             torch.histogram(values, 1, weight=weight)
 
         with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
-            bin_edges = make_tensor((), dtype=torch.float32, device="cpu")
+            values = make_tensor((), dtype=torch.float32, device=device)
+            bin_edges = make_tensor((), dtype=torch.float32, device=device)
             torch.histogram(values, bin_edges, range=(0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
-            values = make_tensor((), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, r"torch\.histogram: min should not exceed max"):
+            values = make_tensor((), dtype=torch.float32, device=device)
             torch.histogram(values, 2, range=(1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, r'range \[nan, nan\] is not finite'):
-            values = torch.tensor([float("nan")], device="cpu", dtype=torch.float32)
-            torch.histogram(values, 2)
+        with self.assertRaisesRegex(RuntimeError, r"torch\.histogram:.*range should have"):
+            torch.histogram(torch.ones(1, device=device), 2, range=(0., 1., 2.))
+
+        for value in [float("nan"), float("inf"), -float("inf")]:
+            with self.assertRaisesRegex(RuntimeError, r"torch\.histogram:.*is not finite"):
+                torch.histogram(torch.tensor([value], device=device), 2)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_bin_boundaries(self, device, dtype):
+        edges = torch.tensor([-2., -1., 0., 0., 1., 2.], device=device, dtype=dtype)
+        values = torch.tensor(
+            [-float("inf"), -3., -2., -1., 0., 1., 2., 3., float("inf"), float("nan")],
+            device=device, dtype=dtype)
+        actual, _ = torch.histogram(values, edges)
+        self.assertEqual(actual, torch.tensor([1., 1., 0., 1., 2.], device=device, dtype=dtype))
+        input_nd = torch.stack([values, values], dim=-1)
+        actual_nd, _ = torch.histogramdd(input_nd, [edges, edges])
+        self.assertEqual(actual_nd, torch.diag(actual))
+
+    @parametrize("invalid_kind", ["dtype", "rank"])
+    def test_histogram_bin_argument_name(self, device, invalid_kind):
+        values = torch.zeros(2, device=device)
+        edges = torch.linspace(0., 1., 4, device=device)
+        edges = edges.double() if invalid_kind == "dtype" else edges.reshape(2, 2)
+        with self.assertRaisesRegex(RuntimeError, r"'bins'.*torch\.histogram"):
+            torch.histogram(values, edges)
+
+    @parametrize("bad_dim", [0, 1, 2])
+    @parametrize("invalid_kind", ["dtype", "rank"])
+    def test_histogramdd_bin_error_dimension(self, device, bad_dim, invalid_kind):
+        values = torch.zeros(2, 3, device=device)
+        edges = [torch.linspace(0., 1., 4, device=device) for _ in range(3)]
+        edges[bad_dim] = edges[bad_dim].double() if invalid_kind == "dtype" else edges[bad_dim].reshape(2, 2)
+        message = rf"bins\[{bad_dim}\].*torch\.histogramdd"
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch.histogramdd(values, edges)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions", [1, 3])
+    @parametrize("weighted", [False, True])
+    def test_histogram_rounded_linear_bins(self, device, dtype, dimensions, weighted):
+        eps = torch.finfo(dtype).eps
+        ranges = [(-1., 1.), (1., 1. + 2 * eps)]
+        if dtype == torch.float64:
+            ranges += [(-1e300, 1e300), (0., 1e-300), (1e100, 1e100 + 1e85),
+                       (-1e-300, 1e-300), (-1e-308, 1e-308)]
+        for limits, count in product(ranges, [17, 257]):
+            edges = torch.linspace(*limits, count + 1, device=device, dtype=dtype)
+            below = torch.nextafter(edges, torch.full_like(edges, -float("inf")))
+            above = torch.nextafter(edges, torch.full_like(edges, float("inf")))
+            values = torch.cat([edges, below, above])
+            values = values if dimensions == 1 else torch.stack([values.roll(dim) for dim in range(dimensions)], dim=1)
+            weights = torch.arange(values.size(0), device=device, dtype=dtype).remainder(7).sub(3).div(8) if weighted else None
+            op = torch.histogram if dimensions == 1 else torch.histogramdd
+            # Keep the multidimensional output small even for long runs of repeated edges.
+            counts = count if dimensions == 1 else [count, 3, 3]
+            actual, returned_edges = op(values, counts, range=limits * dimensions, weight=weights)
+            numpy_edges = returned_edges.cpu().numpy() if dimensions == 1 else [edge.cpu().numpy() for edge in returned_edges]
+            numpy_op = np.histogram if dimensions == 1 else np.histogramdd
+            expected, _ = numpy_op(values.cpu().numpy(), numpy_edges, weights=None if weights is None else weights.cpu().numpy())
+            self.assertEqual(actual, torch.from_numpy(expected).to(device=device, dtype=dtype))
+
+class TestHistogramKernels(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_repeated_edges_and_weights(self, device, dtype):
+        input = torch.tensor([-1., 0., 0.5, 1., float("nan")], device=device, dtype=dtype)
+        for edge_values in [[0., 0., 0.], [-float("inf"), 0., float("inf")], [-1., 0., 0., 1.]]:
+            edges = torch.tensor(edge_values, device=device, dtype=dtype)
+            for weight_values in [[1., -1., 2., -2., float("nan")], [1., 0., 0., 1., 0.],
+                                  [float("nan"), 1., 1., 1., 0.]]:
+                weights = torch.tensor(weight_values, device=device, dtype=dtype)
+                for density in [False, True]:
+                    actual, _ = torch.histogram(input, edges, weight=weights, density=density)
+                    expected, _ = torch.histogram(input.cpu(), edges.cpu(), weight=weights.cpu(), density=density)
+                    self.assertEqual(actual.cpu(), expected)
+
+    def test_histogram_cuda_errors(self, device):
+        values = torch.tensor([0., 1., 2.], device=device)
+        edges = torch.tensor([-1., 1., 3.], device=device)
+        for dtype in [torch.int64, torch.float16, torch.bfloat16]:
+            with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                torch.histogram(values.to(dtype), edges.to(dtype))
+        with DeterministicGuard(True):
+            with self.assertRaisesRegex(RuntimeError, "histogram_cuda does not have a deterministic implementation"):
+                torch.histogram(values, edges)
+
+    @deviceCountAtLeast(2)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions", [1, 3])
+    @parametrize("bin_kind", ["edges", "counts", "inferred"])
+    @parametrize("weighted", [False, True])
+    def test_histogram_multigpu_stream(self, devices, dtype, dimensions, bin_kind, weighted):
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        cpu_input = torch.linspace(-2., 2., 257 * dimensions, dtype=dtype).reshape(257, dimensions)
+        if dimensions == 1:
+            cpu_input = cpu_input[:, 0]
+        cpu_input = cpu_input.pin_memory()
+        cpu_weight = torch.arange(257, dtype=dtype).remainder(7).add(1).div(8) if weighted else None
+        counts = 7 if dimensions == 1 else [7, 8, 9]
+        for current_device, input_device in [devices[:2], devices[:2][::-1]]:
+            with torch.cuda.device(current_device):
+                values = cpu_input.to(input_device)
+                weights = None if cpu_weight is None else cpu_weight.to(input_device)
+                edges = [torch.linspace(-2., 2., count + 1, device=input_device, dtype=dtype)
+                         for count in ([counts] if dimensions == 1 else counts)]
+                bins = (edges[0] if dimensions == 1 else edges) if bin_kind == "edges" else counts
+                kwargs = {"range": (-2., 2.) * dimensions} if bin_kind == "counts" else {}
+                for stream in [torch.cuda.default_stream(input_device), torch.cuda.Stream(device=input_device)]:
+                    values.zero_()
+                    torch.cuda.synchronize(input_device)
+                    stream.wait_stream(torch.cuda.current_stream(input_device))
+                    with torch.cuda.stream(stream):
+                        torch.cuda._sleep(1000000)
+                        with torch.cuda.device(current_device):
+                            values.copy_(cpu_input, non_blocking=True)
+                            result, returned_edges = op(values, bins, weight=weights, **kwargs)
+                            self.assertEqual(torch.cuda.current_device(), torch.device(current_device).index)
+                            # Clone on the input stream to also check ordering of the output write.
+                            result = result.clone()
+                    stream.synchronize()
+                    cpu_edges = returned_edges.cpu() if dimensions == 1 else [edge.cpu() for edge in returned_edges]
+                    expected, _ = op(cpu_input, cpu_edges, weight=cpu_weight)
+                    self.assertEqual(result.device, torch.device(input_device))
+                    self.assertEqual(result.cpu(), expected)
+
+    @deviceCountAtLeast(2)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions", [1, 3])
+    def test_histogram_multigpu_errors(self, devices, dtype, dimensions):
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        input_device, other_device = devices[:2]
+        shape = (17,) if dimensions == 1 else (17, dimensions)
+        values = torch.zeros(shape, dtype=dtype, device=input_device)
+        edges = torch.linspace(-1., 1., 8, dtype=dtype, device=input_device)
+        bins = edges if dimensions == 1 else [edges] * dimensions
+        weights = torch.ones(17, dtype=dtype, device=other_device)
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            op(values, bins, weight=weights)
+        other_edges = edges.to(other_device)
+        other_bins = other_edges if dimensions == 1 else [edges, other_edges, edges]
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            op(values, other_bins)
+        if dimensions == 1:
+            for hist_device, edges_device in [(other_device, input_device), (input_device, other_device)]:
+                hist = torch.empty(7, dtype=dtype, device=hist_device)
+                out_edges = torch.empty(8, dtype=dtype, device=edges_device)
+                with self.assertRaisesRegex(RuntimeError, "same device"):
+                    torch.histogram(values, edges, out=(hist, out_edges))
+
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA/HIP graphs are not supported")
+    @skipIfTorchDynamo("Tests explicit CUDA graph capture and replay")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions, bin_count, bin_kind, weighted, density, num_samples", [
+        (1, 7, "edges", False, False, 257),
+        (1, 7, "counts", True, True, 257),
+        (1, 20000, "edges", True, False, 257),
+        (1, 20000, "counts", False, True, 257),
+        (3, 7, "edges", True, True, 262145),
+        (3, 7, "counts", False, False, 262145),
+        (3, 32, "edges", False, True, 257),
+        (3, 32, "counts", True, False, 257),
+        (8, 1, "edges", True, False, 257),
+        (8, 1, "counts", False, False, 257),
+        (9, 1, "counts", False, True, 257),
+        (1, 6144, "edges", False, False, 1000000),
+        (1, 6145, "counts", True, True, 1000000),
+        (1, 12288, "edges", False, False, 1000000),
+        (1, 12289, "counts", False, False, 1000000),
+        (1, 7, "inferred", False, False, 0),
+        (3, 7, "inferred", True, True, 0),
+    ])
+    def test_histogram_cuda_graph(self, device, dtype, dimensions, bin_count, bin_kind, weighted, density, num_samples):
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        pattern = torch.tensor([-3., -2., -1., 0., 0.5, 1., 2., 3., float("nan"), float("inf")], dtype=dtype)
+        cpu_input = pattern.repeat(num_samples * dimensions // pattern.numel() + 1)[:num_samples * dimensions]
+        cpu_input = cpu_input.reshape(num_samples, dimensions)
+        if dimensions == 1:
+            cpu_input = cpu_input[:, 0]
+        storage = torch.empty((*cpu_input.shape, 2), dtype=dtype, device=device)
+        values = storage[..., 0]
+        values.copy_(cpu_input)
+        weights = torch.empty(2 * num_samples, dtype=dtype, device=device)[::2] if weighted else None
+        cpu_weight = torch.arange(num_samples, dtype=dtype).remainder(7).add(1).div(8) if weighted else None
+        if weighted:
+            weights.copy_(cpu_weight)
+        counts = [bin_count + dim for dim in range(dimensions)]
+        edges = [torch.linspace(-1., 1., count + 1, dtype=dtype, device=device).pow(3).mul(2) for count in counts]
+        bins = (edges[0] if dimensions == 1 else edges) if bin_kind == "edges" else (
+            counts[0] if dimensions == 1 else counts)
+        kwargs = {"range": (-2., 2.) * dimensions} if bin_kind == "counts" else {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                op(values, bins, weight=weights, density=density, **kwargs)
+        stream.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            result, returned_edges = op(values, bins, weight=weights, density=density, **kwargs)
+        for replay in range(3):
+            cpu_input = cpu_input.roll(1, 0).clone()
+            cpu_input[replay::11] = 0.25 * replay
+            values.copy_(cpu_input)
+            if weighted:
+                cpu_weight = cpu_weight.roll(1).add(0.125)
+                weights.copy_(cpu_weight)
+            if bin_kind == "edges":
+                for edge in edges:
+                    edge.mul_(0.875)
+            # Exercise the lifetime of pinned metadata referenced by captured copies.
+            pinned = [torch.empty(dimensions + 1, dtype=torch.int64, pin_memory=True).fill_(2**30)
+                      for _ in range(16)]
+            graph.replay()
+            torch.cuda.synchronize(device)
+            cpu_edges = returned_edges.cpu() if dimensions == 1 else [edge.cpu() for edge in returned_edges]
+            expected, _ = op(cpu_input, cpu_edges, weight=cpu_weight, density=density)
+            self.assertEqual(result.cpu(), expected)
+            eager, eager_edges = op(values, bins, weight=weights, density=density, **kwargs)
+            self.assertEqual(result, eager)
+            self.assertEqual(returned_edges, eager_edges)
+            del pinned
+
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA/HIP graphs are not supported")
+    @skipIfTorchDynamo("Tests explicit CUDA graph capture and replay")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("bin_kind", ["edges", "counts"])
+    def test_histogram_cuda_graph_out(self, device, dtype, bin_kind):
+        values = torch.linspace(-2., 2., 65, device=device, dtype=dtype)
+        weights = torch.arange(65, device=device, dtype=dtype).remainder(7).add(1).div(8)
+        edges = torch.linspace(-2., 2., 8, device=device, dtype=dtype)
+        hist = torch.empty(14, device=device, dtype=dtype)[::2]
+        out_edges = torch.empty(16, device=device, dtype=dtype)[::2]
+        bins = edges if bin_kind == "edges" else 7
+        kwargs = {} if bin_kind == "edges" else {"range": (-2., 2.)}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                torch.histogram(values, bins, weight=weights, density=True, out=(hist, out_edges), **kwargs)
+        stream.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            result = torch.histogram(values, bins, weight=weights, density=True, out=(hist, out_edges), **kwargs)
+        self.assertEqual(result[0].data_ptr(), hist.data_ptr())
+        self.assertEqual(result[1].data_ptr(), out_edges.data_ptr())
+        for value in [-1., 0., 1.]:
+            values.fill_(value)
+            weights.add_(0.125)
+            graph.replay()
+            torch.cuda.synchronize(device)
+            expected = torch.histogram(values.cpu(), out_edges.cpu(), weight=weights.cpu(), density=True)
+            self.assertEqual(hist.cpu(), expected[0])
+            self.assertEqual(out_edges, edges)
+
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA/HIP graphs are not supported")
+    @skipIfTorchDynamo("Tests CUDA graph capture failure and recovery")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions", [1, 3])
+    def test_histogram_cuda_graph_inferred_range(self, device, dtype, dimensions):
+        values = torch.linspace(-2., 2., 65 * dimensions, dtype=dtype, device=device)
+        values = values if dimensions == 1 else values.reshape(65, dimensions)
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        bins = 7 if dimensions == 1 else [7] * dimensions
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(stream):
+            op(values, bins)
+        stream.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, "Cannot copy between CPU and CUDA tensors during CUDA graph capture"):
+            with torch.cuda.graph(graph, stream=stream):
+                op(values, bins)
+
+        # A failed inferred-range capture must not prevent a subsequent valid capture.
+        with torch.cuda.stream(stream):
+            op(values, bins, range=(-2., 2.) * dimensions)
+        stream.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            actual, edges = op(values, bins, range=(-2., 2.) * dimensions)
+        graph.replay()
+        stream.synchronize()
+        cpu_edges = edges.cpu() if dimensions == 1 else [edge.cpu() for edge in edges]
+        expected, _ = op(values.cpu(), cpu_edges)
+        self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("weighted", [False, True])
+    def test_histogram_warp_groups(self, device, dtype, weighted):
+        pattern = torch.tensor([-3., -1., 0., 0.5, 1., 3., float("nan")], device=device, dtype=dtype)
+        for size in [1, 17, 31, 32, 33, 255, 257, 4097]:
+            for concentrated in [False, True]:
+                values = torch.full((size,), 0.5, device=device, dtype=dtype) if concentrated else pattern.repeat(
+                    (size + pattern.numel() - 1) // pattern.numel())[:size]
+                weights = torch.arange(size, device=device, dtype=dtype).remainder(7).div(8) if weighted else None
+                for dims in [1, 3]:
+                    input = values if dims == 1 else values[:, None].expand(-1, dims)
+                    op = torch.histogram if dims == 1 else torch.histogramdd
+                    counts = 7 if dims == 1 else [32] * dims
+                    actual, edges = op(input, counts, range=(-2., 2.) * dims, weight=weights)
+                    cpu_edges = edges.cpu() if dims == 1 else [edge.cpu() for edge in edges]
+                    expected, _ = op(input.cpu(), cpu_edges, weight=None if weights is None else weights.cpu())
+                    self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_changing_contention(self, device, dtype):
+        size = 200000
+        index = torch.arange(size, device=device, dtype=torch.int64)
+        scattered = torch.stack([index.remainder(32), (index // 32).remainder(32),
+                                 (index // 1024).remainder(32)], dim=1).to(dtype).add(0.5)
+        scattered[::17] = float("nan")
+        concentrated = torch.full_like(scattered, 0.5)
+        weights = index.remainder(7).to(dtype).sub(3).div(8)
+        for input in [torch.cat([scattered, concentrated]), torch.cat([concentrated, scattered])]:
+            for weight in [None, weights.repeat(2)]:
+                actual, edges = torch.histogramdd(input, [32] * 3, range=(0., 32.) * 3, weight=weight)
+                expected, _ = torch.histogramdd(input.cpu(), [edge.cpu() for edge in edges],
+                                               weight=None if weight is None else weight.cpu())
+                self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float64)
+    @largeTensorTest("1GB")
+    def test_histogram_linear_estimate_large_bin_count(self, device, dtype):
+        count = 2**24 + 3
+        values = torch.tensor([0., 1., count // 2, count - 2, count - 1, count, count + 1],
+                              device=device, dtype=dtype)
+        actual, edges = torch.histogram(values, count, range=(0., float(count)))
+        expected, _ = torch.histogram(values.cpu(), edges.cpu())
+        self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions, bin_kind", [(1, "counts"), (3, "edges"), (8, "counts"), (9, "edges")])
+    @parametrize("num_samples", [2**24 - 1, 2**24 + 2, 2**31 - 2, 2**31 - 1, 2**31, 2**31 + 1])
+    def test_histogram_large_counts(self, device, dtype, dimensions, bin_kind, num_samples):
+        # Expanded inputs exercise large counts without allocating billions of samples.
+        values = torch.full((dimensions,), 0.5, device=device, dtype=dtype).expand(num_samples, dimensions)
+        edges = torch.tensor([0., 1.], device=device, dtype=dtype)
+        bins = [edges] * dimensions if bin_kind == "edges" else [1] * dimensions
+        kwargs = {"range": (0., 1.) * dimensions} if bin_kind == "counts" else {}
+        op = torch.histogramdd
+        if dimensions == 1:
+            op, values, bins = torch.histogram, values[:, 0], bins[0]
+        result, _ = op(values, bins, **kwargs)
+        expected = torch.full((1,) * dimensions, num_samples, device=device, dtype=dtype)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("dimensions, weighted, bin_kind", [
+        (1, False, "counts"), (1, True, "edges"),
+        (3, False, "edges"), (3, True, "counts"),
+    ])
+    @parametrize("bin_count, num_samples", [
+        (512, 4097), (2048, 257), (4096, 4097), (8192, 65537),
+        (6143, 1000000), (6144, 1000000), (6145, 1000000),
+        (12287, 1000000), (12288, 1000000), (12289, 1000000),
+        (-1, 1000000), (0, 1000000), (1, 1000000),
+    ])
+    def test_histogram_shared_memory_boundary(self, device, dtype, dimensions, weighted, bin_kind, bin_count, num_samples):
+        if bin_count <= 1:
+            capacity = torch.cuda.get_device_properties(device).shared_memory_per_block
+            bin_count += capacity // torch.empty((), dtype=dtype).element_size()
+        values = torch.arange(num_samples, device=device, dtype=dtype).remainder(bin_count).add(0.5)
+        values[::3] = 0.5
+        values[-3:] = torch.tensor([0., bin_count, float("nan")], device=device, dtype=dtype)
+        weights = torch.arange(values.numel(), device=device, dtype=dtype).remainder(7).sub(3).div(8) if weighted else None
+        counts = [bin_count] + [1] * (dimensions - 1)
+        edges = [torch.arange(count + 1, device=device, dtype=dtype) for count in counts]
+        if dimensions > 1:
+            values = torch.stack([values] + [torch.full_like(values, 0.5)] * (dimensions - 1), dim=1)
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        bins = edges if bin_kind == "edges" else counts
+        bins = bins[0] if dimensions == 1 else bins
+        kwargs = {} if bin_kind == "edges" else {"range": tuple(v for count in counts for v in (0., float(count)))}
+        actual, returned_edges = op(values, bins, weight=weights, **kwargs)
+        cpu_edges = returned_edges.cpu() if dimensions == 1 else [edge.cpu() for edge in returned_edges]
+        expected, _ = op(values.cpu(), cpu_edges, weight=None if weights is None else weights.cpu())
+        self.assertEqual(actual.cpu(), expected)
+
+    @parametrize("dimensions", [1, 3])
+    @parametrize("bin_kind", ["edges", "counts"])
+    @parametrize("cpu_input", [False, True])
+    def test_histogram_weight_device_mismatch(self, device, dimensions, bin_kind, cpu_input):
+        input_device, weight_device = ("cpu", device) if cpu_input else (device, "cpu")
+        values = torch.zeros((5,) if dimensions == 1 else (5, dimensions), device=input_device)
+        weights = torch.ones(5, device=weight_device)
+        edges = torch.linspace(-1., 1., 8, device=input_device)
+        bins = edges if bin_kind == "edges" else 7
+        bins = bins if dimensions == 1 else [bins] * dimensions
+        op = torch.histogram if dimensions == 1 else torch.histogramdd
+        kwargs = {} if bin_kind == "edges" else {"range": (-1., 1.) * dimensions}
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            op(values, bins, weight=weights, **kwargs)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_histogram_weighted_warp_special_values(self, device, dtype):
+        values = torch.zeros(4097, device=device, dtype=dtype)
+        for special in [0., float("nan"), float("inf"), -float("inf")]:
+            weights = torch.arange(values.numel(), device=device, dtype=dtype).remainder(7).sub(3).div(8)
+            weights[16] = special
+            for bins in [7, 20000]:
+                actual, edges = torch.histogram(values, bins, range=(-2., 2.), weight=weights)
+                expected, _ = torch.histogram(values.cpu(), edges.cpu(), weight=weights.cpu())
+                self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32)
+    @largeTensorTest("9GB")
+    def test_histogram_large_input_stride(self, device, dtype):
+        storage = torch.empty(2**31 + 2, device=device, dtype=dtype)
+        values = storage[::2**31]
+        values.copy_(torch.tensor([-1., 1.], device=device, dtype=dtype))
+        expected = torch.tensor([1., 1.], device=device, dtype=dtype)
+        actual, _ = torch.histogram(values, 2, range=(-2., 2.))
+        self.assertEqual(actual, expected)
+        actual_nd, _ = torch.histogramdd(values[:, None], [2], range=(-2., 2.))
+        self.assertEqual(actual_nd, expected)
+        input_nd = storage.as_strided((2, 2), (2**31, 1))
+        input_nd.copy_(torch.tensor([[-1., -1.], [1., 1.]], device=device, dtype=dtype))
+        actual_nd, _ = torch.histogramdd(input_nd, [2, 2], range=(-2., 2.) * 2)
+        self.assertEqual(actual_nd, torch.diag(expected))
+        values.copy_(torch.tensor([0.5, 1.5], device=device, dtype=dtype))
+        input = torch.tensor([-1., 1.], device=device, dtype=dtype)
+        actual, _ = torch.histogram(input, 2, range=(-2., 2.), weight=values)
+        self.assertEqual(actual, values)
+
+
+
+class TestHistogramMPSCompatibility(TestCase):
+    hw_classification = HardwareClassification.MPS
+
+    def test_histogram_cpu_bins(self, device):
+        values = torch.tensor([0., 0.5, 1., 2., 3.], device=device)
+        edges = torch.tensor([-1., 1., 4.])
+        actual, actual_edges = torch.histogram(values, edges)
+        expected, expected_edges = torch.histogram(values.cpu(), edges)
+        self.assertEqual(actual.cpu(), expected)
+        self.assertEqual(actual_edges.cpu(), expected_edges)
+
+    @parametrize("density", [False, True])
+    @parametrize("weighted", [False, True])
+    def test_histogramdd_cpu_bins(self, device, density, weighted):
+        values = torch.tensor([[0., 0.5], [1., 2.], [3., 1.], [0.5, 3.]], device=device)
+        edges = [torch.tensor([-1., 1., 4.]), torch.tensor([0., 1.5, 4.])]
+        weight = torch.tensor([1., 2., 1., 3.], device=device) if weighted else None
+        actual, actual_edges = torch.histogramdd(values, edges, weight=weight, density=density)
+        cpu_weight = weight.cpu() if weighted else None
+        expected, expected_edges = torch.histogramdd(values.cpu(), edges, weight=cpu_weight, density=density)
+        self.assertEqual(actual.cpu(), expected)
+        self.assertEqual([edge.cpu() for edge in actual_edges], expected_edges)
+
+    @parametrize("bin_kind", ["edges", "counts"])
+    def test_histogram_cpu_out_edges(self, device, bin_kind):
+        values = torch.tensor([0., 0.5, 1., 2., 3.], device=device)
+        bins = torch.tensor([-1., 1., 4.]) if bin_kind == "edges" else 2
+        kwargs = {"range": (-1., 4.)} if bin_kind == "counts" else {}
+        hist = torch.empty(2, device=device)
+        edges = torch.empty(3)
+        actual, actual_edges = torch.histogram(values, bins, out=(hist, edges), **kwargs)
+        expected, expected_edges = torch.histogram(values.cpu(), bins, **kwargs)
+        self.assertIs(actual, hist)
+        self.assertIs(actual_edges, edges)
+        self.assertEqual(actual.cpu(), expected)
+        self.assertEqual(actual_edges, expected_edges)
+
 
 instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestHistogramDevice, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestHistogramKernels, globals(), only_for="cuda")
+instantiate_device_type_tests(TestHistogramMPSCompatibility, globals(), only_for="mps", allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
