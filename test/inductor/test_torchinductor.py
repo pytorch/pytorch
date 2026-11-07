@@ -22133,6 +22133,11 @@ if RUN_GPU:
             eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
             self.assertEqual(compiled_out, eager_out)
 
+            if config.avoid_modular_indexing:
+                # the pointwise dim expansion that fuses rope indexes the
+                # expanded dim with Mod and is skipped
+                return
+
             # make sure that rope is fused into 1 kernel
             code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
             if config.cpp_wrapper:
