@@ -395,6 +395,22 @@ class TypeDictSource(ChainedSource):
         return "dict({0}.__dict__)"
 
 
+# The mapping wrapped by a types.MappingProxyType. Python exposes it only
+# through the GC: a mappingproxy's single referent is its mapping.
+@dataclass_with_cached_hash(frozen=True)
+class MappingProxyMappingSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("gc", "get_referents"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+        codegen.append_output(codegen.create_load_const(0))
+        codegen.append_output(create_binary_subscr())
+
+    @property
+    def _name_template(self) -> str:
+        return "__import__('gc').get_referents({0})[0]"
+
+
 # Represents obj.__mro__ where object is type object
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
@@ -1083,6 +1099,22 @@ class TupleIteratorGetItemSource(GetItemSource):
         return (
             f"___tuple_iterator_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
         )
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ListReverseIteratorBackingListSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "list_reverseiterator_backing_list"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "___list_reverseiterator_backing_list({0})"
 
 
 @dataclass_with_cached_hash(frozen=True)

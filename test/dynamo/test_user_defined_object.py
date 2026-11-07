@@ -2,6 +2,7 @@
 
 import copy
 import dataclasses
+import os
 import sys
 import types
 import unittest
@@ -867,6 +868,46 @@ class TestClassSetattr(TestCase):
         MyModule.x = 10
 
 
+class TestObjectNew(TestCase):
+    def test_object_new_on_plain_class(self):
+        def fn():
+            return object.__new__(Plain)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIsInstance(opt_fn(), Plain)
+
+    def test_object_new_rejects_kwargs(self):
+        def fn():
+            return object.__new__(Plain, extra=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_new_on_class_with_unsupported_c_level_new(self):
+        # torch._C._DisableFuncTorch (a pybind11 extension type) inherits
+        # its __new__ from pybind11_object, a C-level __new__ that isn't
+        # one of the constructors Dynamo recognizes (unlike object.__new__,
+        # dict.__new__, etc). Explicitly calling __new__ should gracefully
+        # graph-break (fullgraph=True -> Unsupported) instead of hard
+        # crashing with an internal AssertionError in get_example_value.
+        def fn():
+            return torch._C._DisableFuncTorch.__new__(torch._C._DisableFuncTorch)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_construct_class_with_unsupported_c_level_new(self):
+        # Normal (non-fullgraph) construction/use of such a class must
+        # still work correctly by falling back gracefully.
+        def fn(x):
+            with torch._C._DisableFuncTorch():
+                return x + 1
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+
 # ---------------------------------------------------------------------------
 # __setitem__ on user-defined classes / metaclasses
 # ---------------------------------------------------------------------------
@@ -1246,8 +1287,44 @@ class TestUserDefinedSetitem(TestCase):
         self.assertEqual(_DelClassMeta["y"], 2)
 
 
+class _InitReturnValue:
+    pass
+
+
+_INIT_RETURN_TYPES = {"int": int, "str": str, "user_class": _InitReturnValue}
+
+
 class TestObjectConstruction(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("value_kind", list(_INIT_RETURN_TYPES))
+    @parametrize("via_super", [False, True])
+    def test_init_must_return_none(self, value_kind, via_super):
+        def init(self):
+            return _INIT_RETURN_TYPES[value_kind]()
+
+        def child_init(self):
+            return super(Child, self).__init__()
+
+        class Base:
+            __init__ = init
+
+        class Child(Base):
+            __init__ = child_init
+
+        cls = Child if via_super else Base
+
+        def fn():
+            try:
+                cls()
+            except TypeError as exc:
+                return str(exc)
+            return "constructor succeeded"
+
+        type_name = _INIT_RETURN_TYPES[value_kind].__name__
+        expected = f"__init__() should return None, not {type_name!r}"
+        self.assertEqual(fn(), expected)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
 
     def test_privateuse1_tensor_class_without_tensor_classes_registration(self):
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable
@@ -1636,6 +1713,21 @@ class TestSimpleNamespace(TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x)[0], fn(x)[0])
 
+    def test_str_subclass_key_in_sourced_namespace_graph_breaks(self):
+        # A namespace built in eager and passed in has a str subclass key in
+        # its instance dict; vars() must graph break instead of crashing.
+        class MyStr(str):
+            __slots__ = ()
+
+        ns = types.SimpleNamespace()
+        ns.__dict__[MyStr("a")] = 1
+
+        def fn(x, ns):
+            return len(vars(ns)), x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, ns)[0], fn(x, ns)[0])
+
     @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
     def test_non_constant_key_graph_breaks(self):
         # Formatting a tensor produces a StringFormatVariable, which is str-typed
@@ -1869,7 +1961,200 @@ class TestConstantTypePropertyAccelerator(TestCase):
         self.assertEqual(opt_fn(x), fn(x))
 
 
+class _LenZeroDict(dict):
+    def __len__(self):
+        return 0
+
+
+class _FalseBoolDict(dict):
+    def __bool__(self):
+        return False
+
+
+class _LenZeroSet(set):
+    def __len__(self):
+        return 0
+
+
+class _DoublingList(list):
+    def __init__(self, iterable=()):
+        super().__init__(x * 2 for x in iterable)
+
+
+@instantiate_parametrized_tests
+class TestContainerSubclassConstness(TestCase):
+    """A container subclass is not a Python constant: its storage does not
+    determine its truthiness, and it cannot be rebuilt by calling its own
+    constructor on already-built items."""
+
+    @parametrize("name", ["len_dict", "bool_dict", "len_set"])
+    def test_falsy_override_beats_container_storage(self, name):
+        obj = {
+            "len_dict": lambda: _LenZeroDict(a=1),
+            "bool_dict": lambda: _FalseBoolDict(a=1),
+            "len_set": lambda: _LenZeroSet({1}),
+        }[name]()
+
+        def fn(x, o):
+            return (x + 1 if o else x - 1), not o, bool(o)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, obj), compiled(x, obj))
+
+    def test_list_subclass_init_not_reapplied(self):
+        def fn(x):
+            return x + sum(_DoublingList([1, 2]))
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compiled(x))
+
+    def test_constant_subclass_proxies_as_plain_builtin(self):
+        class MyInt(int):
+            pass
+
+        seen = []
+
+        def backend(gm, example_inputs):
+            for node in gm.graph.nodes:
+                seen.extend(type(a).__name__ for a in node.args if not hasattr(a, "op"))
+            return gm.forward
+
+        def fn(x):
+            return torch.add(x, MyInt(3))
+
+        torch.compile(fn, backend=backend, fullgraph=True)(torch.randn(4))
+        self.assertIn("int", seen)
+        self.assertNotIn("MyInt", seen)
+
+
+class _PathLikeStr(str, os.PathLike):
+    __slots__ = ()
+
+    def __fspath__(self):
+        return str(self)
+
+
+@instantiate_parametrized_tests
+class TestConstantSubclassHash(TestCase):
+    """hash() comes from the value's real constant base, which is not
+    __mro__[-2] once extra bases are mixed in."""
+
+    @parametrize("name", ["pathlike_str", "sdp_backend", "pytree_key"])
+    def test_hash_matches_eager(self, name):
+        value = {
+            "pathlike_str": lambda: _PathLikeStr("a/b"),
+            "sdp_backend": lambda: torch.nn.attention.SDPBackend.MATH,
+            "pytree_key": lambda: torch.utils._pytree.SequenceKey(1),
+        }[name]()
+
+        def fn(x, v):
+            return hash(v)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, value), compiled(x, value))
+
+    def test_subclass_used_as_key(self):
+        def fn(x):
+            d = {_PathLikeStr("k"): 1}
+            return d.get("k", "missing"), _PathLikeStr("k") in {"k"}
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compiled(x))
+
+
 instantiate_parametrized_tests(TestObjectConstruction)
+
+
+class _InitOnly:
+    def __init__(self, a):
+        self.a = a
+
+
+class _SuperInitExtraArg:
+    def __init__(self, a):
+        super().__init__(a)
+
+
+class _NewOnly:
+    def __new__(cls, *args):
+        return super().__new__(cls)
+
+
+# object_init: extra arguments are an error unless the type overrides __new__
+# but not __init__.
+_OBJECT_INIT_CASES = {
+    "explicit_on_new_override": lambda: object.__init__(_NewOnly(), 1),
+    "explicit_on_init_override": lambda: object.__init__(_InitOnly(1), 1),
+    "explicit_on_plain": lambda: object.__init__(Plain(), 1),
+    "explicit_kwargs_on_plain": lambda: object.__init__(Plain(), k=1),
+    "bound_on_plain": lambda: Plain().__init__(1),
+    "super_with_extra_arg": lambda: _SuperInitExtraArg(1),
+}
+
+
+class TestObjectInit(TestCase):
+    @parametrize("case", list(_OBJECT_INIT_CASES))
+    def test_object_init(self, case):
+        def fn(x):
+            try:
+                _OBJECT_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestObjectInit)
+
+
+# type_init (a class's tp_init) accepts 1 or 3 arguments and no keywords.
+_TYPE_INIT_CASES = {
+    "builtin_class_no_args": lambda: type.__init__(int),
+    "builtin_class_three_args": lambda: type.__init__(int, "n", (), {}),
+    "builtin_class_kwargs": lambda: type.__init__(int, x=1),
+    "user_class_no_args": lambda: type.__init__(Plain),
+    "user_class_three_args": lambda: type.__init__(Plain, "P", (), {}),
+    "non_class_receiver": lambda: type.__init__(1),
+}
+
+
+class TestTypeInit(TestCase):
+    @parametrize("case", list(_TYPE_INIT_CASES))
+    def test_type_init(self, case):
+        def fn(x):
+            try:
+                _TYPE_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestTypeInit)
+
+
+class TestGetattributeName(TestCase):
+    def test_non_str_name_raises_type_error(self):
+        def fn(x, obj):
+            try:
+                obj.__getattribute__(1)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, Plain())[1], fn(x, Plain())[1])
 
 
 if __name__ == "__main__":

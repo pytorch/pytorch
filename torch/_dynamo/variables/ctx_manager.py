@@ -22,33 +22,41 @@ import contextlib
 import inspect
 import logging
 import types
+import unittest
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
-from torch._guards import Guard
+from torch._guards import Guard, Source
 from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
-from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
-from .base import VariableTracker
+from ..utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    is_safe_constant,
+)
+from .base import store_attr_mutation, ValueMutationNew, VariableTracker
+from .descriptors import MethodDescriptorVariable
 from .functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedMethodDescriptorVariable,
     WrappedNestedUserFunctionVariable,
     WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -82,18 +90,31 @@ class ContextWrappingVariable(VariableTracker):
                 f"Sequence, got {type(target_values).__name__}"
             )
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if hasattr(self, "_call_func"):
             self._call_func(tx, self.target_values)
         self.set_cleanup_hook(tx)
         return variables.ConstantVariable.create(None)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in ("__enter__", "__exit__"):
+            return variables.GetAttrVariable(self, name, py_type=types.MethodType)
+        return super().tp_getattro_impl(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__enter__" and not args and not kwargs:
+            return self.enter(tx)
+        if name == "__exit__" and len(args) == 3 and not kwargs:
+            return self.exit(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
 
     def set_cleanup_hook(
         self, tx: "InstructionTranslatorBase", fn: Callable[..., Any] | None = None
@@ -143,22 +164,32 @@ class ContextWrappingVariable(VariableTracker):
         if not isinstance(
             args[0],
             (
+                MethodDescriptorVariable,
                 NestedUserFunctionVariable,
                 SkipFunctionVariable,
                 UserMethodVariable,
                 UserFunctionVariable,
+                WrappedMethodDescriptorVariable,
             ),
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
-        if isinstance(args[0], NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(args[0], self)
-        elif isinstance(args[0], SkipFunctionVariable):
-            return WrappedSkipFunctionVariable(args[0], self)
-        elif isinstance(args[0], UserMethodVariable):
-            return WrappedUserMethodVariable(args[0], self)
-        elif isinstance(args[0], UserFunctionVariable):
-            return WrappedUserFunctionVariable(args[0], self)
+        return self._wrap_function(args[0])
+
+    # noqa: RVT001
+    def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
+        if isinstance(fn, NestedUserFunctionVariable):
+            return WrappedNestedUserFunctionVariable(fn, self)
+        elif isinstance(fn, SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(fn, self)
+        elif isinstance(
+            fn, (MethodDescriptorVariable, WrappedMethodDescriptorVariable)
+        ):
+            return WrappedMethodDescriptorVariable(fn, self)
+        elif isinstance(fn, UserMethodVariable):
+            return WrappedUserMethodVariable(fn, self)
+        elif isinstance(fn, UserFunctionVariable):
+            return WrappedUserFunctionVariable(fn, self)
         else:
             raise AssertionError("Unexpected arg type")
 
@@ -199,9 +230,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
                 self.cm_obj.__enter__.__func__,
                 source=source and AttrSource(source, "__func__"),
             ),
@@ -212,9 +245,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
                 self.cm_obj.__exit__.__func__,
                 source=source and AttrSource(source, "__func__"),
             ),
@@ -553,7 +588,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 
 
 class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
-    """Delay a call to warnings.catch_warnings"""
+    """Capture statically modelled warnings without changing process state."""
 
     @staticmethod
     def create(
@@ -580,34 +615,320 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.catch_warnings_args = catch_warnings_args
+        self.entered = False
+        self.recorded_warnings: variables.ListVariable | None = None
+        self.filter_rules: list[tuple[str, type[Warning]]] = []
+
+    @staticmethod
+    def active(tx: "InstructionTranslatorBase") -> "CatchWarningsCtxManagerVariable":
+        if not tx.output.is_root_tracer() or not tx.output.warning_scopes:
+            unimplemented(
+                gb_type="Unsupported warning scope",
+                context="warnings require a local, non-speculative capture scope",
+                explanation="Dynamo cannot replay this warning with its original filters.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return tx.output.warning_scopes[-1]
+
+    @staticmethod
+    def check_instruction(tx: "InstructionTranslatorBase", instruction: Any) -> None:
+        opname = instruction.opname
+        if opname in (
+            "LOAD_FAST",
+            "LOAD_FAST_CHECK",
+            "LOAD_DEREF",
+            "LOAD_GLOBAL",
+            "LOAD_CONST",
+            "STORE_FAST",
+            "POP_TOP",
+            "COPY",
+            "SWAP",
+            "PUSH_NULL",
+            "PRECALL",
+            "CALL",
+            "CALL_KW",
+            "KW_NAMES",
+            "NOP",
+            "CACHE",
+            "RESUME",
+        ):
+            return
+        owner = tx.stack[-1] if tx.stack else None
+        if (
+            isinstance(owner, UserDefinedObjectVariable)
+            and type(owner.value) is unittest.case._AssertWarnsContext
+            and owner is tx.symbolic_locals.get("self")
+            and tx.f_code
+            in (
+                unittest.case._AssertWarnsContext.__enter__.__code__,
+                unittest.case._AssertWarnsContext.__exit__.__code__,
+            )
+        ):
+            if opname in ("LOAD_ATTR", "LOAD_METHOD") and instruction.argval in (
+                "warnings_manager",
+                "expected",
+            ):
+                return
+            if opname == "STORE_ATTR" and instruction.argval == "warnings":
+                return
+            if (
+                opname == "RETURN_VALUE"
+                and tx.f_code is unittest.case._AssertWarnsContext.__enter__.__code__
+            ):
+                return
+        if opname == "BEFORE_WITH" and isinstance(
+            owner, CatchWarningsCtxManagerVariable
+        ):
+            return
+        if opname in ("LOAD_ATTR", "LOAD_METHOD"):
+            if instruction.argval == "__code__" and isinstance(
+                owner, variables.BaseUserFunctionVariable
+            ):
+                return
+            if (
+                isinstance(owner, variables.PythonModuleVariable)
+                and owner.value is warnings
+                and type(owner.value) is types.ModuleType
+                and instruction.argval
+                in ("filterwarnings", "simplefilter", "catch_warnings")
+            ):
+                return
+            if isinstance(
+                owner, CatchWarningsCtxManagerVariable
+            ) and instruction.argval in ("__enter__", "__exit__"):
+                return
+        if (
+            opname == "STORE_ATTR"
+            and instruction.argval == "__code__"
+            and isinstance(owner, variables.NestedUserFunctionVariable)
+        ):
+            return
+        unimplemented(
+            gb_type="Unsupported operation in a warning context",
+            context=f"{opname} {instruction.argval}",
+            explanation="Dynamo only captures warnings from straight-line function code assignments.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @staticmethod
+    def check_call(tx: "InstructionTranslatorBase", fn: VariableTracker) -> None:
+        if isinstance(fn, WarningsFilterVariable):
+            return
+        if (
+            isinstance(fn, variables.GetAttrVariable)
+            and isinstance(fn.obj, CatchWarningsCtxManagerVariable)
+            and fn.name in ("__enter__", "__exit__")
+        ):
+            return
+        if isinstance(fn, (WithEnterFunctionVariable, WithExitFunctionVariable)):
+            if isinstance(fn.ctx, CatchWarningsCtxManagerVariable):
+                return
+            if (
+                isinstance(fn, WithExitFunctionVariable)
+                and isinstance(fn.ctx, GenericContextWrappingVariable)
+                and fn.ctx.python_type() is unittest.case._AssertWarnsContext
+            ):
+                return
+        if (
+            isinstance(fn, variables.UserDefinedClassVariable)
+            and fn.value is warnings.catch_warnings
+        ):
+            return
+        unimplemented(
+            gb_type="Unsupported call in a warning context",
+            context=type(fn).__name__,
+            explanation="Dynamo cannot determine the warnings produced by this call.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def add_filter(
+        self, tx: "InstructionTranslatorBase", options: dict[str, Any]
+    ) -> None:
+        action = options["action"]
+        category = options.get("category", Warning)
+        if (
+            type(action) is not str
+            or type(category) is not type
+            or type(options.get("message", "")) is not str
+            or type(options.get("module", "")) is not str
+            or type(options.get("lineno", 0)) is not int
+            or type(options.get("append", False)) is not bool
+        ):
+            unimplemented(
+                gb_type="Unsupported warning filter argument types",
+                context="warning filters require plain constant arguments",
+                explanation="Dynamo cannot evaluate user-defined warning filter behavior.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if (
+            action not in ("always", "ignore", "error")
+            or not issubclass(category, Warning)
+            or options.get("message", "") != ""
+            or options.get("module", "") != ""
+            or options.get("lineno", 0) != 0
+            or options.get("append", False)
+        ):
+            unimplemented(
+                gb_type="Unsupported warning filter",
+                context="warning filters require a category-wide action",
+                explanation="Dynamo only models unconditional local warning filters.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self.filter_rules.insert(0, (action, category))
+
+    @staticmethod
+    def emit_warning(
+        tx: "InstructionTranslatorBase", message: str, category: type[Warning]
+    ) -> None:
+        scope = CatchWarningsCtxManagerVariable.active(tx)
+        action = next(
+            (action for action, cls in scope.filter_rules if issubclass(category, cls)),
+            None,
+        )
+        if action == "ignore":
+            return
+        if action == "error":
+            raise_observed_exception(category, tx, args=[message])
+        capture = next(
+            (
+                scope
+                for scope in reversed(tx.output.warning_scopes)
+                if scope.recorded_warnings is not None
+            ),
+            None,
+        )
+        if action != "always" or capture is None or capture.recorded_warnings is None:
+            unimplemented(
+                gb_type="Unsupported warning emission",
+                context=message,
+                explanation="Dynamo cannot use ambient warning filters during tracing.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        warning = VariableTracker.build(tx, category).call_function(
+            tx, [variables.ConstantVariable.create(message)], {}
+        )
+        instruction = tx.current_instruction
+        lineno = instruction.positions.lineno if instruction.positions else tx.lineno
+        warning_source = AttrSource(tx.import_source("warnings"), "WarningMessage")
+        warning_class = VariableTracker.build(
+            tx,
+            warnings.WarningMessage,
+            source=warning_source,
+            realize=True,
+        )
+        record = tx.output.side_effects.track_new_user_defined_object(
+            VariableTracker.build(tx, object), warning_class, [], tx=tx
+        )
+        fields = {
+            "message": warning,
+            "category": VariableTracker.build(tx, category),
+            "filename": variables.ConstantVariable.create(tx.f_code.co_filename),
+            "lineno": variables.ConstantVariable.create(lineno),
+            "file": variables.ConstantVariable.create(None),
+            "line": variables.ConstantVariable.create(None),
+            "source": variables.ConstantVariable.create(None),
+            "_category_name": variables.ConstantVariable.create(category.__name__),
+        }
+        for name, value in fields.items():
+            store_attr_mutation(tx, record, name, value)
+        capture.recorded_warnings.call_method(tx, "append", [record], {})
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        kwargs = {
-            k: v.as_python_constant() for k, v in self.catch_warnings_args.items()
+        if not tx.output.is_root_tracer():
+            unimplemented(
+                gb_type="Warning scope in a higher-order operator",
+                context=str(self),
+                explanation="Dynamo does not speculate on warning capture state.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.entered:
+            unimplemented(
+                gb_type="Reentering a warning context",
+                context=str(self),
+                explanation="Dynamo cannot reconstruct a previously entered warning context.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not all(
+            value.is_python_constant() for value in self.catch_warnings_args.values()
+        ):
+            unimplemented(
+                gb_type="Non-constant warning context arguments",
+                context="warning context arguments are not constant",
+                explanation="Dynamo requires constant warning context arguments.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        options = {
+            key: value.as_python_constant()
+            for key, value in self.catch_warnings_args.items()
         }
-        ctx_val = warnings.catch_warnings(**kwargs)
-        self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
-        entered = ctx_val.__enter__()
-        if kwargs.get("record", False):
-            from .lists import WarningRecordListVariable
+        try:
+            bound = inspect.signature(warnings.catch_warnings).bind(**options)
+        except TypeError as error:
+            raise_type_error(tx, str(error))
+        bound.apply_defaults()
+        options = bound.arguments
+        if options.get("module") is not None or type(options["record"]) is not bool:
+            unimplemented(
+                gb_type="Unsupported warning context arguments",
+                context="warning capture requires a boolean record flag and the standard module",
+                explanation="Dynamo only models the standard warnings module.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self.filter_rules = (
+            tx.output.warning_scopes[-1].filter_rules.copy()
+            if tx.output.warning_scopes
+            else []
+        )
+        if options.get("action") is not None:
+            self.add_filter(
+                tx,
+                {
+                    key: options[key]
+                    for key in ("action", "category", "lineno", "append")
+                },
+            )
+        if options["record"]:
+            self.recorded_warnings = variables.ListVariable(
+                [], mutation_type=ValueMutationNew()
+            )
+        self.entered = True
+        tx.output.warning_scopes.append(self)
 
-            return WarningRecordListVariable(cast(list[Any], entered))
-        return variables.VariableTracker.build(tx, entered)
+        def cleanup() -> None:
+            if self in tx.output.warning_scopes:
+                tx.output.warning_scopes.remove(self)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        self.set_cleanup_hook(tx, cleanup)
+        return (
+            self.recorded_warnings
+            if self.recorded_warnings is not None
+            else variables.ConstantVariable.create(None)
+        )
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        if name == "__enter__" and not args and not kwargs:
-            return self.enter(tx)
-        if name == "__exit__" and len(args) == 3 and not kwargs:
-            return self.exit(tx, *args)
-        return super().call_method(tx, name, args, kwargs)
+        if not tx.output.warning_scopes or tx.output.warning_scopes[-1] is not self:
+            unimplemented(
+                gb_type="Unsupported warning context exit",
+                context=str(self),
+                explanation="Dynamo only models properly nested warning contexts.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().exit(tx, *args)
+
+    def exit_on_graph_break(self) -> bool:
+        # No warning context is entered during tracing.
+        return False
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.entered:
+            unimplemented(
+                gb_type="Reconstructing an entered warning context",
+                context=str(self),
+                explanation="Dynamo cannot reconstruct the state of an entered warning context.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         codegen.add_push_null(
             lambda: codegen.load_import_from("warnings", "catch_warnings")
         )
@@ -617,6 +938,35 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
 
     def python_type(self) -> type:
         return warnings.catch_warnings
+
+
+class WarningsFilterVariable(SkipFunctionVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not tx.output.warning_scopes:
+            return super().call_function(tx, args, kwargs)
+        scope = CatchWarningsCtxManagerVariable.active(tx)
+        if not all(value.is_python_constant() for value in [*args, *kwargs.values()]):
+            unimplemented(
+                gb_type="Non-constant warning filter arguments",
+                context=str(self),
+                explanation="Dynamo requires constant local warning filters.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            bound = inspect.signature(self.value).bind(
+                *(value.as_python_constant() for value in args),
+                **{key: value.as_python_constant() for key, value in kwargs.items()},
+            )
+        except TypeError as error:
+            raise_type_error(tx, str(error))
+        bound.apply_defaults()
+        scope.add_filter(tx, bound.arguments)
+        return variables.ConstantVariable.create(None)
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -746,6 +1096,9 @@ class GradModeVariable(ContextWrappingVariable):
 
     def python_type(self) -> type:
         return torch.set_grad_enabled
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class InferenceModeVariable(ContextWrappingVariable):
@@ -895,6 +1248,12 @@ class CurrentDeviceContextVariable(ContextWrappingVariable):
         *ContextWrappingVariable._nonvar_fields,
         "device_context",
     }
+
+    @classmethod
+    def create(
+        cls, device_type: str, device_context: type
+    ) -> "CurrentDeviceContextVariable":
+        return cls(device_type, device_context)
 
     def __init__(
         self,
@@ -1419,7 +1778,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
-    def _create_lambda_from_tensors(
+    def create(
         tx: "InstructionTranslatorBase",
         tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
@@ -1442,9 +1801,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     @staticmethod
     def constructor(tx: "InstructionTranslatorBase") -> VariableTracker:
         return variables.LambdaVariable(
-            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
-                tx, tensors
-            )
+            lambda tensors: PreserveVersionContextVariable.create(tx, tensors)
         )
 
     def __init__(
@@ -1473,8 +1830,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         from ..tensor_version_op import _unsafe_set_version_counter
+        from .builder import SourcelessBuilder
 
-        return variables.TorchInGraphFunctionVariable(
+        return SourcelessBuilder.create_internal_torch_function(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
@@ -1676,17 +2034,35 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
     _nonvar_fields = {
         "annotation",
+        "_reenter_fn_name",
         *ContextWrappingVariable._nonvar_fields,
     }
+
+    # Whether a graph break inside this context re-enters the annotation in the
+    # resume function. Subclasses whose context does more than annotate opt out.
+    _reenter_after_graph_break: bool = True
+
+    @staticmethod
+    def create(
+        annotation: dict[str, Any], *, source: Source | None = None
+    ) -> "FxTracebackAnnotateVariable":
+        return FxTracebackAnnotateVariable(annotation, source=source)
 
     def __init__(
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
         budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
-        target_values = (
-            (budget,) if len(annotation) == 1 and type(budget) is float else ()
-        )
+        self._reenter_fn_name: str | None = None
+        target_values: tuple[Any, ...] = ()
+        if len(annotation) == 1 and type(budget) is float:
+            self._reenter_fn_name = "_dynamo_region_activation_memory_budget"
+            target_values = (budget,)
+        elif self._reenter_after_graph_break:
+            items = tuple(annotation.items())
+            if is_safe_constant(items):
+                self._reenter_fn_name = "_dynamo_annotate"
+                target_values = (items,)
         super().__init__(
             target_values=target_values,
             initial_values=initial_values,
@@ -1709,9 +2085,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
-        if self.target_values:
-            return "_dynamo_region_activation_memory_budget"
-        return "annotate"
+        return self._reenter_fn_name or "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
@@ -1722,7 +2096,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
-            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            explanation="Dynamo can only resume torch.fx.traceback.annotate after a graph break when every annotation value is a constant it can embed in bytecode.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],
@@ -1868,13 +2242,6 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return types.MethodType
 
@@ -1922,12 +2289,11 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+    @staticmethod
+    def create(
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable, target: Any
+    ) -> "WithExitFunctionVariable":
+        return WithExitFunctionVariable(ctx, target)
 
     def __init__(
         self,
