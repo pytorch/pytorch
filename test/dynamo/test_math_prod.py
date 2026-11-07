@@ -3,25 +3,20 @@
 import decimal
 import fractions
 import math
+import unittest
 
 import torch
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.test_case import run_tests
+from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 
 
 class MathProdTests(TestCase):
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-
-    def tearDown(self):
-        torch._dynamo.reset()
-        super().tearDown()
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("construct", [False, True])
     @parametrize(
@@ -128,6 +123,19 @@ class MathProdTests(TestCase):
             if not count:
                 self.assertIs(actual[0], start)
 
+    def test_element_alias_without_start(self):
+        def fn(x, inner):
+            return math.prod([[inner]]), inner, x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            inner = [1]
+            actual = compiled(x, inner)
+            self.assertEqual(actual, fn(x, inner))
+            self.assertIs(actual[0][0], inner)
+            self.assertIs(actual[1], inner)
+
     @parametrize("reflected", [False, True])
     def test_multiplication_protocol(self, reflected):
         class Product:
@@ -200,6 +208,221 @@ class MathProdTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
         for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize(
+        "args,error_type",
+        [((1, 0), ZeroDivisionError), (("abc",), ValueError), ((1.5, 2), TypeError)],
+    )
+    def test_fraction_constructor_errors(self, args, error_type):
+        def fn(x):
+            try:
+                fractions.Fraction(*args)
+            except error_type as exc:
+                return x + 1, str(exc)
+            return x, "no error"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("construct", [False, True])
+    def test_fraction_methods(self, construct):
+        def fn(x, value):
+            if construct:
+                value = fractions.Fraction(22, 7)
+            return (
+                x + 1,
+                value.limit_denominator(5),
+                value.as_integer_ratio(),
+                value * value,
+            )
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            value = fractions.Fraction(22, 7)
+            self.assertEqual(compiled(x, value), fn(x, value))
+
+    @unittest.skipUnless(hasattr(fractions.Fraction, "is_integer"), "Python 3.12+")
+    @parametrize("value", [fractions.Fraction(2), fractions.Fraction(3, 2)])
+    def test_fraction_is_integer(self, value):
+        def fn(x, value):
+            return x + 1, value.is_integer()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, value), fn(x, value))
+
+    @parametrize("source", ["constructor", "from_float", "from_decimal"])
+    def test_fraction_mixed_construction(self, source):
+        values = {
+            "constructor": fractions.Fraction(1, 2),
+            "from_float": fractions.Fraction.from_float(0.5),
+            "from_decimal": fractions.Fraction.from_decimal(decimal.Decimal("0.5")),
+        }
+
+        def fn(x, value):
+            left = fractions.Fraction(3, 5)
+            right = fractions.Fraction.from_float(0.5)
+            return x + 1, left * right * value, math.prod([left, right, value])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, values[source]), fn(x, values[source]))
+
+    def test_fraction_replacement(self):
+        def fn(x, values):
+            return x + 1, math.prod(values)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        values = [fractions.Fraction(2, 3)]
+        for value in (fractions.Fraction(2, 3), fractions.Fraction(4, 5)):
+            values[0] = value
+            for _ in range(2):
+                self.assertEqual(compiled(x, values), fn(x, values))
+
+    @parametrize("container", [list, tuple])
+    @parametrize("values", [(), (9,)])
+    @parametrize("external", [False, True])
+    def test_sequence_subclass_iteration(self, container, values, external):
+        class Sequence(container):
+            def __iter__(self):
+                self.calls += 1
+                return iter((2, 3))
+
+        def fn(x, sequence):
+            if not external:
+                sequence = Sequence(values)
+                sequence.calls = 0
+            return math.prod(sequence), sequence.calls, x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            sequence, expected_sequence = Sequence(values), Sequence(values)
+            sequence.calls = expected_sequence.calls = 0
+            self.assertEqual(compiled(x, sequence), fn(x, expected_sequence))
+            self.assertEqual(sequence.calls, 1 if external else 0)
+
+    @parametrize(
+        "container,external",
+        [(list, False), (tuple, False), (range, False), (tuple, True), (range, True)],
+    )
+    def test_iterator_consumption(self, container, external):
+        def fn(x, iterator):
+            if not external:
+                values = range(2, 5) if container is range else container([2, 3, 4])
+                iterator = iter(values)
+            out = math.prod(iterator, start=2)
+            return out, math.prod(iterator), next(iterator, -1), x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            values = range(2, 5) if container is range else container([2, 3, 4])
+            iterator = iter(values)
+            self.assertEqual(compiled(x, iterator), fn(x, iter(values)))
+            if external:
+                self.assertEqual(list(iterator), [])
+
+    def test_external_list_iterator_fallback(self):
+        def fn(x, iterator):
+            out = math.prod(iterator, start=2)
+            return out, math.prod(iterator), next(iterator, -1), x + 1
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            compiled(x, iter([2, 3, 4]))
+
+        compiled = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            iterator = iter([2, 3, 4])
+            self.assertEqual(compiled(x, iterator), fn(x, iter([2, 3, 4])))
+            self.assertEqual(list(iterator), [])
+
+    def test_iterator_progress_after_error(self):
+        class Factor:
+            def __rmul__(self, other):
+                raise ValueError("multiply failed")
+
+        def fn(x):
+            iterator = iter([2, Factor(), 3])
+            try:
+                math.prod(iterator)
+            except ValueError:
+                return next(iterator), list(iterator), x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize(
+        "case", ["missing", "positional", "keyword", "empty_keyword", "noniterable"]
+    )
+    def test_invalid_arguments(self, case):
+        def fn(x):
+            try:
+                if case == "missing":
+                    math.prod()
+                elif case == "positional":
+                    math.prod([2], 3)
+                elif case == "keyword":
+                    math.prod([2], invalid=3)
+                elif case == "empty_keyword":
+                    math.prod([], invalid=3)
+                else:
+                    math.prod(42)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x, "no error"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("tensor_start", [False, True])
+    def test_tensor_product(self, tensor_start):
+        def fn(x):
+            start = x if tensor_start else 2
+            return math.prod([x, x + 1], start=start)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for size in (3, 4):
+            x = torch.ones(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("container", [list, tuple, torch.Size])
+    def test_symbolic_product(self, container):
+        def fn(x):
+            values = container([x.shape[0], x.shape[1]])
+            return x + 1, math.prod(values, start=2)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for shape in ((3, 4), (5, 6)):
+            x = torch.ones(shape)
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("invalid", [False, True])
+    def test_gcd_symbolic_index(self, invalid):
+        def fn(x):
+            value = x.shape[0] / 2 if invalid else x.shape[0]
+            try:
+                out = math.gcd(value, 4)
+            except TypeError:
+                out = -1
+            return x + 1, out
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 4, 6):
+            x = torch.ones(size)
             self.assertEqual(compiled(x), fn(x))
 
     @parametrize(

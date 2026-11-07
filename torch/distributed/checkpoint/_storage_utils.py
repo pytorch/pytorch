@@ -1,6 +1,7 @@
 import os
 
 from .filesystem import FileSystemReader, FileSystemWriter
+from .fsspec_filesystem import FsspecReader, FsspecWriter
 from .storage import StorageReader, StorageWriter
 
 
@@ -20,21 +21,11 @@ def _storage_setup(
             "storage_reader/storage_writer is None."
         )
 
-    targets: list[type[StorageReader | StorageWriter]] = []
+    targets: list[type[StorageReader | StorageWriter]]
     if reader:
-        targets = [
-            FileSystemReader,
-        ]
+        targets = [FileSystemReader, FsspecReader]
     else:
-        targets = [
-            FileSystemWriter,
-        ]
-    try:
-        from .fsspec_filesystem import FsspecReader, FsspecWriter
-
-        targets.append(FsspecReader if reader else FsspecWriter)
-    except Exception:
-        pass
+        targets = [FileSystemWriter, FsspecWriter]
 
     for target in targets:
         if target.validate_checkpoint_id(checkpoint_id):

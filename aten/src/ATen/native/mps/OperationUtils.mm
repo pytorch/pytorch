@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -381,8 +382,7 @@ static void check_mps_shape(MPSShape* shape) {
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
+  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
     if (storage_numel > std::numeric_limits<int32_t>::max()) {
       return true;
@@ -487,10 +487,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
 
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  // Use gather kernel to solve strides for macOS < 15.0
-  // Starting with macOS 15.0, MPS supports native strides directly in the kernels
-  if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
+  if (!useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       // Materialize the view; "_tensor" retains it for as long as other ops use it. Carrying src's
       // conj/neg bits over makes the copy a plain restride, so the bits stay lazy for the ops below
@@ -515,7 +512,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
   // Tensor is contiguous and has no storage offset.
   // Wrap it directly inside MPSGraphTensorData
-  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
+  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI) {
     auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
     check_mps_shape(shape);
     if (!_tensor.storage_offset()) {
@@ -838,15 +835,9 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
     [options setLanguageVersion:static_cast<MTLLanguageVersion>(metal_language_version())];
-    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
-      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
-      options.mathFloatingPointFunctions =
-          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
-    } else {
-      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-      [options setFastMathEnabled:fast_math ? YES : NO];
-      C10_DIAGNOSTIC_POP()
-    }
+    options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+    options.mathFloatingPointFunctions =
+        fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
@@ -862,22 +853,33 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
-    id<MTLLibrary> lib,
-    const std::string& fname) {
-  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
-  std::lock_guard guard(cache_mutex);
-  auto found_cpl = cplMap.find(key);
-  if (found_cpl != cplMap.end()) {
-    return found_cpl->second;
+    const std::string& fname,
+    id<MTLLibrary> lib) {
+  auto key = lib ? fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname) : fname;
+  {
+    std::lock_guard guard(cache_mutex);
+    auto found_cpl = cplMap.find(key);
+    if (found_cpl != cplMap.end()) {
+      return found_cpl->second;
+    }
   }
 
+  if (!lib) {
+    lib = getLibraryForFunc(fname);
+  }
   NSError* error = nil;
   id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
   TORCH_CHECK(func, "Failed to create function state object for: ", fname);
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  return cplMap.try_emplace(std::move(key), cpl, func).first->second;
+  std::lock_guard guard(cache_mutex);
+  auto [it, inserted] = cplMap.try_emplace(std::move(key), cpl, func);
+  if (!inserted) {
+    [cpl release];
+    [func release];
+  }
+  return it->second;
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
@@ -917,7 +919,7 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto [cpl, func] = getLibraryPipelineState(name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
@@ -930,10 +932,10 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
     }
   }
 
-  // Both of these take the lock, so build the kernel before reacquiring it. A
-  // racing thread may have cached `name` first, in which case try_emplace keeps
-  // the winner and this one is dropped.
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  // getLibraryPipelineState() takes the lock, so build the kernel before
+  // reacquiring it. A racing thread may have cached `name` first, in which case
+  // try_emplace keeps the winner and this one is dropped.
+  auto [cpl, func] = getLibraryPipelineState(name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
   std::lock_guard guard(cache_mutex);
   return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
@@ -943,21 +945,43 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  public:
   BundledShaderLibrary() : MetalShaderLibrary("") {}
 
+  std::vector<std::string> getFunctionNames() override {
+    auto rc = MetalShaderLibrary::getFunctionNames();
+    std::erase_if(rc, [&](const auto& name) { return variantLibraries.contains(name); });
+    for (const auto& it : variantLibraries) {
+      rc.push_back(it.first);
+    }
+    return rc;
+  }
+
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
-      auto device = MPSDevice::getInstance()->device();
-      NSError* error = nil;
-#ifdef CAN_BUILD_METAL_4
-      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-      // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
-      const auto section_name = has_mpp() ? "metal_40" : "metal_basic";
-#else
-      const auto section_name = "metal_basic";
+      // Listed newest first: a kernel defined by several sections resolves to the first one
+      const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
+#ifdef CAN_BUILD_METAL_41
+          {"metal_41", has_metal_4_1},
 #endif
-      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
-      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+#ifdef CAN_BUILD_METAL_4
+          // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+          // cooperative-tensor ABI); every kernel it defines shadows the
+          // metal_basic one when has_mpp() holds.
+          {"metal_40", has_mpp},
+#endif
+      };
+      for (const auto& [section, isSupported] : variantSections) {
+        if (!isSupported()) {
+          continue;
+        }
+        auto lib = loadSection(section);
+        @autoreleasepool {
+          for (NSString* name in [lib functionNames]) {
+            variantLibraries.try_emplace([name UTF8String], lib);
+          }
+        }
+      }
+      library = loadSection("metal_basic");
     }
     return library;
   }
@@ -966,7 +990,20 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     TORCH_CHECK(false, "Should never be called");
   }
 
+  id<MTLLibrary> getLibraryForFunc(const std::string& fname) override {
+    auto basicLibrary = getLibrary();
+    auto it = variantLibraries.find(fname);
+    return it != variantLibraries.end() ? it->second : basicLibrary;
+  }
+
  private:
+  static id<MTLLibrary> loadSection(const std::string& name) {
+    NSError* error = nil;
+    auto lib = [MPSDevice::getInstance()->device() newLibraryWithData:getSectionData(name) error:&error];
+    TORCH_CHECK(lib, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    return lib;
+  }
+
   static dispatch_data_t getSectionData(const std::string& name) {
     uint32_t idx = 0;
     for (const auto cnt : c10::irange(_dyld_image_count())) {
@@ -985,6 +1022,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
                                 ^(){
                                 });
   }
+
+  std::unordered_map<std::string, id<MTLLibrary>> variantLibraries;
 };
 
 // Inner extent below which the per-element strided kernel beats the ILP tile.
@@ -1060,9 +1099,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   // Prefer the ILP inner_contiguous kernel over the per-element strided one once
   // the contiguous inner run amortizes the per-run outer-offset calc.
-  bool inner_contiguous =
-      !is_contiguous && !alpha.has_value() && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT && isInnerContiguous(iter);
-  if (!is_contiguous && !alpha.has_value() && force_flavor) {
+  bool inner_contiguous = !is_contiguous && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT && isInnerContiguous(iter);
+  if (!is_contiguous && force_flavor) {
     if (*force_flavor == "strided")
       inner_contiguous = false;
     else if (*force_flavor == "inner_contiguous")
@@ -1183,7 +1221,11 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
           mtl_dispatch2DJob(computeEncoder, cplState, (static_cast<NSUInteger>(inner_bytes) + 15) / 16, outer);
         } else {
           const std::array<uint32_t, 2> packed = {static_cast<uint32_t>(iter.ndim() - 1), inner};
-          mtl_setBytes(computeEncoder, packed, bindInnerContiguousOuter(computeEncoder, iter, 2, {1, 0}));
+          const auto packed_idx = bindInnerContiguousOuter(computeEncoder, iter, 2, {1, 0});
+          mtl_setBytes(computeEncoder, packed, packed_idx);
+          if (alpha) {
+            mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), packed_idx + 1);
+          }
           const auto inner_tiles =
               (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;
           mtl_dispatch2DJob(computeEncoder, cplState, inner_tiles, outer);
@@ -1304,39 +1346,22 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 
   MPSStream* mpsStream = getCurrentMPSStream();
   bool cast_needed = input.scalar_type() != other.scalar_type();
-  bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
-  bool broadcast_on_lhs = false;
   bool scalar_on_lhs = false;
-  int64_t broadcast_numel = 0;
 
   const bool input_is_full = input.numel() == out.numel();
   const bool other_is_full = other.numel() == out.numel();
-  const bool input_is_bc = is_dense_broadcastable(input, out) && !input_is_full;
-  const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
 
-  // Scalar/broadcast specializations are skipped when the user-facing output
-  // dtype differs from the kernel's natural output: only the strided castout
+  // The scalar specialization is skipped when the user-facing output dtype
+  // differs from the kernel's natural output: only the strided castout
   // variant is registered for that combination.
-  if (!output_cast_needed) {
-    if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
-      broadcast_numel = input.numel();
-      if (broadcast_numel == 1) {
-        use_scalar_kernel = true;
-        scalar_on_lhs = true;
-      } else {
-        use_broadcast_kernel = true;
-        broadcast_on_lhs = true;
-      }
-    } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
-      broadcast_numel = other.numel();
-      if (broadcast_numel == 1) {
-        use_scalar_kernel = true;
-        scalar_on_lhs = false;
-      } else {
-        use_broadcast_kernel = true;
-        broadcast_on_lhs = false;
-      }
+  if (!output_cast_needed && out.is_contiguous()) {
+    if (input.numel() == 1 && !input_is_full && other_is_full && other.is_contiguous()) {
+      use_scalar_kernel = true;
+      scalar_on_lhs = true;
+    } else if (other.numel() == 1 && !other_is_full && input_is_full && input.is_contiguous()) {
+      use_scalar_kernel = true;
+      scalar_on_lhs = false;
     }
   }
 
@@ -1373,15 +1398,15 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 
   // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
   // elements. The kernel is applicable whenever the launch shape matches
-  // binary_dense (contiguous, no cast / broadcast / scalar / alpha); it is
+  // binary_dense (contiguous, no cast / scalar / alpha); it is
   // registered for every dtype REGISTER_BINARY_OP touches. The crossover
   // (`ilp_threshold`) is owned by the caller: floating-point output defaults
   // to 256K (see exec_unary_kernel for the rationale), non-floating to
   // UINT32_MAX (i.e. off by default), and ops with a different
   // memory-bandwidth profile can override. PYTORCH_BINARY_FORCE_FLAVOR
   // overrides whenever the kernel is applicable, regardless of dtype.
-  const bool ilp_applicable = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
-      !alpha.has_value() && !output_cast_needed;
+  const bool ilp_applicable =
+      !use_scalar_kernel && iter.is_contiguous() && !cast_needed && !alpha.has_value() && !output_cast_needed;
   const uint32_t threshold = ilp_threshold.value_or(
       c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
   bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
@@ -1395,10 +1420,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   }
 
   // Inner-contiguous: a strided iterator whose innermost (coalesced) dim is unit
-  // stride for every operand, with no cast/scalar/broadcast/alpha. Prefer the
+  // stride for every operand, with no cast/scalar/alpha. Prefer the
   // ILP inner_contiguous kernel over the per-element strided one.
-  const bool ic_applicable = !use_scalar_kernel && !use_broadcast_kernel && !cast_needed && !alpha.has_value() &&
-      !output_cast_needed && !iter.is_contiguous() && isInnerContiguous(iter);
+  const bool ic_applicable = !use_scalar_kernel && !cast_needed && !alpha.has_value() && !output_cast_needed &&
+      !iter.is_contiguous() && isInnerContiguous(iter);
   bool inner_contiguous = ic_applicable && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT;
   if (ic_applicable) {
     if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
@@ -1422,8 +1447,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                   scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
   std::string kernel_name;
   if (output_cast_needed) {
-    // Force the strided castout path regardless of contiguity / scalar /
-    // broadcast hints. The strided binding code below also kicks in (see the
+    // Force the strided castout path regardless of contiguity / scalar hints.
+    // The strided binding code below also kicks in (see the
     // matching `output_cast_needed` short-circuit). Defensive: lookup fails
     // loudly via getPipelineStateForFunc if the op didn't register a
     // `_strided_castout_` variant (e.g. alpha or unusual functor combos).
@@ -1441,19 +1466,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
                                 name,
                                 lhs_suffix,
-                                scalarToMetalTypeString(out),
-                                scalarToMetalTypeString(tensor_operand),
-                                alpha_suffix);
-    }
-  } else if (use_broadcast_kernel) {
-    const auto& tensor_operand = broadcast_on_lhs ? other : input;
-    if (cast_needed) {
-      kernel_name = fmt::format(
-          "{}_dense_broadcast{}_cast_{}{}", name, broadcast_on_lhs ? "_rhs" : "", cast_suffix_type, alpha_suffix);
-    } else {
-      kernel_name = fmt::format("{}_dense_broadcast{}_{}_{}{}",
-                                name,
-                                broadcast_on_lhs ? "_rhs" : "",
                                 scalarToMetalTypeString(out),
                                 scalarToMetalTypeString(tensor_operand),
                                 alpha_suffix);
@@ -1489,7 +1501,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
-        mtl_setArgs<3>(computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+        const auto sizes = dimDividers(iter.shape());
+        mtl_setArgs<3>(computeEncoder, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       } else if (use_scalar_kernel) {
         // Rebind the scalar in case we promoted it above; harmless when we
         // didn't, since this matches what bind_iter_tensors already did.
@@ -1506,21 +1519,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         } else if (alpha) {
           mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
-        }
-      } else if (use_broadcast_kernel) {
-        mtl_setArgs<3>(computeEncoder, broadcast_numel);
-        if (cast_needed) {
-          std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
-                                                 static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
-                                                 static_cast<uint32_t>(input.scalar_type()),
-                                                 static_cast<uint32_t>(other.scalar_type())};
-          if (alpha) {
-            mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type), sizes_types);
-          } else {
-            mtl_setArgs<4>(computeEncoder, sizes_types);
-          }
-        } else if (alpha) {
-          mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else {
         if (iter.is_contiguous()) {
@@ -1548,17 +1546,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                                static_cast<int>(input.scalar_type()),
                                                static_cast<int>(other.scalar_type()),
                                                static_cast<int>(out.scalar_type())};
+          const auto sizes = dimDividers(iter.shape());
           if (alpha) {
             mtl_setArgs<3>(computeEncoder,
                            getMPSScalar(*alpha, alpha_type),
-                           iter.shape(),
+                           sizes,
                            iter.strides(0),
                            iter.strides(1),
                            iter.strides(2),
                            ndim_and_types);
           } else {
-            mtl_setArgs<3>(
-                computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            mtl_setArgs<3>(computeEncoder, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
           }
         }
       }
@@ -1580,7 +1578,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
                                              const std::string& name,
                                              std::optional<c10::Scalar> alpha,
-                                             std::optional<c10::ScalarType> scalar_arg_type) {
+                                             std::optional<c10::ScalarType> scalar_arg_type,
+                                             std::optional<c10::Scalar> beta) {
+  TORCH_INTERNAL_ASSERT(!beta || alpha, "beta requires alpha");
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1596,7 +1596,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type, beta);
     }
     return;
   }
@@ -1629,7 +1629,9 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
-  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+  using namespace std::string_view_literals;
+  const auto alpha_suffix =
+      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair"sv : ""sv) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto direct_name = fmt::format(
       "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
@@ -1655,7 +1657,16 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
       // everything that follows one slot down, so keep the index runtime
       unsigned idx = 4;
       if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), idx++);
+        const auto a = getMPSScalar(*alpha, alpha_type);
+        if (beta) {
+          const auto b = getMPSScalar(*beta, alpha_type);
+          std::array<uint8_t, 2 * sizeof(a.value)> params;
+          std::memcpy(params.data(), &a.value, a.size);
+          std::memcpy(params.data() + a.size, &b.value, b.size);
+          mtl_setBytes(computeEncoder, c10::ArrayRef<uint8_t>(params.data(), a.size + b.size), idx++);
+        } else {
+          mtl_setBytes(computeEncoder, a, idx++);
+        }
       }
       const std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
                                         static_cast<int>(other1.scalar_type()),
@@ -1692,7 +1703,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
         const auto ndim = iter.ndim();
         const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
         const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
-        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+        const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+        bool transposed = false;
+        for (const auto i : c10::irange(1, iter.ntensors())) {
+          const auto strides = iter.strides(i);
+          transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
+        }
+        if (transposed) {
+          const auto tg_x = std::min<NSUInteger>(32, dim0);
+          const auto tg_y = std::min({8UL, dim1, [binaryPSO maxTotalThreadsPerThreadgroup] / tg_x});
+          [computeEncoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2)
+                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+        } else {
+          mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, dim2);
+        }
       }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }

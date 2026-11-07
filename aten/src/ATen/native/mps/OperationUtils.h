@@ -14,6 +14,7 @@
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <c10/metal/common.h>
+#include <c10/util/SmallVector.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
@@ -706,11 +707,6 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
 }
 
-inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
-}
-
 template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
@@ -776,6 +772,15 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
       getMPSProfiler().endProfileKernel(cplState, mpsStream);
     });
   }
+}
+
+// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
+inline c10::SmallVector<c10::metal::DimDivider, 5> dimDividers(IntArrayRef sizes) {
+  c10::SmallVector<c10::metal::DimDivider, 5> dividers;
+  for (const auto size : sizes) {
+    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
+  }
+  return dividers;
 }
 
 template <typename T>
@@ -860,8 +865,9 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
+        const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(
-            computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
