@@ -12,6 +12,7 @@ from torch.utils._config_module import (
     inherit_fields_from,
     install_config_module,
 )
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 if TYPE_CHECKING:
@@ -71,7 +72,19 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+    if triton_compile_iq_enabled():
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+            )
+        return False
+    elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
@@ -705,7 +718,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
@@ -988,6 +1001,9 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
+# Broadcasts at least this wide also apply realize_reads_threshold to the
+# broadcast producer, which is otherwise recomputed for every broadcast element
+realize_broadcast_reuse_threshold = 64
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
 realize_opusers_threshold = 5
@@ -1018,6 +1034,9 @@ delay_realize_cheap_outputs: bool = Config(
 fallback_random = False
 
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+# TODO: Currently only aligned, contiguous fp32/fp16/bf16 dropout approximately matches
+# eager. Not yet handled: fp64 or misaligned/non-dense dropout, torch.rand values (and
+# fp64 offsets), randn/randint/bernoulli/uniform_, and multi-round Halide kernels.
 align_random_eager = False
 
 # Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
@@ -1152,6 +1171,15 @@ max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
+
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -1725,11 +1753,12 @@ keep_static_cubin_raw: bool = (
     os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
-# Use _FastCudaLauncher (vectorcall C extension) instead of
-# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Use _FastCudaLauncher / _FastXpuLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedTritonKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
-# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
-# and cuCtxGetCurrent.
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple and, per pointer
+# argument, cuPointerGetAttribute and cuCtxGetCurrent on CUDA, or
+# zeMemGetAllocProperties and the context lookup it needs on XPU.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
@@ -1983,6 +2012,12 @@ class cpp:
 
     # set to torch.get_num_threads()
     threads = -1
+
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
 
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
@@ -2325,6 +2360,12 @@ class triton:
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
+
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # emulate_precision_casts also disables it.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
@@ -2772,7 +2813,7 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
-    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    # Set to True to allocate weights with PyTorch's caching allocator (CUDA and XPU)
     weight_use_caching_allocator: bool = (
         os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
     )
@@ -3037,6 +3078,8 @@ class xpu(cutlass):
 
 
 class rocm:
+    """ROCm-specific inductor configuration (arch list, CK, origami, etc.)."""
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
@@ -3112,9 +3155,13 @@ class rocm:
     # When True, the rocm-origami pip package is consulted at GEMM compile time
     # to pre-select a top-K of Triton configs from the DEFAULT search space,
     # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
-    # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at heuristics/template/triton.py load time.
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    #
+    # config.patch behaviour:
+    #   patching to False  -- disables origami at call time (_origami_enabled()).
+    #   patching to True   -- no effect; the rocm-origami import is cached at
+    #                         heuristics/template/triton.py load time and cannot
+    #                         be re-triggered by a runtime patch.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
@@ -3122,7 +3169,6 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
@@ -3288,6 +3334,13 @@ class trace:
     # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
     provenance_tracking_to_timeline = (
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
     )
 
     # Maximum number of trace events to process in profiler timeline post-processing.

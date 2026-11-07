@@ -3,6 +3,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -16,6 +17,11 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
+from torch._higher_order_ops.user_kernel_hop import (
+    is_user_kernel_functional_hop,
+    user_kernel_hop_infos,
+    UserKernelHOPInfo,
+)
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -32,12 +38,13 @@ from torch._prims_common import (
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import (
     FakeTensorUpdater,
     get_fake_args_kwargs,
     get_node_storage,
+    get_storage,
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
@@ -106,6 +113,125 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+# Note [CPU flash attention accumulation order]
+# Uses the 512-key kv_split_size of aten/src/ATen/native/cpu/FlashAttentionKernel.cpp
+# so the per-block max and rescale match native, e.g. a late maximum overflows the same
+# way. Each block's weighted sum is reduced on its own and then added, while native's
+# GEMM accumulates into the running output, so when large values of opposite sign
+# cancel, either side may overflow; native's result also depends on its GEMM.
+# NaN scores always propagate; native's scalar-tail std::max can drop one.
+_CPU_FLASH_ATTENTION_KV_BLOCK_SIZE = 512
+
+
+def _can_decompose_cpu_flash_attention(match: Match) -> bool:
+    if not config.cpp.enable_cpu_flash_attention_decomposition:
+        return False
+    flash_attention_node = match.output_node().args[0]
+    if (
+        not isinstance(flash_attention_node, fx.Node)
+        or len(flash_attention_node.args) < 3
+    ):
+        return False
+    input_nodes = [
+        arg for arg in flash_attention_node.args[:3] if isinstance(arg, fx.Node)
+    ]
+    if len(input_nodes) != 3:
+        return False
+    q, k, v = [arg.meta["val"] for arg in input_nodes]
+    if (
+        any(
+            t.device.type != "cpu" or t.dtype != torch.float32 or t.ndim != 4
+            for t in (q, k, v)
+        )
+        or any(type(s) is not int for t in (q, k, v) for s in t.shape[1:])
+        or not q.is_contiguous()
+        or k.stride(-1) != 1
+        or v.stride(-1) != 1
+    ):
+        return False
+    # CPU flash schema: q, k, v, dropout_p, is_causal, *, attn_mask, scale.
+    dropout = get_arg_value(flash_attention_node, 3, "dropout_p")
+    causal = get_arg_value(flash_attention_node, 4, "is_causal")
+    if (
+        flash_attention_node.kwargs.get("attn_mask") is not None
+        or dropout not in (None, 0.0)
+        or causal
+    ):
+        return False
+    batch, heads, queries, features = q.shape
+    keys = k.size(2)
+    if (
+        queries <= 0
+        or keys <= 0
+        or features <= 0
+        or not statically_known_true(sym_eq(k.shape, (batch, heads, keys, features)))
+        or not statically_known_true(sym_eq(v.shape, k.shape))
+    ):
+        return False
+    scale = flash_attention_node.kwargs.get("scale")
+    return scale is None or (isinstance(scale, (int, float)) and math.isfinite(scale))
+
+
+@register_graph_pattern(
+    CallFunction(
+        operator.getitem,
+        CallFunctionVarArgs(
+            aten._scaled_dot_product_flash_attention_for_cpu.default, users=1
+        ),
+        0,
+    ),
+    pass_dict=pass_patterns[0],  # pyrefly: ignore [bad-argument-type]
+    extra_check=_can_decompose_cpu_flash_attention,
+)
+def _decompose_cpu_flash_attention(match: Match, *args, **kwargs):
+    flash_attention_node = cast(fx.Node, match.output_node().args[0])
+    scale_arg = cast(int | float | None, flash_attention_node.kwargs.get("scale"))
+    scale = None if scale_arg is None else float(scale_arg)
+
+    def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        # Materialize Q once rather than recomputing its producer in each key reduction.
+        q = cast(torch.Tensor, inductor_prims.force_stride_order(q, q.stride()))
+        scaling = 1.0 / math.sqrt(q.size(-1)) if scale is None else scale
+
+        def attention_block(
+            key: torch.Tensor,
+            value: torch.Tensor,
+            previous_max: torch.Tensor | None,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            scores = (q.unsqueeze(-2) * key.unsqueeze(-3)).sum(-1) * scaling
+            row_max = scores.amax(-1, keepdim=True)
+            if previous_max is not None:
+                row_max = torch.maximum(previous_max, row_max)
+            safe_max = torch.where(row_max == -math.inf, 0.0, row_max)
+            weights = (scores - safe_max).exp()
+            denominator = weights.sum(-1, keepdim=True)
+            weighted = (weights.unsqueeze(-1) * value.unsqueeze(-3)).sum(-2)
+            return row_max, denominator, weighted
+
+        block_size = _CPU_FLASH_ATTENTION_KV_BLOCK_SIZE
+        row_max, denominator, weighted = attention_block(
+            k[:, :, :block_size], v[:, :, :block_size], None
+        )
+        for start in range(block_size, k.size(-2), block_size):
+            previous_max = row_max
+            row_max, block_sum, block_weighted = attention_block(
+                k[:, :, start : start + block_size],
+                v[:, :, start : start + block_size],
+                previous_max,
+            )
+            rescale = torch.where(
+                row_max == -math.inf, 1.0, (previous_max - row_max).exp()
+            )
+            denominator = block_sum + denominator * rescale
+            weighted = block_weighted + weighted * rescale
+        denominator = torch.where(denominator == 0.0, 1.0, denominator)
+        return weighted * denominator.reciprocal()
+
+    match.replace_by_example(attention, list(flash_attention_node.args[:3]))
+    counters["inductor"]["cpu_flash_attention_decomposition"] += 1
+
 
 _QUACK_SYMMETRIC_ALIGNMENT = 8
 _QUACK_SYMMETRIC_MIN_M = 4096
@@ -563,9 +689,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fix_auto_functionalized_dtype_views
     )
 
+    # The observer keeps its Triton-era name, so compile-time metrics keep their key;
+    # the pass decomposes every registered user-kernel DSL's functional HOP.
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
-    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
+    ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
@@ -1527,6 +1655,43 @@ def _collect_output_storage(
     )
 
 
+def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
+    """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
+
+    This is a denylist of consumers known to observe placement: ``as_strided``, whose
+    storage offset is relative to the storage, and user-defined kernels of any DSL,
+    which are opaque and may need an aligned base, for example to build a TMA
+    descriptor on the host or on the device. Other opaque consumers, such as custom
+    ops and extern fallback kernels, are intentionally not included. Views are
+    followed through single- and multi-output view ops.
+    """
+    storage = get_node_storage(node)
+    if storage is None:
+        return False
+    pending = [node]
+    seen = OrderedSet([node])
+    while pending:
+        current = pending.pop()
+        for user in current.users:
+            if user.target is aten.as_strided.default:
+                return True
+            if is_user_kernel_functional_hop(user.target):
+                return True
+            if user.op != "call_function" or user in seen:
+                continue
+            val = user.meta.get("val")
+            outputs = val if isinstance(val, (list, tuple)) else [val]
+            if any(
+                isinstance(out, torch.Tensor)
+                and torch._C._has_storage(out)
+                and get_storage(out) == storage
+                for out in outputs
+            ):
+                seen.add(user)
+                pending.append(user)
+    return False
+
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -1622,10 +1787,14 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
+            # A non-view noop such as clone has fresh storage at offset 0. Replacing it
+            # with a source at another offset changes what storage-relative users read,
+            # so compare offsets only when such a user exists.
             if same_tensor_meta(
                 node,
                 src,
-                skip_storage_offset=True,
+                skip_storage_offset=node_is_view
+                or not _depends_on_storage_offset(node),
             ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
@@ -1881,9 +2050,10 @@ def _get_single_replacement_node(
     return nodes[0]
 
 
-def _propagate_triton_eager_input_vals(
+def _propagate_user_kernel_eager_input_vals(
     replacement_nodes: Sequence[torch.fx.Node],
     hop_node: torch.fx.Node,
+    mutation_hop: torch._ops.HigherOrderOperator,
 ) -> None:
     eager_input_vals = hop_node.meta.get("eager_input_vals")
     if eager_input_vals is None:
@@ -1896,58 +2066,63 @@ def _propagate_triton_eager_input_vals(
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.
-    mutation_node = _get_single_replacement_node(
-        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
-    )
+    mutation_node = _get_single_replacement_node(replacement_nodes, mutation_hop)
     mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
 
 
-def decompose_triton_kernel_wrapper_functional(graph):
-    """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
-    mutation node.
+def decompose_user_kernel_wrapper_functional(graph):
+    """Decomposes user-kernel functional HOP nodes (triton_kernel_wrapper_functional,
+    ...) into clones and the underlying mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
     # First, recursively process any subgraphs
-    apply_pass_to_subgraphs(decompose_triton_kernel_wrapper_functional, graph)
+    apply_pass_to_subgraphs(decompose_user_kernel_wrapper_functional, graph)
 
     graph_pass = PatternMatcherPass()
+    user_kernel_hops = user_kernel_hop_infos()
 
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        # pyrefly: ignore [bad-argument-type]
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
+    def register_pattern(user_kernel_hop: UserKernelHOPInfo) -> None:
+        # A HOP kwarg of any name reaches the handler as a keyword argument, so the
+        # handler closes over the info and takes match as a positional-only argument.
+        @register_graph_pattern(
+            CallFunctionVarArgs(user_kernel_hop.functional),
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=graph_pass,
         )
+        def _(match: Match, /, *args, **kwargs):
+            hop_node = match.nodes[0]
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+            # The impl that eager runs: clones plus the mutation HOP.
+            py_kernels = user_kernel_hop.functional.py_kernels
+            dense = py_kernels[torch._C.DispatchKey.CompositeExplicitAutograd]
 
-        hop_node = match.nodes[0]
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
+            # NB: we combine (args, kwargs) into flat args for replacing.
+            # This is replace_by_example uses make_fx which does not support
+            # tracing a function with kwargs.
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return (dense(*args, **kwargs),)
 
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+            # pyrefly: ignore [bad-argument-type]
+            replacement_nodes = match.replace_by_example(
+                decomp, flat_args, run_functional_passes=False
+            )
+            _propagate_user_kernel_eager_input_vals(
+                replacement_nodes, hop_node, user_kernel_hop.mutation
+            )
 
-        # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
-
+    for user_kernel_hop in user_kernel_hops:
+        register_pattern(user_kernel_hop)
     graph_pass.apply(graph)
 
-    for _ in graph.find_nodes(
-        op="call_function",
-        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        raise AssertionError("triton_kernel_wrapper_functional was not removed")
+    for user_kernel_hop in user_kernel_hops:
+        for _ in graph.find_nodes(
+            op="call_function", target=user_kernel_hop.functional
+        ):
+            raise AssertionError(f"{user_kernel_hop.functional} was not removed")
 
 
 def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:

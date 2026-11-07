@@ -4224,6 +4224,7 @@ class ShapeEnv:
         self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
+        self._var_to_range_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
         # Separate counter tracking only replacement changes, used by
@@ -4440,6 +4441,7 @@ class ShapeEnv:
             "source_name_to_debug_name",
             "_prev_cache_key",
             "_version_counter",
+            "_var_to_range_version_counter",
             "dim_constraints",
             # source locations are OK to diverge
             "var_to_range_sloc",
@@ -4871,7 +4873,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4881,6 +4883,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            self._var_to_range_version_counter,
         )
 
     def _update_version_counter(self) -> None:
@@ -8071,10 +8074,12 @@ class ShapeEnv:
                 sloc = self._get_sloc()
                 vr_sloc = ValueRangesSLoc(sloc, sloc)
             self.var_to_range_sloc[symbol] = vr_sloc
+            changed = True
         else:
             old = self.var_to_range[symbol]
             new = old & vr
-            if new != old:
+            changed = new != old
+            if changed:
                 if vr_sloc is None:
                     sloc = self._get_sloc()
                     vr_sloc = ValueRangesSLoc(sloc, sloc)
@@ -8084,6 +8089,10 @@ class ShapeEnv:
                     self.var_to_range_sloc[symbol].upper = vr_sloc.upper
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
+
+        if changed:
+            self._var_to_range_version_counter += 1
+            self._update_version_counter()
 
         if (v := self.backed_var_to_val.get(symbol)) is not None:
             r = self.var_to_range[symbol]
@@ -8709,14 +8718,9 @@ class ShapeEnv:
             raise AssertionError("frame must not be None")
 
         insts = list(dis.get_instructions(frame.f_code))
-        if sys.version_info >= (3, 11):
-            # For Python >= 3.11, instructions can be 2-4 bytes long.
-            from bisect import bisect_left
+        from bisect import bisect_left
 
-            cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
-        else:
-            # For Python <= 3.10, instructions are always 2 bytes.
-            cur = frame.f_lasti // 2
+        cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
 
         if sys.version_info >= (3, 13):
             if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
@@ -9344,9 +9348,6 @@ class ShapeEnv:
                     self.var_to_range[symbol].lower,
                     "range_refined_to_singleton",
                 )
-
-            # Clears the cache, since this update can change the result.
-            self._maybe_evaluate_static.cache_clear()
 
     @lru_cache(maxsize=None)
     @record_shapeenv_event()
