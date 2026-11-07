@@ -1561,6 +1561,7 @@ Tensor tensor_frombuffer(
 
   Py_buffer view;
   if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
+    PyErr_Clear();
     TORCH_CHECK(
         PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
         "could not retrieve a contiguous buffer from the given object "
@@ -1572,7 +1573,6 @@ Tensor tensor_frombuffer(
         "You may want to copy the buffer to protect its data or make it writable "
         "before converting it to a tensor. This type of warning will be "
         "suppressed for the rest of this program.");
-    PyErr_Clear();
   }
 
   Py_INCREF(view.obj);
