@@ -1547,7 +1547,7 @@ def pysequence_repeat(
             tx,
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
-    count = n.nb_index_impl(tx)
+    count = pynumber_index(tx, n)
     validate_sequence_repeat_count(tx, count)
     return seq.sq_repeat_impl(tx, count)
 
@@ -1568,7 +1568,7 @@ def pysequence_inplace_repeat(
             tx,
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
-    count = n.nb_index_impl(tx)
+    count = pynumber_index(tx, n)
     validate_sequence_repeat_count(tx, count)
     return seq.sq_inplace_repeat_impl(tx, count)
 
