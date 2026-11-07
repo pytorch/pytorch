@@ -510,8 +510,7 @@ inline C10_HOST_DEVICE Half operator*(const Half& a, const Half& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -557,8 +556,7 @@ inline C10_HOST_DEVICE float operator-(Half a, float b) {
 inline C10_HOST_DEVICE float operator*(Half a, float b) {
   return static_cast<float>(a) * b;
 }
-inline C10_HOST_DEVICE float operator/(Half a, float b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(Half a, float b) {
   return static_cast<float>(a) / b;
 }
 
@@ -571,8 +569,7 @@ inline C10_HOST_DEVICE float operator-(float a, Half b) {
 inline C10_HOST_DEVICE float operator*(float a, Half b) {
   return a * static_cast<float>(b);
 }
-inline C10_HOST_DEVICE float operator/(float a, Half b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(float a, Half b) {
   return a / static_cast<float>(b);
 }
 
@@ -600,8 +597,7 @@ inline C10_HOST_DEVICE double operator-(Half a, double b) {
 inline C10_HOST_DEVICE double operator*(Half a, double b) {
   return static_cast<double>(a) * b;
 }
-inline C10_HOST_DEVICE double operator/(Half a, double b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(Half a, double b) {
   return static_cast<double>(a) / b;
 }
 
@@ -614,8 +610,7 @@ inline C10_HOST_DEVICE double operator-(double a, Half b) {
 inline C10_HOST_DEVICE double operator*(double a, Half b) {
   return a * static_cast<double>(b);
 }
-inline C10_HOST_DEVICE double operator/(double a, Half b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(double a, Half b) {
   return a / static_cast<double>(b);
 }
 
