@@ -1405,6 +1405,10 @@ class OutputGraph(OutputGraphCommon):
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
 
+    def rekey_input_mutation_stream(self, old_index: int, new_index: int) -> None:
+        if (stack := self._input_mutation_streams.pop(old_index, None)) is not None:
+            self._input_mutation_streams.setdefault(new_index, stack)
+
     _EVENT_INPUT_MUTATION_FIX = (
         "To fix this, either:\n"
         "  1. Move the input mutation after the event.record() call.\n"
