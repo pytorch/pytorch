@@ -41,7 +41,11 @@ from torch.distributed.elastic.agent.server.local_elastic_agent import (
     TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT,
 )
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.multiprocessing.errors import (
+    ChildFailedError,
+    ProcessFailure,
+    record,
+)
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils.process_state import read_proc_state
@@ -1839,13 +1843,15 @@ class LocalElasticAgentUninterruptibleStateTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def _make_agent(
-        self, uninterruptible_state_timeout: float | None = None
+        self,
+        uninterruptible_state_timeout: float | None = None,
+        local_world_size: int = 1,
     ) -> LocalElasticAgent:
         rdzv_handler = Mock()
         rdzv_handler.get_backend.return_value = "c10d"
         spec = WorkerSpec(
             role="default",
-            local_world_size=1,
+            local_world_size=local_world_size,
             entrypoint=_happy_function,
             args=(),
             rdzv_handler=rdzv_handler,
@@ -1901,21 +1907,34 @@ class LocalElasticAgentUninterruptibleStateTest(TestCase):
             self.assertIn(4321, agent._uninterruptible_state_first_seen)
 
     def test_check_uninterruptible_state_timeout_fires(self):
-        agent = self._make_agent()
+        agent = self._make_agent(local_world_size=2)
         agent._pcontext = Mock()
-        agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.pids.return_value = {0: 1234, 1: 4321}
+        # A live worker can leave a half written error file behind.
+        error_file = os.path.join(agent._logs_specs.root_log_dir, "error.json")
+        with open(error_file, "w") as f:
+            f.write('{"message": {"message": "trunc')
+        agent._pcontext.error_files = {0: error_file, 1: error_file}
+        agent._worker_group.workers[0].global_rank = 6
+        agent._worker_group.workers[1].global_rank = 7
         # Pre-seed the first-seen timestamp far in the past.
         agent._uninterruptible_state_first_seen[4321] = time.monotonic() - 600
         agent._remaining_restarts = 3
         with mock.patch(
             "torch.distributed.elastic.agent.server.local_elastic_agent.read_proc_state",
-            return_value="D",
+            side_effect=lambda pid: "D" if pid == 4321 else "S",
         ):
             result = agent._check_uninterruptible_state_timeout(
                 agent._worker_group, timeout=60
             )
         self.assertIsNotNone(result)
         self.assertEqual(result.state, WorkerState.UNHEALTHY)
+        self.assertEqual(list(result.failures), [7])
+        self.assertEqual(result.failures[7].local_rank, 1)
+        self.assertEqual(result.failures[7].pid, 4321)
+        self.assertEqual(result.failures[7].exitcode, 1)
+        self.assertEqual(result.failures[7].error_file, "<N/A>")
+        self.assertIn("D-state", result.failures[7].message)
         # D-state workers wedge the host; restarting on the same host would
         # conflict. _check_uninterruptible_state_timeout should disable
         # restarts so the supervising loop exits via _stop_workers instead
@@ -1984,7 +2003,12 @@ class LocalElasticAgentUninterruptibleStateTest(TestCase):
         with mock.patch.object(
             agent,
             "_check_uninterruptible_state_timeout",
-            return_value=RunResult(state=WorkerState.UNHEALTHY),
+            return_value=RunResult(
+                state=WorkerState.UNHEALTHY,
+                failures={
+                    0: ProcessFailure(local_rank=0, pid=4321, exitcode=1, error_file="")
+                },
+            ),
         ) as check_mock:
             result = agent._monitor_workers(agent._worker_group)
         check_mock.assert_called_once()
