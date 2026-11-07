@@ -77,7 +77,8 @@ def vt_identity_compare(
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
-    if left is right:
+    # A realized lazy wrapper and its inner VT represent the same object.
+    if left is right or left.unwrap() is right.unwrap():
         return ConstantVariable.create(True)
 
     left_val = left.get_real_python_backed_value()

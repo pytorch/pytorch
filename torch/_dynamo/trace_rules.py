@@ -165,6 +165,8 @@ manual_torch_name_rule_map: dict[
     | type[SkipFunctionVariable]
     | type[UserFunctionVariable],
 ] = {
+    "decimal.getcontext": TorchInGraphFunctionVariable,
+    "decimal.localcontext": TorchInGraphFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
