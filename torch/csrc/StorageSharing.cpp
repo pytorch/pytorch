@@ -23,6 +23,11 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef USE_XPU
+#include <c10/xpu/XPUCachingAllocator.h>
+#include <torch/csrc/xpu/XPUIPCTypes.h>
+#endif
+
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -557,6 +562,199 @@ static PyObject* THPStorage_newSharedCuda(
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_XPU
+static void THPStorage_decrementXpuIpcRefCounter(
+    const std::string& ref_counter_handle,
+    ptrdiff_t ref_counter_offset) {
+  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+  try {
+    auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+        ref_counter_handle.c_str(),
+        flags,
+        sizeof(int64_t) * torch::XPU_IPC_REF_COUNTER_FILE_SIZE,
+        nullptr);
+    *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
+    // NOLINTNEXTLINE(bugprone-empty-catch)
+  } catch (c10::Error&) {
+  }
+}
+#endif
+
+static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+#ifdef USE_XPU
+  const auto& storage = THPStorage_Unpack(self);
+  TORCH_CHECK(
+      storage.device_type() == at::kXPU, "_share_xpu_: only available on XPU");
+  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+  TORCH_CHECK(
+      !storage_impl->received_cuda(),
+      "Attempted to send XPU tensor received from another process; this is not currently supported. Consider cloning before sending.");
+
+  at::DeviceGuard device_guard(storage.device());
+  THPObjectPtr tuple(PyTuple_New(8));
+  THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
+  THPObjectPtr _handle(Py_NewRef(Py_None));
+  THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
+  THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
+  THPObjectPtr _ref_counter(Py_NewRef(Py_None));
+  THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
+  THPObjectPtr _event_handle(Py_NewRef(Py_None));
+  THPObjectPtr _event_sync_required(Py_NewRef(Py_False));
+  if (storage.data()) {
+    auto shandle = c10::xpu::XPUCachingAllocator::shareIpcHandle(
+        storage.mutable_data());
+    _handle = PyBytes_FromStringAndSize(
+        shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
+    _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
+
+    at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentXpuData(
+        storage.mutable_data(), storage.device());
+    auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
+    auto sent_data =
+        static_cast<torch::XpuIPCSentData*>(storage.data_ptr().get_context());
+    sent_data->set_original_ptr(std::move(old_data_ptr));
+    _ref_counter = PyBytes_FromString(sent_data->handle().c_str());
+    _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
+  }
+
+  if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes ||
+      !_ref_counter || !_ref_counter_offset) {
+    return nullptr;
+  }
+  PyTuple_SET_ITEM(tuple.get(), 0, device.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
+  PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
+  PyTuple_SET_ITEM(tuple.get(), 6, _event_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 7, _event_sync_required.release());
+  return tuple.release();
+#else
+  TORCH_CHECK(false, "XPU is not available");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_releaseIPCCounterXpu(
+    PyObject* /*_unused*/,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+#ifdef USE_XPU
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
+  PyObject* _ref_counter = PyTuple_GET_ITEM(args, 0);
+  PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 1);
+  if (!(PyBytes_Check(_ref_counter) &&
+        THPUtils_checkLong(_ref_counter_offset))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_release_ipc_counter in XPU mode",
+        1,
+        "(bytes _ref_counter, int _ref_counter_offset)");
+    return nullptr;
+  }
+  THPStorage_decrementXpuIpcRefCounter(
+      PyBytes_AS_STRING(_ref_counter),
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset)));
+  Py_RETURN_NONE;
+#else
+  TORCH_CHECK(false, "XPU is not available");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedXpu(
+    PyObject* /*_unused*/,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+#ifdef USE_XPU
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 8, "tuple of 8 items expected");
+  PyObject* _device = PyTuple_GET_ITEM(args, 0);
+  PyObject* _handle = PyTuple_GET_ITEM(args, 1);
+  PyObject* _size_bytes = PyTuple_GET_ITEM(args, 2);
+  PyObject* _offset_bytes = PyTuple_GET_ITEM(args, 3);
+  PyObject* _ref_counter = PyTuple_GET_ITEM(args, 4);
+  PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 5);
+  PyObject* _event_sync_required = PyTuple_GET_ITEM(args, 7);
+  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
+        PyBytes_Check(_handle) && PyBytes_Check(_ref_counter) &&
+        THPUtils_checkLong(_offset_bytes) &&
+        THPUtils_checkLong(_ref_counter_offset) &&
+        PyBool_Check(_event_sync_required))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_new_shared in XPU mode",
+        1,
+        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset, object event_handle, bool event_sync_required)");
+    return nullptr;
+  }
+  TORCH_CHECK(
+      !PyObject_IsTrue(_event_sync_required),
+      "_new_shared_xpu: event synchronization is not supported");
+
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes);
+  ptrdiff_t storage_offset_bytes =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
+  const auto device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(_device), "c10::DeviceIndex");
+  const at::Device xpu_device(at::kXPU, device);
+  at::DeviceGuard device_guard(xpu_device);
+
+  char* buffer = nullptr;
+  Py_ssize_t handle_size = 0;
+  if (PyBytes_AsStringAndSize(_handle, &buffer, &handle_size) == -1) {
+    return nullptr;
+  }
+  std::shared_ptr<void> basePtr = c10::xpu::XPUCachingAllocator::getIpcDevPtr(
+      std::string(buffer, handle_size));
+  void* devPtr = static_cast<char*>(basePtr.get()) + storage_offset_bytes;
+
+  struct IpcDeleterContext {
+    std::string ref_counter_handle;
+    ptrdiff_t ref_counter_offset{};
+    c10::DeviceIndex device{-1};
+    std::shared_ptr<void> base_ptr;
+  };
+
+  auto ctx = std::make_unique<IpcDeleterContext>();
+  ctx->ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ctx->ref_counter_offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
+  ctx->device = device;
+  ctx->base_ptr = std::move(basePtr);
+
+  c10::DataPtr data_ptr(
+      devPtr,
+      ctx.release(),
+      +[](void* ctx_) {
+        std::unique_ptr<IpcDeleterContext> ctx(
+            static_cast<IpcDeleterContext*>(ctx_));
+        c10::xpu::getCurrentXPUStream(ctx->device).synchronize();
+        ctx->base_ptr.reset();
+        THPStorage_decrementXpuIpcRefCounter(
+            ctx->ref_counter_handle, ctx->ref_counter_offset);
+      },
+      xpu_device);
+
+  auto base = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      storage_size,
+      std::move(data_ptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  base->set_received_cuda(true);
+
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
+#else
+  TORCH_CHECK(false, "XPU is not available");
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 // Returns an object that holds a "weak" pointer to the c10::StorageImpl.  This
 // pointer keeps the c10::StorageImpl struct live, but does not retain the data
 // pointer.
@@ -650,6 +848,15 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      nullptr},
     {"_release_ipc_counter_cuda",
      THPStorage_releaseIPCCounter,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_share_xpu_", THPStorage_shareXpu, METH_NOARGS, nullptr},
+    {"_new_shared_xpu",
+     THPStorage_newSharedXpu,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_release_ipc_counter_xpu",
+     THPStorage_releaseIPCCounterXpu,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},
