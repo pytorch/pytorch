@@ -319,7 +319,9 @@ def _native_layer_norm(
     bias: torch.Tensor | None,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if input.is_mtia:
+    if input.is_mtia or (
+        input.device.type == "cpu" and config.cpp.fallback_native_layer_norm
+    ):
         return NotImplemented
     # We can write a util function to update decomp table if we have more ops to fallback.
     return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
