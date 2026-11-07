@@ -932,13 +932,14 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
-    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+    def _print_rounding_to_int(self, expr: sympy.Expr, rounding: str) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        # pyrefly: ignore [missing-attribute]
+        return f"triton_helpers.rounding_to_int({self._print(expr.args[0])}, {V.kernel.index_dtype}, '{rounding}')"
+
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        return self._print_rounding_to_int(expr, "trunc")
 
     def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
@@ -1012,32 +1013,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
     def _print_floor(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_ceiling(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _print_CeilToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         # pyrefly: ignore [missing-attribute]
