@@ -410,10 +410,10 @@ False
 
 ```{eval-rst}
 ======================================= ===========================================
-``e``                                       Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
+:doc:`e <torch.e>`                          Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
-``pi``                                      The ratio of a circle's circumference to its diameter (~3.1416). Alias for :attr:`math.pi`.
+:doc:`pi <torch.pi>`                        The ratio of a circle's circumference to its diameter (~3.1416). Alias for :attr:`math.pi`.
 ======================================= ===========================================
 ```
 
@@ -1193,4 +1193,6 @@ This feature is a prototype and may have compatibility breaking changes in the f
 :hidden: true
 
 torch.aliases.md
+torch.e.md
+torch.pi.md
 ```
