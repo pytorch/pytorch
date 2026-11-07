@@ -213,11 +213,14 @@ class OpsHandler(Generic[T]):
     ) -> T:
         """
         Convert x to the narrower floating-point dtype with an IEEE 754 rounding
-        direction; see torch.round_to. rounding is one of "to_nearest_even",
-        "toward_zero", "toward_positive" and "toward_negative". src_dtype is the
-        dtype of the value x holds, which must be exact in it (x itself may be
-        in the compute type). The result is in the compute type of dtype
-        (upcast_compute_type), like that of to_dtype with use_compute_types.
+        direction; see Tensor.to(..., round=...). rounding is one of
+        "to_nearest_even", "toward_zero", "toward_positive" and
+        "toward_negative". src_dtype is the dtype of the input buffer or
+        expression; x may hold it in the compute type, and fused float16 and
+        bfloat16 producers pass their unrounded result there unless
+        config.emulate_precision_casts is set. The result has type
+        upcast_compute_type(dtype), like to_dtype with use_compute_types: float32
+        for float16 and bfloat16 in Triton, dtype itself in C++.
         """
         raise NotImplementedError
 

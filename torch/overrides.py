@@ -1114,7 +1114,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
-        torch.round_to: lambda input, dtype, mode, *, memory_format=None, out=None: -1,
         torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
         torch._rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1.0 / 8, upper=1.0 / 3, training=False, inplace=False: -1,

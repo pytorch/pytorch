@@ -908,7 +908,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     elif op_name == "to_dtype_rounded":
-        # Computed in float for float16 and bfloat16, like other ops.
+        # The compute type: float32 in Triton for float16 and bfloat16.
         return upcast_compute_type(kwargs["dtype"] if "dtype" in kwargs else args[-3])
     return None
 
@@ -1218,6 +1218,8 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    """Defaults shared by the code-generating backends' op overrides."""
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1378,11 +1380,12 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
+    @staticmethod
     def to_dtype_rounded(
-        self, x: OpVarT, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
+        x: OpVarT, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
     ) -> OpVarT:
         raise NotImplementedError(
-            f"{type(self).__name__}: to_dtype_rounded is only implemented for the Triton and C++ backends"
+            "to_dtype_rounded is only implemented for the Triton and C++ backends"
         )
 
     def inline_asm_elementwise(

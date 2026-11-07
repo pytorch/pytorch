@@ -9,8 +9,12 @@ namespace {
 void to_dtype_rounded_kernel_cuda(
     TensorIteratorBase& iter,
     c10::RoundingMode mode) {
-  if (iter.dtype() == kFloat8_e8m0fnu || iter.dtype() == kFloat8_e5m3fnu) {
-    to_dtype_rounded_kernel_cuda_arch_specific(iter, mode);
+  if (iter.dtype() == kFloat8_e8m0fnu) {
+    to_dtype_rounded_kernel_cuda_e8m0(iter, mode);
+    return;
+  }
+  if (iter.dtype() == kFloat8_e5m3fnu) {
+    to_dtype_rounded_kernel_cuda_e5m3(iter, mode);
     return;
   }
   AT_DISPATCH_V2(

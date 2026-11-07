@@ -745,15 +745,10 @@ class CppOverrides(OpOverrides):
         # such values pass their unrounded float result, unless
         # config.emulate_precision_casts is set.
         wide = "double" if src_dtype == torch.float64 else "float"
-        result = (
+        return (
             f"c10::convert_with_rounding<{DTYPE_TO_CPP[dtype]}>("
             f"static_cast<{wide}>({x}), c10::RoundingMode::{mode})"
         )
-        # Like other ops, Half and BFloat16 results are computed in float (see
-        # DtypePropagationOpsHandler.to_dtype_rounded); they are exact in it.
-        if dtype in DTYPE_LOWP_FP:
-            return f"static_cast<float>({result})"
-        return result
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -4459,7 +4454,7 @@ class CppKernelProxy(CppKernel):
                     "value_expr",
                 ]:
                     return node.args[-1]  # type: ignore[return-value]
-                elif node.target == "to_dtype_bitcast":
+                elif node.target in ["to_dtype_bitcast", "to_dtype_rounded"]:
                     return node.args[2]  # type: ignore[return-value]
                 else:
                     return None
@@ -4494,7 +4489,8 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr", "value_expr"]
+                    _node.target
+                    in ["load", "index_expr", "value_expr", "to_dtype_rounded"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input

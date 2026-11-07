@@ -1503,7 +1503,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @override
     def to_dtype_rounded(x, dtype: torch.dtype, src_dtype: torch.dtype, rounding):
-        # Like the CUDA kernel of aten.round_to: hardware conversions on CUDA
+        # Like the CUDA kernel of aten._to_dtype_rounded: hardware conversions on CUDA
         # where they exist, triton_helpers.round_float32_to_bits
         # (c10::convert_with_rounding) otherwise. The result is a single
         # expression, without temporaries, so that it also works in the

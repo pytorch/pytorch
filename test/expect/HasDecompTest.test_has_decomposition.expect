@@ -635,6 +635,8 @@ aten::_thnn_fused_lstm_cell_backward_impl
 aten::_thnn_fused_lstm_cell_backward_impl.out
 aten::_to_dense
 aten::_to_dense.out
+aten::_to_dtype_rounded
+aten::_to_dtype_rounded.out
 aten::_to_sparse
 aten::_to_sparse.out
 aten::_to_sparse.sparse_dim
@@ -1161,8 +1163,6 @@ aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
 aten::resize_as_sparse_
-aten::round_to
-aten::round_to.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out

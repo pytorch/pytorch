@@ -54,7 +54,7 @@ _fwd_grad_all = {
     xfail("chalf"),
     # The gradient is the identity, like a plain dtype conversion's, which
     # finite differences across the rounding do not reproduce.
-    xfail("round_to"),
+    xfail("_to_dtype_rounded"),
     skip("normal"),
     skip("normal", variant_name="number_mean"),
     skip("linalg.lstsq"),

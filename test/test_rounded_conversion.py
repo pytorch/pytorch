@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     slowTest,
     TestCase,
 )
@@ -170,10 +171,17 @@ def _boundary_inputs(src, dst):
             .double()
         )
         mags = mags.sort().values
+        top = torch.tensor([torch.finfo(dst).max, 2.0**128], dtype=torch.float64)
     else:
         mags = _finite_magnitudes(dst)
+        no_mantissa = dst is torch.float8_e8m0fnu
+        top = torch.stack(
+            [mags[-1], mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]]
+        )
+    # Includes the midpoint between the largest value and the next one, were
+    # the exponent range wider.
     centers = torch.cat(
-        [mags, (mags[1:] + mags[:-1]) / 2, mags[-1:] * 1.5, mags[-1:] * 4]
+        [mags, (mags[1:] + mags[:-1]) / 2, top.mean(0, keepdim=True), mags[-1:] * 4]
     )
     centers = torch.cat([centers, -centers]).to(src)
     inputs = [centers]
@@ -227,9 +235,12 @@ class TestRoundedConversion(TestCase):
         actual = actual.cpu().to(dtype)
         expected = expected.cpu().to(dtype)
         nan = expected.isnan()
-        self.assertEqual(actual.isnan(), nan)
-        bad = ~nan & (
-            (actual != expected) | (torch.signbit(actual) != torch.signbit(expected))
+        bad = (actual.isnan() != nan) | (
+            ~nan
+            & (
+                (actual != expected)
+                | (torch.signbit(actual) != torch.signbit(expected))
+            )
         )
         if bad.any():
             i = bad.nonzero()[0].item()
@@ -420,13 +431,15 @@ class TestRoundedConversion(TestCase):
         x = torch.tensor([v], dtype=torch.float64, device=device)
         w = x.to(torch.complex32).to(torch.complex128)
         self.assertEqual(w.item(), complex(1 + 2**-10, 0))
+        w = torch.tensor([complex(v, -v)], dtype=torch.complex32, device=device)
+        self.assertEqual(w.to(torch.complex128).item(), expected)
         for n in (1, 2):
             w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
 
     def test_signatures(self, device):
         x = torch.randn(4, 5, device=device)
-        expected = torch.round_to(x, torch.bfloat16, "toward_positive")
+        expected = torch._to_dtype_rounded(x, torch.bfloat16, "toward_positive")
         other = torch.empty((), dtype=torch.bfloat16, device=device)
         for y in (
             x.to(torch.bfloat16, round="toward_positive"),
@@ -435,12 +448,10 @@ class TestRoundedConversion(TestCase):
             x.to(device, torch.bfloat16, round="toward_positive"),
             x.to(other, round="toward_positive"),
             x.to(torch.bfloat16, copy=True, round="toward_positive"),
-            x.round_to(torch.bfloat16, "toward_positive"),
-            torch.round_to(x, torch.bfloat16, mode="toward_positive"),
         ):
             self.assertEqual(y, expected, atol=0, rtol=0)
         out = torch.empty_like(expected)
-        torch.round_to(x, torch.bfloat16, "toward_positive", out=out)
+        torch._to_dtype_rounded(x, torch.bfloat16, "toward_positive", out=out)
         self.assertEqual(out, expected, atol=0, rtol=0)
 
     def test_memory_format(self, device):
@@ -476,7 +487,7 @@ class TestRoundedConversion(TestCase):
                 round="toward_zero",
                 memory_format=torch.contiguous_format,
             )
-        self.assertEqual(recorder.ops, [torch.ops.aten.round_to.default])
+        self.assertEqual(recorder.ops, [torch.ops.aten._to_dtype_rounded.default])
         self.assertTrue(w.is_contiguous())
         self.assertEqual(w, z, atol=0, rtol=0)
 
@@ -503,11 +514,13 @@ class TestRoundedConversion(TestCase):
         with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
             x.to(device, round="toward_zero")
         with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
-            x.round_to(torch.float32, "toward_zero")
+            torch._to_dtype_rounded(x, torch.float32, "toward_zero")
         with self.assertRaisesRegex(ValueError, "rounding mode must be one of"):
-            x.round_to(torch.float16, "nearest")
+            torch._to_dtype_rounded(x, torch.float16, "nearest")
         with self.assertRaisesRegex(RuntimeError, "expected out to have dtype"):
-            torch.round_to(x, torch.float16, "toward_zero", out=torch.empty_like(x))
+            torch._to_dtype_rounded(
+                x, torch.float16, "toward_zero", out=torch.empty_like(x)
+            )
 
     def test_autograd(self, device):
         x = torch.randn(5, dtype=torch.float64, device=device, requires_grad=True)
@@ -521,12 +534,8 @@ class TestRoundedConversion(TestCase):
             dual = torch.autograd.forward_ad.make_dual(x.detach(), tangent)
             out = dual.to(torch.float32, round="toward_positive")
             _, out_tangent = torch.autograd.forward_ad.unpack_dual(out)
-        self.assertEqual(
-            out_tangent,
-            tangent.to(torch.float32, round="toward_positive"),
-            atol=0,
-            rtol=0,
-        )
+        # The tangent is converted like the gradient, not rounded in the mode.
+        self.assertEqual(out_tangent, tangent.to(torch.float32), atol=0, rtol=0)
 
     def test_fake(self, device):
         with FakeTensorMode():
@@ -541,6 +550,7 @@ class TestRoundedConversion(TestCase):
             actual, x.to(torch.float16, round="toward_negative"), atol=0, rtol=0
         )
 
+    @skipIfTorchDynamo("inspects the graph of a nested torch.compile")
     def test_compile(self, device):
         def fn(x):
             return (x * 3).to(torch.bfloat16, round="toward_positive") + 1
@@ -551,7 +561,7 @@ class TestRoundedConversion(TestCase):
             torch.compile(fn, backend=backend, fullgraph=True)(x), fn(x), atol=0, rtol=0
         )
         targets = [n.target for n in backend.fw_graphs[0].graph.nodes]
-        self.assertIn(torch.ops.aten.round_to.default, targets)
+        self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
         self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0)
         compiled = torch.compile(fn, fullgraph=True, dynamic=True)
         for n in (5, 33):
@@ -566,12 +576,12 @@ class TestRoundedConversion(TestCase):
         x = torch.randn(4, device=device)
         ep = torch.export.export(M(), (x,)).run_decompositions()
         targets = [n.target for n in ep.graph.nodes if n.op == "call_function"]
-        self.assertIn(torch.ops.aten.round_to.default, targets)
+        self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
         self.assertEqual(ep.module()(x), M()(x), atol=0, rtol=0)
 
     def test_torchscript(self, device):
         def fn(x):
-            return x.round_to(torch.float16, "toward_zero")
+            return torch._to_dtype_rounded(x, torch.float16, "toward_zero")
 
         x = torch.randn(4, device=device)
         self.assertEqual(torch.jit.script(fn)(x), fn(x), atol=0, rtol=0)
@@ -582,9 +592,9 @@ class TestRoundedConversion(TestCase):
     @largeTensorTest("6GB", device="cpu")
     def test_exhaustive_float32(self, device):
         # Every float32 input, comparing the accelerator (which uses hardware
-        # instructions where available) with the CPU's software conversion.
-        # Without those instructions (e.g. on ROCm, or float8 before sm_89),
-        # this compares the software conversion on both.
+        # instructions where available, and NVIDIA's emulations of some of
+        # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
+        # On ROCm, this compares the software conversion on both.
         chunk = 1 << 28
         for start in range(-(1 << 31), 1 << 31, chunk):
             x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)
@@ -647,7 +657,7 @@ class TestRoundedConversionPython(TestCase):
         # Errors are checked in the same order as on real tensors.
         for t in (x, torch.empty(4, 3)):
             with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
-                t.round_to(torch.float32, "nearest")
+                torch._to_dtype_rounded(t, torch.float32, "nearest")
 
     def test_packed_sequence(self):
         data = torch.randn(3, 2, 4, dtype=torch.float64)
@@ -662,8 +672,16 @@ class TestRoundedConversionPython(TestCase):
         self.assertEqual(converted.sorted_indices, packed.sorted_indices)
 
     def test_module_to_rejects_round(self):
+        module = torch.nn.Linear(2, 2)
         with self.assertRaisesRegex(RuntimeError, "does not accept round argument"):
-            torch.nn.Linear(2, 2).to(torch.float16, round="toward_zero")
+            module.to(torch.float16, round="toward_zero")
+
+        # Also through Dynamo's polyfill of the parser.
+        def fn():
+            return module.to(torch.float16, round="toward_zero")
+
+        with self.assertRaisesRegex(Exception, "does not accept round argument"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
 
 
 if __name__ == "__main__":
