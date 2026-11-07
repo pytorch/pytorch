@@ -3,6 +3,7 @@ import logging
 
 import torch
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.xpu._utils import get_xpu_codename, XPUCodename
 
 
 log = logging.getLogger(__name__)
@@ -10,9 +11,7 @@ log = logging.getLogger(__name__)
 
 @clear_on_fresh_cache
 @functools.lru_cache(1)
-def get_xpu_arch() -> str | None:
-    from torch.testing._internal.common_xpu import get_xpu_codename, XPUCodename
-
+def get_xpu_arch_for_sycl_tla() -> str | None:
     name2arch = {
         XPUCodename.PVC: "Xe12",
         XPUCodename.BMG: "Xe20",
