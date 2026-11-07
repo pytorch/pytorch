@@ -14,7 +14,6 @@ from typing_extensions import deprecated
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch._utils import _get_device_module
 from torch.distributed import distributed_c10d, rpc
 from torch.distributed._shard._utils import DEPRECATE_MSG
 from torch.distributed._shard.sharding_spec._internals import (
@@ -385,9 +384,13 @@ class ShardedTensor(ShardedTensorBase):
             backend_config = dist.BackendConfig(backend)
             for device, backend_str in backend_config.get_device_backend_map().items():
                 if backend_str == backend and device != "cpu":
-                    return torch.device(
-                        device, _get_device_module(device).current_device()
-                    )
+                    if torch.accelerator.is_available():
+                        dev_idx = torch.accelerator.current_device_index()
+                        return torch.device(device, dev_idx)
+                    mod = getattr(torch, device, None)
+                    has_cur = mod and hasattr(mod, "current_device")
+                    idx = mod.current_device() if has_cur else 0
+                    return torch.device(device, idx)
         return torch.device("cpu")
 
     def gather(  # type: ignore[override]
