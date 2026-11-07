@@ -28,9 +28,10 @@ def get_config_request_key(
     arch: str,
     toolkit_version: str,
     instantiation_level: str,
+    device_type: str,
 ) -> str:
     """
-    Return a key for the full ops, based on cutlass key, arch, toolkit version, instantiation level, and serialization.py file hash.
+    Return a key for the full ops, based on cutlass key, arch, toolkit version, instantiation level, device type, and serialization.py file hash.
     """
 
     # Get hash of serialization.py and cutlass_utils.py files using their module file paths
@@ -44,7 +45,7 @@ def get_config_request_key(
 
     hash_target = "-".join(
         [
-            cutlass_key().hex(),
+            cutlass_key(device_type).hex(),
             arch,
             toolkit_version,
             instantiation_level,
@@ -81,7 +82,9 @@ def maybe_fetch_ops(device_type: str) -> list[Any] | None:
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
 
     # filename and filepath
-    request_key: str = get_config_request_key(arch, version, instantiation_level)
+    request_key: str = get_config_request_key(
+        arch, version, instantiation_level, device_type
+    )
     filename: str = _generate_config_filename(request_key)
     filepath: str = os.path.join(cache_dir(), filename)
 
