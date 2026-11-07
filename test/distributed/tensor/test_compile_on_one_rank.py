@@ -2000,6 +2000,16 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_stream_explicit_index_refused_under_coor(self):
+        def f(x):
+            return device_module.current_stream(1), x + 1
+
+        x = torch.zeros(1, device=f"{device_type}:0")
+        with self.assertRaises(torch._dynamo.exc.CompileOnOneRankUnsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self):
         def f(x, stream):
             return x + (1 if stream == torch.accelerator.current_stream() else 2)

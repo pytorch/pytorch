@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_accelerator,
     requires_cuda,
+    requires_multigpu,
     requires_xpu,
     TEST_WITH_ROCM,
 )
@@ -3798,6 +3799,90 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1, device="cuda")
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
+
+    @requires_multigpu
+    def test_cuda_current_stream_other_device(self):
+        def fn(x):
+            return torch.cuda.current_stream(1)
+
+        def key(s):
+            return s.device_index, s.stream_id
+
+        x = torch.zeros(1, device="cuda:0")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(key(compiled(x)), key(fn(x)))
+        s = torch.cuda.Stream(device=1)
+        with torch.cuda.stream(s):
+            self.assertEqual(key(compiled(x)), key(s))
+        self.assertEqual(counter.frame_count, 1, "stream switch must not recompile")
+
+        # In-graph uses must reference the minted registry slot, not slot 0
+        # (a returned stream is rebuilt from its source and never reads it).
+        idxs = []
+
+        def backend(gm, *args):
+            for n in gm.graph.nodes:
+                if n.op == "call_function" and "synchronize_stream" in str(n.target):
+                    idxs.append(n.args[0])
+            return gm.forward
+
+        def fn_sync(x):
+            torch.cuda.current_stream(1).synchronize()
+            torch.cuda.current_stream().synchronize()
+            return x + 1
+
+        torch.compile(fn_sync, backend=backend, fullgraph=True)(x)
+        self.assertEqual(len(idxs), 2)
+        self.assertNotEqual(idxs[0], CURRENT_STREAM_INDEX)
+        self.assertEqual(idxs[1], CURRENT_STREAM_INDEX)
+
+    @requires_multigpu
+    def test_cuda_current_stream_queries_distinct_objects(self):
+        """Separate current_stream(1) queries return distinct objects, as
+        in eager (every eager query wraps a fresh stream object)."""
+
+        def fn(x, side):
+            a = torch.cuda.current_stream(1)
+            with torch.cuda.stream(side):
+                b = torch.cuda.current_stream(1)
+            return x + 1, a is b, a == b, a, b
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        # Trace on device 0 so device 1 is the untracked one being minted.
+        with torch.cuda.device(0):
+            side = torch.cuda.Stream(device=0)
+            x = torch.zeros(1, device="cuda:0")
+            result = compiled(x, side)
+        self.assertEqual(result, fn(x, side))
+        # Distinct objects (eager wraps each query), still equal streams,
+        # and the equality guard does not recompile.
+        self.assertFalse(result[1])
+        self.assertTrue(result[2])
+        # Distinct objects at the frame boundary too, not just in-frame.
+        self.assertIsNot(result[3], result[4])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_cuda_current_stream_no_index_inside_stream_context(self):
+        """An indexless device argument means the current stream of the
+        tracked device: inside a stream context entered in the compiled
+        function, that is the context's stream."""
+
+        def fn(x, s, arg):
+            with torch.cuda.stream(s):
+                return torch.cuda.current_stream(arg), x + 1
+
+        s = torch.cuda.Stream()
+        x = torch.zeros(2, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for name, arg in (("str", "cuda"), ("torch.device", torch.device("cuda"))):
+            with self.subTest(form=name):
+                got = compiled(x, s, arg)[0]
+                self.assertEqual(
+                    (got.device_index, got.stream_id),
+                    (s.device_index, s.stream_id),
+                )
 
     def test_cuda_current_stream_with_entered_stream(self):
         """Verify that torch.cuda.current_stream().cuda_stream returns the

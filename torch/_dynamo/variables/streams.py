@@ -275,6 +275,8 @@ class SymbolicStreamState:
         from ..source import CurrentStreamSource
 
         cur_stack: list[StreamVariable] = []
+        self.current_stream_source: CurrentStreamSource | None = None
+        self._query_counter: int = 0
         if torch.accelerator.is_available():
             from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
@@ -284,6 +286,7 @@ class SymbolicStreamState:
                 # Reconstruct the stream relative to each rank's current device.
                 device = torch.device(device.type)
             source = CurrentStreamSource(device)
+            self.current_stream_source = source
             # Register the current stream so it gets index 0 (each OutputGraph
             # starts with an empty registry).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
@@ -305,13 +308,55 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
-        mark_current_stream_used()
+    def cur_stream(
+        self,
+        device: torch.device | None = None,
+        *,
+        tx: "InstructionTranslatorBase",
+    ) -> "StreamVariable":
         if device is not None:
+            if device.index is None:
+                # An indexless device (e.g. "cuda") means the current
+                # stream of the tracked device: the stack top.
+                mark_current_stream_used()
+                return self.cur_stream_stack[-1]
+            # Match by peeked device so the lazy seed is not realized (a
+            # realization would install a guard whose check queries the
+            # device-0 stream on every guard evaluation).
             for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
+                value = stream
+                if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+                    value = stream.peek_value()
+                else:
+                    value = stream.value
+                if value.device == device:
+                    mark_current_stream_used()
                     return stream
+            from torch.fx.experimental.proxy_tensor import _coor_enabled
 
+            if _coor_enabled():
+                # As with explicit-index Stream constructors, the index
+                # names a GPU that is wrong on every other rank.
+                from ..exc import CompileOnOneRankUnsupported
+
+                raise CompileOnOneRankUnsupported(
+                    "current_stream with an explicit device index under "
+                    "compile_on_one_rank: the index names a specific GPU, "
+                    "but the compiled artifact runs on every rank."
+                )
+            # No tracked stream on this device: use its live one. The seed
+            # stays untouched, so slot 0 keeps the unused-stream placeholder.
+            # Evict any tracker cached for this source: eager wraps every
+            # query in a fresh stream object, so separate queries must not
+            # alias (a == b still holds via the equality guard).
+            from .builder import VariableBuilder
+
+            source = CurrentStreamSource(device, query_id=self._query_counter)
+            self._query_counter += 1
+            # The unique query_id makes the source's tracker-cache key fresh
+            # on every mint, so no cache eviction is needed.
+            return VariableBuilder(tx, source)(torch.accelerator.current_stream(device))
+        mark_current_stream_used()
         return self.cur_stream_stack[-1]
 
     def tracked_device_type(self) -> str | None:
@@ -917,7 +962,7 @@ class EventVariable(VariableTracker):
             stream_arg = kwargs.get("stream")
 
         if not stream_arg:
-            stream_var = tx.symbolic_stream_state.cur_stream()
+            stream_var = tx.symbolic_stream_state.cur_stream(tx=tx)
             return stream_var, stream_var.user_object_index  # type: ignore[return-value]
 
         return stream_arg, stream_arg.user_object_index  # type: ignore[return-value]
