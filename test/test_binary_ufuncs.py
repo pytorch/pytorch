@@ -2025,6 +2025,54 @@ class TestBinaryUfuncsDevice(TestCase):
             for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
                 self.assertEqual(x + y, z)
 
+    @dtypes(torch.bfloat16, torch.float16, torch.complex32)
+    def test_add_sub_reduced_precision_alpha(self, device, dtype):
+        # Values from #199449: for these inputs, computing in opmath_t (single-rounding)
+        # differs from double-rounding (alpha rounded to the reduced dtype first) by at least 1 ulp.
+        g = complex(0.052978515625, 0.052978515625) if dtype.is_complex else 0.052978515625
+        p = complex(-0.53125, -0.53125) if dtype.is_complex else -0.53125
+        alpha = 0.1
+
+        # Tensor sizes cover scalar-only (< vector size), loop boundary, scalar tail, and large tail paths.
+        # The sizes straddle the 2 * Vectorized<scalar_t>::size() unroll (e.g. 32 on AVX2, 64 on AVX512):
+        # 1, 31, 32, 33, 63, 64, 65, and 4096 + 67.
+        for n in [1, 31, 32, 33, 63, 64, 65, 4096 + 67]:
+            x = torch.full((n,), g, device=device, dtype=dtype)
+            y = torch.full((n,), p, device=device, dtype=dtype)
+
+            x_comp = x.cfloat() if dtype.is_complex else x.float()
+            y_comp = y.cfloat() if dtype.is_complex else y.float()
+
+            ref_add = (x_comp + alpha * y_comp).to(dtype)
+            ref_sub = (x_comp - alpha * y_comp).to(dtype)
+
+            out_add = torch.add(x, y, alpha=alpha)
+            out_sub = torch.sub(x, y, alpha=alpha)
+
+            self.assertEqual(out_add, ref_add, atol=0, rtol=0, exact_dtype=True)
+            self.assertEqual(out_sub, ref_sub, atol=0, rtol=0, exact_dtype=True)
+
+            x_nc = torch.full((n * 2,), g, device=device, dtype=dtype)[::2]
+            y_nc = torch.full((n * 2,), p, device=device, dtype=dtype)[::2]
+
+            out_add_nc = torch.add(x_nc, y_nc, alpha=alpha)
+            out_sub_nc = torch.sub(x_nc, y_nc, alpha=alpha)
+
+            self.assertEqual(out_add_nc, ref_add, atol=0, rtol=0, exact_dtype=True)
+            self.assertEqual(out_sub_nc, ref_sub, atol=0, rtol=0, exact_dtype=True)
+
+    @dtypes(torch.float16)
+    def test_add_alpha_overflow_reduced_precision(self, device, dtype):
+        # Passing an alpha exceeding float16's finite range (e.g. 1e5, where float16 max is 65504)
+        # previously raised a checked_convert RuntimeError during Scalar conversion on CPU:
+        # "value cannot be converted to type at::Half without overflow".
+        # Now alpha is converted to opmath_t (float), so it succeeds without raising on CPU,
+        # computes in float32, and overflows to inf in float16, matching CUDA.
+        a = torch.tensor([1.0], device=device, dtype=dtype)
+        b = torch.tensor([1.0], device=device, dtype=dtype)
+        res = torch.add(a, b, alpha=1e5)
+        self.assertTrue(torch.isinf(res).all())
+
     # Tests that device tensors on different devices cannot be used in the same
     # binary operation, and that device "scalars" cannot be used in the same
     # binary operation as non-scalar CPU tensors.
