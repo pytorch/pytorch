@@ -496,7 +496,6 @@ __global__ void upsample_bilinear2d_backward_gather_out_frame(
   }
 }
 
-#ifndef USE_ROCM
 template <typename scalar_t, typename accscalar_t, int vec_size>
 __device__ __forceinline__ void upsample_bilinear2d_backward_gather_nhwc(
     const size_t index,
@@ -635,7 +634,6 @@ __global__ void upsample_bilinear2d_backward_gather_nhwc_out_frame(
         odata);
   }
 }
-#endif
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
@@ -915,6 +913,99 @@ static void upsample_bilinear2d_out_cuda_template(
   });
 }
 
+#ifdef USE_ROCM
+// The NHWC gather writes every grad_input element and beats zero-fill plus
+// atomic scatter once enough grad_output values land on each grad_input
+// address (4 * o_numel / i_numel). Architectures without a perf sweep keep
+// the scatter. A return of 0 means no gather.
+int64_t nhwc_gather_min_contributions() {
+  const auto& hooks = at::detail::getCUDAHooks();
+  if (hooks.isGPUArch({"gfx950"})) {
+    return 6;
+  }
+  if (hooks.isGPUArch({"gfx942"})) {
+    return 4;
+  }
+  if (hooks.isGPUArch({"gfx1250"})) {
+    return 2;
+  }
+  return 0;
+}
+
+// Writes every grad_input element, so the caller skips zero-fill.
+template <typename scalar_t>
+void upsample_bilinear2d_backward_gather_nhwc_launch(
+    const Tensor& grad_input,
+    const Tensor& grad_output_,
+    int nbatch,
+    int channels,
+    int input_height,
+    int input_width,
+    int output_height,
+    int output_width,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+      input_height, output_height, align_corners, scales_h);
+  const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+      input_width, output_width, align_corners, scales_w);
+
+  Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
+  constexpr int vector_size = 16 / sizeof(scalar_t);
+  const bool vectorized =
+      vector_size > 1 &&
+      channels % vector_size == 0 &&
+      memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
+          grad_input.const_data_ptr<scalar_t>())) >= vector_size &&
+      memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
+          grad_output.const_data_ptr<scalar_t>())) >= vector_size;
+  const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
+      input_height * input_width;
+  const size_t work_items = vectorized
+      ? num_input_elements / vector_size
+      : num_input_elements;
+  const auto* properties = at::cuda::getCurrentDeviceProperties();
+  const size_t num_blocks = std::min(
+      ceil_div(work_items, static_cast<size_t>(num_threads)),
+      static_cast<size_t>(properties->maxGridSize[0]));
+  if (vectorized) {
+    upsample_bilinear2d_backward_gather_nhwc_out_frame<
+        scalar_t, accscalar_t, vector_size><<<num_blocks, num_threads, 0, stream>>>(
+        work_items,
+        channels,
+        input_height,
+        input_width,
+        output_height,
+        output_width,
+        rheight,
+        rwidth,
+        align_corners,
+        grad_input.mutable_data_ptr<scalar_t>(),
+        grad_output.const_data_ptr<scalar_t>());
+  } else {
+    upsample_bilinear2d_backward_gather_nhwc_out_frame<
+        scalar_t, accscalar_t, 1><<<num_blocks, num_threads, 0, stream>>>(
+        work_items,
+        channels,
+        input_height,
+        input_width,
+        output_height,
+        output_width,
+        rheight,
+        rwidth,
+        align_corners,
+        grad_input.mutable_data_ptr<scalar_t>(),
+        grad_output.const_data_ptr<scalar_t>());
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+#endif
+
 static void upsample_bilinear2d_backward_out_cuda_template(
     const Tensor& grad_input,
     const Tensor& grad_output_,
@@ -940,6 +1031,38 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   }
 
   const auto memory_format = grad_output_.suggest_memory_format();
+
+#ifdef USE_ROCM
+  // Contended atomics: once enough contributions land on each grad_input
+  // address, the gather, which writes every element, beats zero-fill plus
+  // atomic scatter. A cut of 0 keeps the scatter.
+  const int64_t min_contributions = nhwc_gather_min_contributions();
+  if (min_contributions > 0 &&
+      grad_output_.sizes() != grad_input.sizes() &&
+      memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 &&
+      grad_input.is_contiguous(memory_format) &&
+      4 * grad_output_.numel() >=
+          min_contributions * grad_input.numel()) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16,
+        grad_output_.scalar_type(), "upsample_bilinear2d_backward_gather_nhwc",
+        [&] {
+          upsample_bilinear2d_backward_gather_nhwc_launch<scalar_t>(
+              grad_input,
+              grad_output_,
+              nbatch,
+              channels,
+              input_height,
+              input_width,
+              output_height,
+              output_width,
+              align_corners,
+              scales_h,
+              scales_w);
+        });
+    return;
+  }
+#endif
 
   // initialization to zero is required here. As we launch one thread per output
   // element, and atomicAdd to input gradient. Given a sparse sampling case, our
