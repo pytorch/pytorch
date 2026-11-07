@@ -8,6 +8,7 @@
 
 #include "XpuptiScopeProfilerApi.h"
 #include "Config.h"
+#include "ScopeExit.h"
 #include "ThrowUtil.h"
 #include "XpuptiProfilerMacros.h"
 #include "XpuptiScopeProfilerConfig.h"
@@ -68,6 +69,17 @@ XpuptiScopeProfilerApi::safe_pti_scope_collection_handle_t::
 }
 
 void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
+#if PTI_VERSION_AT_LEAST(1, 2)
+  XPUPTI_CALL(ptiMetricsEnable(nullptr));
+  const auto metricsGuard = makeScopeExit([this]() {
+    try {
+      XPUPTI_CALL(ptiMetricsDisable(nullptr));
+    } catch (...) {
+      exceptFromScopeHandleDestructor_ = std::current_exception();
+    }
+  });
+#endif
+
   uint32_t deviceCount = 0;
   XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount));
 
