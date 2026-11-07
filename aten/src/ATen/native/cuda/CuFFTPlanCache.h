@@ -111,10 +111,7 @@ public:
   const ::cufftHandle & get() const { return handle_; }
 
   ~CuFFTHandle() {
-// Not using fftDestroy() for rocFFT to work around double freeing of handles
-#if !defined(USE_ROCM)
     cufftDestroy(handle_);
-#endif
   }
 };
 
