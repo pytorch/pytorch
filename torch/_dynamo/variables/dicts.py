@@ -803,7 +803,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_order_guard(tx)
-        return self._new_dict(self.materialize_keys().copy())
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if self.items:
+            # `PyDict_Copy` falls back to `PyDict_Merge` when `tp_iter` differs.
+            result.dict_merge(tx, self)
+        return result
 
     def dict_get(
         self,
@@ -1458,7 +1462,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_order_guard(tx)
-        if self.python_type() is not collections.OrderedDict:
+        if not pyodict_checkexact(self):
             # odict_copy calls the subclass constructor, then its get/setitem hooks.
             cls = VariableTracker.build(tx, type).call_function(tx, [self], {})
             result = cls.call_function(tx, [], {})
@@ -1469,7 +1473,15 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                 value = generic_getitem(tx, self, key.vt)
                 generic_setitem(tx, result, key.vt, value)
             return result
-        return ConstDictVariable.dict_copy(self, tx, args, kwargs)
+        if self._can_fast_merge(self):
+            return self._new_dict(self.items.copy())
+        result = self._new_dict({})
+        # Exact odict_copy hashes lookups, but inserts using the stored hashes.
+        for key in _iter_detecting_mutation(
+            HashableTracker.iter_keys_by_identity(self.items)
+        ):
+            result.items[key] = generic_getitem(tx, self, key.vt)
+        return result
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
