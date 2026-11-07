@@ -79,7 +79,7 @@ jobs:
             set -euxo pipefail
             mkdir -p "${RUNNER_TEMP}/llm"
             cd test-infra/tools/torchci
-            aws s3 cp s3://target-determinator-assets/indexes/v2/latest/bundle.tar "${RUNNER_TEMP}/llm/bundle.tar" --no-sign-request
+            aws s3 cp s3://target-determinator-assets/indexes/latest/bundle.tar "${RUNNER_TEMP}/llm/bundle.tar" --no-sign-request
             python -P -m torchci.td.llm.bundle verify "${RUNNER_TEMP}/llm/bundle.tar"
 
       - name: Run Retriever

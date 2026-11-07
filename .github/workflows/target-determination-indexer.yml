@@ -128,19 +128,19 @@ jobs:
         run: |
           set -euo pipefail
           bucket=target-determinator-assets
-          if latest_sha256=$(aws s3api head-object --bucket "${bucket}" --key indexes/v2/latest/bundle.tar \
+          if latest_sha256=$(aws s3api head-object --bucket "${bucket}" --key indexes/latest/bundle.tar \
               --query 'Metadata."bundle-sha256"' --output text 2>"${RUNNER_TEMP}/head-object.err"); then
             # Only this job sets the metadata, after the build read the bundle back with
             # the retriever's full check; anything else at latest is not kept.
             if [[ "${latest_sha256}" =~ ^[0-9a-f]{64}$ ]]; then
               # Server-side multipart copy: copy-object stops at 5 GB, and bundles of
               # the larger registry models exceed it.
-              aws s3 cp "s3://${bucket}/indexes/v2/latest/bundle.tar" "s3://${bucket}/indexes/v2/previous/bundle.tar"
+              aws s3 cp "s3://${bucket}/indexes/latest/bundle.tar" "s3://${bucket}/indexes/previous/bundle.tar"
             else
               echo "The current latest bundle has no bundle-sha256 metadata from this workflow: not keeping it as previous"
             fi
           elif grep -qE 'Not Found|404' "${RUNNER_TEMP}/head-object.err"; then
-            echo "No current bundle at indexes/v2/latest: nothing to keep"
+            echo "No current bundle at indexes/latest: nothing to keep"
           else
             cat "${RUNNER_TEMP}/head-object.err" >&2
             exit 1
@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          aws s3 cp "${RUNNER_TEMP}/td-index/bundle.tar" s3://target-determinator-assets/indexes/v2/latest/bundle.tar \
+          aws s3 cp "${RUNNER_TEMP}/td-index/bundle.tar" s3://target-determinator-assets/indexes/latest/bundle.tar \
             --metadata "bundle-sha256=${BUNDLE_SHA256}" --no-progress
 
 concurrency:
