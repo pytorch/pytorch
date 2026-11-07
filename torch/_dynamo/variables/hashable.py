@@ -439,7 +439,23 @@ class HashableTracker:
 
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker) -> None:
+    def __init__(self, vt: VariableTracker, *, known_hash: int | None = None) -> None:
+        if known_hash is not None:
+            if (
+                not isinstance(vt, variables.LazyVariableTracker)
+                or vt.is_realized()
+                or vt.peek_type() is not int
+                or type(known_hash) is not int
+                or hash(vt.peek_value()) != known_hash
+            ):
+                raise AssertionError(
+                    "known_hash requires an unrealized exact-int key with the matching hash"
+                )
+            # Only exact-int hook IDs use a hash from the source dictionary.
+            # Keep them lazy until user code observes the key or its hash.
+            self.vt = vt
+            self._hash, self._hash_is_identity = known_hash, False
+            return
         # We specialize SymNodes
         vt = specialize_symnode(_guard_lazy_key(vt))
         if type(vt) is variables.ConstantVariable and (
