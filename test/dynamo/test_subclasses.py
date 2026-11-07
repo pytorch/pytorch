@@ -2051,6 +2051,33 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
 
+    def test_as_subclass_real_dtype_torch_function(self):
+        # Issue #202726: .real on real-dtype tensor subclass with __torch_function__
+        class Sub(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def f(t):
+            return t.real * 2
+
+        t = torch.randn(3).as_subclass(Sub)
+        opt_f = torch.compile(f, backend="eager")
+        self.assertEqual(f(t), opt_f(t))
+
+        def f2(x):
+            return x.as_subclass(Sub).real * 2
+
+        x = torch.randn(3)
+        opt_f2 = torch.compile(f2, backend="eager")
+        self.assertEqual(f2(x), opt_f2(x))
+
+        def f3(x):
+            return Sub(x.real) * 2
+
+        opt_f3 = torch.compile(f3, backend="eager")
+        self.assertEqual(f3(x), opt_f3(x))
+
     def test_subclass_method_override(self):
         class MyTensor(torch.Tensor):
             def sum(self, dim=None, keepdim=False):

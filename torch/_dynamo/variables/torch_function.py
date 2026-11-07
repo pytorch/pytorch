@@ -625,6 +625,11 @@ class TensorWithTFOverrideVariable(TensorVariable):
             raise AssertionError(
                 f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
             )
+        # The new subclass tensor instance is a newly constructed object in this frame;
+        # its mutation tracking will be handled by the caller (or AttributeMutationNew),
+        # so it must not inherit an existing object's source or mutation_type.
+        kwargs.pop("source", None)
+        kwargs.pop("mutation_type", None)
         var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
