@@ -15,6 +15,7 @@ from unittest import mock
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -2051,6 +2052,50 @@ class TagSafetyChecks(RecursiveDictTagTests):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
+
+    def test_nn_module_tag_safe_with_method_code_guard(self):
+        # forward and helper get a __code__ guard via type(mod).__dict__; that
+        # must not cost the module its tag-safe root.
+        class Mod(torch.nn.Module):
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x)
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x)
+
+        # The tag-safe root must not hide the guards: rebinding either class
+        # function still recompiles.
+        Mod.helper = lambda self, x: x * 9
+        self.assertEqual(opt_fn(x), x * 9)
+        self.assertEqual(cnt.frame_count, 2)
+        Mod.forward = lambda self, x: self.helper(x) + 1
+        self.assertEqual(opt_fn(x), x * 9 + 1)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):

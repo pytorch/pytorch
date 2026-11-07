@@ -28,6 +28,7 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
+from torch._guards import TracingContext
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
@@ -43,6 +44,7 @@ from ..source import (
     AttrSource,
     DictGetItemSource,
     GetItemSource,
+    is_from_skip_guard_source,
     Source,
     TypeDictSource,
     TypeMROSource,
@@ -185,6 +187,14 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+
+def type_is_immutable(obj_type: type, /) -> bool:
+    return bool(
+        type.__dict__["__flags__"].__get__(obj_type, type(obj_type))
+        & Py_TPFLAGS_IMMUTABLETYPE
+    )
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -1860,36 +1870,6 @@ def slot_wrapper_iadd(
 is_richcompare_not_implemented = is_nb_not_implemented
 
 
-def object_richcompare(
-    self: VariableTracker,
-    tx: "InstructionTranslatorBase",
-    other: VariableTracker,
-    op: str,
-) -> VariableTracker:
-    """object's tp_richcompare.
-
-    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
-    - __eq__: identity check, else NotImplemented
-    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering
-    """
-    if op == "__eq__":
-        identity = vt_identity_compare(self, other)
-        if identity is not None and identity.as_python_constant():
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(NotImplemented)
-    elif op == "__ne__":
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
-        # Safe to call as_python_constant(): only identity-based types use
-        # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
-        if is_richcompare_not_implemented(eq_result):
-            return eq_result
-        return ConstantVariable.create(not eq_result.as_python_constant())
-    else:
-        return ConstantVariable.create(NotImplemented)
-
-
 def python_constant_richcompare_impl(
     self: VariableTracker,
     tx: "InstructionTranslatorBase",
@@ -2069,11 +2049,11 @@ def generic_hash_impl(
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
-    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    Dispatches to the VT's tp_hash_impl.  Called by generic_hash (which wraps
     the result in a VT), container hash_impls (which propagate is_fake),
     and HashableTracker (which just needs the int).
     """
-    return obj.hash_impl(tx)
+    return obj.tp_hash_impl(tx)
 
 
 def generic_hash(
@@ -2285,6 +2265,31 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     return GetItemSource(TypeMROSource(klass_source), idx)
 
 
+def guard_mro_absent(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+    stop: int,
+) -> None:
+    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    memoize = (
+        not TracingContext.get().guards_context.skip_install
+        and not is_from_skip_guard_source(klass_source)
+    )
+    for idx in range(stop):
+        absent_key = (id(klass), idx, name)
+        if memoize and absent_key in tx.output.guarded_mro_absent_keys:
+            continue
+        if memoize:
+            tx.output.guarded_mro_absent_keys.add(absent_key)
+        install_guard(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
+                partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+            )
+        )
+
+
 def mro_attr_source(
     tx: "InstructionTranslatorBase",
     klass: type,
@@ -2302,23 +2307,32 @@ def mro_attr_source(
     that is an error.
     """
     entries = tuple(iter_mro_static_dicts(klass))
+    memoize = (
+        not TracingContext.get().guards_context.skip_install
+        and not is_from_skip_guard_source(klass_source)
+    )
+    if (
+        memoize
+        and not type_is_immutable(klass)
+        and id(klass) not in tx.output.guarded_mro_type_ids
+    ):
+        # TYPE_MATCH pins the class, not its bases. Cached owner sources require both.
+        mro_source = TypeMROSource(klass_source)
+        install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        # The builtin metaclass always puts the already guarded class first.
+        first = 1 if type(klass) is type else 0
+        for index in range(first, len(entries)):
+            install_guard(
+                GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
+            )
+        tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(entries):
         if name not in namespace:
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*. Deduplicated by (id(klass), name): the
-        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        for absent_idx in range(idx):
-            absent_key = (id(entries[absent_idx][0]), name)
-            if absent_key in tx.output.guarded_mro_absent_keys:
-                continue
-            tx.output.guarded_mro_absent_keys.add(absent_key)
-            install_guard(
-                TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
-                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-            )
+        # of them later gains *name*.
+        guard_mro_absent(tx, klass, klass_source, name, idx)
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
@@ -2326,14 +2340,15 @@ def mro_attr_source(
         # the descriptor: a descriptor shared by unrelated classes needs a
         # source through each one.
         cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key)
+        cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
         if cached is not None:
             return cached
 
         source = DictGetItemSource(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
         )
-        tx.output.mro_source_cache[cache_key] = source
+        if memoize:
+            tx.output.mro_source_cache[cache_key] = source
         return source
 
     return None
