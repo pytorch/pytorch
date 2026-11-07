@@ -1048,7 +1048,7 @@ class TensorVariable(VariableTracker):
             size_len = len(size_var.items)
         # Ensure we don't unpack a scalar tensor.
         if size_len == 0:
-            raise AssertionError("Can't unpack scalar tensors.")
+            raise_type_error(tx, "iteration over a 0-d tensor")
 
         if self.valid_size():
             length = self.size[0]
