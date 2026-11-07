@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import inspect
 import re
 import unittest
 from collections import namedtuple, OrderedDict
@@ -15,6 +16,7 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -35,6 +37,7 @@ from torch._inductor.codegen.triton import (
 )
 from torch._inductor.codegen.wrapper import (
     _escape_triton_kernel_source_for_wrapper,
+    PythonWrapperCodegen,
     render_user_defined_triton_kernel_transitive_closure,
     user_defined_triton_kernel_transitive_closure,
     user_defined_triton_kernel_transitive_closure_source_code,
@@ -50,6 +53,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -111,6 +115,18 @@ if has_triton_package():
                 transitive_constexpr_helper as transitive_constexpr_alias,
                 transitive_jit_helper as transitive_jit_alias,
                 transitive_triton_alias_kernel,
+            )
+
+    if hasattr(triton, "aggregate"):
+        try:
+            from .aggregate_kernel_helpers import (
+                aggregate_kernel,
+                nested_aggregate_kernel,
+            )
+        except ImportError:
+            from aggregate_kernel_helpers import (
+                aggregate_kernel,
+                nested_aggregate_kernel,
             )
 
     @triton.jit
@@ -532,6 +548,50 @@ def helper(x):
             source,
             render_user_defined_triton_kernel_transitive_closure(source_modules),
         )
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "aggregate"),
+        "requires triton.aggregate",
+    )
+    @parametrize("nested", [False, True])
+    @parametrize("source_lookup", ["inspect", "missing", "replacement"])
+    def test_user_defined_triton_kernel_aggregate(self, nested, source_lookup):
+        kernel = nested_aggregate_kernel if nested else aggregate_kernel
+        getsource = inspect.getsource
+
+        def class_source(obj):
+            if isinstance(obj, type):
+                if source_lookup == "missing":
+                    raise OSError("replacement class has no __firstlineno__")
+                if source_lookup == "replacement":
+                    return "class aggregate_value:\n    pass\n"
+            return getsource(obj)
+
+        with (
+            patch("torch._inductor.codegen.wrapper.inspect.getsource", class_source),
+            patch.dict(
+                kernel.fn.__globals__, {"size": kernel.fn.__globals__["Config"]}
+            ),
+        ):
+            sources = user_defined_triton_kernel_transitive_closure(kernel)
+        self.assertIsNone(sources[0].module_name)
+        self.assertTrue(sources[0].source.startswith(f"def {kernel.__name__}("))
+        source = render_user_defined_triton_kernel_transitive_closure(sources)
+        self.assertEqual(source.count("class Config:"), 1)
+        self.assertNotIn("\nsize = Config\n", source)
+        self.assertNotIn(f"from {kernel.fn.__module__} import", source)
+        if nested:
+            alias_pos = source.index("ConfigAlias = Config")
+            self.assertLess(source.index("class Config:"), alias_pos)
+            self.assertLess(alias_pos, source.index("class NestedConfig:"))
+            self.assertIn("def aggregate_method_helper", source)
+        header = "import triton\nimport triton.language as tl\n@triton.jit\n"
+        module = PyCodeCache.load(header + source)
+        self.assertIsInstance(getattr(module, kernel.__name__), triton.JITFunction)
+        self.assertTrue(module.Config.__triton_aggregate__)
+        if nested:
+            self.assertIs(module.NestedConfigAlias, module.NestedConfig)
+            self.assertIs(module.NestedConfig.__annotations__["config"], module.Config)
 
     @unittest.skipUnless(
         has_triton_package() and hasattr(triton, "constexpr_function"),
@@ -2210,6 +2270,41 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
+
+
+class TestTritonAggregate(InductorTestCase):
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and hasattr(triton, "aggregate"),
+        "requires GPU and triton.aggregate",
+    )
+    @parametrize("nested", [False, True])
+    @parametrize("as_code", [False, True])
+    def test_compile(self, device, nested, as_code):
+        kernel = nested_aggregate_kernel if nested else aggregate_kernel
+        self.assertFalse(kernel.fn.__module__.startswith("triton"))
+
+        @torch.library.triton_op(
+            f"test_aggregate::{self._testMethodName}", mutates_args={}
+        )
+        def add_one(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            torch.library.wrap_triton(kernel)[(1,)](x, out, x.numel())
+            return out
+
+        x = torch.arange(17, device=device)
+        self.assertEqual(add_one(x), x + 1)
+        with (
+            inductor_config.patch(fx_graph_cache=False),
+            patch.object(
+                PythonWrapperCodegen,
+                "defines_triton_kernels_as_code",
+                return_value=as_code,
+            ),
+        ):
+            self.assertEqual(torch.compile(add_one, fullgraph=True)(x), x + 1)
+
+
+instantiate_device_type_tests(TestTritonAggregate, globals(), only_for=(GPU_TYPE,))
 
 
 if __name__ == "__main__":
