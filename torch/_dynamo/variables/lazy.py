@@ -331,11 +331,19 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
                 for v in value
             )
-        elif value_cls in (dict, collections.OrderedDict):
+        elif value_cls is dict:
             result = {
                 k: cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
                 for k, v in list(value.items())
             }
+        elif value_cls is collections.OrderedDict:
+            items, order = list(dict.items(value)), list(value)
+            result = collections.OrderedDict(
+                (k, cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant))
+                for k, v in items
+            )
+            for key in order:
+                result.move_to_end(key)
         else:
             result = value
 
