@@ -3338,6 +3338,7 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
+# Not cached: for a dynamic K this installs a guard on the current graph.
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
@@ -3359,9 +3360,10 @@ def use_decompose_k_choice(
         return False
     if sizevars.statically_known_true(large_k):
         return True
-    # A backed dynamic K is decided on its hint, using splits that divide every K.
-    # Only the base threshold is guarded, so the one recompile is a later K below
-    # it; a larger threshold_multiple just trims the other choices.
+    # A backed dynamic K is decided on its hint, using splits that divide every K,
+    # and guarded so a later K below the threshold recompiles. The
+    # threshold_multiple > 1 check only drops Triton mm; keep it for a dynamic K
+    # rather than add a second guard.
     if not isinstance(k, sympy.Expr) or k.is_number or free_unbacked_symbols(large_k):
         return False
     m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
@@ -3371,7 +3373,7 @@ def use_decompose_k_choice(
     )
     if not divisible or k_hint < decompose_k_threshold * max(m_hint, n_hint):
         return False
-    return threshold_multiple > 1 or sizevars.guard_or_false(large_k)
+    return threshold_multiple == 1 and sizevars.guard_or_false(large_k)
 
 
 @functools.cache
