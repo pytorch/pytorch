@@ -2031,6 +2031,24 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertEqual(s.device_index, 2)
                 self.assertEqual(s.device_type, 3)
 
+    def test_mode_returning_wrong_number_of_values(self) -> None:
+        def returning(n):
+            class Mode(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    return tuple(torch.ones(2) for _ in range(n))
+
+            return Mode()
+
+        # Built outside the mode: otherwise the mode also intercepts this
+        # single-return op and fails before max.dim is ever reached.
+        t = torch.ones(2)
+        for n in (3, 1):
+            with self.assertRaisesRegex(
+                RuntimeError, f"to return 2 values but it returned {n} instead"
+            ):
+                with returning(n):
+                    torch.ops.aten.max.dim(t, 0)
+
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
         # See LoggingTensor above for more details on the subclass
