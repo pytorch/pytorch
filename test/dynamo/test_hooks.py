@@ -884,6 +884,27 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, left, right), fn(x, left, right))
         self.assertEqual(counter.frame_count, 2)
 
+    def test_hook_dict_move_to_end_guard_keys(self):
+        def hook(module, args, output):
+            return output + 1
+
+        first = torch.nn.Identity()
+        key = first.register_forward_hook(hook).id
+
+        def fn(x, module):
+            try:
+                module._forward_hooks.move_to_end(key, last=False)
+            except KeyError:
+                return x + 2
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        second = torch.nn.Identity()
+        second.register_forward_hook(hook)
+        for module in (first, second):
+            self.assertEqual(compiled(x, module), fn(x, module))
+
     @parametrize("view", ["keys", "items"])
     def test_hook_view_repr_observes_ids(self, view):
         def fn(x, module):
