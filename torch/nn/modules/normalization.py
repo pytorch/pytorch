@@ -53,6 +53,10 @@ class LocalResponseNorm(Module):
         self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0
     ) -> None:
         super().__init__()
+        if size <= 0:
+            raise ValueError(
+                f"size ({size}) must be greater than 0"
+            )
         self.size = size
         self.alpha = alpha
         self.beta = beta
