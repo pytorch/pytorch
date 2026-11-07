@@ -56,6 +56,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
     onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
@@ -5871,8 +5872,8 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
-    @onlyCUDA
-    def test_memory_format_cpu_and_cuda_ops(self, device):
+    @onlyOn(["cuda", "xpu"])
+    def test_memory_format_cpu_and_gpu_ops(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
                 return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
@@ -5881,8 +5882,8 @@ class TestTorchDeviceType(TestCase):
         def transformation_cpu_fn(tensor, **kwargs):
             return tensor.cpu(**kwargs)
 
-        def transformation_cuda_fn(tensor, **kwargs):
-            return tensor.cuda(**kwargs)
+        def transformation_device_fn(tensor, **kwargs):
+            return tensor.to(device=device, **kwargs)
 
         formats_shapes = (
             (torch.channels_last, (4, 3, 8, 8)),
@@ -5890,9 +5891,24 @@ class TestTorchDeviceType(TestCase):
 
         for mf, shape in formats_shapes:
             self._test_memory_format_transformations(
-                'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
+                device, get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
-                'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
+                'cpu', get_generator(mf, shape), transformation_device_fn, mf, default_is_preserve=True)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_addcmul_gpu_errors_with_cpu_scalars(self, device):
+        # Logic is dtype agnostic, so dtype isn't tested
+        alpha = 0.5
+
+        a = torch.rand((2, 2), device=device)
+        b = torch.rand((2, 2), device=device)
+        c = torch.rand((2, 2), device=device)
+        scalar = torch.rand([], device="cpu")
+
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+            torch.addcmul(a, scalar, c, value=alpha)
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+            torch.addcmul(scalar, b, c, value=alpha)
 
     # FIXME: move to test_serialization
     @onlyNativeDeviceTypes
@@ -6133,7 +6149,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -6147,10 +6162,10 @@ class TestTorchDeviceType(TestCase):
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
-                if "cuda" == device.type:
-                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-                else:
+                if device.type == "cpu":
                     self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+                else:
+                    self.assertEqual(s1._scale.device.type, device.type)
 
             s1.load_state_dict(s0.state_dict())
 
@@ -7474,20 +7489,6 @@ class TestTorchCUDA(TestCase):
             _no_sync_helper(f, level)
         for f, level in product(expect_sync, (1, 2)):
             _sync_raises_helper(f, level)
-
-    def test_addcmul_cuda_errors_with_cpu_scalars(self, device):
-        # Logic is dtype agnostic, so dtype isn't tested
-        alpha = 0.5
-
-        a = torch.rand((2, 2), device=device)
-        b = torch.rand((2, 2), device=device)
-        c = torch.rand((2, 2), device=device)
-        scalar = torch.rand([], device="cpu")
-
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
-            torch.addcmul(a, scalar, c, value=alpha)
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
-            torch.addcmul(scalar, b, c, value=alpha)
 
     # FIXME: move to test_serialization
     @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
