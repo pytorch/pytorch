@@ -257,6 +257,18 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
         return False
 
+    def define_user_defined_flydsl_kernel(
+        self,
+        kernel: Any,
+        arg_names: tuple[str, ...],
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+        device: torch.device | None,
+    ) -> str:
+        raise NotImplementedError(
+            "User-defined FlyDSL kernels are not supported by the FX wrapper"
+        )
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],

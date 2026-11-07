@@ -8800,9 +8800,9 @@ class SubgraphBuffer(ExternKernel):
 
 class UserDefinedKernel(ExternKernel):
     """
-    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel): an opaque
-    launch that returns nothing (NoneLayout) and writes some of its tensor arguments in
-    place. Each written argument gets a
+    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel,
+    UserDefinedFlyDSLKernel): an opaque launch that returns nothing (NoneLayout) and
+    writes some of its tensor arguments in place. Each written argument gets a
     MutationOutput, which orders later readers after the launch and keeps it alive.
     """
 
@@ -9171,6 +9171,78 @@ class UserDefinedTritonKernel(UserDefinedKernel):
         # includes scalars, so writes may reference non-tensor args like SymInts.
         self.register_written_args(
             kernel_args, [key.name for key in self.arg_accesses.read_writes.writes]
+        )
+
+
+class UserDefinedFlyDSLKernel(UserDefinedKernel):
+    """
+    A user-defined FlyDSL kernel: a @flyc.jit host function captured through
+    torch._library.flydsl.wrap_flydsl.
+
+    Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
+    generated code launches the host function (Python wrapper) on the wrapper's
+    stream.
+    """
+
+    def __init__(
+        self,
+        *,
+        kernel_idx: int,
+        kernel_args: dict[str, Any],
+        mutated_arg_names: Sequence[str],
+    ) -> None:
+        from torch._higher_order_ops.flydsl_kernel_wrap import (
+            flydsl_kernel_side_table,
+            get_host_fn_info,
+        )
+
+        super().__init__(kernel_args, kernel_idx=kernel_idx)
+        self.kernel = flydsl_kernel_side_table.get_kernel(kernel_idx)
+        self.host_fn_info = get_host_fn_info(self.kernel.fn)
+        self.set_kernel_param_order(self.host_fn_info.params, kernel_args)
+        self.mutated_arg_names = list(mutated_arg_names)
+        self.register_written_args(kernel_args, mutated_arg_names)
+
+    def split_args(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Kernel arguments passed at launch (tensors and runtime scalars, in
+        signature order) and the constants the generated code binds once (Constexpr
+        arguments, None, objects). Parameters the call left out take their defaults
+        here."""
+        from torch._higher_order_ops.flydsl_kernel_wrap import python_scalar
+
+        info = self.host_fn_info
+        runtime_args: dict[str, Any] = {}
+        constant_args: dict[str, Any] = {}
+        for name in info.params:
+            if name == info.stream_param:
+                continue
+            if name in self.ordered_kwargs_for_cpp_kernel:
+                value = self.get_kwargs_value(name)
+            else:
+                value = info.defaults[name]
+            if isinstance(value, IRNode):
+                runtime_args[name] = value
+            elif info.is_runtime_scalar(name, value):
+                # A FlyDSL Numeric value or an int/float subclass, as a plain Python
+                # value the generated code can print (symbolic values stay as they are).
+                runtime_args[name] = python_scalar(value)
+            else:
+                constant_args[name] = value
+        return runtime_args, constant_args
+
+    @override
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        runtime_args, constant_args = self.split_args()
+        name = wrapper.define_user_defined_flydsl_kernel(
+            self.kernel,
+            tuple(runtime_args),
+            constant_args,
+            runtime_args,
+            self.get_device(),
+        )
+        self.codegen_comment(wrapper, name)
+        wrapper.generate_user_defined_flydsl_kernel_call(
+            name, self.kernel, runtime_args, constant_args, self.get_device_or_error()
         )
 
 
