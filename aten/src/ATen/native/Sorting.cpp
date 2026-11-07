@@ -682,8 +682,9 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
   Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
 
-  // Make dim to reduce contiguous (stride=1)
-  if (in.stride(dim) > 1) {
+  // Make dim to reduce contiguous (stride=1). The loop below reads it densely,
+  // so an expanded (stride 0) dim must be copied too.
+  if (in.stride(dim) != 1) {
     in = in.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim).contiguous();
     vals = vals.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
     inds = inds.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
