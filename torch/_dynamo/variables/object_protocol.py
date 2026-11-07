@@ -143,6 +143,19 @@ def vt_identity_compare(
     if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
         return ConstantVariable.create(False)
 
+    if isinstance(left, TupleVariable) and isinstance(right, TupleVariable):
+        if (
+            left.python_type() is tuple
+            and right.python_type() is tuple
+            and not left.items
+            and not right.items
+        ):
+            return ConstantVariable.create(True)
+        if left.identity_token is not None and right.identity_token is not None:
+            return ConstantVariable.create(
+                left.identity_token is right.identity_token
+            )
+
     # Different Python types can never be the same object.
     try:
         if left.python_type() is not right.python_type():
