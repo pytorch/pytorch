@@ -1573,6 +1573,91 @@ class TestMeta(_TestMetaBase):
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
+    def test_meta_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(self, device):
+        to_meta = MetaConverter()
+        x = torch.randn(5, 5, device=device)
+        scale = torch.tensor([0.1], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+        fake_quant_enabled = torch.tensor([1], dtype=torch.long, device=device)
+        args = [x, scale, zero_point, fake_quant_enabled, -128, 127]
+        meta_args = [to_meta(a) if isinstance(a, torch.Tensor) else a for a in args]
+
+        op = aten._fake_quantize_per_tensor_affine_cachemask_tensor_qparams.default
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        for ref, meta in zip(ref_out, meta_out):
+            self.assertEqual(meta.device.type, "meta")
+            self.assertEqual(ref.size(), meta.size())
+            self.assertEqual(ref.stride(), meta.stride())
+            self.assertEqual(ref.dtype, meta.dtype)
+
+        # the check that every device makes (the CPU kernel also reads scale and
+        # zero_point through .item() and the CUDA one does not, so that is not checked)
+        cases = (
+            ("`quant_min` should be less than or", {"quant_min": 127, "quant_max": -128}),
+        )
+        base = dict(
+            self=x,
+            scale=scale,
+            zero_point=zero_point,
+            fake_quant_enabled=fake_quant_enabled,
+            quant_min=-128,
+            quant_max=127,
+        )
+        for message, override in cases:
+            kwargs = {**base, **override}
+            real_args = list(kwargs.values())
+            fake_args = [to_meta(a) if isinstance(a, torch.Tensor) else a for a in real_args]
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                op(*real_args)
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                op(*fake_args)
+
+    def test_meta_fake_quantize_per_channel_affine_cachemask(self, device):
+        to_meta = MetaConverter()
+        x = torch.randn(5, 4, device=device)
+        scale = torch.rand(4, device=device) + 0.1
+        zero_point = torch.zeros(4, dtype=torch.int, device=device)
+        op = aten.fake_quantize_per_channel_affine_cachemask.default
+        base = dict(
+            self=x, scale=scale, zero_point=zero_point, axis=1, quant_min=-128, quant_max=127
+        )
+
+        def to_meta_args(kwargs):
+            return [to_meta(a) if isinstance(a, torch.Tensor) else a for a in kwargs.values()]
+
+        ref_out = op(*base.values())
+        meta_out = op(*to_meta_args(base))
+        for ref, meta in zip(ref_out, meta_out):
+            self.assertEqual(meta.device.type, "meta")
+            self.assertEqual(ref.size(), meta.size())
+            self.assertEqual(ref.stride(), meta.stride())
+            self.assertEqual(ref.dtype, meta.dtype)
+
+        # the checks the kernel makes without looking at values
+        cases = (
+            ("Scale must be Float or BFloat16", {"scale": scale.double()}),
+            ("Zero-point must be Int32, Float or Half", {"zero_point": zero_point.long()}),
+            ("scale should be a 1-D tensor", {"scale": scale.view(2, 2)}),
+            ("zero point should be a 1-D tensor", {"zero_point": zero_point.view(2, 2)}),
+            (
+                "scale and zero-point need to have the same dimensions",
+                {"zero_point": zero_point[:3]},
+            ),
+            (
+                "not consistent with input tensor",
+                {"scale": scale[:3], "zero_point": zero_point[:3]},
+            ),
+            ("`quant_min` should be less than or", {"quant_min": 127, "quant_max": -128}),
+            ("`axis` must be between 0", {"axis": -1}),
+        )
+        for message, override in cases:
+            kwargs = {**base, **override}
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                op(*kwargs.values())
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                op(*to_meta_args(kwargs))
+
     def test_cdist_forward(self, device):
         to_meta = MetaConverter()
         x1 = torch.rand([3, 2], device=device)

@@ -2816,6 +2816,22 @@ def _device_setters() -> dict[Any, str]:
     }
 
 
+def unimplemented_library_fallback(fn: Any) -> Never:
+    # A function of PyTorch that is disabled on purpose (torch._disable_dynamo with a
+    # library_fallback_reason, which sets the attribute that is checked for), so there is no
+    # `torch.compiler.disable` call in the user's code to remove.
+    msg = inspect.getattr_static(fn, "_torchdynamo_disable_msg", None)
+    qualified_name = f"{fn.__module__}.{getattr(fn, '__qualname__', fn)}"
+    unimplemented(
+        gb_type="Skip calling a PyTorch function that is disabled for Dynamo",
+        context=qualified_name,
+        explanation=f"`{qualified_name}` runs eagerly, outside of Dynamo (reason: {msg})",
+        hints=[
+            "This is a limitation of the PyTorch code that was called, not a `torch.compiler.disable` call in your code: the reason above says what avoids it. With torch.compile and without fullgraph=True this call graph-breaks and runs eagerly instead.",
+        ],
+    )
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -3006,6 +3022,10 @@ class SkipFunctionVariable(VariableTracker):
             unimplemented_direct_disable_call("torch.compiler.disable")
         elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
+            if inspect.getattr_static(
+                self.value, "_torchdynamo_library_fallback", False
+            ):
+                unimplemented_library_fallback(self.value)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
                 context=str(self.value),

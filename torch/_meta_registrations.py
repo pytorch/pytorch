@@ -2675,6 +2675,57 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
+@register_meta(aten._fake_quantize_per_tensor_affine_cachemask_tensor_qparams.default)
+def meta__fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+    self, scale, zero_point, fake_quant_enabled, quant_min, quant_max
+):
+    torch._check(
+        quant_min <= quant_max,
+        lambda: "`quant_min` should be less than or equal to `quant_max`.",
+    )
+    # How scale, zero_point and fake_quant_enabled are read depends on the device (the
+    # CPU kernel calls .item() on them, the CUDA one reads them through data pointers),
+    # so only the check that every device shares is made here.
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
+
+
+@register_meta(aten.fake_quantize_per_channel_affine_cachemask.default)
+def meta_fake_quantize_per_channel_affine_cachemask(
+    self, scale, zero_point, axis, quant_min, quant_max
+):
+    torch._check(
+        scale.dtype in (torch.float32, torch.bfloat16),
+        lambda: f"Scale must be Float or BFloat16, found {scale.dtype}",
+    )
+    torch._check(
+        zero_point.dtype in (torch.int32, torch.float32, torch.float16),
+        lambda: f"Zero-point must be Int32, Float or Half, found {zero_point.dtype}",
+    )
+    torch._check(scale.dim() == 1, lambda: "scale should be a 1-D tensor")
+    torch._check(zero_point.dim() == 1, lambda: "zero point should be a 1-D tensor")
+    torch._check(
+        scale.numel() == zero_point.numel(),
+        lambda: "scale and zero-point need to have the same dimensions",
+    )
+    torch._check(
+        scale.numel() == self.size(axis),
+        lambda: "dimensions of scale and zero-point are not consistent with input tensor",
+    )
+    torch._check(
+        quant_min <= quant_max,
+        lambda: "`quant_min` should be less than or equal to `quant_max`.",
+    )
+    # The kernel also checks that an integer zero_point lies within [quant_min,
+    # quant_max], which depends on the values of the tensor.
+    torch._check(
+        axis >= 0 and axis <= self.dim(),
+        lambda: "`axis` must be between 0 and number of dimensions of input",
+    )
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
+
+
 @register_meta(aten.mm)
 @out_wrapper(exact_dtype=True)
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):

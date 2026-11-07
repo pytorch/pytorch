@@ -185,6 +185,12 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch.distributed.destroy_process_group": SkipFunctionVariable,
+    # torch.ao.quantization.observer is inlined, but the histogram search is
+    # data-dependent and has to keep running eagerly, and RecordingObserver appends to a
+    # list, whose length Dynamo guards on, so it would recompile on every call.
+    "torch.ao.quantization.observer.HistogramObserver#forward": SkipFunctionVariable,
+    "torch.ao.quantization.observer.HistogramObserver#calculate_qparams": SkipFunctionVariable,
+    "torch.ao.quantization.observer.RecordingObserver#forward": SkipFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
     "torch._utils._maybe_view_chunk_cat": UserFunctionVariable,
@@ -3561,7 +3567,9 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.fake_quantize",
     "torch.ao.quantization.fx._decomposed",
+    "torch.ao.quantization.observer",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",

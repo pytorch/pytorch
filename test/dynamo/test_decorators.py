@@ -1535,6 +1535,61 @@ class DecoratorTests(PytreeRegisteringTestCase):
         ):
             fn3(torch.randn(4, 5))
 
+    def test_disabled_function_of_torch_keeps_the_generic_message(self):
+        # a disable() in the user's code, also of a function of torch, and the functions of
+        # torch that are disabled with a reason, are reported as before
+        generic = "Remove the `torch.compiler.disable` call"
+
+        @torch.compiler.disable(reason="a reason")
+        def f(x):
+            return x + 1
+
+        f.__module__ = "torch.fake_module"
+        for fn in (
+            f,
+            torch.compiler.disable(torch.nn.functional.relu, reason="a reason"),
+        ):
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Unsupported, generic):
+                torch.compile(lambda x, fn=fn: fn(x), backend="eager", fullgraph=True)(
+                    torch.randn(3)
+                )
+
+    def test_library_fallback_of_torch_message(self):
+        # a fallback that PyTorch disables on purpose, with torch._disable_dynamo and a
+        # reason, does not tell the user to remove a call that is not in their code
+        @torch._disable_dynamo(library_fallback_reason="the reason of the library")
+        def f(x):
+            return x + 1
+
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(lambda x: f(x), backend="eager", fullgraph=True)(
+                torch.randn(3)
+            )
+        message = str(cm.exception)
+        self.assertIn("the reason of the library", message)
+        self.assertIn(f.__qualname__, message)
+        self.assertNotIn("Remove the `torch.compiler.disable` call", message)
+
+    @torch._dynamo.config.patch(dont_skip_tracing=True)
+    def test_library_fallback_of_torch_message_when_inlining(self):
+        # the same when Dynamo tries to inline the function, which is what
+        # dont_skip_tracing does for a function that it would skip
+        @torch._disable_dynamo(library_fallback_reason="the reason of the library")
+        def f(x):
+            return x + 1
+
+        def g(x):
+            return f(x)
+
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(lambda x: g(x), backend="eager", fullgraph=True)(
+                torch.randn(3)
+            )
+        message = str(cm.exception)
+        self.assertIn("the reason of the library", message)
+        self.assertNotIn("Remove the `torch.compiler.disable` call", message)
+
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
 

@@ -3355,6 +3355,16 @@
       ]
     }
   ],
+  "GB1580": [
+    {
+      "Gb_type": "Skip calling a PyTorch function that is disabled for Dynamo",
+      "Context": "qualified_name",
+      "Explanation": "`{qualified_name}` runs eagerly, outside of Dynamo (reason: {msg})",
+      "Hints": [
+        "This is a limitation of the PyTorch code that was called, not a `torch.compiler.disable` call in your code: the reason above says what avoids it. With torch.compile and without fullgraph=True this call graph-breaks and runs eagerly instead."
+      ]
+    }
+  ],
   "GB2483": [
     {
       "Gb_type": "tp_str_impl not implemented",
