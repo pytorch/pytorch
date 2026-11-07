@@ -417,7 +417,6 @@
   "test/inductor/test_external_callables.py",
   "test/inductor/test_flex_attention.py",
   "test/inductor/test_flex_aux_vectorization.py",
-  "test/inductor/test_flex_decoding.py",
   "test/inductor/test_flex_flash.py",
   "test/inductor/test_flex_gemm.py",
   "test/inductor/test_flydsl_flex_attention.py",
