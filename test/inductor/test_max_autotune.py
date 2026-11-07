@@ -2159,40 +2159,36 @@ class TestMaxAutotune(TestCase):
                         lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                     )
 
-        def check_decompose_k(code):
-            fc = FileCheck()
-            (fc.check if M * N * K >= 2**33 else fc.check_not)("decompose_k").run(
-                code[0]
-            )
-
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            # A dynamic K is not known to divide any split, which is only
-            # offered for M * N * K >= 2**33.
-            check_decompose_k(code)
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-        torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
+            torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
         if dynamic:
-            check_decompose_k(code)
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-        torch.testing.assert_close(
-            compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
-        )
+            torch.testing.assert_close(
+                compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
+            )
 
         # Test adding reinterpret view before subgraph
         a = a.transpose(0, 1)
@@ -2202,18 +2198,20 @@ class TestMaxAutotune(TestCase):
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            check_decompose_k(code)
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_.*_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
-        torch.testing.assert_close(
-            compiled_func(a, b),
-            (a.transpose(0, 1) @ b).relu(),
-            atol=atol,
-            rtol=rtol,
-        )
+            torch.testing.assert_close(
+                compiled_func(a, b),
+                (a.transpose(0, 1) @ b).relu(),
+                atol=atol,
+                rtol=rtol,
+            )
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             fp16_red_setting
