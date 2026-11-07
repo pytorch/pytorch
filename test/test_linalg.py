@@ -200,6 +200,16 @@ def parse_tunable_log(log):
     return tuned
 
 
+def get_tunableop_untuned_entry_count():
+    # Zero when nothing was recorded: the file is only created on first write.
+    import os
+    filename = get_tunableop_untuned_filename()
+    if not os.path.exists(filename):
+        return 0
+    with open(filename) as file:
+        return sum(1 for line in file if line.strip())
+
+
 class TestLinalg(TestCase):
     def test_parse_cuda_scaled_gemm_options_preserves_input_dtype_order(self):
         tokens = ["nt", "16", "32", "64", "ld", "64", "16", "16", "a", "Float8", "e5m2", "b", "Float8", "e4m3fn", "c", "BFloat16", "as", "Float", "bs", "Float", "ast", "0", "bst", "0", "dscale", "0", "fast", "0", "bias", "None"]
@@ -9359,7 +9369,15 @@ class TestLinalgCudaOnly(TestCase):
 
         # disable TunableOp and restore to default values
         torch.cuda.tunable.enable(False)
+        # The results manager is a process-global initialized once, so entries
+        # outlive the test that tuned them. Per-test filenames isolate the files
+        # but not this, leaving tests that share a shape order-dependent.
+        torch.cuda.tunable._clear_all()
         torch.cuda.tunable.record_untuned_enable(False)
+        # Process-global, so leaving these on would change every later test.
+        torch.cuda.tunable._nearest_match_enable(False)
+        torch.cuda.tunable._record_borrowed_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
         torch.cuda.tunable.tuning_enable(True)
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
@@ -11224,8 +11242,9 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(
             run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "0"}), ("False", "True")
         )
+        # Borrowing requires recording, so this var turns both off.
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("True", "False")
+            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("False", "False")
         )
         # Only "0" vetoes. 1 means "leave it to the pass", which is what the
         # script then enables, and an unparsable value warns and does the same.
@@ -11841,6 +11860,589 @@ class TestLinalgCudaOnly(TestCase):
         else:
             self.assertTrue((out == 10000.).all())
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_nearest_match_borrow_tunableop(self, device, dtype):
+        # An untuned shape borrows from a neighbour differing in one free dim, the
+        # borrow is benchmarked against the default, and the winner is recorded.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # Tune the donor shape only.
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = self._force_nondefault_donor()
+
+            # Reuse pass: no tuning, borrow allowed, record the outcome.
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+            self.assertTrue(torch.cuda.tunable._nearest_match_is_enabled())
+            self.assertTrue(torch.cuda.tunable._record_borrowed_is_enabled())
+
+            # Same K/transpose, smaller N: eligible to borrow from the tuned shape.
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            # The decision is persisted, so the untuned shape now has its own entry.
+            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_large_shape_borrow_tunableop(self, device, dtype):
+        # A real model's ladder reaches a dim of 102400, well above the 18432 that
+        # every bucket since the degenerate-stride fix has stayed under. Tuning at
+        # that size must not abort or hang, and the bucket below must still borrow.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # K stays small: the 102400 dim is under test, not the total footprint.
+            K, N = 64, 32
+            B = torch.randn(K, N, device=device, dtype=dtype)
+            A = torch.randn(102400, K, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = self._force_nondefault_donor()
+            self.assertGreater(after_tuning, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            # The next bucket down the same ladder, which has no entry of its own.
+            A2 = torch.randn(51200, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_record_borrowed_disabled_tunableop(self, device, dtype):
+        # With recording off there is no borrow at all: measuring a donor the
+        # deployed process would never get is worse than not borrowing.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = self._force_nondefault_donor()
+            persisted = self._results_file_rows()
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(False)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            # Nothing borrowed, so nothing recorded in memory or on disk.
+            self.assertEqual(len(torch.cuda.tunable.get_results()), after_tuning)
+            self.assertEqual(self._results_file_rows(), persisted)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_verdict_not_revalidated_tunableop(self, device, dtype):
+        # The verdict stands: the second call of the same shape is an exact
+        # hit, since RecordBorrowed persisted the borrow. The caller's Lookup
+        # guard protects this. Counted in a subprocess (VERBOSE is sticky).
+        #
+        # Tuned here rather than in the child: Default can win a one-iteration
+        # tune of this shape, and LookupNearest skips Default donors, so the
+        # child would have nothing to borrow and the count would depend on
+        # which kernel happened to win. _force_nondefault_donor settles that,
+        # and the child is handed the finished file.
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            """
+            import torch
+
+            results_filename = {results_filename!r}
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+                assert torch.cuda.tunable.read_file(results_filename)
+
+                torch.cuda.tunable._nearest_match_enable(True)
+                torch.cuda.tunable._record_borrowed_enable({record_borrowed})
+
+                device = {device!r}
+                dtype = {dtype}
+                # Same borrow shape twice: only the first may validate.
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                A2 = torch.randn(32, 64, device=device, dtype=dtype)
+                torch.matmul(A2, B)
+                torch.matmul(A2, B)
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        )
+
+        donor_dir = tempfile.mkdtemp(prefix="tunableop_borrow_donor_")
+        donor_file = os.path.join(donor_dir, "donors.csv")
+        try:
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = torch.randn(64, 64, device=device, dtype=dtype)
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                torch.matmul(A, B)
+                self._force_nondefault_donor()
+                shutil.copyfile(torch.cuda.tunable.get_filename(), donor_file)
+
+            for record_borrowed in (True, False):
+                with self.subTest(record_borrowed=record_borrowed):
+                    # A private copy per run: the child appends its verdict,
+                    # and the next run must start from the donor alone.
+                    results_filename = os.path.join(
+                        donor_dir, f"results_{record_borrowed}.csv"
+                    )
+                    shutil.copyfile(donor_file, results_filename)
+                    env = os.environ.copy()
+                    # An inherited kill switch would stop the borrow entirely.
+                    env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
+                    env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
+                    env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+                    env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+                    # The child resolves its own interpreter and modules;
+                    # ours describe this process and can leave it unable to
+                    # import torch at all.
+                    env.pop("PYTHONPATH", None)
+                    env.pop("PYTHONHOME", None)
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-c",
+                            script.format(
+                                results_filename=results_filename,
+                                device=device,
+                                dtype=dtype,
+                                record_borrowed=record_borrowed,
+                            ),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        cwd=os.path.dirname(__file__),
+                        check=True,
+                    )
+
+                    # The child only borrows, so the single search it may log
+                    # is the borrow's FindFastestAmong; the repeat must log
+                    # nothing. Raw matches, not parse_tunable_log: that keys on
+                    # (op_sig, param_sig), so a second validation of the same
+                    # shape overwrites the first and the repeat goes unseen --
+                    # which is the regression this test exists for. Two
+                    # candidates means FindFastestAmong ran over Default and
+                    # the donor, proof the donor was measured. With recording
+                    # off nothing is borrowed.
+                    validations = len(
+                        re.findall(
+                            r"finding fastest for .*out of 2 candidates",
+                            result.stdout,
+                        )
+                    )
+                    self.assertEqual(
+                        validations, 1 if record_borrowed else 0, result.stdout
+                    )
+        finally:
+            shutil.rmtree(donor_dir, ignore_errors=True)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_nearest_match_off_by_default_tunableop(self, device, dtype):
+        # Borrowing is off unless a compile-time pass turns it on: a runtime
+        # process has no reason to pay a nearest-match scan and a validation
+        # benchmark on every miss.
+        with self._tunableop_ctx():
+            self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
+            self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
+
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = len(torch.cuda.tunable.get_results())
+
+            # Lookup-only, no borrowing: an unseen shape stays unrecorded.
+            torch.cuda.tunable.tuning_enable(False)
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+            self.assertEqual(len(torch.cuda.tunable.get_results()), after_tuning)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_suppresses_record_untuned_tunableop(self, device, dtype):
+        # A recorded borrow persists the shape as an exact entry, leaving offline
+        # tuning nothing to find, so the same shape must not also be reported as
+        # untuned.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = self._force_nondefault_donor()
+            self.assertEqual(get_tunableop_untuned_entry_count(), 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+            torch.cuda.tunable.record_untuned_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+            self.assertEqual(get_tunableop_untuned_entry_count(), 0)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_record_untuned_when_borrow_unrecorded_tunableop(self, device, dtype):
+        # The converse: without record_borrowed nothing is persisted, so the shape
+        # is still a genuine gap and has to reach the untuned file.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            self._force_nondefault_donor()
+            persisted = self._results_file_rows()
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            # Nothing persisted, so the shape is still a genuine gap.
+            self.assertEqual(self._results_file_rows(), persisted)
+            self.assertGreater(get_tunableop_untuned_entry_count(), 0)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_benchmarks_only_default_and_donor_tunableop(self, device, dtype):
+        # The borrow is a restricted two-candidate race against the default, not a
+        # full re-tune, so the winner can only ever be the donor's solution or
+        # Default -- never some third solution the backend offers.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            before = {(r[0], r[1]): r[2] for r in torch.cuda.tunable.get_results()}
+            donor_solutions = set(before.values())
+
+            self._force_nondefault_donor()
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            after = {(r[0], r[1]): r[2] for r in torch.cuda.tunable.get_results()}
+            new_entries = set(after) - set(before)
+            self.assertEqual(len(new_entries), 1)
+            borrowed_solution = after[next(iter(new_entries))]
+            self.assertIn(borrowed_solution, donor_solutions | {"Default"})
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_nearest_match_precedes_wildcard_fallback_tunableop(self, device, dtype):
+        # Both mechanisms answer a concrete miss. With nearest match on, a
+        # nearest donor is preferred over the wildcard and whichever is used is
+        # benchmarked and persisted; with it off, a wildcard hit is served
+        # unvalidated and records nothing. So with both enabled the borrow
+        # takes the branch, which the new entry is evidence of.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+            after_tuning = self._force_nondefault_donor()
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+            torch.cuda.tunable.wildcard_fallback_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_wildcard_donor_validated_and_persisted_tunableop(self, device, dtype):
+        # With no usable nearest donor but a wildcard entry present, the
+        # wildcard kernel is validated against Default (not returned blindly),
+        # and the verdict is persisted. Tunes under dynamic_dims_mask so the
+        # wildcard entry really exists, then drops the concrete row so nearest
+        # has no donor.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K = 64
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, 32, device=device, dtype=dtype)
+            with torch.cuda.tunable.dynamic_dims_mask(M=True):
+                torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            # Keep only wildcard rows (param sig contains '*').
+            self._force_nondefault_donor()
+            self._rewrite_results_file(
+                filename, lambda row: row if "*" in row[1] else None
+            )
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+            before_rows = self._results_file_rows()
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+            torch.cuda.tunable.wildcard_fallback_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertGreater(len(torch.cuda.tunable.get_results()), before)
+            # "persisted" in the name: the verdict must reach the file, which
+            # get_results() alone does not show.
+            self.assertGreater(len(self._results_file_rows()), len(before_rows))
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_unusable_donor_records_nothing_tunableop(self, device, dtype):
+        # A donor naming an unregistered solution (e.g. a results file from a
+        # build with more backends) is a miss, not a fault: nothing validated,
+        # nothing recorded.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            self._rewrite_results_file(
+                filename, lambda row: [row[0], row[1], "NoSuchKernel_xyz", row[3]]
+            )
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertEqual(len(torch.cuda.tunable.get_results()), before)
+
+    def _results_file_rows(self):
+        # What was actually persisted, as opposed to get_results(), which is
+        # the in-memory map. Asserting on the file is what proves a borrow
+        # reached disk rather than only memory.
+        import csv
+        import os
+        filename = torch.cuda.tunable.get_filename()
+        if not os.path.exists(filename):
+            return []
+        with open(filename) as f:
+            return [r for r in csv.reader(f) if r and r[0] != "Validator"]
+
+    def _force_nondefault_donor(self):
+        """Make every tuned row a usable non-Default solution; skip if none.
+
+        LookupNearest skips Default donors, so a tune that Default happens to
+        win leaves nothing to borrow and a positive borrow test would pass
+        while exercising none of the path. The substitute is taken from this
+        run rather than invented: an unreachable name would be an unusable
+        donor, which is a different case (see the unusable-donor test).
+        Returns the entry count after reloading.
+        """
+        import csv
+        filename = torch.cuda.tunable.get_filename()
+        with open(filename) as f:
+            rows = [r for r in csv.reader(f) if r and r[0] != "Validator"]
+        usable = [r[2] for r in rows if r[2] != "Default"]
+        if not usable:
+            self.skipTest("tuning picked Default, so no donor can be borrowed")
+        self._rewrite_results_file(
+            filename, lambda row: [row[0], row[1], usable[0], row[3]]
+        )
+        torch.cuda.tunable._clear_all()
+        self.assertTrue(torch.cuda.tunable.read_file(filename))
+        return len(torch.cuda.tunable.get_results())
+
+    def _rewrite_results_file(self, filename, transform):
+        # Rewrite every non-Validator row of a results file through `transform`,
+        # which takes and returns a [op_sig, param_sig, solution, time] row,
+        # or None to drop the row. Tests mutate a *real* tuned entry rather
+        # than hand-authoring signatures, so the entry stays exactly what the
+        # runtime would emit.
+        import csv
+        with open(filename) as f:
+            rows = [r for r in csv.reader(f) if r]
+        with open(filename, "w", newline="") as f:
+            # The reader splits on '\n', so csv's default '\r\n' leaves a stray
+            # '\r' on the last field of every row -- which silently fails the
+            # validator check and makes read_file return False.
+            writer = csv.writer(f, lineterminator="\n")
+            for row in rows:
+                if row[0] == "Validator":
+                    writer.writerow(row)
+                else:
+                    rewritten = transform(row)
+                    if rewritten is not None:
+                        writer.writerow(rewritten)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_skips_default_donor_tunableop(self, device, dtype):
+        # A donor whose recorded result is Default must not be borrowed. Normal
+        # tuning records Default when it wins, so such entries do sit in the map;
+        # borrowing one would mask a farther specialized donor and make the
+        # validator benchmark Default against Default.
+        import os
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(filename))
+
+            # Make the sole donor a Default winner, then reload so the manager
+            # holds exactly that.
+            self._rewrite_results_file(
+                filename, lambda row: [row[0], row[1], "Default", row[3]]
+            )
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            # Eligible on shape, but the only candidate is Default, so there is
+            # nothing worth borrowing and nothing should be recorded.
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertEqual(len(torch.cuda.tunable.get_results()), before)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_rejects_padded_leading_dim_tunableop(self, device, dtype):
+        # A leading dim may only be treated as a function of m/n/k when it is
+        # tight. A padded ld carries alignment the backend's algo choice depends
+        # on, so a donor that differs in a padded ld must not be borrowed even
+        # though its logical dims are otherwise eligible.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+
+            def pad_lds(row):
+                # Signature tail is ..._ld_<lda>_<ldb>_<ldc>[_suffix]. Widen each
+                # ld past its logical extent so none of them is tight.
+                parts = row[1].split("_")
+                i = parts.index("ld")
+                for off in (1, 2, 3):
+                    parts[i + off] = str(int(parts[i + off]) + 8)
+                return [row[0], "_".join(parts), row[2], row[3]]
+
+            self._force_nondefault_donor()
+            self._rewrite_results_file(filename, pad_lds)
+            torch.cuda.tunable._clear_all()
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            before = len(torch.cuda.tunable.get_results())
+            self.assertGreater(before, 0)
+
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            self.assertEqual(len(torch.cuda.tunable.get_results()), before)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_borrow_persists_with_record_untuned_tunableop(self, device, dtype):
+        # record_untuned and record_borrowed are both on during a reuse pass:
+        # the borrow suppresses the untuned record precisely so it can record the
+        # decision instead. Nothing bulk-writes the results map at shutdown, so
+        # the borrowed entry has to reach the file here or it is lost on exit.
+        # Assert on file contents rather than get_results(), which would pass
+        # even when nothing was written.
+        import csv
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            K, M = 64, 32
+            A = torch.randn(64, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            filename = torch.cuda.tunable.get_filename()
+            with open(filename) as f:
+                before_rows = {(r[0], r[1]) for r in csv.reader(f) if r and r[0] != "Validator"}
+
+            self._force_nondefault_donor()
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            torch.cuda.tunable._nearest_match_enable(True)
+            torch.cuda.tunable._record_borrowed_enable(True)
+
+            A2 = torch.randn(32, K, device=device, dtype=dtype)
+            torch.matmul(A2, B)
+
+            with open(filename) as f:
+                after_rows = {(r[0], r[1]) for r in csv.reader(f) if r and r[0] != "Validator"}
+
+            self.assertEqual(len(after_rows - before_rows), 1)
 
     @setLinalgBackendsToDefaultFinally
     def test_preferred_linalg_library(self):

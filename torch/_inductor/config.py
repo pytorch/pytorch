@@ -3056,18 +3056,22 @@ class cuda(cutlass):
 
     # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
-    # autotuning and records the solutions; with autotune_tunableop_ladder it
-    # also tunes a range of sizes of each GEMM's dynamic dim, the traced shape
-    # among them. A GEMM it skips (ladder off, static, several dynamic symbols,
-    # dynamic K, a non-dense operand, an operand still flexible at lowering, an
-    # unsupported choice, a CPU winner, an unbacked dim with no user hint, the
-    # layout-conflict fallback) is covered only with PYTORCH_TUNABLEOP_ENABLED
-    # set, by max-autotune benchmarking the aten choice here or a later run.
-    # Tuning happens while lowering, so a warm FxGraphCache or AOTAutogradCache
-    # hit tunes nothing at all: a tune pass needs a cold cache, or
-    # force_disable_caches. "reuse" instead borrows the nearest
-    # recorded shape, benchmarks it against the default, and records the
-    # winner. Run as separate passes: "tune" writes, "reuse" reads.
+    # autotuning and records the solutions; with autotune_tunableop_ladder it also
+    # tunes a range of sizes of each GEMM's dynamic dim, the traced shape among
+    # them. A GEMM the ladder skips -- maybe_range_pretune has the full list,
+    # which includes a static shape, a dynamic K, a CPU winner, a choice it
+    # cannot rebuild metas for, and an operand still flexible after finalize()
+    # -- has its traced shape tuned only where autotune leaves it more than one
+    # choice, so the aten candidate is benchmarked and routed through the
+    # worker. With max-autotune off there is only the aten choice,
+    # autotune returns without benchmarking, and the shape is covered only with
+    # PYTORCH_TUNABLEOP_ENABLED set on a later run. Tuning happens while
+    # lowering, so a warm FxGraphCache or AOTAutogradCache hit tunes nothing at
+    # all: a tune pass needs a cold cache, or force_disable_caches. "reuse"
+    # instead borrows the nearest recorded shape, benchmarks it against the
+    # default kernel, and records the winner. Run as separate passes: "tune"
+    # builds the results file, "reuse" borrows from it and appends its own
+    # verdicts to the same file, so copy it first to keep the two apart.
     # pyrefly: ignore [bad-assignment]
     autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
@@ -3081,10 +3085,11 @@ class cuda(cutlass):
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
     )
 
-    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic
-    # dim. It gives runtime a chance of an exact hit on a size the compile never
-    # saw, and is nearly all of the tuning cost. Off, Inductor submits nothing:
-    # only PYTORCH_TUNABLEOP_ENABLED covers it, via max-autotune or a later run.
+    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim.
+    # The ladder is what gives runtime a chance of an exact hit on a size the
+    # compile never saw, and is also nearly all of the tuning cost. With it off,
+    # the most that is tuned is the traced shape of each GEMM, and only where
+    # autotune benchmarks the aten choice at all -- see autotune_tunableop_mode.
     autotune_tunableop_ladder: bool = (
         os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
     )

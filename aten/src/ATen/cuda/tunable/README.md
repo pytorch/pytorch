@@ -127,6 +127,18 @@ due to the use of concurrent futures module. The argument to `mgpu_tune_gemm_in_
 expression (? or *) to generate the list of untuned files containing the GEMMs to be processed. The `num_gpus`
 must between 1 and the total number of GPUs available.
 
+### Reuse mode writes into the results file
+
+A compile-time reuse pass -- `TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE=reuse`
+under Inductor -- borrows the nearest recorded shape, benchmarks the borrow
+against Default, and persists the verdict, Default included when the borrow
+loses. A non-Default wildcard entry is validated and persisted the same way.
+Verdicts go into the same results file as real tuning results, in the same
+format. The file cannot distinguish them, and a later tuning pass treats those
+shapes as exact hits and never tunes them. The pass reads donors from, and
+appends to, the one file `get_filename()` names, so keeping tuning and reuse
+outputs apart means copying the tuned file before starting the reuse pass.
+
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
 at::cuda::tunable::getTuningContext(), or the `torch.cuda.tunable` python interfaces. The environment variables take
