@@ -41,7 +41,18 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -3506,16 +3517,10 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            cache_cls = {
-                "rocm": ROCmCodeCache,
-                "cuda": CUDACodeCache,
-                "xpu": XPUCodeCache,
-            }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
-
-            gpu_codecache = cache_cls()
-            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
-            # clear the list of aot kernels after each linking
-            gpu_codecache.aot_kernels_o.clear()
+            # Device types without a registered code cache (cpu, mps, npu
+            # without a backend hook, ...) have no GPU kernels to link: skip
+            # the GPU-kernel link step with an empty object list.
+            gpu_kernels_o = aot_kernels_o_for_device(device_type)
 
             if gpu_kernels_o:
                 if config.aot_inductor.emit_multi_arch_kernel:
@@ -5888,6 +5893,153 @@ class ROCmCodeCache:
             source_code, dst_file_ext
         )
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
+
+
+# Registry of the CodeCache class used to compile kernels for a given device type.
+# Out-of-tree backends should call register_device_codecache() from their backend
+# registration hook; the built-in cuda/xpu entries are wired right below (after
+# all cache classes exist).
+#
+# The protocol below is the contract a registered class must satisfy; see
+# CUDACodeCache / XPUCodeCache / ROCmCodeCache for concrete implementations.
+@runtime_checkable
+class DeviceCodeCacheProtocol(Protocol):
+    """Contract for device code caches registered via register_device_codecache().
+
+    The registry stores classes: every existing implementation is a class whose
+    members are classmethods/attributes, and callers instantiate it with no
+    arguments where an instance is needed (the AOTI link step does
+    ``cache_cls()``). Implementers must provide:
+
+    - ``write(source_code, dst_file_ext)``: writes source to disk, returns
+      ``(hash_key, source_code_path)``.
+    - ``compile(source_code, dst_file_ext, extra_args=None)``: compiles the
+      source, returns ``(dst_file_path, hash_key, source_code_path)``.
+    - ``load(source_code, dst_file_ext)``: compiles (if needed) and loads the
+      generated ``.so``, returning ``(DLLWrapper, hash_key, source_code_path)``.
+    - ``aot_kernels_o``: list of extra ``.o`` files to link into an AOTInductor
+      ``.so``; the AOTI link step copies and clears it after each linking.
+    - ``cache_clear()``: clears this cache's entries; in-tree caches clear
+      ``aot_kernels_o`` here too, so that ``fresh_cache()`` does not link
+      stale ``.o`` files into the next AOTI ``.so``. Out-of-tree caches
+      should follow the same contract. Note that registration itself does
+      not add the class to Inductor's ``fresh_cache()`` bookkeeping: an
+      out-of-tree cache is cleared by ``fresh_cache()`` only if it applies
+      ``@clear_on_fresh_cache`` (from torch._inductor.utils) to its
+      ``cache_clear``-equivalent entry points.
+    """
+
+    aot_kernels_o: list[str]
+
+    @classmethod
+    def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]: ...
+
+    @classmethod
+    def compile(
+        cls, source_code: str, dst_file_ext: str, extra_args: list[str] | None = None
+    ) -> tuple[str, str, str]: ...
+
+    @classmethod
+    def load(cls, source_code: str, dst_file_ext: str) -> tuple[Any, str, str]: ...
+
+    @classmethod
+    def cache_clear(cls) -> None: ...
+
+
+_DEVICE_CODECACHE_REGISTRY: dict[str, type[DeviceCodeCacheProtocol]] = {}
+
+
+def register_device_codecache(
+    device_type: str, codecache_cls: type[DeviceCodeCacheProtocol]
+) -> None:
+    """Register the CodeCache class used to compile kernels for ``device_type``.
+
+    Call this from the backend registration hook; re-registration replaces the
+    previous entry (last registration wins). The class must satisfy
+    ``DeviceCodeCacheProtocol``; this is checked loudly at registration time.
+    """
+    if not isinstance(codecache_cls, DeviceCodeCacheProtocol):
+        missing = [
+            name
+            for name in ("write", "compile", "load", "cache_clear", "aot_kernels_o")
+            if not hasattr(codecache_cls, name)
+        ]
+        raise TypeError(
+            f"codecache_cls {codecache_cls!r} does not satisfy "
+            f"DeviceCodeCacheProtocol (missing: {missing}); see the protocol "
+            "docstring in torch/_inductor/codecache.py."
+        )
+    _DEVICE_CODECACHE_REGISTRY[device_type] = codecache_cls
+
+
+def _lookup_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol] | None:
+    """Resolve ``device_type`` to its registered CodeCache class, or None.
+
+    Returns None for device types without a registered code cache (e.g. cpu,
+    mps) instead of raising; callers that need a hard failure should use
+    get_device_codecache().
+    """
+    return _DEVICE_CODECACHE_REGISTRY.get(device_type)
+
+
+def aot_kernels_o_for_device(device_type: str) -> list[str]:
+    """Return and clear the ``.o`` files to link into an AOTInductor ``.so``.
+
+    Used by the AOTI link step: resolves ``device_type`` to its registered
+    CodeCache class, instantiates it, copies its ``aot_kernels_o`` and clears
+    the list (so each link only sees kernels compiled for it). Device types
+    without a registered code cache have no GPU kernels to link and get an
+    empty list.
+    """
+    cache_cls = _lookup_device_codecache(device_type)
+    if cache_cls is None:
+        return []
+    gpu_codecache = cache_cls()
+    gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+    gpu_codecache.aot_kernels_o.clear()
+    return gpu_kernels_o
+
+
+def get_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol]:
+    """
+    Return the CodeCache class registered for ``device_type``.
+
+    This deliberately fails loudly for unregistered devices instead of falling back
+    to CUDACodeCache: silently handing back a CUDA code cache makes the kernel get
+    compiled for the wrong device, which surfaces as a confusing error from the
+    generated C++ rather than as a device dispatch problem.
+
+    Note: the registry currently only affects the built-in "cuda"/"xpu" devices.
+    Registering a code cache for another device type does not make Inductor
+    compile kernels for it -- codegen emits ``async_compile.<device_type>(...)``,
+    and :class:`AsyncCompile` only defines the cuda/xpu/rocm entry points. The
+    registry is the extension point for *overriding* the CUDA/XPU code caches
+    (e.g. out-of-tree backends that keep the "cuda"/"xpu" device type but swap
+    the compiler driver), not for adding new device types.
+    """
+    codecache_cls = _lookup_device_codecache(device_type)
+    if codecache_cls is None:
+        raise NotImplementedError(
+            f"No CodeCache registered for device type {device_type!r}. "
+            f"Registered device types: {sorted(_DEVICE_CODECACHE_REGISTRY)}. "
+            "Out-of-tree backends that override the code cache for an "
+            "existing device type must call register_device_codecache() "
+            "from their backend registration hook."
+        )
+    return codecache_cls
+
+
+# Note [Device code cache registration]
+# The built-in device code caches are wired here at import time. "rocm" is a
+# build flavor, not a device type: on a HIP build the "cuda" device is served
+# by ROCmCodeCache. Doing this at module level (rather than inside
+# codegen.common._init_builtin_backend_registration) means an out-of-tree
+# backend calling register_device_codecache() from its own registration hook
+# simply replaces these entries.
+register_device_codecache(
+    "cuda", ROCmCodeCache if torch.version.hip is not None else CUDACodeCache
+)
+register_device_codecache("xpu", XPUCodeCache)
 
 
 class CodeCacheFuture:

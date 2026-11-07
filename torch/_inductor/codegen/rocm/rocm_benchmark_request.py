@@ -13,7 +13,7 @@ from torch._inductor.autotune_process import (
     GPUDeviceBenchmarkMixin,
     TensorMeta,
 )
-from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
+from torch._inductor.codecache import DLLWrapper, get_device_codecache
 
 
 if TYPE_CHECKING:
@@ -26,6 +26,11 @@ log = logging.getLogger(__name__)
 class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
+    #
+    # The code cache is resolved through the registry ("cuda" entry, which is
+    # ROCmCodeCache on a HIP build) so a custom CodeCache registered for
+    # "cuda" applies uniformly to compilation, benchmarking, and the AOTI
+    # link step.
 
     def __init__(
         self,
@@ -43,15 +48,18 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = ROCmCodeCache.write(self.source_code, "so")
+        self.hash_key, self.source_file = get_device_codecache("cuda").write(
+            self.source_code, "so"
+        )
 
     def precompile(self):
         # Prepopulate code cache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        ROCmCodeCache.compile(self.source_code, "so")
+        codecache_cls = get_device_codecache("cuda")
+        codecache_cls.compile(self.source_code, "so")
         if config.rocm.generate_test_runner:
-            ROCmCodeCache.compile(self.source_code, "exe")
+            codecache_cls.compile(self.source_code, "exe")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -130,9 +138,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = ROCmCodeCache.load(
-                self.source_code, "so"
-            )
+            self.DLL, self.hash_key, self.source_file = get_device_codecache(
+                "cuda"
+            ).load(self.source_code, "so")
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
