@@ -224,7 +224,7 @@ def prepare_cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+        boxed_forward_device_index.set(compiled_graph.device_index())
 
 
 def cudagraph_post_compile(
@@ -281,7 +281,7 @@ def cudagraph_post_compile(
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
         }
 
-        device_index = next(iter(compiled_graph.device_idxs))
+        device_index = compiled_graph.device_index()
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
@@ -372,7 +372,7 @@ def cudagraph_partition_post_compile(
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
     mutated_input_idxs = compiled_graph.mutated_input_idxs
-    device_index = next(iter(compiled_graph.device_idxs))
+    device_index = compiled_graph.device_index()
 
     # Filter to only tensor constants (exclude opaque value type classes)
     tensor_constants = {
@@ -539,9 +539,6 @@ class CompiledFxGraph(OutputCode):
     frozen_param_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     opaque_value_type_classes: dict[str, type]
-    # User FlyDSL kernels that keep this graph from being serialized (see
-    # prepare_for_serialization).
-    process_local_kernels: list[str]
     output_strides: list[tuple[_StrideExprStr, ...] | None] | None
     disabled_cudagraphs_reason: str | None
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -564,6 +561,10 @@ class CompiledFxGraph(OutputCode):
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
+    # User FlyDSL kernels that keep this graph from being serialized (see
+    # prepare_for_serialization). A class attribute, unlike a default_factory, is
+    # also read by an instance made without __init__.
+    process_local_kernels: Sequence[str] = ()
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
@@ -576,6 +577,10 @@ class CompiledFxGraph(OutputCode):
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
     _serialized_original_gm: bytes | None = None
+    # Enter the "## Call CompiledFxGraph ##" range without the Python profiler
+    # flag check, so on-demand profiling sessions also scope the provenance
+    # markers of this graph's calls.
+    _always_enter_call_range: bool = False
 
     def __init__(
         self,
@@ -617,7 +622,10 @@ class CompiledFxGraph(OutputCode):
         self.kernel_sources = graph.wrapper_code.kernel_sources
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
-        self.device_idxs = OrderedSet(graph.device_idxs)
+        # Under compile-on-one-rank the index is the compiling rank's, and this
+        # artifact is shared across ranks; see device_index().
+        coor = torch.compiler.config.compile_on_one_rank
+        self.device_idxs = OrderedSet() if coor else OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
 
@@ -755,6 +763,7 @@ class CompiledFxGraph(OutputCode):
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
         self._set_compile_context_for_autotune_cache()
+        self._always_enter_call_range = config.trace.provenance_profiler_markers
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -829,7 +838,10 @@ class CompiledFxGraph(OutputCode):
             with autotune_cache_context:
                 try:
                     # Checking the profiler directly is faster than nullcontext
-                    if torch.autograd.profiler._is_profiler_enabled:
+                    if (
+                        torch.autograd.profiler._is_profiler_enabled
+                        or self._always_enter_call_range
+                    ):
                         with torch._C._profiler._RecordFunctionFast(
                             f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
@@ -849,6 +861,11 @@ class CompiledFxGraph(OutputCode):
                 )
             ):
                 self._compile_context = None
+
+    def device_index(self) -> int:
+        if torch.compiler.config.compile_on_one_rank:
+            return torch.cuda.current_device()
+        return next(iter(self.device_idxs))
 
     def post_compile(
         self,
@@ -1008,7 +1025,7 @@ class CompiledFxGraph(OutputCode):
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
-        if getattr(self, "process_local_kernels", None):
+        if self.process_local_kernels:
             raise RuntimeError(
                 "This compiled graph launches user FlyDSL kernels "
                 f"({', '.join(self.process_local_kernels)}) through objects bound in "
