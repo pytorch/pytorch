@@ -229,6 +229,10 @@ class InductorChoices:
         Default is a no-op. Subclasses may override to inject additional
         autotuning candidates. Backward calls provide sixteen input nodes, four
         subgraphs, and the output buffers in ``mutated_inputs``.
+
+        The hook uses the fused backward ABI. A changed candidate pool takes
+        precedence over opt-in ROCm split execution. Returning the same ordered
+        candidate objects permits split execution for supported workloads.
         """
         return choices
 
