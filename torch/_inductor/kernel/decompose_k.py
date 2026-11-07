@@ -12,6 +12,7 @@ from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
@@ -74,9 +75,17 @@ def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
     m = a.shape[0]
     k = a.shape[1]
 
+    remainder = None
     if bmm_backend == "aten":
         n = b.shape[1]
         k_parts = k // k_splits
+        if not statically_known_true(k_parts * k_splits == k):
+            # Leave k_splits to 2 * k_splits - 1 rows for the extra MM, so its K
+            # is never 0 or 1 and tracing adds no guard on K % k_splits.
+            k_parts -= 1
+            k_main = k_parts * k_splits
+            remainder = torch.mm(a[:, k_main:], b[k_main:], out_dtype=torch.float32)
+            a, b = a[:, :k_main], b[:k_main]
         a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
         b_reshaped = b.reshape(k_splits, k_parts, n)
         result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
@@ -91,6 +100,8 @@ def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
         raise AssertionError(f"unsupported decompose-K BMM backend: {bmm_backend}")
 
     reduced_buf = torch.sum(result, 0)
+    if remainder is not None:
+        reduced_buf += remainder
     return reduced_buf.to(a.dtype)
 
 
