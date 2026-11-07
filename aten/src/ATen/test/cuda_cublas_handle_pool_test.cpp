@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-#if defined(__linux__) && !defined(USE_ROCM)
+#if defined(__linux__) && !defined(USE_ROCM) && !defined(FBCODE_CAFFE2)
 #include <dlfcn.h>
 
 #include <cstddef>
@@ -99,7 +99,7 @@ TEST(CUDABlasHandlePoolTest, ConcurrentGetAndClearWorkspaces) {
   EXPECT_EQ(error_count.load(), 0);
 }
 
-#if defined(__linux__) && !defined(USE_ROCM)
+#if defined(__linux__) && !defined(USE_ROCM) && !defined(FBCODE_CAFFE2)
 namespace {
 // A negative count disables failure injection for the other tests.
 thread_local int create_attempts = -1;
@@ -150,7 +150,7 @@ TEST(CUDABlasHandlePoolDeathTest, RetriesAllocationFailure) {
       ::testing::ExitedWithCode(EXIT_SUCCESS),
       "");
 }
-#endif // defined(__linux__) && !defined(USE_ROCM)
+#endif // defined(__linux__) && !defined(USE_ROCM) && !defined(FBCODE_CAFFE2)
 
 #ifdef USE_ROCM
 
