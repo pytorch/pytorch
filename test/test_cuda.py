@@ -13499,6 +13499,32 @@ class TestCudaOptims(TestCase):
                             )
 
     @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA sleep")
+    def test_grad_scaler_cpu_gradients_after_async_scale_copy(self, device):
+        # CPU-offloaded gradients must not read the scaler's CUDA state until
+        # the queued device-to-host copies have completed.
+        with torch.cuda.device(device):
+            for has_inf in (False, True):
+                with self.subTest(has_inf=has_inf):
+                    parameter = torch.nn.Parameter(torch.tensor([3.0]))
+                    optimizer = torch.optim.SGD([parameter], lr=0.25)
+                    scaler = torch.amp.GradScaler("cuda", init_scale=128.0)
+                    scaler.scale(torch.ones((), device=device))
+                    parameter.grad = torch.tensor([float("inf") if has_inf else 128.0])
+                    torch.cuda.synchronize(device)
+                    torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+                    scaler.unscale_(optimizer)
+                    torch.cuda.synchronize(device)
+                    found_inf = scaler._per_optimizer_states[id(optimizer)][
+                        "found_inf_per_device"
+                    ][torch.device("cpu")]
+                    self.assertEqual(found_inf, float(has_inf))
+                    scaler.step(optimizer)
+                    self.assertEqual(
+                        parameter, torch.tensor([3.0 if has_inf else 2.75])
+                    )
+
+    @onlyCUDA
     @parametrize("in_place_unscale", [False, True])
     @optims(
         [optim for optim in optim_db if "cuda" in optim.supports_fused_on],
