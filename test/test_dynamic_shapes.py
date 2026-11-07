@@ -5852,11 +5852,33 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             scalar_src = torch.tensor(42, dtype=x.dtype)
             return x.select_scatter(scalar_src, 0, u0)
 
-        compiled = torch.compile(func, fullgraph=True, dynamic=True, backend="inductor")
         b = torch.tensor([0])
         a = torch.ones(9, dtype=torch.int32)
 
-        self.assertEqual(compiled(a, b), func(a, b))
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                compiled = torch.compile(
+                    func, fullgraph=True, dynamic=True, backend=backend
+                )
+                self.assertEqual(compiled(a, b), func(a, b))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_slice_scatter_unbacked_end(self):
+        def func(x, src, end):
+            return x.slice_scatter(src, 0, 0, end.item())
+
+        x = torch.zeros(9)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                compiled = torch.compile(
+                    func, fullgraph=True, dynamic=True, backend=backend
+                )
+                for end in (3, 5):
+                    src = torch.ones(end)
+                    end_tensor = torch.tensor(end)
+                    self.assertEqual(
+                        compiled(x, src, end_tensor), func(x, src, end_tensor)
+                    )
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
