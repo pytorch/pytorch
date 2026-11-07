@@ -26,7 +26,7 @@ struct VecConvert {
     // aarch64 ("Don't know how to widen the operands for INSERT_SUBVECTOR"),
     // first seen in the BFloat16/double instantiation of cpu_flash_attention.
     for (int i = 0; i < count; i++) {
-      dst_buf[i] = static_cast<dst_t>(src_buf[i]);
+      dst_buf[i] = c10::convert<dst_t>(src_buf[i]);
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }

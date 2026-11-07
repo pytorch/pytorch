@@ -21,6 +21,42 @@ TEST(TestCast, TestConvert) {
   EXPECT_EQ(a, convert<BFloat16>(b));
 }
 
+TEST(TestCast, TestConvertRoundsDoubleOnce) {
+  using torch::headeronly::BFloat16;
+  using torch::headeronly::convert;
+  using torch::headeronly::Half;
+
+  // Just above the midpoint between 1 and the next value. Rounding to float
+  // first would land exactly on the midpoint, which then ties to even (1.0).
+  // BFloat16 also covers aarch64, where Half converts from double natively.
+  EXPECT_EQ(
+      static_cast<float>(convert<Half>(1.0 + 0x1p-11 + 0x1p-40)),
+      1.0f + 0x1p-10f);
+  EXPECT_EQ(
+      static_cast<float>(convert<BFloat16>(1.0 + 0x1p-8 + 0x1p-40)),
+      1.0f + 0x1p-7f);
+  const auto z =
+      convert<torch::headeronly::complex<Half>>(1.0 + 0x1p-11 + 0x1p-40);
+  EXPECT_EQ(static_cast<float>(z.real()), 1.0f + 0x1p-10f);
+  EXPECT_EQ(static_cast<float>(z.imag()), 0.0f);
+}
+
+TEST(TestCast, TestRoundsThroughFloat) {
+  using namespace torch::headeronly;
+  using c10::detail::rounds_through_float;
+  static_assert(
+      rounds_through_float<Half> && rounds_through_float<BFloat16> &&
+      rounds_through_float<Float8_e4m3fn> &&
+      rounds_through_float<Float8_e4m3fnuz> &&
+      rounds_through_float<Float8_e5m2> &&
+      rounds_through_float<Float8_e5m2fnuz> &&
+      rounds_through_float<Float8_e5m3fnu> &&
+      rounds_through_float<Float8_e8m0fnu>);
+  static_assert(
+      !rounds_through_float<float> && !rounds_through_float<double> &&
+      !rounds_through_float<int8_t> && !rounds_through_float<bool>);
+}
+
 TEST(TestCast, TestCheckedConvert) {
   using torch::headeronly::checked_convert;
 
