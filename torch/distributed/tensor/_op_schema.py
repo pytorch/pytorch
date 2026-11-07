@@ -580,10 +580,11 @@ class OpSchema:
         return mesh
 
     def is_inplace_op(self) -> bool:
-        # simple analysis of function schema to determine
-        # if this is an inplace variant, it might not
-        # be entirely correct, but it's good enough for now.
-        return self.op._schema.name[-1] == "_"
+        return (
+            self.op._schema.name[-1] == "_"
+            and self.op._schema.is_mutable
+            and not self.is_out_variant_op()
+        )
 
     def is_out_variant_op(self) -> bool:
         # simple analysis of function schema to determine
