@@ -2487,7 +2487,26 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         # NumpyVariable.call_function, builder.py's
         # is_numpy_dtype branch, and ConstantLikeVariable.tp_getattro_impl's
         # isinstance(result, self.np_dtype) branch.
-        return cast("np.dtype[Any]", self.value).type.__name__
+        dtype = cast("np.dtype[Any]", self.value)
+        # .type.__name__ / .name drop endianness. Non-native byte order must
+        # not be lowered to a native scalar name (silent correctness bug).
+        if not dtype.isnative:
+            unimplemented(
+                gb_type="numpy.dtype with non-native byte order",
+                context=f"as_proxy {dtype!r}",
+                explanation=(
+                    "torch.compile cannot preserve numpy.dtype byte order when "
+                    f"lowering {dtype!r} into the FX graph. Using the scalar "
+                    "type name would silently change results for endian-sensitive "
+                    "ops such as astype/view."
+                ),
+                hints=[
+                    "Use a native-endian dtype inside the compiled region.",
+                    "Move the endian-sensitive cast/view outside torch.compile.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        return dtype.type.__name__
 
 
 np_constant_collection_functions = frozenset((tnp.finfo, tnp.iinfo, tnp.dtype))

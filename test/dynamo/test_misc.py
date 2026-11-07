@@ -4351,6 +4351,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(*args), correct)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_nonnative_dtype_graph_break(self):
+        # Regression for #202920: lowering np.dtype(">f4") via type.__name__
+        # used to drop endianness and silently change .view() results.
+        dtype = np.dtype(">f4" if sys.byteorder == "little" else "<f4")
+        x = np.array([1.0, 2.0], dtype=np.float32)
+
+        def cast_and_view(arr, dt):
+            return arr.astype(dt).view(np.uint32)
+
+        expected = cast_and_view(x, dtype)
+        with self.assertRaisesRegex(
+            Unsupported, "numpy.dtype with non-native byte order"
+        ):
+            torch.compile(cast_and_view, backend="eager", fullgraph=True)(x, dtype)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(cast_and_view, backend=cnts)
+        self.assertEqual(opt_fn(x, dtype), expected)
+        self.assertEqual(cnts.frame_count, 0)
+
     def test_numpy_take_along_axis(self):
         def fn(x, i, a):
             return np.take_along_axis(x, i, a)
