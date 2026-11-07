@@ -31,6 +31,7 @@ def checkpoint_wrapper(fn):
 
 class AnnotateTests(torch._dynamo.test_case.TestCase):
     def test_empty_hooks_preserve_input_annotation(self):
+        # Reusing empty-hook trackers must leave input annotation in the child's scope.
         class Parent(torch.nn.Module):
             def __init__(self):
                 super().__init__()
