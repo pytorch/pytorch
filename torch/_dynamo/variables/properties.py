@@ -27,6 +27,7 @@ from .base import (
     getset_set,
     Member,
     readonly_setter,
+    store_attr_mutation,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -78,25 +79,30 @@ class PropertyVariable(VariableTracker):
                 if isinstance(name, DeletedVariable):
                     return self._getter_name(tx)
                 return name
-            fget = self._get_accessor(tx, "fget")
-            raw_getter = get_property_accessor(self.descriptor, "fget")
-            if (
-                raw_getter is not None
-                and type(raw_getter)
-                not in (types.FunctionType, types.BuiltinFunctionType)
-            ) or tx.output.side_effects.has_pending_mutation_of_attr(fget, "__name__"):
-                unimplemented(
-                    gb_type="Unsupported existing property name lookup",
-                    context="property name may fall back to the getter's __name__",
-                    explanation="Dynamo cannot read an existing property's name when its getter has custom attribute access or a pending name mutation.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+            if type(self.descriptor) is not property:
+                fget = self._get_accessor(tx, "fget")
+                raw_getter = get_property_accessor(self.descriptor, "fget")
+                if (
+                    raw_getter is not None
+                    and type(raw_getter)
+                    not in (types.FunctionType, types.BuiltinFunctionType)
+                ) or tx.output.side_effects.has_pending_mutation_of_attr(
+                    fget, "__name__"
+                ):
+                    unimplemented(
+                        gb_type="Unsupported existing property name lookup",
+                        context="property name may fall back to the getter's __name__",
+                        explanation="Dynamo cannot read an existing property's name when its getter has custom attribute access or a pending name mutation.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
             source = self.source and PropertyNameSource(self.source)
             names = VariableTracker.build(
                 tx, get_property_name(self.descriptor), source, realize=True
             ).unpack_var_sequence(tx)
             if names:
                 return names[0]
+            if type(self.descriptor) is property:
+                return self._getter_name(tx)
             raise_attribute_error(tx, "'property' object has no attribute '__name__'")
         raise_attribute_error(
             tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
@@ -110,6 +116,13 @@ class PropertyVariable(VariableTracker):
         except ObservedAttributeError:
             handle_observed_exception(tx)
             raise_attribute_error(tx, "'property' object has no attribute '__name__'")
+
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable | None:
+        if name == "__name__":
+            return None
+        return super()._hasattr_check_side_effects(tx, name)
 
     def _isabstractmethod_getter(
         self, tx: "InstructionTranslatorBase"
@@ -132,7 +145,10 @@ class PropertyVariable(VariableTracker):
         )
 
     tp_getset = {
-        "__name__": GetSet(_name_getter, getset_set("__name__")),
+        "__name__": GetSet(
+            _name_getter,
+            lambda s, tx, value: store_attr_mutation(tx, s, "__name__", value),
+        ),
         "__isabstractmethod__": GetSet(
             _isabstractmethod_getter,
             readonly_setter,
@@ -154,7 +170,20 @@ class PropertyVariable(VariableTracker):
         return PropertyVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
-        return "PropertyVariable()"
+        getter = get_property_accessor(self.descriptor, "fget")
+        if type(getter) is types.MethodType:
+            getter = getter.__func__
+        name = (
+            getter.__name__
+            if type(getter)
+            in (
+                types.FunctionType,
+                types.BuiltinFunctionType,
+                types.MethodDescriptorType,
+            )
+            else "?"
+        )
+        return f"PropertyVariable({name})"
 
     def python_type(self) -> type:
         return property
@@ -197,35 +226,7 @@ class PropertyVariable(VariableTracker):
 
     def raw_descriptor_entry(self, name: str) -> GetSet | Member | None:
         # Explicit C descriptor calls bypass Python attribute lookup entirely.
-        from .base import unmodeled_setter
-        from .user_defined import UserDefinedPropertyVariable
-
-        entry = VariableTracker.lookup_tp_getset_member(self, name)
-        if isinstance(self, UserDefinedPropertyVariable):
-            if name == "__doc__":
-                return Member(PropertyVariable._raw_doc_getter, unmodeled_setter)
-            if name == "__name__" and (
-                self.lookup_class_mro_attr(name) is not property.__dict__[name]
-                or inspect.getattr_static(self.python_type(), "__setattr__")
-                is not object.__setattr__
-                or inspect.getattr_static(self.python_type(), "__delattr__")
-                is not object.__delattr__
-            ):
-                return GetSet(type(self)._name_getter, unmodeled_setter)
-        return entry
-
-    def _raw_doc_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .user_defined import UserDefinedPropertyVariable
-
-        if (
-            isinstance(self, UserDefinedPropertyVariable)
-            and self.property_args is not None
-        ):
-            return ConstantVariable.create(None)
-        source = self.source and PropertyAccessorSource(self.source, "__doc__")
-        return VariableTracker.build(
-            tx, get_property_accessor(self.descriptor, "__doc__"), source
-        )
+        return VariableTracker.lookup_tp_getset_member(self, name)
 
     @staticmethod
     def _validate_init_args(
@@ -258,7 +259,7 @@ class PropertyVariable(VariableTracker):
     ) -> NoReturn:
         from .object_protocol import generic_getattr, generic_repr
 
-        if sys.version_info < (3, 13):
+        if sys.version_info < (3, 13) and type(self.descriptor) is not property:
             unimplemented(
                 gb_type="Unsupported legacy property error message",
                 context=f"property missing {kind}",
@@ -266,13 +267,20 @@ class PropertyVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         name = None
-        try:
-            name_vt = self._name_getter(tx)
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
+        if sys.version_info < (3, 13):
+            source = self.source and PropertyNameSource(self.source)
+            names = VariableTracker.build(
+                tx, get_property_name(self.descriptor), source, realize=True
+            ).unpack_var_sequence(tx)
         else:
             try:
-                name = str.__str__(generic_repr(tx, name_vt).as_python_constant())
+                names = [self._name_getter(tx)]
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                names = []
+        if names:
+            try:
+                name = str.__str__(generic_repr(tx, names[0]).as_python_constant())
             except AsPythonConstantNotImplementedError:
                 unimplemented(
                     gb_type="Unsupported property name formatting",

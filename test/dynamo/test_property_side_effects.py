@@ -7,6 +7,7 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -19,6 +20,8 @@ class PropertyWithName(property):
 
 @instantiate_parametrized_tests
 class PropertySideEffectsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "storage",
         ("instance", "slot", "descriptor", "property_slot", "property_name_slot"),

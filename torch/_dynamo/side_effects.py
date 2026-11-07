@@ -576,10 +576,8 @@ class SideEffects:
         if not deferred:
             self.check_allowed_side_effect(item)
         if (
-            sys.version_info >= (3, 13)
-            and name == "__name__"
-            and isinstance(item, variables.UserDefinedPropertyVariable)
-            and item.lookup_class_mro_attr(name) is property.__dict__[name]
+            isinstance(item, variables.UserDefinedPropertyVariable)
+            and item.is_property_name_slot(name)
             and name in self.store_attr_mutations.get(item, {})
             and self.get_attr_mutation_kind(item, name) is not mutation_kind
         ):
@@ -624,10 +622,8 @@ class SideEffects:
                     item, name, AttrMutationKind.INSTANCE_DICT
                 )
                 or not (
-                    sys.version_info >= (3, 13)
-                    and name == "__name__"
-                    and isinstance(item, variables.UserDefinedPropertyVariable)
-                    and item.lookup_class_mro_attr(name) is property.__dict__[name]
+                    isinstance(item, variables.UserDefinedPropertyVariable)
+                    and item.is_property_name_slot(name)
                 )
             ):
                 # store_attr always writes both maps together, so the
@@ -2125,8 +2121,9 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             # GENERIC_SETATTR deletions on UDOV fall through to the normal
             # DELETE_ATTR path below so descriptor semantics are preserved
             # during replay.
-            elif isinstance(var.mutation_type, AttributeMutationExisting) and hasattr(
-                getattr(var, "value", None), name
+            elif isinstance(var.mutation_type, AttributeMutationExisting) and (
+                (type(var) is variables.PropertyVariable and name == "__name__")
+                or hasattr(getattr(var, "value", None), name)
             ):
                 cg.tx.output.update_co_names(name)
                 cg(var.source)

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
 from collections.abc import MutableMapping
 
 import torch
@@ -7,6 +8,7 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -26,6 +28,67 @@ global_property = GlobalProperty(global_getter)
 
 @instantiate_parametrized_tests
 class PropertyDescriptorDispatchTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("raw", (False, True))
+    @parametrize("name", ("fget", "fset", "fdel", "__isabstractmethod__", "__name__"))
+    def test_property_metadata_mro_guard(self, raw, name):
+        if name == "__name__" and sys.version_info < (3, 13):
+            self.skipTest("property.__name__ requires Python 3.13+")
+        mixin = type("Mixin", (), {"__slots__": (), name: "shadowed"})
+
+        class SubProperty(property, mixin):
+            pass
+
+        def getter(obj):
+            return obj
+
+        prop = SubProperty(getter, getter, getter)
+        descriptor = property.__dict__[name]
+
+        def fn(x):
+            result = (
+                descriptor.__get__(prop, type(prop)) if raw else getattr(prop, name)
+            )
+            return x + 1, result
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(counter.frame_count, 1)
+        SubProperty.__bases__ = (mixin, property)
+        self.assertEqual(compiled(x + 2), fn(x + 2))
+        self.assertEqual(compiled(x + 3), fn(x + 3))
+        self.assertEqual(counter.frame_count, 1 if raw else 2)
+
+    @parametrize("name", ("fget", "__isabstractmethod__"))
+    def test_property_metadata_setter_mro_guard(self, name):
+        mixin = type("Mixin", (), {"__slots__": (), name: "shadowed"})
+
+        class SubProperty(property, mixin):
+            pass
+
+        prop = SubProperty()
+
+        def fn(x):
+            try:
+                setattr(prop, name, 12)
+            except AttributeError:
+                return x + 1, False
+            return x + 1, True
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+        self.assertEqual(counter.frame_count, 1)
+        SubProperty.__bases__ = (mixin, property)
+        self.assertEqual(compiled(x + 2), fn(x + 2))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("custom_get", (False, True))
     def test_metaclass_descriptor_side_effects(self, custom_get):
         events = []

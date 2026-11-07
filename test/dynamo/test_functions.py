@@ -7485,7 +7485,7 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("descriptor_kind", ("classmethod", "method"))
     @parametrize("metaclass_hook", ("dict_property", "getattribute"))
-    def test_descriptor_source_rejects_metaclass_dict(
+    def test_descriptor_source_with_metaclass_dict(
         self, descriptor_kind, metaclass_hook
     ):
         descriptor = (
@@ -7522,9 +7522,31 @@ class GraphModule(torch.nn.Module):
             return x + raw.__get__([1, 1], list)(1)
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "custom metaclass __dict__"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        if metaclass_hook == "getattribute":
+            with self.assertRaisesRegex(Unsupported, "custom metaclass __dict__"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(calls, [D])
+            return
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for value in (x, x + 1):
+            expected = fn(value)
+            calls.clear()
+            self.assertEqual(compiled(value), expected)
+            self.assertEqual(calls, [D])
+        self.assertEqual(counter.frame_count, 1)
+
+        descriptor = (
+            dict.__dict__["__class_getitem__"]
+            if descriptor_kind == "classmethod"
+            else list.index
+        )
+        expected = fn(x)
+        calls.clear()
+        self.assertEqual(compiled(x), expected)
         self.assertEqual(calls, [D])
+        self.assertEqual(counter.frame_count, 2)
 
     def test_prebound_classmethod_descriptor_avoids_metaclass_hooks(self):
         calls = []
@@ -7973,11 +7995,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        if sys.version_info < (3, 13):
-            self.assertRaisesRegex(
-                Unsupported, "legacy property error message", opt_fn, x
-            )
-            opt_fn = torch.compile(fn, backend="eager")
         self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):

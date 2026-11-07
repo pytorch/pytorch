@@ -73,6 +73,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    PropertyAccessorSource,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -90,6 +91,7 @@ from ..utils import (
     dict_methods,
     frozenset_methods,
     get_custom_getattr,
+    get_property_accessor,
     has_torch_function,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
@@ -124,6 +126,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     REPR_ADDRESS_PLACEHOLDER,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3695,7 +3698,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     type(descriptor), slot
                 ) is not getattr(property, slot):
                     unimplemented(
-                        gb_type="Property subclass setter without a source",
+                        gb_type="Property subclass setter or deleter without a source",
                         context=f"property subclass {slot} without a source",
                         explanation="A source is required to trace a custom property descriptor method.",
                         hints=[*graph_break_hints.SUPPORTABLE],
@@ -4396,14 +4399,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
-        if can_use_mro_source or (
-            isinstance(self, UserDefinedPropertyVariable)
-            and self.cls_source is not None
-        ):
-            source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
+        source = self._class_attribute_source(tx, name, source)
         return VariableTracker.build(tx, type_attr, source)
+
+    def _class_attribute_source(
+        self, tx: "InstructionTranslatorBase", name: str, source: Source | None
+    ) -> Source | None:
+        if self.cls_source is not None and self.source is not None:
+            return self.get_source_by_walking_mro(tx, name)
+        if source is None and self.cls_source is not None:
+            return AttrSource(self.cls_source, name)
+        return source
 
     def invoke_descriptor_get(
         self,
@@ -5073,6 +5079,34 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         self._base_methods = property_methods
         self.property_args: list[VariableTracker] | None = None
 
+    def _class_attribute_source(
+        self, tx: "InstructionTranslatorBase", name: str, source: Source | None
+    ) -> Source | None:
+        if self.cls_source is not None:
+            return self.get_source_by_walking_mro(tx, name)
+        return source
+
+    def raw_descriptor_entry(self, name: str) -> GetSet | Member | None:
+        if name == "__doc__":
+            return Member(type(self)._raw_doc_getter, unmodeled_setter)
+        if name == "__name__" and (
+            self.lookup_class_mro_attr(name) is not property.__dict__[name]
+            or inspect.getattr_static(self.python_type(), "__setattr__")
+            is not object.__setattr__
+            or inspect.getattr_static(self.python_type(), "__delattr__")
+            is not object.__delattr__
+        ):
+            return GetSet(type(self)._name_getter, unmodeled_setter)
+        return super().raw_descriptor_entry(name)
+
+    def _raw_doc_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.property_args is not None:
+            return ConstantVariable.create(None)
+        source = self.source and PropertyAccessorSource(self.source, "__doc__")
+        return VariableTracker.build(
+            tx, get_property_accessor(self.descriptor, "__doc__"), source
+        )
+
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5095,7 +5129,11 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         doc_attr = inspect.getattr_static(self.python_type(), "__doc__", None)
-        if not isinstance(doc_attr, types.MemberDescriptorType) and (
+        has_doc_slot = isinstance(doc_attr, types.MemberDescriptorType) and any(
+            cls is doc_attr.__objclass__
+            for cls in type.__getattribute__(self.python_type(), "__mro__")
+        )
+        if not has_doc_slot and (
             hasattr(type(doc_attr), "__set__") or hasattr(type(doc_attr), "__delete__")
         ):
             unimplemented(
@@ -5112,12 +5150,10 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         side_effects = tx.output.side_effects
         side_effects.mutation(self)
         self.property_args = [bound[name] for name in names[:3]]
-        if (
-            sys.version_info >= (3, 13)
-            and side_effects.has_pending_mutation_of_attr(
-                self, "__name__", AttrMutationKind.GENERIC_SETATTR
-            )
-            and self.lookup_class_mro_attr("__name__") is property.__dict__["__name__"]
+        if self.is_property_name_slot(
+            "__name__"
+        ) and side_effects.has_pending_mutation_of_attr(
+            self, "__name__", AttrMutationKind.GENERIC_SETATTR
         ):
             side_effects.remove_attr_mutation(self, "__name__")
         doc = bound["doc"]
@@ -5138,12 +5174,11 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
                 getter_doc = not doc.is_constant_none()
             except ObservedAttributeError:
                 handle_observed_exception(tx)
-                # Match the pre-3.12.5 early return for missing getter docs.
+                # CPython 3.12.5 stopped returning early for a missing getter doc.
+                # https://github.com/python/cpython/commit/7545b7cb63a7b27de2a829b626f546088b24de47
                 if sys.version_info < (3, 12, 5):
                     return ConstantVariable.create(None)
-        if not self.python_type().__dictoffset__ and not isinstance(
-            doc_attr, types.MemberDescriptorType
-        ):
+        if not self.python_type().__dictoffset__ and not has_doc_slot:
             if getter_doc:
                 raise_attribute_error(
                     tx,
@@ -5171,9 +5206,17 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
             return self.tp_init_impl(tx, args, kwargs)
         return super().call_base_method(tx, name, args, kwargs)
 
+    def is_property_name_slot(self, name: str) -> bool:
+        return (
+            sys.version_info >= (3, 13)
+            and name == "__name__"
+            and self.lookup_class_mro_attr(name) is property.__dict__[name]
+        )
+
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
         if self._object_has_getattribute:
             return None
+        entry = super().lookup_tp_getset_member(name)
         if name in PropertyVariable.tp_getset or name in PropertyVariable.tp_members:
             descriptor = inspect.getattr_static(property, name, NO_SUCH_SUBOBJ)
             if (
@@ -5181,17 +5224,39 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
                 or self.lookup_class_mro_attr(name) is not descriptor
             ):
                 return None
-            if self.cls_source is not None and descriptor is not NO_SUCH_SUBOBJ:
-                from torch._dynamo.symbolic_convert import InstructionTranslator
+            if (
+                entry is not None
+                and entry.getter is not None
+                and self.cls_source is not None
+            ):
+                raw_getter = entry.getter
 
-                self.get_source_by_walking_mro(InstructionTranslator.current_tx(), name)
-                # Pin the builtin owner when __bases__ changes the MRO.
-                owner = GetItemSource(
-                    TypeMROSource(self.cls_source),
-                    self.python_type().__mro__.index(property),
-                )
-                install_guard(owner.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return super().lookup_tp_getset_member(name)
+                def getter(obj, tx):
+                    obj.get_source_by_walking_mro(tx, name)
+                    return raw_getter(obj, tx)
+
+                return type(entry)(getter, entry.setter)
+        return entry
+
+    def get_source_by_walking_mro(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> DictGetItemSource:
+        source = super().get_source_by_walking_mro(tx, name)
+        descriptor = self.lookup_class_mro_attr(name)
+        if (
+            self.cls_source is not None
+            and isinstance(
+                descriptor, (types.MemberDescriptorType, types.GetSetDescriptorType)
+            )
+            and descriptor.__objclass__ is property
+        ):
+            # The owner can move when __bases__ changes without gaining a shadow.
+            owner = GetItemSource(
+                TypeMROSource(self.cls_source),
+                self.python_type().__mro__.index(property),
+            )
+            install_guard(owner.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return source
 
     def _get_accessor(
         self, tx: "InstructionTranslatorBase", name: str
@@ -5199,12 +5264,6 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         if self.property_args is not None:
             return self.property_args[("fget", "fset", "fdel").index(name)]
         return PropertyVariable._get_accessor(self, tx, name)
-
-    tp_members = {
-        "fget": Member(lambda s, tx: s._get_accessor(tx, "fget"), readonly_setter),
-        "fset": Member(lambda s, tx: s._get_accessor(tx, "fset"), readonly_setter),
-        "fdel": Member(lambda s, tx: s._get_accessor(tx, "fdel"), readonly_setter),
-    }
 
     def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if (
@@ -5218,7 +5277,6 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         return PropertyVariable._name_getter(self, tx)
 
     tp_getset = {
-        **PropertyVariable.tp_getset,
         "__name__": GetSet(_name_getter, PropertyVariable.tp_getset["__name__"].setter),
     }
 

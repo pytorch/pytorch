@@ -2052,12 +2052,23 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx, "descriptor '__init__' of 'property' object needs an argument"
                 )
             obj, *rest = args
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, property):
+            obj = obj.realize()
+            try:
+                obj_type = obj.python_type()
+            except NotImplementedError:
+                obj_type = None
+            if obj_type is not None and not issubclass(obj_type, property):
                 raise_type_error(
                     tx,
                     "descriptor '__init__' requires a 'property' object "
                     f"but received a '{obj_type.__name__}'",
+                )
+            if not isinstance(obj, variables.PropertyVariable):
+                unimplemented(
+                    gb_type="Unsupported property initialization receiver",
+                    context=f"property.__init__ on {type(obj).__name__}",
+                    explanation="Dynamo cannot initialize a property represented by a different variable tracker.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
             if isinstance(obj, variables.UserDefinedPropertyVariable):
                 return obj.tp_init_impl(tx, rest, kwargs)

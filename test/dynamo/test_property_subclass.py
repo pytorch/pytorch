@@ -9,7 +9,9 @@ import torch
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -26,6 +28,8 @@ class PropertyWithoutDoc(property):
 
 @instantiate_parametrized_tests
 class PropertySubclassTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("cls", (PropertyWithDoc, PropertyWithoutDoc))
     @parametrize("getter_doc", (None, "Getter docstring."))
     @parametrize("doc", (None, "Explicit docstring.", ""))
@@ -99,11 +103,23 @@ class PropertySubclassTests(TestCase):
             return y + 1, p.__doc__, p.__get__(x, type(x)), p
 
         x = torch.ones(2)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="eager")(x)
-        self.assertEqual(actual[:3], expected[:3])
-        self.assertEqual(actual[3].__doc__, "Changed doc.")
-        self.assertEqual(actual[3].__get__(x, type(x)), expected[3].__get__(x, type(x)))
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        for value in (x, x + 1):
+            expected = fn(value)
+            actual = compiled(value)
+            self.assertEqual(actual[:3], expected[:3])
+            self.assertEqual(actual[3].__doc__, "Changed doc.")
+            self.assertEqual(
+                actual[3].__get__(value, type(value)),
+                expected[3].__get__(value, type(value)),
+            )
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.op_count, 3)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertIn(
+            "Call to `torch._dynamo.graph_break()`", next(iter(counters["graph_break"]))
+        )
 
     @unittest.skipIf(
         sys.version_info < (3, 13), "property.__name__ requires Python 3.13+"
@@ -170,6 +186,77 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("doc", (None, "Explicit doc.", ""))
+    @parametrize("getter_doc", (None, "Getter doc."))
+    @parametrize("delete_doc", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ docstrings")
+    def test_escaping_doc_slot(self, doc, getter_doc, delete_doc):
+        class SlottedProperty(property):
+            __slots__ = ("__doc__",)
+
+        def getter(obj):
+            return obj + 1
+
+        getter.__doc__ = getter_doc
+
+        def fn(x):
+            p = SlottedProperty(getter, doc=doc)
+            if delete_doc:
+                del p.__doc__
+            return x + 2, p
+
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (x, x + 3):
+            expected = fn(value)
+            actual = compiled(value)
+            self.assertEqual(actual[0], expected[0])
+            self.assertIs(type(actual[1]), SlottedProperty)
+            self.assertIs(actual[1].fget, getter)
+            self.assertEqual(actual[1].__get__(value), expected[1].__get__(value))
+            if delete_doc:
+                self.assertFalse(hasattr(actual[1], "__doc__"))
+            else:
+                self.assertEqual(actual[1].__doc__, expected[1].__doc__)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_foreign_doc_slot_graph_break(self):
+        events = []
+
+        class Meta(type):
+            def __subclasscheck__(cls, other):
+                events.append("subclass check")
+                return True
+
+        class Other(metaclass=Meta):
+            __slots__ = ("__doc__",)
+
+        class ForeignDocProperty(property):
+            __doc__ = Other.__dict__["__doc__"]
+
+            def __init__(self, getter):
+                try:
+                    super().__init__(getter)
+                except TypeError:
+                    pass
+
+        def getter(obj):
+            return obj + 1
+
+        def fn(x):
+            return x + 1, ForeignDocProperty(getter)
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(Unsupported, "custom doc setter"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(events, [])
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual[0], fn(x)[0])
+        self.assertIs(type(actual[1]), ForeignDocProperty)
+        self.assertIs(actual[1].fget, getter)
+        self.assertEqual(actual[1].__get__(x), x + 1)
+        self.assertEqual(events, [])
 
     def test_existing_property(self):
         def getter(obj):
@@ -639,7 +726,12 @@ class PropertySubclassTests(TestCase):
             return x + 1, RecordingDocProperty(getter)
 
         x = torch.ones(2)
-        with self.assertRaisesRegex(Unsupported, "property subclass initialization"):
+        reason = (
+            "Unsupported property subclass initialization"
+            if sys.version_info < (3, 12)
+            else "Property subclass initialization with a custom doc setter"
+        )
+        with self.assertRaisesRegex(Unsupported, reason):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(events, [])
         actual = torch.compile(fn, backend="eager")(x)
@@ -800,6 +892,11 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[:2], expected[:2])
         self.assertEqual(actual[2].__dict__, expected[2].__dict__)
         self.assertIs(actual[2].fget, getter)
+        if sys.version_info < (3, 12, 5):
+            expected_dict = {"__doc__": "original doc"} if reinitialize else {}
+        else:
+            expected_dict = {"__doc__": None}
+        self.assertEqual(actual[2].__dict__, expected_dict)
 
     @parametrize("change", ("rename", "shadow", "insert_shadow", "swap"))
     @unittest.skipIf(sys.version_info < (3, 13), "requires Python 3.13+ property names")
@@ -846,7 +943,7 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(compiled(x + 3), fn(x + 3))
         self.assertEqual(counter.frame_count, 1 if change == "rename" else 2)
 
-    @parametrize("action", ("get", "set", "class_get"))
+    @parametrize("action", ("get", "set", "delete", "class_get"))
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_sourceless_custom_descriptor_graph_break(self, action):
         class CustomProperty(property):
@@ -855,6 +952,9 @@ class PropertySubclassTests(TestCase):
 
             def __set__(self, obj, value):
                 obj.value = value + 2
+
+            def __delete__(self, obj):
+                obj.value = obj.value + 3
 
         descriptor = CustomProperty()
 
@@ -870,9 +970,12 @@ class PropertySubclassTests(TestCase):
             if action == "set":
                 obj.prop = x
                 return obj.value
+            if action == "delete":
+                del obj.prop
+                return obj.value
             return obj.prop
 
-        kind = "setter" if action == "set" else "getter"
+        kind = "setter or deleter" if action in ("set", "delete") else "getter"
         with self.assertRaisesRegex(
             Unsupported, f"Property subclass {kind} without a source"
         ):
@@ -996,6 +1099,32 @@ class PropertySubclassTests(TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x, value), fn(x, value)
         )
 
+    def test_context_manager_property_initialization_graph_break(self):
+        class ContextProperty(property):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        def getter(obj):
+            return obj + 1
+
+        p = ContextProperty()
+
+        def fn(x):
+            property.__init__(p, getter)
+            return x + 1, p.fget is getter
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported property initialization receiver"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIsNone(p.fget)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        self.assertIs(p.fget, getter)
+
     def test_exact_property_initialization_graph_break(self):
         p = property()
 
@@ -1037,6 +1166,38 @@ class PropertySubclassTests(TestCase):
         x = torch.ones(2)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    @parametrize("method", ("getter", "setter", "deleter"))
+    @parametrize("new", (False, True))
+    def test_inherited_property_methods_graph_break(self, method, new):
+        if new and sys.version_info < (3, 12):
+            self.skipTest("requires Python 3.12+ construction")
+
+        def getter(obj):
+            """Original doc."""
+            return obj
+
+        def replacement(obj):
+            """Replacement doc."""
+            return obj + 1
+
+        existing = PropertyWithoutDoc(getter)
+
+        def fn(x):
+            p = PropertyWithoutDoc(getter) if new else existing
+            return x + 1, getattr(p, method)(replacement)
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(Unsupported, f"method `{method}`"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertIs(type(actual[1]), PropertyWithoutDoc)
+        self.assertIs(actual[1].fget, expected[1].fget)
+        self.assertIs(actual[1].fset, expected[1].fset)
+        self.assertIs(actual[1].fdel, expected[1].fdel)
+        self.assertEqual(actual[1].__doc__, expected[1].__doc__)
+
     @parametrize(
         "attr", ("fget", "fset", "fdel", "__name__", "__isabstractmethod__", "__doc__")
     )
@@ -1062,7 +1223,7 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         if new:
-            with self.assertRaises(Unsupported):
+            with self.assertRaisesRegex(Unsupported, "Unsupported function call"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
         else:
@@ -1093,7 +1254,7 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         if new:
-            with self.assertRaises(Unsupported):
+            with self.assertRaisesRegex(Unsupported, "Unsupported function call"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
         else:
@@ -1221,7 +1382,7 @@ class PropertySubclassTests(TestCase):
                 return x + 1, str(exc)
 
         x = torch.ones(2)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(Unsupported, r"repr\(\) on tensor"):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
@@ -1245,7 +1406,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.__name__
 
         x = torch.ones(2)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported existing property name lookup"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(events, [])
         compiled = torch.compile(fn, backend="eager")
@@ -1266,7 +1429,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.__name__
 
         x = torch.ones(2)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported existing property name lookup"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(getter.__name__, "getter")
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
@@ -1352,7 +1517,9 @@ class PropertySubclassTests(TestCase):
                 descriptor.__set__(p, "changed")
             return x + 1
 
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "Write to unmodeled getset/member attribute"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
         self.assertEqual(events, [])
         torch.compile(fn, backend="eager")(torch.ones(2))
@@ -1377,7 +1544,9 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         if sys.version_info < (3, 13):
-            with self.assertRaises(Unsupported):
+            with self.assertRaisesRegex(
+                Unsupported, "Unsupported legacy property error message"
+            ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
         else:
@@ -1470,7 +1639,9 @@ class PropertySubclassTests(TestCase):
 
         x = torch.ones(2)
         expected = fn(x)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported property owner name lookup"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(events, [])
         self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
@@ -1595,7 +1766,7 @@ class PropertySubclassTests(TestCase):
                 return x + 1, str(exc)
 
         x = torch.ones(2)
-        if sys.version_info < (3, 13):
+        if sys.version_info < (3, 13) and cls is not property:
             with self.assertRaisesRegex(Unsupported, "legacy property error message"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             compiled = torch.compile(fn, backend="eager")

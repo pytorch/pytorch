@@ -339,11 +339,6 @@ class TestSlotsAttrAssignment(TestCase):
         )
         self.assertRaisesRegex(AttributeError, expected, fn, Foo())
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        if sys.version_info < (3, 13):
-            self.assertRaisesRegex(
-                Unsupported, "legacy property error message", compiled_fn, Foo()
-            )
-            compiled_fn = torch.compile(fn, backend="eager")
         self.assertRaisesRegex(Exception, expected, compiled_fn, Foo())
 
     def test_delattr_instance_dict_exposes_non_data_descriptor(self):
@@ -408,11 +403,6 @@ class TestSlotsAttrAssignment(TestCase):
         )
         self.assertRaisesRegex(AttributeError, expected, fn, Foo())
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        if sys.version_info < (3, 13):
-            self.assertRaisesRegex(
-                Unsupported, "legacy property error message", compiled_fn, Foo()
-            )
-            compiled_fn = torch.compile(fn, backend="eager")
         self.assertRaisesRegex(Exception, expected, compiled_fn, Foo())
 
     def test_slot_and_dict_mutation_same_object(self):

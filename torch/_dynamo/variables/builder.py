@@ -378,7 +378,6 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
-    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
@@ -1442,6 +1441,10 @@ class VariableBuilder:
         id_dispatch = self._id_dispatch().get(id(value))
         if id_dispatch is not None:
             return id_dispatch(self, value)
+
+        if type(value) is not property and issubclass(type(value), property):
+            # A property subclass can spoof __class__ during isinstance checks.
+            return self.wrap_user_defined(value)
 
         # Everything else (NB: order matters!)
         if (
@@ -2757,7 +2760,10 @@ class VariableBuilder:
         from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        if InspectVariable.is_matching_object(value):
+        if issubclass(type(value), property):
+            variable_cls = self.tx.output.side_effects.get_variable_cls(type(value))
+            result = variable_cls(value, source=self.source)
+        elif InspectVariable.is_matching_object(value):
             # Skip guards on inspect related variable trackers because they are
             # not important for recompiles (something else will also change to
             # cause recompiles) and can cause a large number of OBJECT_ALIASING
@@ -2777,8 +2783,6 @@ class VariableBuilder:
             result = GenericContextWrappingVariable(value, source=self.source)
         elif SimpleNamespaceVariable.is_matching_cls(type(value)):
             result = SimpleNamespaceVariable(value, source=self.source)
-        elif isinstance(value, property):
-            result = UserDefinedPropertyVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
