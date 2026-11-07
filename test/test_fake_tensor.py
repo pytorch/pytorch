@@ -2251,6 +2251,84 @@ assert not torch.cuda.is_initialized()
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
 
+    @parametrize("avoid_device_init", [False, True])
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_privateuse1_hook(self, avoid_device_init):
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def _fake_avoid_device_init() -> bool:
+                return avoid_device_init
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        backend_name = "privateuseone"
+
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+
+            fake_mode = FakeTensorMode()
+
+            self.assertEqual(fake_mode.avoid_device_init, avoid_device_init)
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_hook_queried_before_is_available(self):
+        # A backend whose is_available() touches the runtime must not be asked
+        # for availability once it has opted in to avoiding device init.
+        class _DummyPrivateUse1Module:
+            is_available_called = False
+
+            @staticmethod
+            def _fake_avoid_device_init() -> bool:
+                return True
+
+            @classmethod
+            def is_available(cls) -> bool:
+                cls.is_available_called = True
+                raise AssertionError("is_available() should not have been called")
+
+        backend_name = "privateuseone"
+
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+
+            fake_mode = FakeTensorMode()
+
+            self.assertTrue(fake_mode.avoid_device_init)
+            self.assertFalse(_DummyPrivateUse1Module.is_available_called)
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_avoid_device_init_backward_compatibility(self):
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        backend_name = "privateuseone"
+
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+
+            fake_mode = FakeTensorMode()
+
+            self.assertFalse(fake_mode.avoid_device_init)
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
     def test_unique_output_dtype(self):
         shape_env = ShapeEnv()
         for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
