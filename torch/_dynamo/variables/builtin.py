@@ -79,6 +79,7 @@ from ..utils import (
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
+    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -109,6 +110,7 @@ from .dicts import (
     pyfrozendict_check,
     pyfrozendict_checkexact,
 )
+from .hashable import guard_key_collisions
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
@@ -2613,6 +2615,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
+    def call__frozendict_fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        seed: VariableTracker,
+        iterable: VariableTracker,
+        value: VariableTracker,
+        /,
+    ) -> VariableTracker:
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        storage.dict_update(tx, [seed], {}, container_name="frozendict")
+        if pyanydict_checkexact(iterable) or pyanyset_checkexact(iterable):
+            if isinstance(iterable, ConstDictVariable):
+                iterable.install_dict_order_guard(tx)
+            elif pyanyset_checkexact(iterable):
+                iterable.install_set_order_guard(tx)
+            guard_key_collisions(storage.items, iterable.items)
+            for key in iterable.items:
+                storage.items[key] = value
+        else:
+            # A key hash can advance this same iterator.
+            for key in lazily_unpack(tx, iterable, allow_fast_path=False):
+                hashed = storage._lookup_key(tx, key, container_name="frozendict")
+                storage.items[hashed] = value
+        return variables.FrozenDictVariable.create(storage)
+
     def call_set(
         self,
         tx: "InstructionTranslatorBase",
@@ -3748,9 +3775,7 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
             return variables.FrozenDictVariable.create(result.storage)
         if name == "fromkeys":
-            return variables.FrozenDictVariable.frozen_deferred_operator(
-                self, tx, args, kwargs
-            )
+            return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)
             if not pyfrozendict_check(args[0]):
@@ -3768,6 +3793,20 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 )
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "frozendict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.frozendict_fromkeys),
+            [self, *args],
+            kwargs,
+        )
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):

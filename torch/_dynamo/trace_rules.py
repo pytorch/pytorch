@@ -4131,7 +4131,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES: dict[Callable[..., Any], type[VariableTracker]] = {
-    polyfills._frozendict_fromkeys: SkipFunctionVariable,
+    polyfills._frozendict_fromkeys: BuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
