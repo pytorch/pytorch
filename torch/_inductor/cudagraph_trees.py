@@ -2020,6 +2020,10 @@ class CUDAGraphNode:
         )
 
     def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
+        if metadata["data_ptr"] == 0:
+            return cast(
+                torch.types.Storage, torch.UntypedStorage(0, device=metadata["device"])
+            )
         return torch._C._construct_storage_from_data_pointer(
             metadata["data_ptr"], metadata["device"], metadata["nbytes"]
         )
