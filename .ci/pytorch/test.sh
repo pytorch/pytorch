@@ -442,6 +442,30 @@ test_python_legacy_jit() {
   assert_git_not_dirty
 }
 
+test_editable() {
+  # Every other job tests a wheel install. This one replaces it with a redirect-mode
+  # editable install (Python from the checkout, CMake artifacts from the install tree)
+  # and runs the suites that resolve installed files, so a path derived from
+  # __file__ instead of the import system fails here instead of on a developer's box.
+  # The rebuild hits the sccache the build job just filled. The test job checks out
+  # without submodules; the build needs them from the license scan onwards.
+  python -m pip uninstall -y torch
+  git submodule sync && git submodule update --init --recursive
+  time python -m pip install --no-build-isolation --no-deps -v -e .
+  python -c "import torch; print(torch.__file__); print(list(torch.__path__))"
+  # Suites that resolve installed files (helpers, cpp_extension, package data, licenses, the
+  # library loaders behind torchbind and the jit backends) plus the two import sweeps.
+  # The list is the point of the job, so TD must not trim it.
+  export NO_TD=1
+  time python test/run_test.py --include \
+    test_utils test_license test_type_hints test_testing test_public_bindings \
+    test_cpp_extensions_jit test_cpp_extensions_aot_ninja test_fx test_serialization \
+    test_import_stats --verbose
+  time python test/run_test.py --include test_jit -k TestBackends --verbose
+  unset NO_TD
+  assert_git_not_dirty
+}
+
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -2629,6 +2653,8 @@ elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
+elif [[ "$TEST_CONFIG" == 'editable' ]]; then
+  test_editable
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
