@@ -39,16 +39,8 @@ void initDeviceProperty(DeviceIndex device) {
 
 void initDeviceGlobalIdx(DeviceIndex device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
-  // Get all SYCL devices associated with the SYCL platform.
-  auto devices = sycl::device::get_devices();
-  auto match_device = [raw_device](const auto& dev) -> bool {
-    return raw_device == dev;
-  };
-  auto it = std::find_if(devices.begin(), devices.end(), match_device);
-  TORCH_CHECK(
-      it != devices.end(), "Can't find the global index of XPU device.");
   device_global_idxs[device] =
-      static_cast<int32_t>(std::distance(devices.begin(), it));
+      static_cast<int32_t>(raw_device.ext_oneapi_index_within_platform());
 }
 
 } // anonymous namespace
@@ -67,8 +59,8 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
   return &device_properties[device];
 }
 
-// Return the global index enumerated by sycl::device::get_devices based on the
-// index of a XPU device in the framework.
+// Return the SYCL index of a XPU device, i.e. its index within its SYCL
+// platform (sycl_ext_oneapi_platform_device_index).
 int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   initXPUContextVectors();
   if (device == -1)
