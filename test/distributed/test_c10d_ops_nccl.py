@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -69,6 +70,8 @@ def _nccl_version_at_least(version):
 
 
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(device_type)
