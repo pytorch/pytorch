@@ -18,11 +18,14 @@ import torch.nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     make_dynamo_test,
 )
 
 
 @torch._dynamo.config.patch("enable_trace_unittest", True)
+@instantiate_parametrized_tests
 class NbBoolTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -216,6 +219,160 @@ class NbBoolTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, Plain()), compiled(x, Plain()))
+
+    @parametrize("case", ["str", "float", "none", "raises", "blocked", "negative", "overflow"])
+    @parametrize("truth_test", ["bool", "if", "not"])
+    def test_user_defined_len_error_propagates(self, case, truth_test):
+        class BadLen:
+            def __len__(self):
+                if case == "raises":
+                    raise TypeError("length failed")
+                return {
+                    "str": "x",
+                    "float": 1.5,
+                    "none": None,
+                    "negative": -1,
+                    "overflow": sys.maxsize + 1,
+                }[case]
+
+        if case == "blocked":
+            BadLen.__len__ = None
+
+        def fn(x, obj):
+            try:
+                if truth_test == "bool":
+                    result = bool(obj)
+                elif truth_test == "not":
+                    result = not obj
+                else:
+                    result = 1 if obj else 0
+            except (TypeError, ValueError, OverflowError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x - 1, result, "missed exception"
+
+        obj = BadLen()
+        error_type = {
+            "negative": ValueError,
+            "overflow": OverflowError,
+        }.get(case, TypeError)
+        pattern = {
+            "str": "cannot be interpreted as an integer",
+            "float": "cannot be interpreted as an integer",
+            "none": "cannot be interpreted as an integer",
+            "raises": "length failed",
+            "blocked": "not callable",
+            "negative": "__len__.*should return >= 0",
+            "overflow": "cannot fit.*index-sized integer",
+        }[case]
+        with self.assertRaisesRegex(error_type, pattern):
+            bool(obj)
+        x = torch.ones(1)
+        expected = fn(x, obj)
+        self.assertIs(expected[1], error_type)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+
+    @parametrize("value", [0, 2, False, True])
+    def test_user_defined_len_valid_truthiness(self, value):
+        class Sized:
+            def __len__(self):
+                return value
+
+        def fn(x, obj):
+            return x + bool(obj), not obj, 1 if obj else 0
+
+        x = torch.ones(1)
+        obj = Sized()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_user_defined_bool_precedes_invalid_len(self):
+        class HasBool:
+            def __bool__(self):
+                return False
+
+            def __len__(self):
+                raise TypeError("__len__ must not be called")
+
+        def fn(x, obj):
+            return x + bool(obj), not obj, 1 if obj else 0
+
+        x = torch.ones(1)
+        obj = HasBool()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_user_defined_len_accepts_index(self):
+        class Length:
+            def __index__(self):
+                return 2
+
+        class Sized:
+            def __len__(self):
+                return Length()
+
+        def fn(x, obj):
+            return x + bool(obj), not obj
+
+        x = torch.ones(1)
+        obj = Sized()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    @parametrize("obj_kind", ["slice", "list_iter", "tuple_iter", "range_iter", "dict_iter", "function"])
+    def test_no_length_protocol_stays_truthy(self, obj_kind):
+        def fn(x, obj):
+            return x + bool(obj), not obj
+
+        obj = {
+            "slice": lambda: slice(0),
+            "list_iter": lambda: iter([]),
+            "tuple_iter": lambda: iter(()),
+            "range_iter": lambda: iter(range(0)),
+            "dict_iter": lambda: iter({}),
+            "function": lambda: fn,
+        }[obj_kind]()
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    @parametrize("container_kind", ["list", "tuple", "dict", "empty_list", "range"])
+    def test_nonconstant_container_truthiness(self, container_kind):
+        def fn(x):
+            if container_kind == "list":
+                obj = [x]
+            elif container_kind == "tuple":
+                obj = (x,)
+            elif container_kind == "dict":
+                obj = {"k": x}
+            elif container_kind == "empty_list":
+                obj = [x][:0]
+            else:
+                obj = range(x.size(0))
+            return x + bool(obj), 1 if obj else 0
+
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_user_defined_symbolic_len_stays_dynamic(self):
+        class Sized:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __len__(self):
+                return self.tensor.size(0)
+
+        def fn(x, obj):
+            return x + bool(obj), 1 if obj else 0
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for size in (2, 4):
+            x = torch.ones(size)
+            obj = Sized(x)
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
 
     def test_user_defined_bool_returns_non_bool_raises(self):
         class BadBool:
