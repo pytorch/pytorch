@@ -7310,5 +7310,25 @@
         "Keep this frozendict inside the compiled region."
       ]
     }
+  ],
+  "GB5370": [
+    {
+      "Gb_type": "Unsupported dictionary union storage",
+      "Context": "{type(self)}, {type(other)}",
+      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9291": [
+    {
+      "Gb_type": "Preexisting frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
+      ]
+    }
   ]
 }

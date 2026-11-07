@@ -587,6 +587,14 @@ def odict_fromkeys(
     return dict_fromkeys(cls, iterable, value)
 
 
+def frozendict_fromkeys(
+    cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
+) -> C:
+    if not torch._has_frozendict:
+        raise AssertionError("requires builtins.frozendict")
+    return _frozendict_fromkeys(cls(), iterable, value)
+
+
 def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []

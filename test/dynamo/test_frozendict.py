@@ -3,6 +3,7 @@
 import builtins
 import io
 import operator
+import time
 import types
 import unittest
 from collections import defaultdict, OrderedDict
@@ -119,6 +120,58 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         mapping = builtins.frozendict(a=1)
         self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
 
+    @parametrize("construct", [False, True])
+    @parametrize("empty", [False, True])
+    def test_repr_and_str(self, construct, empty):
+        def fn(x, mapping):
+            if construct:
+                mapping = builtins.frozendict(mapping)
+            return x + 1, repr(mapping), str(mapping), mapping.__repr__()
+
+        contents = {} if empty else {"b": [1, 2], 3: "a'b\\c"}
+        mapping = contents if construct else builtins.frozendict(contents)
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize("construct", [False, True])
+    def test_repr_recursive(self, construct):
+        def fn(x, mapping):
+            if construct:
+                values = []
+                mapping = builtins.frozendict(a=values)
+                values.append(mapping)
+            return x + 1, repr(mapping), str(mapping)
+
+        values = []
+        mapping = builtins.frozendict(a=values)
+        values.append(mapping)
+        x = torch.ones(1)
+        expected = fn(x, mapping)
+        self.assertEqual(expected[1], "frozendict({'a': [frozendict({...})]})")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
+        )
+
+    def test_repr_custom_children(self):
+        class Child:
+            def __repr__(self):
+                return "child"
+
+        def fn(x):
+            child = Child()
+            mapping = builtins.frozendict({child: builtins.frozendict(a=child)})
+            return x + 1, repr(mapping), str(mapping)
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1], "frozendict({child: frozendict({'a': child})})")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
     @parametrize("mapping_input", [False, True])
     @parametrize("key_error", ["unhashable", "custom", "subclass"])
     def test_constructor_key_type_errors(self, mapping_input, key_error):
@@ -147,6 +200,37 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             source = Mapping(key, x) if mapping_input else [(key, x)]
             try:
                 builtins.frozendict(source)
+            except TypeError as error:
+                return x + 1, type(error), error.args
+            return x - 1, None, ()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        if key_error == "subclass":
+            self.assertIs(expected[1], KeyTypeError)
+            self.assertEqual(expected[2], ("custom hash failed", 17))
+        else:
+            self.assertIs(expected[1], TypeError)
+            self.assertIn("as a frozendict key", expected[2][0])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    @parametrize("key_error", ["unhashable", "custom", "subclass"])
+    def test_fromkeys_key_type_errors(self, key_error):
+        class KeyTypeError(TypeError):
+            pass
+
+        class Key:
+            def __hash__(self):
+                if key_error == "subclass":
+                    raise KeyTypeError("custom hash failed", 17)
+                raise TypeError("custom hash failed")
+
+        def fn(x):
+            key = [] if key_error == "unhashable" else Key()
+            try:
+                builtins.frozendict.fromkeys([key], x)
             except TypeError as error:
                 return x + 1, type(error), error.args
             return x - 1, None, ()
@@ -463,6 +547,58 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hash"):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
 
+    @parametrize("base", [types.ModuleType, torch.Tensor])
+    def test_constructed_cached_hash_class_change(self, base):
+        class Changed(base):
+            def __hash__(self):
+                return object.__hash__(self) + 1
+
+        value = (
+            types.ModuleType(__name__) if base is types.ModuleType else torch.ones(1)
+        )
+
+        def fn(x, value):
+            mapping = builtins.frozendict(value=value)
+            hash(mapping)
+            return x + 1, mapping
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hashes"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, value)
+        actual = torch.compile(fn, backend="eager")(x, value)
+        expected = fn(x, value)
+        self.assertEqual(actual[0], expected[0])
+        value.__class__ = Changed
+        self.assertEqual(hash(actual[1]), hash(expected[1]))
+
+    @parametrize("base", [object, type, types.ModuleType, torch.Tensor])
+    def test_cached_hash_restored_identity_hash(self, base):
+        class Key(base):
+            def __hash__(self):
+                return object.__hash__(self) + 1
+
+        if base is type:
+            key = Key("Key", (), {})
+        elif base is types.ModuleType:
+            key = Key(__name__)
+        else:
+            key = Key()
+        mapping = builtins.frozendict(value=key)
+        cached_hash = hash(mapping)
+        if base is type or base is object:
+            Key.__hash__ = object.__hash__
+        else:
+            key.__class__ = base
+
+        def fn(x, mapping):
+            return x + (hash(mapping) == cached_hash)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "cached a hash"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+
     @parametrize("base", [object, type, types.ModuleType, torch.Tensor])
     def test_preexisting_restored_identity_hash(self, base):
         class Key(base):
@@ -561,7 +697,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
-    @parametrize("name", ["keys", "__len__"])
+    @parametrize("name", ["copy", "keys", "__len__"])
     def test_descriptor_receiver_errors(self, name):
         def fn(x):
             try:
@@ -614,10 +750,63 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "does not support item assignment"):
             result[4]["a"] = x
 
+    @parametrize("base_type", [dict, OrderedDict, defaultdict])
+    @parametrize("iterable_type", [list, dict, set, frozenset])
+    def test_fromkeys_dict_constructor_returns_frozendict(
+        self, base_type, iterable_type
+    ):
+        class Mapping(base_type):
+            def __new__(cls, data=(("seed", 5),)):
+                return builtins.frozendict(data)
+
+        def fn(x, keys):
+            return Mapping.fromkeys(keys, x + 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(3)
+        for keys in ([-1, -2, -1], [-2, -1, -1]):
+            if iterable_type is dict:
+                keys = dict.fromkeys(keys)
+            else:
+                keys = iterable_type(keys)
+            result = compiled(x, keys)
+            self.assertIs(type(result), builtins.frozendict)
+            self.assertEqual(list(result), ["seed", *dict.fromkeys(keys)])
+            self.assertEqual(result, fn(x, keys))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("mapping_type", [OrderedDict, defaultdict])
+    @parametrize("name", ["__or__", "__ror__"])
+    def test_mutable_union_descriptors(self, mapping_type, name):
+        def fn(x):
+            return getattr(mapping_type, name)(
+                mapping_type(a=x), builtins.frozendict(b=x + 1)
+            )
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(result), mapping_type)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(list(result), list(fn(x)))
+
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize("name", ["__eq__", "__ne__", "__or__", "__ror__"])
-    @parametrize("subclass", [False, True])
-    def test_dict_descriptors(self, mapping_type, name, subclass):
+    def test_dict_descriptors(self, mapping_type, name):
+        def fn(x):
+            op = getattr(mapping_type, name)
+            return (
+                x + 1,
+                op(mapping_type(a=x), builtins.frozendict(a=x)),
+                op(mapping_type(a=x), builtins.frozendict(b=x)),
+            )
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("name", ["__eq__", "__ne__", "__or__", "__ror__"])
+    def test_dict_descriptors_frozen_subclass_fallback(self, mapping_type, name):
         class Mapping(builtins.frozendict):
             pass
 
@@ -625,8 +814,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             return x + 1, getattr(mapping_type, name)(mapping_type(a=x), mapping)
 
         x = torch.randn(3)
-        mapping = (Mapping if subclass else builtins.frozendict)(a=x)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "frozendict"):
+        mapping = Mapping(a=x)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
         self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
 
@@ -734,6 +923,24 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 x, builtins.frozendict(x=edge)
             )
 
+    def test_dunder_dict_union(self):
+        class Holder:
+            def __init__(self, x):
+                self.a = x
+                self.b = x + 1
+
+        def fn(obj, x):
+            return obj.__dict__ | builtins.frozendict(b=x + 2, c=x)
+
+        x = torch.randn(3)
+        obj = Holder(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(obj, x)
+        self.assertEqual(result, fn(obj, x))
+        self.assertIs(type(result), dict)
+        self.assertEqual(list(result), ["a", "b", "c"])
+        self.assertIs(result["a"], obj.a)
+        self.assertIs(result["c"], x)
+
     def test_missing_key_exception(self):
         def fn(x):
             mapping = builtins.frozendict(a=x)
@@ -745,23 +952,476 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("base_type", [dict, OrderedDict, defaultdict])
-    def test_fromkeys_dict_constructor_returns_frozendict(self, base_type):
-        class Mapping(base_type):
+    @parametrize("other_type", [dict, getattr(builtins, "frozendict", dict)])
+    def test_equality_unequal_values(self, other_type):
+        def fn(x):
+            left = builtins.frozendict(a=1, b=2)
+            right = other_type(a=1, b=3)
+            return x + 1, left == right, right == left, left != right, right != left
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "iterable_type", [dict, getattr(builtins, "frozendict", dict), set, frozenset]
+    )
+    def test_fromkeys_container_inputs(self, iterable_type):
+        def fn(x, keys):
+            result = builtins.frozendict.fromkeys(keys, x + 1)
+            return result, list(result)
+
+        x = torch.randn(3)
+        keys = iterable_type({"b": 0, "a": 1})
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, keys)
+        self.assertEqual(result, fn(x, keys))
+        self.assertIs(type(result[0]), builtins.frozendict)
+        self.assertIs(result[0]["a"], result[0]["b"])
+
+    def test_fromkeys_does_not_compare_iterable_type(self):
+        class Meta(type):
+            def __eq__(cls, other):
+                if other is builtins.frozendict:
+                    raise RuntimeError("fromkeys must not compare types")
+                return cls is other
+
+            __hash__ = type.__hash__
+
+        class Keys(list, metaclass=Meta):
+            pass
+
+        def fn(x, keys):
+            return builtins.frozendict.fromkeys(keys, x + 1)
+
+        x = torch.randn(3)
+        keys = Keys(["b", "a"])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, keys), fn(x, keys)
+        )
+
+    @parametrize("dict_constructor", [False, True])
+    def test_fromkeys_streams_key_hashes(self, dict_constructor):
+        class Mapping(dict):
             def __new__(cls, data=()):
                 return builtins.frozendict(data)
 
+        class Key:
+            value = 1
+
+            def __hash__(self):
+                return self.value
+
         def fn(x):
-            return Mapping.fromkeys("ab", x)
+            key = Key()
+
+            def keys():
+                yield key
+                key.value = 2
+
+            cls = Mapping if dict_constructor else builtins.frozendict
+            result = cls.fromkeys(keys(), 7)
+            return x + (key in result), key.value
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "_frozendict_fromkeys"
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        result = torch.compile(fn, backend="eager")(x)
-        self.assertIs(type(result), builtins.frozendict)
+        self.assertEqual(fn(x), (x, 2))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_fromkeys_preserves_iterator_position(self):
+        class Key:
+            def __hash__(self):
+                next(self.iterator, None)
+                return 1
+
+        def fn(x):
+            key = Key()
+            key.iterator = iter([key, "skipped"])
+            mapping = builtins.frozendict.fromkeys(key.iterator, 7)
+            return x + len(mapping)
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_copy_and_fromkeys(self):
+        def fn(x):
+            mapping = builtins.frozendict(a=x)
+            fromkeys = mapping.fromkeys(["b", "a", "b"], x + 1)
+            return mapping.copy() is mapping, fromkeys
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
+        self.assertTrue(result[0])
+        self.assertEqual(list(result[1]), ["b", "a"])
+        self.assertIs(result[1]["a"], result[1]["b"])
+
+    @parametrize("mapping_type", [OrderedDict, defaultdict])
+    @parametrize("reverse", [False, True])
+    @parametrize("direct", [False, True])
+    def test_union_preserves_mutable_mapping_type(self, mapping_type, reverse, direct):
+        def fn(x):
+            mapping = (
+                defaultdict(int, a=x)
+                if mapping_type is defaultdict
+                else mapping_type(a=x)
+            )
+            frozen = builtins.frozendict(a=x + 1, b=x + 2)
+            if direct:
+                return mapping.__ror__(frozen) if reverse else mapping.__or__(frozen)
+            return frozen | mapping if reverse else mapping | frozen
+
+        x = torch.randn(3)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(result), type(expected))
+        self.assertEqual(list(result), list(expected))
+        self.assertEqual(result, expected)
+        if isinstance(expected, defaultdict):
+            self.assertIs(result.default_factory, int)
+
+    def test_defaultdict_union_bypasses_update_override(self):
+        class Mapping(defaultdict):
+            def update(self, *args, **kwargs):
+                raise RuntimeError("union must not call update override")
+
+        def fn(x):
+            return Mapping(int, a=x) | builtins.frozendict(b=x + 1)
+
+        x = torch.randn(3)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(result), Mapping)
+        self.assertIs(result.default_factory, int)
+        self.assertEqual(result, expected)
+
+    @parametrize("operation", [operator.eq, operator.or_])
+    def test_input_dict_with_custom_new(self, operation):
+        class Mapping(dict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
+
+        def fn(x, mapping):
+            frozen = builtins.frozendict(a=x)
+            return x + 1, operation(frozen, mapping)
+
+        x = torch.randn(3)
+        mapping = Mapping(a=x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_union_and_rebinding(self):
+        def fn(x):
+            left = builtins.frozendict(b=x, a=x + 1)
+            right = {"a": x + 2, "c": x + 3}
+            alias = left
+            left |= right
+            return (
+                left,
+                right | alias,
+                alias,
+                alias | {},
+                builtins.frozendict() | alias,
+            )
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertIs(type(result[0]), builtins.frozendict)
+        self.assertIs(type(result[1]), dict)
+        self.assertEqual(list(result[0]), ["b", "a", "c"])
+        self.assertIs(result[2], result[3])
+        self.assertIs(result[2], result[4])
+        self.assertIsNot(result[0], result[2])
+
+    @parametrize(
+        "operation",
+        [
+            lambda d: d | builtins.frozendict(),
+            lambda d: builtins.frozendict(a=0) | d,
+            lambda d: builtins.frozendict.fromkeys(d),
+        ],
+    )
+    def test_dict_key_guard_invalidation(self, operation):
+        def fn(x, mapping):
+            result = operation(mapping)
+            return x + len(result), tuple(result)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(3)
+        for mapping in ({}, {"a": 1}, {"a": 2}, {"a": 1, "b": 2}, {"c": 1, "d": 2}):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 4)
+
+    def test_union_preserves_key_comparisons(self):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return self.calls > 1
+
+        def fn(x):
+            first, second = Key(), Key()
+            mapping = builtins.frozendict([(first, x), (second, x + 1)])
+            mapping = mapping | {"tail": x}
+            return x + len(mapping), first.calls
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), (x + 3, 1))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_equality_and_reflection(self):
+        class Reflected:
+            def __eq__(self, other):
+                return len(other) == 2
+
+        def fn(x):
+            mapping = builtins.frozendict(a=x, b=1)
+            same = {"b": 1, "a": x}
+            return (
+                x + (mapping == same),
+                same == mapping,
+                mapping != {"a": x},
+                mapping == Reflected(),
+            )
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("dict_side", [None, "left", "right"])
+    @parametrize("change_hash", [False, True])
+    def test_equality_preserves_stored_key_hashes(self, dict_side, change_hash):
+        class Key:
+            def __init__(self):
+                self.value = 1
+                self.calls = 0
+
+            def __hash__(self):
+                self.calls += 1
+                return self.value
+
+        def fn(x):
+            key = Key()
+            left = {key: 1} if dict_side == "left" else builtins.frozendict([(key, 1)])
+            right = (
+                {key: 1} if dict_side == "right" else builtins.frozendict([(key, 1)])
+            )
+            before = key.calls
+            if change_hash:
+                key.value = 2
+            equal, unequal = left == right, left != right
+            return x + 1, equal, unequal, key.calls - before
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(result[1:], (True, False, 0))
+
+    @parametrize("dict_side", [None, "left", "right"])
+    def test_equality_looks_up_each_key_once(self, dict_side):
+        class Key:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return True
+
+        def fn(x):
+            first, second = Key(), Key()
+            left = (
+                {first: 1} if dict_side == "left" else builtins.frozendict([(first, 1)])
+            )
+            right = (
+                {second: 1}
+                if dict_side == "right"
+                else builtins.frozendict([(second, 1)])
+            )
+            equal, unequal = left == right, left != right
+            return x + 1, equal, unequal, first.calls + second.calls
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(result[1:], (True, False, 2))
+
+    @parametrize("wrap", [None, tuple, frozenset])
+    def test_converted_mapping_method_key_hash_cannot_escape(self, wrap):
+        def fn(x, mapping):
+            return x + 1, hash(builtins.frozendict(mapping))
+
+        key = time.time if wrap is None else wrap((time.time,))
+        mapping = {key: 1}
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_converted_method_key_hash_ignores_receiver_contents(self):
+        def fn(x, mapping):
+            return x + 1, hash(builtins.frozendict(mapping))
+
+        receiver = {"unrelated": object()}
+        mapping = {receiver.get: 1}
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize("wrap", [tuple, frozenset])
+    def test_builtin_method_hash_in_frozen_values_cannot_escape(self, wrap):
+        def fn(x):
+            return x + 1, hash(builtins.frozendict(a=wrap((time.time,))))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_hash_and_container_keys(self):
+        def fn(x):
+            left = builtins.frozendict(a=1, b=(2, 3))
+            right = builtins.frozendict(b=(2, 3), a=1)
+            table = {left: x + 1}
+            members = {left}
+            return (
+                hash(left),
+                hash(right),
+                table[right],
+                right in members,
+                hash(left.keys().mapping),
+            )
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("value_type", [float, complex, tuple, frozenset])
+    @parametrize("use_key", [False, True])
+    def test_hash_nan_identity_guards(self, value_type, use_key):
+        def make_mapping():
+            value = float("nan")
+            value = (
+                value_type([value])
+                if value_type in (tuple, frozenset)
+                else value_type(value)
+            )
+            return builtins.frozendict({value: 1} if use_key else {"a": value})
+
+        def fn(x, mapping):
+            return x + 1, hash(mapping)
+
+        first, second = make_mapping(), make_mapping()
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for mapping in (first, second, first):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_hash_collisions_and_cache(self):
+        class Key:
+            def __hash__(self):
+                return 42
+
+        class Value:
+            def __init__(self):
+                self.calls = 0
+
+            def __hash__(self):
+                self.calls += 1
+                return 7
+
+        def fn(x):
+            value = Value()
+            mapping = builtins.frozendict([(Key(), value), (Key(), value)])
+            first = hash(mapping)
+            second = hash(mapping)
+            return x + value.calls, first, second
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_preexisting_custom_hash_cache(self):
+        class Value:
+            def __init__(self):
+                self.value = 1
+
+            def __hash__(self):
+                return self.value
+
+        value = Value()
+        mapping = builtins.frozendict(a=value)
+        original_hash = hash(mapping)
+        value.value = 2
+
+        def fn(x, mapping):
+            return x + hash(mapping)
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "cached a hash"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1), mapping)
+        self.assertEqual(hash(mapping), original_hash)
+
+    @parametrize("use_key", [False, True])
+    @parametrize("graph_break", [False, True])
+    @parametrize("metaclass", [False, True])
+    def test_custom_hash_reconstruction(self, use_key, graph_break, metaclass):
+        class Value:
+            def __init__(self):
+                self.value = 1
+
+            def __hash__(self):
+                return self.value
+
+        class Meta(type):
+            def __hash__(cls):
+                return cls.value
+
+        class ClassValue(metaclass=Meta):
+            value = 1
+
+        def fn(x):
+            value = ClassValue if metaclass else Value()
+            value.value = 1
+            mapping = builtins.frozendict([(value, 1)] if use_key else [("a", value)])
+            saved_hash = hash(mapping)
+            value.value = 2
+            if graph_break:
+                torch._dynamo.graph_break()
+            return x + 1, mapping, saved_hash
+
+        x = torch.randn(3)
+        if not graph_break:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "stored key hashes"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+        result, mapping, saved_hash = torch.compile(fn, backend="eager")(x)
+        self.assertIs(type(mapping), builtins.frozendict)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(hash(mapping), saved_hash)
+
+    @parametrize("operation", [lambda d: d | [], lambda d: d < {}, lambda d: hash(d)])
+    def test_operator_errors(self, operation):
+        def fn(x):
+            mapping = builtins.frozendict(a=[])
+            try:
+                operation(mapping)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
 
 if __name__ == "__main__":

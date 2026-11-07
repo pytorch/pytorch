@@ -133,8 +133,7 @@ from .dicts import (
     NNModuleHooksDictVariable,
     NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
-    pydict_check,
-    pyfrozendict_check,
+    pyanydict_check,
 )
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -5644,11 +5643,7 @@ class DefaultDictVariable(ConstDictVariable):
         if not isinstance(self_, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
-        if pyfrozendict_check(other_):
-            return variables.FrozenDictVariable.frozen_deferred_operator(
-                other_, tx, [], {}
-            )
-        if not pydict_check(other_):
+        if not pyanydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
         cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
