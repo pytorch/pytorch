@@ -1010,8 +1010,13 @@ strict_output_strides = False
 # indexing, stays inlined in every mode; adaptive pooling with non-divisible
 # sizes, split reductions over symbolic ranges and a strided slice_scatter
 # whose dim is not provably a multiple of the step still use ModularIndexing.
-avoid_modular_indexing: bool | None = get_tristate_env(
-    "TORCHINDUCTOR_AVOID_MODULAR_INDEXING"
+# [DO NOT LAND] forced on (strict affine indexing on every backend) so CI
+# exercises the avoid_modular_indexing paths in every test suite; =auto
+# selects the per-backend default.
+avoid_modular_indexing: bool | None = (
+    None
+    if os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "auto"
+    else get_tristate_env("TORCHINDUCTOR_AVOID_MODULAR_INDEXING", True)
 )
 
 # In the automatic mode above, a dim-merging view of unrealized compute whose
