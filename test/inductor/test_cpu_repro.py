@@ -1676,6 +1676,27 @@ class CPUReproTests(TestCase):
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
     @requires_vectorization
+    def test_simd_horizontal_reduction(self):
+        def fn(x):
+            return x.sum(-1), x.amax(-1)
+
+        # 37 columns leave a masked tail; bfloat16 accumulates in VectorizedN<float, 2>.
+        dtypes = (torch.float32, torch.bfloat16)
+        simdlens = sorted({isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()})
+        for dtype, simdlen in itertools.product(dtypes, simdlens):
+            x = torch.randn(4, 37, dtype=dtype)
+            for enabled in (False, True):
+                patches = {
+                    "cpp.simdlen": simdlen,
+                    "cpp.simd_horizontal_reduction": enabled,
+                }
+                with config.patch(patches):
+                    torch._dynamo.reset()
+                    actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+                self.assertEqual(actual, fn(x))
+                self.assertEqual("simd_vec_reduce_all" in code, enabled)
+
+    @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/190757
         # A vectorized loop smaller than the vector width runs 1 iteration, not
