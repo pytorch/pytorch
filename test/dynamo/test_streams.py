@@ -3276,6 +3276,9 @@ class <lambda>(torch.nn.Module):
             return z
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
+        torch.accelerator.synchronize()
         expected = fn(*inp)
         (
             actual,
