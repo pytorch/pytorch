@@ -19,6 +19,8 @@ import threading
 import warnings
 import weakref
 from collections.abc import Callable
+from concurrent.futures import as_completed, ThreadPoolExecutor
+from pickle import PicklingError
 from typing import Any, Generic, NoReturn, Self, TYPE_CHECKING, TypeVar
 
 import torch
@@ -207,12 +209,25 @@ class DataLoader(Generic[_T_co]):
             will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
+        worker_startup_threads (int, optional, keyword-only arg): Maximum number of threads
+            used to start worker processes concurrently, capped at :attr:`num_workers`.
+            Must be a positive integer. ``1`` starts workers sequentially in the calling
+            thread. Values greater than ``1`` require ``num_workers > 0`` and the
+            ``spawn`` multiprocessing start method on any platform. The start method is
+            checked when creating an iterator. (default: ``1``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
                  cannot be an unpicklable object, e.g., a lambda function. See
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
+
+    .. warning:: With ``worker_startup_threads > 1``, serialization of :attr:`dataset`,
+                 :attr:`collate_fn`, :attr:`worker_init_fn`, and their shared state may run
+                 concurrently on background threads. Custom serialization hooks must be
+                 thread-safe and must not require the main thread. This option only
+                 changes process startup, not where worker initialization or data loading
+                 runs.
 
     .. warning:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
                  When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
@@ -242,6 +257,7 @@ class DataLoader(Generic[_T_co]):
     dataset: Dataset[_T_co]
     batch_size: int | None
     num_workers: int
+    worker_startup_threads: int
     pin_memory: bool
     drop_last: bool
     timeout: float
@@ -271,6 +287,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        worker_startup_threads: int = 1,
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -282,6 +299,15 @@ class DataLoader(Generic[_T_co]):
 
         if timeout < 0:
             raise ValueError("timeout option should be non-negative")
+
+        if isinstance(worker_startup_threads, bool) or not isinstance(
+            worker_startup_threads, int
+        ):
+            raise TypeError("worker_startup_threads must be a positive integer")
+        if worker_startup_threads < 1:
+            raise ValueError("worker_startup_threads must be a positive integer")
+        if worker_startup_threads > 1 and num_workers == 0:
+            raise ValueError("worker_startup_threads > 1 requires num_workers > 0")
 
         if num_workers == 0 and prefetch_factor is not None:
             raise ValueError(
@@ -298,6 +324,7 @@ class DataLoader(Generic[_T_co]):
 
         self.dataset = dataset
         self.num_workers = num_workers
+        self.worker_startup_threads = worker_startup_threads
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
         self.pin_memory_device = pin_memory_device
@@ -433,6 +460,13 @@ class DataLoader(Generic[_T_co]):
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
+            if self.worker_startup_threads > 1:
+                context = self.multiprocessing_context or torch.multiprocessing
+                if context.get_start_method() != "spawn":
+                    raise ValueError(
+                        "worker_startup_threads > 1 requires the 'spawn' "
+                        "multiprocessing start method"
+                    )
             self.check_worker_number_rationality()
             return _MultiProcessingDataLoaderIter(self)
 
@@ -1098,6 +1132,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #     down.
 
     def __init__(self, loader) -> None:
+        self._shutdown = True
         super().__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
@@ -1132,61 +1167,76 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
-        self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
 
         self._index_queues = []
         self._workers = []
-        for i in range(self._num_workers):
-            # No certainty which module multiprocessing_context is
-            index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
-            # Need to `cancel_join_thread` here!
-            # See sections (2) and (3b) above.
-            index_queue.cancel_join_thread()
-            # The worker consumes the holder so its Process does not retain the dataset.
-            dataset_holder = [self._dataset]
-            w = multiprocessing_context.Process(
-                target=_utils.worker._worker_loop,
-                args=(
-                    self._dataset_kind,
-                    dataset_holder,
-                    index_queue,
-                    self._worker_result_queue,
-                    self._workers_done_event,
-                    self._auto_collation,
-                    self._collate_fn,
-                    self._drop_last,
-                    self._base_seed,
-                    self._worker_init_fn,
-                    i,
-                    self._num_workers,
-                    self._persistent_workers,
-                    self._shared_seed,
-                ),
-            )
-            w.daemon = True
-            # NB: Process.start() actually take some time as it needs to
-            #     start a process and pass the arguments over via a pipe.
-            #     Therefore, we only add a worker to self._workers list after
-            #     it started, so that we do not call .join() if program dies
-            #     before it starts, and __del__ tries to join but will get:
-            #     AssertionError: can only join a started process.
-            from pickle import PicklingError
-
+        # Shutdown may run before _reset(), including after only some workers start.
+        self._workers_status = [True] * self._num_workers
+        self._shutdown = False
+        try:
+            self._start_workers(loader, multiprocessing_context)
+        except BaseException as error:
             try:
-                w.start()
-            except (TypeError, AttributeError, PicklingError):
-                warnings.warn(
-                    "Got pickle error when attempting to start a worker Process. "
-                    "This might be because the worker Process arguments are not picklable. "
-                    "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
-                    "to 'forkserver', which requires the worker Process arguments to be picklable. "
-                    "You can also try multiprocessing.set_start_method('fork').",
-                    stacklevel=2,
-                )
-                raise
-            self._index_queues.append(index_queue)
-            self._workers.append(w)
+                self._shutdown_workers()
+            except BaseException as cleanup_error:
+                raise error from cleanup_error
+            raise
+
+    def _start_workers(self, loader, multiprocessing_context) -> None:
+        with (
+            ThreadPoolExecutor(
+                max_workers=min(loader.worker_startup_threads, self._num_workers)
+            )
+            if loader.worker_startup_threads > 1
+            else contextlib.nullcontext()
+        ) as executor:
+            futures = []
+            try:
+                for i in range(self._num_workers):
+                    # No certainty which module multiprocessing_context is
+                    index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+                    self._index_queues.append(index_queue)
+                    # Need to `cancel_join_thread` here!
+                    # See sections (2) and (3b) above.
+                    index_queue.cancel_join_thread()
+                    # The worker consumes the holder so its Process does not
+                    # retain the dataset.
+                    dataset_holder = [self._dataset]
+                    w = multiprocessing_context.Process(
+                        target=_utils.worker._worker_loop,
+                        args=(
+                            self._dataset_kind,
+                            dataset_holder,
+                            index_queue,
+                            self._worker_result_queue,
+                            self._workers_done_event,
+                            self._auto_collation,
+                            self._collate_fn,
+                            self._drop_last,
+                            self._base_seed,
+                            self._worker_init_fn,
+                            i,
+                            self._num_workers,
+                            self._persistent_workers,
+                            self._shared_seed,
+                        ),
+                    )
+                    w.daemon = True
+                    # Register before starting so failures cannot lose a concurrently
+                    # started process. Shutdown skips processes that have no pid.
+                    self._workers.append(w)
+                    if executor is None:
+                        self._start_worker(w)
+                    else:
+                        futures.append(executor.submit(self._start_worker, w))
+                for future in as_completed(futures):
+                    future.result()
+            finally:
+                # submit() may enqueue work before failing without returning a future.
+                # Cancel all queued starts and join running starters before cleanup.
+                if executor is not None:
+                    executor.shutdown(wait=True, cancel_futures=True)
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
@@ -1206,8 +1256,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             )
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
-            # Similar to workers (see comment above), we only register
-            # pin_memory_thread once it is started.
+            # Only register a started thread so shutdown can safely join it.
             self._pin_memory_thread = pin_memory_thread
         else:
             self._data_queue = self._worker_result_queue  # type: ignore[assignment]
@@ -1227,9 +1276,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             id(self),
             tuple(w.pid for w in self._workers),  # type: ignore[misc]
         )
-        _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
+        _utils.signal_handling._set_SIGCHLD_handler()
         self._reset(loader, first_iter=True)
+
+    @staticmethod
+    def _start_worker(worker) -> None:
+        try:
+            worker.start()
+        except (TypeError, AttributeError, PicklingError):
+            warnings.warn(
+                "Got pickle error when attempting to start a worker Process. "
+                "This might be because the worker Process arguments are not picklable. "
+                "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
+                "to 'forkserver', which requires the worker Process arguments to be picklable. "
+                "You can also try multiprocessing.set_start_method('fork').",
+                stacklevel=4,
+            )
+            raise
 
     def _reset(self, loader, first_iter=False) -> None:
         super()._reset(loader, first_iter)
@@ -1628,56 +1692,63 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # Exit `pin_memory_thread` first because exiting workers may leave
                 # corrupted data in `worker_result_queue` which `pin_memory_thread`
                 # reads from.
-                if hasattr(self, "_pin_memory_thread"):
-                    # Use hasattr in case error happens before we set the attribute.
-                    self._pin_memory_thread_done_event.set()
-                    # Send something to pin_memory_thread in case it is waiting
-                    # so that it can wake up and check `pin_memory_thread_done_event`
-                    self._worker_result_queue.put((None, None))
-                    self._pin_memory_thread.join()
+                try:
+                    if hasattr(self, "_pin_memory_thread"):
+                        # Use hasattr in case error happens before we set the attribute.
+                        self._pin_memory_thread_done_event.set()
+                        # Send something to pin_memory_thread in case it is waiting
+                        # so that it can wake up and check `pin_memory_thread_done_event`
+                        self._worker_result_queue.put((None, None))
+                        self._pin_memory_thread.join()
+                finally:
                     self._worker_result_queue.cancel_join_thread()
                     self._worker_result_queue.close()
 
                 # Exit workers now.
                 self._workers_done_event.set()
-                for worker_id in range(len(self._workers)):
+                for worker_id, w in enumerate(self._workers):
                     # Get number of workers from `len(self._workers)` instead of
                     # `self._num_workers` in case we error before starting all
                     # workers.
                     # If we are using workers_status with persistent_workers
                     # we have to shut it down because the worker is paused
-                    if self._persistent_workers or self._workers_status[worker_id]:
+                    if w.pid is not None and (
+                        self._persistent_workers or self._workers_status[worker_id]
+                    ):
                         self._mark_worker_as_unavailable(worker_id, shutdown=True)
                 for w in self._workers:
                     # We should be able to join here, but in case anything went
                     # wrong, we set a timeout and if the workers fail to join,
                     # they are killed in the `finally` block.
-                    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                for q in self._index_queues:
-                    q.cancel_join_thread()
-                    q.close()
-            finally:
-                # Even though all this function does is putting into queues that
-                # we have called `cancel_join_thread` on, weird things can
-                # happen when a worker is killed by a signal, e.g., hanging in
-                # `Event.set()`. So we need to guard this with SIGCHLD handler,
-                # and remove pids from the C side data structure only at the
-                # end.
-                #
-                # FIXME: Unfortunately, for Windows, we are missing a worker
-                #        error detection mechanism here in this function, as it
-                #        doesn't provide a SIGCHLD handler.
-                if self._worker_pids_set:
-                    _utils.signal_handling._remove_worker_pids(id(self))
-                    self._worker_pids_set = False
-                for w in self._workers:
-                    if w.is_alive():
-                        # Existing mechanisms try to make the workers exit
-                        # peacefully, but in case that we unfortunately reach
-                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
-                        # we kill the worker.
-                        w.terminate()
+                    if w.pid is not None:
                         w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+            finally:
+                try:
+                    for q in self._index_queues:
+                        q.cancel_join_thread()
+                        q.close()
+                finally:
+                    # Even though all this function does is putting into queues that
+                    # we have called `cancel_join_thread` on, weird things can
+                    # happen when a worker is killed by a signal, e.g., hanging in
+                    # `Event.set()`. So we need to guard this with SIGCHLD handler,
+                    # and remove pids from the C side data structure only at the
+                    # end.
+                    #
+                    # FIXME: Unfortunately, for Windows, we are missing a worker
+                    #        error detection mechanism here in this function, as it
+                    #        doesn't provide a SIGCHLD handler.
+                    if self._worker_pids_set:
+                        _utils.signal_handling._remove_worker_pids(id(self))
+                        self._worker_pids_set = False
+                    for w in self._workers:
+                        if w.is_alive():
+                            # Existing mechanisms try to make the workers exit
+                            # peacefully, but in case that we unfortunately reach
+                            # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                            # we kill the worker.
+                            w.terminate()
+                            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
 
     @staticmethod
     def _clean_up_persistent_workers_atexit() -> None:
