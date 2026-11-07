@@ -118,6 +118,8 @@ class TestHOPInfra(TestCase):
             "trace_wrapped",
             "triton_kernel_wrapper_functional",
             "triton_kernel_wrapper_mutation",
+            "flydsl_kernel_wrapper_functional",
+            "flydsl_kernel_wrapper_mutation",
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
             "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }
@@ -964,6 +966,71 @@ class TestUserKernelHOPShared(TestCase):
         info = dataclasses.replace(info, display_name="ToyDSL", side_table=table)
         self.assertEqual(info.display_name, "ToyDSL")
         self.assertIs(info.get_side_table(), table)
+
+    def test_flydsl_info(self):
+        # FlyDSL's registry entry, made when flydsl_kernel_wrap is imported (no flydsl
+        # or GPU needed): its own layout constraint, whatever Triton's config says,
+        # its trigger, not serializable, the functional HOP's dense impl, and the
+        # constant rules of its side table.
+        from torch._higher_order_ops import flydsl_kernel_wrap as fkw
+        from torch._inductor import config as inductor_config
+
+        info = fkw.flydsl_kernel_hop_info
+        hops = (
+            fkw.flydsl_kernel_wrapper_mutation,
+            fkw.flydsl_kernel_wrapper_functional,
+        )
+        self.assertEqual((info.dsl, info.display_name), ("flydsl", "FlyDSL"))
+        self.assertIs(info.side_table, fkw.flydsl_kernel_side_table)
+        self.assertEqual((info.mutation, info.functional), hops)
+        for hop in hops:
+            self.assertIs(get_user_kernel_hop_info(hop), info)
+        self.assertEqual(
+            (info.reinplace_trigger, info.serializable),
+            (ReInplaceTrigger.FLYDSL_OPS, False),
+        )
+        for triton_layout in ("needs_fixed_stride_order", "flexible_layout"):
+            with inductor_config.patch(
+                triton_kernel_default_layout_constraint=triton_layout
+            ):
+                self.assertEqual(
+                    info.get_layout_constraint(), "needs_fixed_stride_order"
+                )
+        self.assertIn(
+            torch._C.DispatchKey.CompositeExplicitAutograd, info.functional.py_kernels
+        )
+        # The flydsl package's types are FlyDSL's, a module merely named like it is
+        # not (test_flydsl_kernels checks how real FlyDSL values are keyed).
+        rules = fkw.FLYDSL_CONSTANT_RULES
+        self.assertIs(info.get_side_table().constant_rules, rules)
+
+        def value_of_type_in(module: str, value: object) -> object:
+            obj = type("Int32", (), {"__module__": module})()
+            obj.value = value  # type: ignore[attr-defined]
+            return obj
+
+        for module in ("flydsl", "flydsl.expr.numeric"):
+            self.assertTrue(rules.is_dsl_value(value_of_type_in(module, 5)))
+        self.assertFalse(rules.is_dsl_value(value_of_type_in("flydsl_configs", 5)))
+        self.assertIsNone(rules.scalar_value(value_of_type_in("flydsl_configs", 5)))
+        self.assertIsNone(rules.leaf_key(len))
+
+    def test_flydsl_trigger_refused_to_other_dsls(self):
+        # ReInplaceTrigger.FLYDSL_OPS belongs to the flydsl DSL (TRIGGER_DSLS)
+        # whether or not FlyDSL has registered yet (it registers when
+        # flydsl_kernel_wrap is first imported), so another DSL registering first
+        # cannot take it and make FlyDSL's own registration fail.
+        from torch._higher_order_ops import flydsl_kernel_wrap as fkw
+
+        info = dataclasses.replace(fkw.flydsl_kernel_hop_info, dsl="toy")
+        msg = (
+            "^ReInplaceTrigger.FLYDSL_OPS belongs to the flydsl DSL; register the "
+            "toy DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own$"
+        )
+        with mock.patch.dict(user_kernel_hop._user_kernel_hops, clear=True):
+            with self.assertRaisesRegex(ValueError, msg):
+                user_kernel_hop.register_user_kernel_hop(info)
+            self.assertEqual(user_kernel_hop._user_kernel_hops, {})
 
     def test_registered_impls(self):
         # The impls register_user_kernel_hop_impls registers, on a toy DSL: the eager
