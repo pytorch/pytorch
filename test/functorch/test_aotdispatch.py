@@ -806,6 +806,99 @@ def forward(self, primals_1):
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
+    def _verify_set__output_aliases_input(self, f, make_inps, base_idx):
+        for requires_grad in (False, True):
+            inps = make_inps(requires_grad)
+            self.verify_aot_autograd(
+                f, inps, test_mutation=True, keep_inp_mutations=True
+            )
+
+            graph_inps = [x.clone() for x in inps]
+            compiled_f = self.run_autograd(f, [None], None, True, False)
+            out = compiled_f(*graph_inps)
+
+            self.assertEqual(
+                out.untyped_storage().data_ptr(),
+                graph_inps[base_idx].untyped_storage().data_ptr(),
+            )
+
+    def test_set__intermediate_onto_input_is_alias_of_input(self):
+        def f(a):
+            out = torch.empty_like(a)
+            with torch.no_grad():
+                out.set_(a)
+            out.mul_(2)
+            return out
+
+        self._verify_set__output_aliases_input(
+            f, lambda rg: [torch.ones(4, requires_grad=rg)], base_idx=0
+        )
+
+    def test_set__view_of_intermediate_onto_input_is_alias_of_input(self):
+        def f(a):
+            out = torch.empty_like(a)
+            with torch.no_grad():
+                out.set_(a)
+            return out.view(-1)
+
+        self._verify_set__output_aliases_input(
+            f, lambda rg: [torch.ones(2, 2, requires_grad=rg)], base_idx=0
+        )
+
+    def test_set__intermediate_onto_input_view_is_alias_of_input(self):
+        def f(a):
+            out = torch.empty(3, dtype=a.dtype)
+            with torch.no_grad():
+                out.set_(a[1:])
+            return out
+
+        self._verify_set__output_aliases_input(
+            f, lambda rg: [torch.arange(4.0, requires_grad=rg)], base_idx=0
+        )
+
+    def test_set__intermediate_onto_metadata_mutated_input_is_alias_of_input(self):
+        def f(a):
+            a.t_()
+            out = torch.empty_like(a)
+            with torch.no_grad():
+                out.set_(a)
+            return out
+
+        self._verify_set__output_aliases_input(
+            f,
+            lambda rg: [torch.arange(6.0).reshape(2, 3).requires_grad_(rg)],
+            base_idx=0,
+        )
+
+    def test_set__input_onto_input(self):
+        def f(x, y):
+            with torch.no_grad():
+                x.set_(y)
+            return x.view(-1)
+
+        for requires_grad in (False, True):
+            inp = [
+                torch.ones(4, requires_grad=requires_grad),
+                torch.arange(4.0, requires_grad=requires_grad),
+            ]
+            self.verify_aot_autograd(
+                f, inp, test_mutation=True, keep_inp_mutations=True
+            )
+
+    def test_set__intermediate_with_grad_fn_onto_input(self):
+        def f(a, w):
+            out = w * 2
+            with torch.no_grad():
+                out.set_(a)
+            return out
+
+        for requires_grad in (False, True):
+            inp = [
+                torch.randn(4, requires_grad=requires_grad),
+                torch.randn(4, requires_grad=True),
+            ]
+            self.verify_aot_autograd(f, inp)
+
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
     )
