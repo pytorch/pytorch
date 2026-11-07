@@ -1880,8 +1880,6 @@ if __name__ == "__main__":
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
 
-        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
-        # the data pointer for XPU.
         z = torch.from_dlpack(x, device=x.device, copy=copy)
         self.assertEqual(z, x)
         self.assertEqual(z.device, x.device)
