@@ -2887,6 +2887,36 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
+// The CPU cascade summation (see use_cascade_powsum) adds partial sums into its
+// output, so reduce half and bfloat16 into a float temporary and round once at
+// the end. A single-element result is written once and needs no temporary.
+// Returns false when the kernel would not take that path.
+static bool cpu_powsum_in_float(const char* name, const Tensor& result, const Tensor& self,
+                                OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
+  const auto in_dtype = self.scalar_type();
+  const bool single_output = result.numel() == 1;
+  if (!self.is_cpu() || result.scalar_type() != in_dtype ||
+      !use_cascade_powsum(in_dtype, kFloat, ord, is_norm, single_output) ||
+      use_cascade_powsum(in_dtype, in_dtype, ord, is_norm, single_output)) {
+    return false;
+  }
+  Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
+  auto iter = make_reduction(name, result_float, self, dim, keepdim, in_dtype, kFloat);
+  // The 2-norm takes its square root in the same pass that rounds to the result dtype.
+  const bool sqrt_after = is_norm && ord == 2.0;
+  if (is_norm && !sqrt_after) {
+    norm_stub(iter.device_type(), iter, ord);
+  } else {
+    powsum_stub(iter.device_type(), iter, ord);
+  }
+  if (sqrt_after) {
+    at::sqrt_out(const_cast<Tensor&>(result), result_float);
+  } else {
+    result.copy_(result_float);
+  }
+  return true;
+}
+
 TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, const Tensor& result) {
   // Casting a large integer to a double will just introduce an error for
   // values larger than 10^53 (same for negative numbers), so that's fine.
@@ -2949,6 +2979,10 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     self_ = self;
   }
 
+  if (cpu_powsum_in_float("vector_norm", result, self_, dim, keepdim, ord, /*is_norm=*/true)) {
+    return;
+  }
+
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
   norm_stub(iter.device_type(), iter, ord);
 }
@@ -3004,6 +3038,10 @@ Tensor linalg__powsum(
     self_ = self.to(*opt_dtype);
   } else {
     self_ = self;
+  }
+
+  if (cpu_powsum_in_float("powsum", result, self_, dim, keepdim, ord, /*is_norm=*/false)) {
+    return result;
   }
 
   auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
