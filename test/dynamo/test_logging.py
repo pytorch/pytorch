@@ -22,10 +22,12 @@ from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     find_free_port,
+    getRocmVersion,
     IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -1430,6 +1432,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         )
 
     def test_logs_out(self):
+        if TEST_WITH_ROCM and getRocmVersion()[:2] == (10, 2):
+            self.skipTest("unexpected kineto warnings on ROCm 10.2")
         import tempfile
 
         with tempfile.NamedTemporaryFile(delete=True) as tmp:
