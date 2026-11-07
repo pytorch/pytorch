@@ -214,15 +214,18 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
 /// auto t = torch::randn(3, 3);
 /// torch::special::logsumexp(t, 1);
 /// ```
-inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+inline Tensor logsumexp(
+    const Tensor& self,
+    IntArrayRef dims = {},
+    bool keepdim = false) {
   return torch::special_logsumexp(self, dims, keepdim);
 }
 
 inline Tensor& logsumexp_out(
     Tensor& result,
     const Tensor& self,
-    IntArrayRef dims,
-    bool keepdim) {
+    IntArrayRef dims = {},
+    bool keepdim = false) {
   return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
