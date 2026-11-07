@@ -13353,12 +13353,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         with (
             warnings.catch_warnings(record=True) as w,
-            self.assertRaises(torch._dynamo.exc.BackendCompilerFailed),
+            self.assertRaises(torch._dynamo.exc.BackendCompilerFailed) as cm,
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        # Suppress unrelated pkg_resources warnings
-        self.assertIn("forward call that caused the error", str(w[-1].message))
+        # Trace is attached to the original exception (or still warned). AOT
+        # matching depends on exception type, which wrapping no longer changes.
+        combined = str(cm.exception) + "".join(
+            getattr(cm.exception, "__notes__", ())
+        ) + "".join(str(x.message) for x in w)
+        self.assertIn("forward call that caused the error", combined)
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
