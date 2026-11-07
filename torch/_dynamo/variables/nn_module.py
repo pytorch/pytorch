@@ -1634,6 +1634,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
+            dict_vt.install_dict_contains_guard(tx, HashableTracker(name_vt))
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 

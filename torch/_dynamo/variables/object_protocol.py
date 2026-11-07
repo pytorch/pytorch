@@ -17,12 +17,14 @@ import types
 import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
-from typing import NoReturn, TYPE_CHECKING
+from typing import cast, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
     get_type_slots,
+    get_type_tp_name,
     has_slot,
+    is_generic_getattr,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
@@ -33,6 +35,7 @@ from torch._guards import TracingContext
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
@@ -2295,6 +2298,8 @@ def mro_attr_source(
     klass: type,
     klass_source: Source,
     name: str,
+    *,
+    guard_absence: bool = False,
 ) -> "DictGetItemSource | None":
     """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
@@ -2326,32 +2331,33 @@ def mro_attr_source(
                 GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
             )
         tx.output.guarded_mro_type_ids.add(id(klass))
-    for idx, (base, namespace) in enumerate(entries):
-        if name not in namespace:
-            continue
+    owner_idx = next(
+        (i for i, (_, namespace) in enumerate(entries) if name in namespace), None
+    )
+    if owner_idx is None and not guard_absence:
+        return None
+    guard_mro_absent(
+        tx, klass, klass_source, name, len(entries) if owner_idx is None else owner_idx
+    )
+    if owner_idx is None:
+        return None
+    base = entries[owner_idx][0]
+    # Reuse the source when the same owner is reached again for the same
+    # name, even from a differently-sourced object, so it does not collect
+    # duplicate guards or an OBJECT_ALIASING guard. Keyed on the owner, not
+    # the descriptor: a descriptor shared by unrelated classes needs a
+    # source through each one.
+    cache_key = (id(base), name)
+    cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
+    if cached is not None:
+        return cached
 
-        # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*.
-        guard_mro_absent(tx, klass, klass_source, name, idx)
-
-        # Reuse the source when the same owner is reached again for the same
-        # name, even from a differently-sourced object, so it does not collect
-        # duplicate guards or an OBJECT_ALIASING guard. Keyed on the owner, not
-        # the descriptor: a descriptor shared by unrelated classes needs a
-        # source through each one.
-        cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
-        if cached is not None:
-            return cached
-
-        source = DictGetItemSource(
-            TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
-        )
-        if memoize:
-            tx.output.mro_source_cache[cache_key] = source
-        return source
-
-    return None
+    source = DictGetItemSource(
+        TypeDictSource(_mro_entry_source(klass, klass_source, owner_idx)), name
+    )
+    if memoize:
+        tx.output.mro_source_cache[cache_key] = source
+    return source
 
 
 def _resolve_descriptor_get(
@@ -2471,7 +2477,9 @@ def object_generic_getattr(
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
-      7. AttributeError
+      7. AttributeError only for an immutable runtime type with generic lookup,
+         no instance dictionary, and no __getattr__; otherwise defer to the
+         tracker's fallback, which may guard mutable class attributes.
     """
     from .user_defined import is_data_descriptor
 
@@ -2529,7 +2537,36 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
+    # Step 7: Confirm the runtime type before handling absence directly.
+    # Mutable classes still need guards for later class writes.
+    modeled_type = obj._cpython_type
+    modeled_types = modeled_type if isinstance(modeled_type, tuple) else (modeled_type,)
+    if (
+        type_is_immutable(py_type)
+        and not py_type.__dictoffset__
+        and is_generic_getattr(py_type)
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    ):
+        try:
+            actual_type_matches = (
+                type(tx.output.resolve_source_value(obj.source)) is py_type
+                if obj.source
+                else any(py_type is candidate for candidate in modeled_types)
+            )
+        except (NameError, KeyError, AttributeError, NotImplementedError):
+            # Some sources require guard helpers unavailable to source evaluation.
+            actual_type_matches = False
+        if actual_type_matches:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"
+                ],
+                kwargs={"name": ConstantVariable.create(name), "obj": obj},
+            )
+
+    # Attribute absence was not proven -- signal to the caller to fall back.
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2576,6 +2613,25 @@ def generic_getattr(
             ):
                 return value
 
+    # A user descriptor must run once; hasattr followed by getattr runs it twice.
+    if (
+        default is not _NO_DEFAULT
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and not isinstance(obj.lookup_class_mro_attr(name), types.MemberDescriptorType)
+        and (
+            obj.lookup_class_mro_attr("__dict__") is NO_SUCH_SUBOBJ
+            or isinstance(
+                obj.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+            )
+        )
+    ):
+        try:
+            return generic_getattr(tx, obj, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+            obj.guard_attribute_absence(tx, name)
+            return cast(VariableTracker, default)
+
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
         hasattr_var = obj.call_obj_hasattr(tx, name)
@@ -2584,7 +2640,7 @@ def generic_getattr(
                 f"hasattr_var must be a constant True or False, got {hasattr_var}"
             )
         if not hasattr_var.as_python_constant():
-            return default  # type: ignore[return-value]
+            return cast(VariableTracker, default)
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
