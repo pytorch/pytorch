@@ -3155,12 +3155,13 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    # Enable Origami analytical config selection for Triton templates (ROCm only).
     #
-    # When True, the rocm-origami pip package is consulted at GEMM compile time
-    # to pre-select a top-K of Triton configs from the DEFAULT search space,
-    # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    # When True, the rocm-origami pip package is consulted at compile time to
+    # pre-select Triton configs from the DEFAULT GEMM and FlexAttention search
+    # spaces, reducing autotuning cost while retaining near-exhaustive runtime.
+    # Read once at config import from TORCHINDUCTOR_ORIGAMI; on unless that is
+    # set to something other than "1".
     #
     # config.patch behaviour:
     #   patching to False  -- disables origami at call time (_origami_enabled()).
@@ -3168,14 +3169,17 @@ class rocm:
     #                         heuristics/template/triton.py load time and cannot
     #                         be re-triggered by a runtime patch.
     #
-    # Active only when all of these hold:
+    # The package is loaded only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
     #   - config.max_autotune
     #   - config.rocm.origami (this knob)
-    #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
-    # one-time warning; the regular config generator runs instead.
+    # Each consumer has additional gates. GEMM requires its DEFAULT search space
+    # and warns when EXHAUSTIVE bypasses it. FlexAttention currently requires its
+    # DEFAULT search space plus a static, dense, contiguous gfx950 forward problem
+    # in the measured shape domain, with Q/K/V sharing one fp16/bf16 dtype, no
+    # user-pinned tuning kernel_options, and a score_mod that reads no captured
+    # buffers; every other case retains the regular config generator.
     #
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend

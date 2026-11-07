@@ -21,6 +21,7 @@ from .heuristics.template.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    FlexAttentionConfigContext,
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
@@ -176,6 +177,28 @@ class InductorChoices:
         return flex_heuristics.get_flex_attn_fwd_configs(
             head_dim, seq_len, dtype, v_head_dim
         )
+
+    def refine_flex_attention_fwd_configs(
+        self, configs: list[Any], context: FlexAttentionConfigContext
+    ) -> list[Any]:
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
+        ``append_flex_attention_choices`` still receives the unrefined pool.
+        Only the stock pool is refined: a handler that overrides
+        ``get_flex_attention_fwd_configs`` keeps its pool unless it also
+        overrides this method.
+        """
+        # Resolve through the instance: composed choices dispatch each hook to
+        # the contributor that overrides it, which type(self) would not see.
+        lookup = getattr(self.get_flex_attention_fwd_configs, "__func__", None)
+        if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
+            return configs
+        flex_heuristics = self.get_config_heuristics(context.device.type)
+        refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
+        return configs if refine is None else refine(configs, context)
 
     def get_flex_attention_bwd_configs(
         self,
@@ -834,6 +857,8 @@ class InductorChoices:
             proximity_score,
         )
 
+
+_STOCK_FLEX_ATTENTION_FWD_CONFIGS = InductorChoices.get_flex_attention_fwd_configs
 
 InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
 InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
