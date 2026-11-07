@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -15613,20 +15613,17 @@ class TestNNDeviceType(NNTestCase):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @onlyAccelerator
-    def test_CTCLoss_long_targets(self, device):
-        # target_length=1200 gives a 2401-position lattice, which exceeds the
-        # 1024-thread block the MPS kernel processes at a time; the backward
-        # pass must match CPU across blocks (see gh-203356).
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @toleranceOverride({torch.double: tol(atol=1e-4, rtol=0), torch.float: tol(atol=1e-2, rtol=1e-6)})
+    def test_CTCLoss_long_targets(self, device, dtype):
+        # 2 * target_length + 1 > 1024 exercises the cross-block recursion in the MPS kernel (gh-203356)
         input_length = 4000
         vocab_size = 3
         batch_size = 4
         target_length = 1200
-        # MPS has no float64; float32 accumulates ~1e-3 error over 4000 steps.
-        is_mps = torch.device(device).type == "mps"
-        dtype = torch.float if is_mps else torch.double
-        tol = 1e-2 if is_mps else 1e-4
 
-        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=dtype).log_softmax(2).requires_grad_()
+        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).log_softmax(2).requires_grad_()
         targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
@@ -15637,11 +15634,11 @@ class TestNNDeviceType(NNTestCase):
         grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
-            res_device = torch.nn.functional.ctc_loss(log_probs.to(device), targets.to(device), input_lengths, target_lengths,
+            res_device = torch.nn.functional.ctc_loss(log_probs.to(dtype).to(device), targets.to(device), input_lengths, target_lengths,
                                                       reduction='sum', zero_infinity=True)
-            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device))
-        self.assertEqual(res_cpu, res_device, atol=tol, rtol=0)
-        self.assertEqual(grad_cpu, grad_device, atol=tol, rtol=0)
+            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device, dtype))
+        self.assertEqual(res_cpu, res_device, exact_dtype=False)
+        self.assertEqual(grad_cpu, grad_device)
 
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
