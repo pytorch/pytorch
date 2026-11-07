@@ -86,16 +86,6 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, view)
 
-    def test_input_subclass_inherited_get(self):
-        class Mapping(builtins.frozendict):
-            pass
-
-        def fn(x, mapping):
-            return x + mapping.get("a", 0)
-
-        x, mapping = torch.ones(1), Mapping(a=2)
-        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
-
     @parametrize("key_type", [float, complex, tuple, frozenset])
     def test_input_nan_key_identity_guard(self, key_type):
         def make_key():
@@ -173,11 +163,11 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
+    @parametrize("streaming", [False, True])
     @parametrize("explicit_new", [False, True])
-    def test_constructor_preserves_key_comparisons(self, explicit_new):
+    def test_constructor_preserves_key_comparisons(self, explicit_new, streaming):
         class Key:
-            def __init__(self):
-                self.calls = 0
+            calls = 0
 
             def __hash__(self):
                 return 42
@@ -188,16 +178,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             first, second = Key(), Key()
+
+            def pairs():
+                yield first, x
+                yield second, x + 1
+                first.calls = 0
+
+            data = pairs() if streaming else [(first, x), (second, x + 1)]
             if explicit_new:
-                mapping = builtins.frozendict.__new__(
-                    builtins.frozendict, [(first, x), (second, x + 1)]
-                )
+                mapping = builtins.frozendict.__new__(builtins.frozendict, data)
             else:
-                mapping = builtins.frozendict([(first, x), (second, x + 1)])
+                mapping = builtins.frozendict(data)
             return x + len(mapping), first.calls
 
         x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 2, 1))
+        self.assertEqual(fn(x), (x + 2, 0 if streaming else 1))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_subscription_compares_key_once(self):
@@ -260,9 +255,11 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertEqual(compiled(x, mapping), fn(x, mapping))
         finally:
-            torch._dynamo.disallow_in_graph(consume)
+            torch._dynamo.trace_rules._allowed_callable_ids.remove(id(consume))
+        self.assertFalse(torch._dynamo.trace_rules.is_callable_disallowed(consume))
 
-    def test_sourceless_custom_key_hash(self):
+    @parametrize("instance", [False, True])
+    def test_sourceless_custom_key_hash(self, instance):
         class Meta(type):
             hash_value = 1
             calls = 0
@@ -274,7 +271,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         class Key(metaclass=Meta):
             pass
 
-        mapping = builtins.frozendict({Key: 5})
+        mapping = builtins.frozendict({Key() if instance else Key: 5})
         Meta.hash_value = 2
         calls = Meta.calls
         with self.assertRaisesRegex(
@@ -446,6 +443,25 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(key.calls, calls)
         self.assertEqual(torch.compile(fn, backend="eager")(torch.ones(1), mapping), 2)
         self.assertEqual(key.calls, calls)
+
+    @parametrize(
+        "key_type",
+        [python_pytree.MappingKey, python_pytree.SequenceKey, python_pytree.GetAttrKey],
+    )
+    def test_preexisting_changed_pytree_key(self, key_type):
+        key = key_type("a" if key_type is python_pytree.GetAttrKey else 0)
+        mapping = builtins.frozendict({key: 7})
+        changed = "b" if key_type is python_pytree.GetAttrKey else 1
+        object.__setattr__(key, next(iter(key_type.__dataclass_fields__)), changed)
+
+        def fn(x, mapping):
+            return x + mapping.get(key, 0)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hash"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
 
     @parametrize("base", [object, type, types.ModuleType, torch.Tensor])
     def test_preexisting_restored_identity_hash(self, base):
