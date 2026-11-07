@@ -90,6 +90,8 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _wrap_delattr,
+    _wrap_setattr,
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
     GetSet,
@@ -1841,13 +1843,209 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
-    """Some unsupported user-defined method"""
+class MethodTypeVariableMixin(VariableTracker):
+    """Shared PyMethod_Type protocol for bound-method VariableTrackers."""
 
-    # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
-    # Mirrors PyMethodObject, which composes im_func/im_self rather than
-    # subclassing the function type (MethodType is not a FunctionType subclass).
+    im_func: VariableTracker
+    im_self: VariableTracker
     _cpython_type = types.MethodType
+    tp_members = {
+        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
+        "__func__": Member(lambda s, _: s.im_func, readonly_setter),
+    }
+
+    @staticmethod
+    def _get_doc(
+        s: "MethodTypeVariableMixin", tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        return generic_getattr(tx, s.im_func, "__doc__")
+
+    @staticmethod
+    def _set_doc(
+        s: "MethodTypeVariableMixin",
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> Never:
+        raise_attribute_error(
+            tx, "attribute '__doc__' of 'method' objects is not writable"
+        )
+
+    @staticmethod
+    def _get_class(
+        s: "MethodTypeVariableMixin", tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        source = AttrSource(s.source, "__class__") if s.source else None
+        return VariableTracker.build(tx, types.MethodType, source)
+
+    @staticmethod
+    def _set_class(
+        s: "MethodTypeVariableMixin",
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> Never:
+        if value is None:
+            raise_type_error(tx, "can't delete __class__ attribute")
+        if maybe_get_python_type(value) is not type:
+            raise_type_error(
+                tx,
+                f"__class__ must be set to a class, not '{value.python_type_name()}' object",
+            )
+        raise_type_error(
+            tx,
+            "__class__ assignment only supported for mutable types or ModuleType subclasses",
+        )
+
+    tp_getset = {
+        "__class__": GetSet(_get_class, _set_class),
+        "__doc__": GetSet(_get_doc, _set_doc),
+    }
+
+    def _method_func(self) -> Any:
+        if isinstance(self.im_func, BaseUserFunctionVariable):
+            return self.im_func.get_function()
+        return self.im_func.as_python_constant()
+
+    def get_name(self) -> str:
+        if isinstance(self.im_func, BaseUserFunctionVariable):
+            return self.im_func.get_name()
+        return self._method_func().__name__
+
+    def python_type(self) -> type[types.MethodType]:
+        return types.MethodType
+
+    def self_args(self) -> list[VariableTracker]:
+        return [self.im_self]
+
+    def guard_as_python_constant(self) -> types.MethodType:
+        return types.MethodType(
+            self._method_func(), self.im_self.guard_as_python_constant()
+        )
+
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # PyMethod_Type uses the receiver's identity hash, even when its type
+        # overrides __hash__. A source gives the actual method; otherwise use
+        # the receiver object when available and a fake VT identity if not.
+        if self.source:
+            return hash(tx.output.resolve_source_value(self.source)), False
+
+        receiver = self.im_self.get_real_python_backed_value()
+        if receiver is NO_SUCH_SUBOBJ:
+            receiver_hash = id(self.im_self)
+        else:
+            receiver_hash = object.__hash__(receiver)
+        result = receiver_hash ^ hash(self._method_func())
+        if result == -1:
+            result = -2
+        return result, True
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, MethodTypeVariableMixin
+        ):
+            return variables.ConstantVariable.create(NotImplemented)
+
+        equal = self._method_func() is other._method_func()
+        if equal:
+            from .object_protocol import vt_identity_compare
+
+            same_self = vt_identity_compare(self.im_self, other.im_self)
+            if same_self is None:
+                unimplemented(
+                    gb_type="method comparison with undecidable receiver",
+                    context=f"{self} {op} {other}",
+                    explanation="Dynamo cannot tell at trace time whether the "
+                    "two bound methods share a receiver.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
+            equal = same_self.as_python_constant()
+
+        return variables.ConstantVariable.create(equal if op == "__eq__" else not equal)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        return self
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        if any(name in t.__dict__ for t in types.MethodType.__mro__):
+            return super().tp_getattro_impl(tx, name)
+        return generic_getattr(tx, self.im_func, name)
+
+    def tp_setattr_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        return self._set_method_attribute(tx, name, value)
+
+    def tp_delattr_impl(
+        self, tx: "InstructionTranslatorBase", name: VariableTracker
+    ) -> VariableTracker:
+        return self._set_method_attribute(tx, name, None)
+
+    def _set_method_attribute(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if not name.is_python_constant():
+            unimplemented(
+                gb_type="non-constant attribute name on method",
+                context=f"method={self}, name={name}",
+                explanation="Dynamo requires a constant attribute name when "
+                "setting or deleting a MethodType attribute.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        name_value = name.as_python_constant()
+        if not isinstance(name_value, str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{name.python_type_name()}'",
+            )
+        entry = MethodTypeVariableMixin.tp_getset.get(
+            name_value
+        ) or MethodTypeVariableMixin.tp_members.get(name_value)
+        if entry is not None:
+            result = entry.setter(self, tx, value)
+            return result if result is not None else ConstantVariable.create(None)
+        raise_attribute_error(
+            tx,
+            f"'method' object has no attribute '{name_value}' and no __dict__ for setting new attributes",
+        )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__":
+            return _wrap_setattr(
+                self, tx, MethodTypeVariableMixin.tp_setattr_impl, args, kwargs
+            )
+        if name == "__delattr__":
+            return _wrap_delattr(
+                self, tx, MethodTypeVariableMixin.tp_delattr_impl, args, kwargs
+            )
+        return super().call_method(tx, name, args, kwargs)
+
+
+class UserMethodVariable(MethodTypeVariableMixin, BaseUserFunctionVariable):  # noqa: RVT001
+    """Some unsupported user-defined method"""
 
     def __init__(
         self,
@@ -1905,58 +2103,6 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
         # (nested, generator, wrapper) never do.
         fn_vt = self.im_func
         return isinstance(fn_vt, UserFunctionVariable) and fn_vt.is_constant
-
-    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # CPython method_hash: hash(self) ^ hash(func)
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/classobject.c#L304
-        if self.source:
-            real_val = tx.output.resolve_source_value(self.source)
-            return hash(real_val), False
-        # Sourceless: compute method_hash from components.
-        from .object_protocol import generic_hash_impl
-
-        self_hash, self_fake = generic_hash_impl(tx, self.im_self)
-        func_hash = hash(self.get_function())
-        h = self_hash ^ func_hash
-        if h == -1:
-            h = -2
-        return h, self_fake
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # method_richcompare: only == and != are handled, and only against
-        # another method; anything else is NotImplemented, which is why
-        # `obj.m < obj.m` is a TypeError. im_func is compared by equality and
-        # im_self by identity. Ref method_richcompare in CPython
-        # Objects/classobject.c.
-        if op not in ("__eq__", "__ne__") or not isinstance(other, UserMethodVariable):
-            return variables.ConstantVariable.create(NotImplemented)
-
-        if self.get_function() is not other.get_function():
-            equal = False
-        else:
-            from .object_protocol import vt_identity_compare
-
-            same_self = vt_identity_compare(self.im_self, other.im_self)
-            if same_self is None:
-                # Receiver identity is not decidable at trace time. Returning
-                # NotImplemented here would fall back to comparing the method
-                # objects by identity, which is always False for two separate
-                # attribute reads, so break instead of answering wrongly.
-                unimplemented(
-                    gb_type="method comparison with undecidable receiver",
-                    context=f"{self} {op} {other}",
-                    explanation="Dynamo cannot tell at trace time whether the "
-                    "two bound methods share a receiver.",
-                    hints=[*graph_break_hints.DIFFICULT],
-                )
-            equal = same_self.as_python_constant()
-
-        return variables.ConstantVariable.create(equal if op == "__eq__" else not equal)
-
-    def self_args(self) -> list[VariableTracker]:
-        return [self.im_self]
 
     def get_source(self) -> Source | None:
         return self.im_func.get_source()
@@ -2087,59 +2233,51 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
         # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L61
         return super().call_function(tx, args, kwargs)
 
-    def tp_descr_get_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        owner: VariableTracker,
-    ) -> VariableTracker:
-        # method_descr_get: a bound method does not re-bind. Only reached where
-        # method has tp_descr_get (3.13+); see tp_getset below.
-        return self
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # method_getattro: a name defined on the method type resolves there;
-        # anything else (__name__, __defaults__, __dict__, ...) is read off
-        # __func__.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c
-        from .object_protocol import generic_getattr
-
-        if any(name in t.__dict__ for t in types.MethodType.__mro__):
-            return super().tp_getattro_impl(tx, name)
-        return generic_getattr(tx, self.im_func, name)
-
-    def _get_doc(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import generic_getattr
-
-        # method_get_doc returns __func__.__doc__.
-        return generic_getattr(tx, self.im_func, "__doc__")
-
-    def _set_doc(
-        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
-    ) -> Never:
-        # A getset with a NULL setter (getset_set).
-        msg = "attribute '__doc__' of 'method' objects is not writable"
-        raise_attribute_error(tx, msg)
-
-    # The members and getsets of the method type itself.
-    # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
-    tp_members = {
-        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
-        "__func__": Member(lambda s, _: s.im_func, readonly_setter),
-    }
-
-    tp_getset = {
-        "__doc__": GetSet(_get_doc, _set_doc),
-    }
-
     if "__get__" not in types.MethodType.__dict__:
         # 3.11 and 3.12: method has no __get__, so method_getattro forwards the
         # attribute to __func__, whose __get__ re-binds.
-        tp_getset["__get__"] = GetSet(
-            lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
-        )
+        tp_getset = {
+            **MethodTypeVariableMixin.tp_getset,
+            "__get__": GetSet(
+                lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter
+            ),
+        }
+
+
+class BoundBuiltinCallableMethodVariable(MethodTypeVariableMixin):  # noqa: RVT001
+    """MethodType wrapping a builtin function.
+
+    Mirrors PyMethodObject in CPython's Objects/classobject.c.
+    """
+
+    _cpython_type = types.MethodType
+
+    def __init__(
+        self,
+        im_func: "variables.BuiltinVariable",
+        im_self: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.im_func = im_func
+        self.im_self = im_self
+
+    def __repr__(self) -> str:
+        return f"BoundBuiltinCallableMethodVariable({self.im_func}, {self.im_self})"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.im_func.call_function(tx, [self.im_self, *args], kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("types", "MethodType"))
+        codegen(self.im_func)
+        codegen(self.im_self)
+        codegen.extend_output(create_call_function(2, False))
 
 
 class ContextWrappedFunctionMixin(VariableTracker):

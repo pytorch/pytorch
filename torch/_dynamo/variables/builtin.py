@@ -922,7 +922,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
         from .builder import SourcelessBuilder
-        from .functions import BaseUserFunctionVariable
+        from .functions import BaseUserFunctionVariable, MethodTypeVariableMixin
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
         from .torch import BaseTorchVariable
@@ -1111,6 +1111,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
+                    MethodTypeVariableMixin,
                     ConstDictVariable,
                     BaseTorchVariable,
                 )
@@ -3904,6 +3905,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
+                variables.MethodTypeVariableMixin,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

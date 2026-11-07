@@ -5880,6 +5880,26 @@ class SourcelessBuilder:
                 descriptor, SourcelessBuilder.create(tx, value.__self__)
             )
         elif isinstance(value, types.MethodType):
+            if not isinstance(value.__func__, types.FunctionType):
+                func_vt = SourcelessBuilder.create(tx, value.__func__)
+                if isinstance(func_vt, BuiltinVariable):
+                    if isinstance(value.__self__, (type, abc.ABCMeta)):
+                        obj_vt = SourcelessBuilder.create(tx, value.__self__)
+                    else:
+                        obj_vt = tx.output.side_effects.id_to_variable.get(
+                            id(value.__self__)
+                        )
+                    if obj_vt is None:
+                        unimplemented(
+                            gb_type="sourceless builtin MethodType without tracked receiver",
+                            context=f"method={value}",
+                            explanation="Dynamo cannot reconstruct a builtin-backed "
+                            "MethodType unless its receiver is already tracked.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    return torch._dynamo.variables.BoundBuiltinCallableMethodVariable(
+                        func_vt, obj_vt
+                    )
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
                 if getattr(value.__self__, value.__func__.__name__) != value:

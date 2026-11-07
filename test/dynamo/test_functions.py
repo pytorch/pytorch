@@ -6778,6 +6778,133 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    def test_builtin_callable_method_type(self):
+        class Receiver:
+            pass
+
+        receiver = Receiver()
+
+        def fn(x):
+            method = types.MethodType(id, receiver)
+            try:
+                method.missing_attribute
+            except AttributeError as error:
+                missing_args = error.args
+            return (
+                method(),
+                method.__func__ is id,
+                method.__self__ is receiver,
+                hasattr(method, "__get__"),
+                method.__name__,
+                method.__qualname__,
+                method.__module__,
+                method.__doc__,
+                missing_args,
+                x + 1,
+            )
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_builtin_callable_method_type_richcompare_and_hash(self):
+        class Unhashable:
+            __hash__ = None
+
+        a, b = Unhashable(), Unhashable()
+
+        def fn(x):
+            m1 = types.MethodType(id, a)
+            m2 = types.MethodType(id, a)
+            m3 = types.MethodType(id, b)
+            other = object()
+            return (
+                m1 == m2,
+                m1 != m3,
+                m1 is m2,
+                m2 in {m1},
+                m2 in {m1: True},
+                m1 == other,
+                m1 != other,
+                x + 1,
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[:-1], (True, True, False, True, True, False, True))
+
+    def test_builtin_callable_method_type_attribute_errors(self):
+        class Receiver:
+            pass
+
+        def fn(name, value, delete):
+            method = types.MethodType(id, Receiver())
+            try:
+                if delete:
+                    delattr(method, name)
+                else:
+                    setattr(method, name, value)
+            except (AttributeError, TypeError) as error:
+                return type(error).__name__, error.args
+            return "no error", ()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        cases = (
+            ("__func__", None, False),
+            ("__self__", None, True),
+            ("__doc__", None, False),
+            ("__doc__", None, True),
+            ("missing_attribute", None, False),
+            ("__class__", None, False),
+            ("__class__", int, False),
+            ("__class__", None, True),
+        )
+        for name, value, delete in cases:
+            self.assertEqual(compiled(name, value, delete), fn(name, value, delete))
+
+    def test_builtin_callable_method_type_rejects_none_receiver(self):
+        def fn():
+            try:
+                types.MethodType(id, None)
+            except TypeError as error:
+                return type(error).__name__, error.args
+            return "no error", ()
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(),
+            fn(),
+        )
+
+    def test_sourceless_builtin_callable_method_type(self):
+        class Receiver:
+            pass
+
+        receiver = Receiver()
+        method = types.MethodType(id, receiver)
+
+        def fn(x, obj):
+            obj.value = x
+            return method(), obj.value + 1
+
+        x = torch.randn(2)
+        expected = fn(x, receiver)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, receiver)
+        self.assertEqual(actual, expected)
+
+    def test_python_bound_method_path_is_unchanged(self):
+        class Receiver:
+            def add(self, x):
+                return x + 1
+
+        receiver = Receiver()
+
+        def fn(x):
+            return receiver.add(x)
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_method_still_inlines_after_vt_split(self):
         """Method calls, attribute access and reconstruction survive the split."""
 
