@@ -1709,8 +1709,8 @@ bool gemm_and_bias(
   }
   const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
-  auto ltworkspace = CublasLtWorkspace();
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+  const auto workspace_budget = at::cuda::getCUDABlasLtWorkspaceSize();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspace_budget);
 
 #ifndef USE_ROCM
   uint32_t a_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
@@ -1743,6 +1743,17 @@ bool gemm_and_bias(
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
+    const auto workspace_size = heuristicResult.workspaceSize;
+    at::DataPtr workspace;
+    void* workspace_ptr = nullptr;
+    if (workspace_size) {
+      if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+        workspace_ptr = at::cuda::getCUDABlasLtWorkspace(workspace_size);
+      } else {
+        workspace = at::cuda::allocateCUDABlasWorkspace(workspace_size);
+        workspace_ptr = workspace.get();
+      }
+    }
     cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1757,8 +1768,8 @@ bool gemm_and_bias(
       result_ptr,
       Ddesc_raw,
       &heuristicResult.algo,
-      ltworkspace.ptr,
-      ltworkspace.size,
+      workspace_ptr,
+      workspace_size,
       stream);
 #ifdef USE_ROCM
     if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
