@@ -2637,6 +2637,22 @@ class triton:
         == "1"
     )
 
+    # Emit a second version of each pointwise kernel with atomic_add stores in
+    # which every program accumulates into one of several zero-initialized
+    # replicas of the destination, then sum the replicas into the destination.
+    # This divides atomic contention by the replica count, at the cost of zeroing
+    # and reducing the replicas. The wrapper picks the version at runtime from
+    # the real sizes, using the two limits below.
+    replicate_atomic_scatters = (
+        os.environ.get("TORCHINDUCTOR_REPLICATE_ATOMIC_SCATTERS", "0") == "1"
+    )
+    atomic_scatter_replicas: int = 16
+    # Largest replica workspace of one kernel launch, in MiB.
+    atomic_scatter_replica_max_mib: int = 512
+    # Minimum number of atomic_add stores per destination element. Below it, the
+    # zeroing and reduction cost more than the contention they remove.
+    atomic_scatter_replica_min_ratio: int = 128
+
     # Fuse staged reduction pipelines, including block reductions and
     # lane-resolution pointwise epilogues.
     nested_reduction: bool = Config(

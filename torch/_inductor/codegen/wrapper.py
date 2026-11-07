@@ -1260,6 +1260,34 @@ class ExitSubgraphLine(WrapperLine):
         return converter._generate_exit_subgraph
 
 
+@dataclasses.dataclass
+class EnterBranchLine(WrapperLine):
+    """Indents the body of an `if` or `else` line written just before it.
+
+    Sizes computed inside the branch are not defined after it, so the memo of
+    computed sizes is restored at the matching ExitBranchLine.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_indent()
+
+
+@dataclasses.dataclass
+class ExitBranchLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+
 # [device-as-parameter] Name of the call()-local variable holding the runtime current
 # device index under compile-on-one-rank, so the wrapper is byte-identical across ranks.
 _COOR_DEVICE_IDX_VAR = COOR_DEVICE_IDX_VAR

@@ -28,6 +28,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -146,7 +147,7 @@ from .triton_utils import (
     use_block_ptr_enabled,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
-from .wrapper import SymbolicCallArg
+from .wrapper import EnterBranchLine, ExitBranchLine, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -3600,6 +3601,48 @@ ARG_REDUCTION_TYPES = (
 PLAIN_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
 
 
+@dataclasses.dataclass
+class AtomicScatterReplica:
+    """The replicas of one atomic_add destination, see
+    config.triton.replicate_atomic_scatters."""
+
+    numel: sympy.Expr
+    # Elements per replica. A multiple of 16, so that every replica keeps the
+    # alignment of the destination and the atomics stay vectorizable.
+    stride: sympy.Expr
+    # First element of the replicas in the kernel's workspace, set by the first
+    # store to the destination.
+    offset: sympy.Expr | None = None
+
+
+def _atomic_replica_limits(
+    replicas: dict[str, AtomicScatterReplica], scattered: sympy.Expr
+) -> list[tuple[sympy.Expr, sympy.Expr]] | None:
+    """The (lhs, rhs) pairs that must satisfy lhs <= rhs at runtime for the
+    replicated kernel to be used, or None if one never holds."""
+    nrep = config.triton.atomic_scatter_replicas
+    itemsize = V.graph.get_dtype(next(iter(replicas))).itemsize
+    # The replica offsets must also fit in an int32 index.
+    max_elems = min(
+        config.triton.atomic_scatter_replica_max_mib * 2**20 // itemsize, 2**31 - 1
+    )
+    limits = [
+        (nrep * sympy.Add(*(r.stride for r in replicas.values())), max_elems),
+        *(
+            (config.triton.atomic_scatter_replica_min_ratio * r.numel, scattered)
+            for r in replicas.values()
+        ),
+    ]
+    undecided = []
+    for lhs, rhs in limits:
+        if V.graph.sizevars.statically_known_leq(lhs, rhs):
+            continue
+        if V.graph.sizevars.statically_known_gt(lhs, rhs):
+            return None
+        undecided.append((lhs, sympy.sympify(rhs)))
+    return undecided
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -3666,6 +3709,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        self.atomic_add_buffers: OrderedSet[str] = OrderedSet()
+        self.plain_store_buffers: OrderedSet[str] = OrderedSet()
+        # Set on the replicated version of a kernel.
+        self.atomic_replicas: dict[str, AtomicScatterReplica] = {}
+        self.atomic_replica_limits: list[tuple[sympy.Expr, sympy.Expr]] = []
+        # Set on a kernel whose replicated version the wrapper picks at runtime.
+        self.atomic_replica_kernel: TritonKernel | None = None
         self._pdl_load_index = 0
         self._pdl_has_wait = False
         self.op_trace: list[TritonOpTraceEntry] = []
@@ -5655,7 +5705,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         store the 'value' to the memory location 'name', offset by some indexing expression 'index'.
         """
 
-        var = self.args.output(name)
+        real_name = name
+        if V.graph.scheduler:
+            real_name = V.graph.scheduler.mutation_real_name.get(name, name)
+        replica = None
+        if mode == "atomic_add":
+            self.atomic_add_buffers.add(real_name)
+            replica = self.atomic_replicas.get(real_name)
+        else:
+            self.plain_store_buffers.add(real_name)
+        if replica is None:
+            var = self.args.output(name)
+        else:
+            var = self._atomic_replica_workspace(real_name, replica)
         original_index = index
         dtype = V.graph.get_dtype(name)
 
@@ -5734,6 +5796,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"
+            if replica is not None:
+                if replica.offset is None:
+                    raise AssertionError(f"no workspace for the replicas of {name}")
+                nrep = config.triton.atomic_scatter_replicas
+                stride = self.index_to_str(replica.stride)
+                indexing_str = (
+                    f"(tl.program_id(0) % {nrep}) * {stride} + ({indexing_str})"
+                )
+                if replica.offset != 0:
+                    offset = self.index_to_str(replica.offset)
+                    indexing_str = f"{offset} + {indexing_str}"
             # PyTorch bool accumulation has OR semantics.
             atomic_op = "atomic_or" if dtype == torch.bool else "atomic_add"
             line = f"tl.{atomic_op}({var} + ({indexing_str}), {value}, {indexing.mask_str}, sem='relaxed')"
@@ -5751,6 +5824,72 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.outside_loop_vars.add(value)
 
         exit_stack.close()
+
+    def _atomic_replica_workspace(
+        self, name: str, replica: AtomicScatterReplica
+    ) -> str:
+        if replica.offset is None:
+            ws_ptr, _, offset = self.args.workspace(
+                config.triton.atomic_scatter_replicas * replica.stride,
+                zero_fill=True,
+                dtype=V.graph.get_dtype(name),
+            )
+            replica.offset = sympy.sympify(offset)
+            return ws_ptr
+        return self.args.workspace_args[0].inner_name
+
+    def atomic_scatter_replicas(self) -> dict[str, AtomicScatterReplica]:
+        """The atomic_add destinations of this kernel that its replicated version
+        would accumulate into per-program replicas instead."""
+        if (
+            not self.atomic_add_buffers
+            or self.features.is_reduction()
+            or self.is_combo_kernel
+            or self.args.workspace_args
+            or V.graph.cpp_wrapper
+            or config.fx_wrapper
+            or config.triton.autotune_at_compile_time
+        ):
+            return {}
+        loaded = OrderedSet(
+            V.graph.scheduler.mutation_real_name.get(name, name)
+            for name in self._load_counts
+        )
+        replicas: dict[str, AtomicScatterReplica] = {}
+        dtype = None
+        for name in self.atomic_add_buffers:
+            # A replica cannot serve loads or plain stores of the destination, and
+            # starts at zero, so it would also drop the value of an in-out buffer.
+            if (
+                name in loaded
+                or name in self.plain_store_buffers
+                or name in self.args.inplace_buffers
+                or name not in self.args.output_buffers
+            ):
+                continue
+            buf = V.graph.try_get_buffer(name)
+            if buf is None:
+                continue
+            layout = buf.get_layout()
+            # The workspace has one dtype; bool atomics are atomic_or.
+            if layout.dtype == torch.bool or dtype not in (None, layout.dtype):
+                continue
+            numel = sympy_product(layout.size)
+            if (
+                free_unbacked_symbols(numel)
+                or not V.graph.sizevars.statically_known_equals(layout.offset, 0)
+                or not ir.is_contiguous_strides_for_shape(layout.stride, layout.size)
+            ):
+                continue
+            dtype = layout.dtype
+            replicas[name] = AtomicScatterReplica(numel, CeilDiv(numel, 16) * 16)
+        return replicas
+
+    def atomic_replica_condition(self) -> str:
+        pexpr = V.graph.wrapper_code.codegen_python_sizevar
+        return " and ".join(
+            f"{pexpr(lhs)} <= {pexpr(rhs)}" for lhs, rhs in self.atomic_replica_limits
+        )
 
     def device_assert_async(self, cond, msg) -> None:
         # Without Triton debug asserts, the assert is compiled out and cannot fail.
@@ -8624,7 +8763,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def call_kernel(
         self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
     ):
+        if self.atomic_replicas:
+            self._call_atomic_replica_kernel(name)
+            return
         wrapper = V.graph.wrapper_code
+        replica_kernel = self.atomic_replica_kernel
+        if replica_kernel is not None:
+            wrapper.writeline(f"if {replica_kernel.atomic_replica_condition()}:")
+            wrapper.writeline(EnterBranchLine(wrapper))
+            replica_kernel.call_kernel(replica_kernel.kernel_name)
+            wrapper.writeline(ExitBranchLine(wrapper))
+            wrapper.writeline("else:")
+            wrapper.writeline(EnterBranchLine(wrapper))
+
         wrapper.write_triton_header_once()
         _, call_args, _, arg_types = self.args.python_argdefs()
         self.add_numel_to_call_args(name, call_args, arg_types)
@@ -8643,6 +8794,50 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if deallocate_ws:
             self.deallocate_workspaces()
+        if replica_kernel is not None:
+            wrapper.writeline(ExitBranchLine(wrapper))
+
+    def _call_atomic_replica_kernel(self, name: str) -> None:
+        """Zero the replicas, launch, and add the replicas to the destinations."""
+        wrapper = V.graph.wrapper_code
+        wrapper.write_triton_header_once()
+        _, call_args, _, arg_types = self.args.python_argdefs()
+        self.add_numel_to_call_args(name, call_args, arg_types)
+
+        # Plain lines rather than memory planning lines: this may run in one
+        # branch of an `if`, and the planner could reuse the workspace after it.
+        (ws,) = self.args.workspace_args
+        ws_name = ws.get_name()
+        wrapper.writeline(
+            wrapper.make_allocation(
+                ws_name, ws.device, ws.dtype, shape=(ws.count,), stride=(1,)
+            )
+        )
+        wrapper.writeline(wrapper.make_zero_buffer(ws_name))
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            triton=True,
+            arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
+        )
+
+        nrep = config.triton.atomic_scatter_replicas
+        pexpr = wrapper.codegen_python_sizevar
+        for buf_name, replica in self.atomic_replicas.items():
+            if replica.offset is None:
+                raise AssertionError(f"no workspace for the replicas of {buf_name}")
+            start = pexpr(replica.offset)
+            end = pexpr(replica.offset + nrep * replica.stride)
+            stride = pexpr(replica.stride)
+            numel = pexpr(replica.numel)
+            # add_, not copy_: the destination holds what earlier kernels wrote.
+            wrapper.writeline(
+                f"{buf_name}.view(-1).add_({ws_name}[{start}:{end}]"
+                f".view({nrep}, {stride})[:, :{numel}].sum(dim=0))"
+            )
+        wrapper.writeline(f"del {ws_name}")
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
@@ -9424,6 +9619,49 @@ class TritonScheduling(SIMDScheduling):
             )
             store_cache()
             return ms, mod.__file__
+
+    def replicate_atomic_scatters(  # type: ignore[override]
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernels: list[TritonKernel],
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
+        if len(kernels) != 1:
+            return kernels
+        (kernel,) = kernels
+        replicas = kernel.atomic_scatter_replicas()
+        if not replicas:
+            return kernels
+        limits = _atomic_replica_limits(
+            replicas, sympy_product(kernel.numels.values())
+        )
+        if limits is None:
+            return kernels
+        choices = self.create_kernel_choices(
+            kernel_features, kernel_args, kernel_kwargs
+        )
+        if len(choices) != 1:
+            return kernels
+        (replica_kernel,) = choices
+        replica_kernel.atomic_replicas = replicas
+        replica_kernel.atomic_replica_limits = limits
+        node_schedule = kernel_features.node_schedule
+        self.codegen_node_schedule_with_kernel(node_schedule, replica_kernel)
+        if any(replica.offset is None for replica in replicas.values()):
+            return kernels
+        if not limits:
+            return [replica_kernel]
+
+        config_patches = self._collect_config_patches(node_schedule)
+        with V.set_kernel_handler(replica_kernel), config.patch(**config_patches):
+            src_code = replica_kernel.codegen_kernel()
+        replica_kernel.kernel_name = self.define_kernel(
+            src_code, node_schedule, replica_kernel
+        )
+        replica_kernel.code_hash = code_hash(src_code)
+        kernel.atomic_replica_kernel = replica_kernel
+        return kernels
 
     def create_kernel_choices(  # type: ignore[override]
         self,
