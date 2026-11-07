@@ -136,6 +136,7 @@ class ShutdownTimeoutTest(TestCase):
         mock_spec = Mock(spec=WorkerSpec)
         mock_spec.max_restarts = 3
         mock_spec.rdzv_handler = Mock()
+        mock_spec.local_world_size = 1
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
