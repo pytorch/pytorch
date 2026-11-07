@@ -87,6 +87,14 @@ if TEST_WITH_ROCM:
 else:
     NUM_DEVICES = 4
 
+
+def build_mesh_for_fake_pg(mesh: torch.Tensor) -> DeviceMesh:
+    if not dist.is_initialized() or dist.get_backend() != "fake":
+        raise RuntimeError("An initialized fake process group is required")
+    # DeviceMesh requires a logical device type, but FakePG performs no device work.
+    return DeviceMesh("cpu", mesh)
+
+
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
@@ -706,15 +714,24 @@ class DTensorTestMixin:
 
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
+    def _selected_device_type(cls) -> str:
+        device_type = cls.device_type
+        return (
+            device_type
+            if isinstance(device_type, str)
+            else _get_device_type(cls.world_size)
+        )
+
+    @classmethod
     def backend_str(cls) -> str:
-        device_type = _get_device_type(cls.world_size)
+        device_type = cls._selected_device_type()
         backend = dist.get_default_backend_for_device(device_type)
         return backend
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         # Bind accelerator ranks unless the test falls back to CPU.
-        if _get_device_type(world_size) != "cpu" and torch.accelerator.is_available():
+        if cls._selected_device_type() != "cpu" and torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
                 sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
