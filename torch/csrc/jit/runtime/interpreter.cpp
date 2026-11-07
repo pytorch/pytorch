@@ -121,6 +121,8 @@ bool in_torchscript_runtime() {
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
       : taskLauncher_(std::move(taskLauncher)) {
+    registers.reserve(
+        code.pImpl->register_peak_.load(std::memory_order_relaxed));
     enterFrame(code, 0);
   }
 
@@ -173,6 +175,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void enterFrame(const Code& code, size_t base_pointer) {
     frames.emplace_back(Frame{code.pImpl, 0, base_pointer, std::nullopt});
     registers.resize(registers.size() + code.pImpl->register_size_);
+    // Raise the peak register count to a monotonic max.
+    auto& peak = frames.front().function->register_peak_;
+    size_t cur = registers.size();
+    size_t prev = peak.load(std::memory_order_relaxed);
+    while (prev < cur &&
+           !peak.compare_exchange_weak(
+               prev, cur, std::memory_order_relaxed)) {
+    }
   }
 
   void leaveFrame() {
