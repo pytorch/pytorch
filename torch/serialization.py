@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import threading
 import warnings
+import zipfile
 from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
@@ -806,6 +807,52 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
 class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
     def __init__(self, name_or_buffer: str | IO[bytes]) -> None:
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
+
+
+class _UnsupportedZipRegion(RuntimeError):
+    """Raised when a bounded ZIP cannot safely use mapped storage."""
+
+
+def _load_zip_region(
+    zip_view: IO[bytes],
+    *,
+    overall_storage: torch.UntypedStorage,
+    storage_base_offset: int,
+) -> Any:
+    original_position = zip_view.tell()
+    try:
+        region_length = zip_view.seek(0, os.SEEK_END)
+        zip_view.seek(0)
+        try:
+            with zipfile.ZipFile(zip_view) as archive:
+                records = [
+                    info
+                    for info in archive.infolist()
+                    if info.filename.split("/", 1)[-1].startswith("data/")
+                ]
+                if not records:
+                    raise _UnsupportedZipRegion("ZIP has no tensor storage")
+                for info in records:
+                    if info.flag_bits & 0x1 or info.compress_type != zipfile.ZIP_STORED:
+                        raise _UnsupportedZipRegion("compressed or encrypted storage")
+                    with archive.open(info):
+                        pass
+        except zipfile.BadZipFile as e:
+            raise RuntimeError("invalid bounded ZIP region") from e
+        zip_view.seek(0)
+        with _open_zipfile_reader(zip_view) as zip_file:
+            return _load(
+                zip_file,
+                map_location="cpu",
+                pickle_module=_weights_only_unpickler,
+                overall_storage=overall_storage[
+                    storage_base_offset : storage_base_offset + region_length
+                ],
+                weights_only=True,
+                disallow_byteswap=True,
+            )
+    finally:
+        zip_view.seek(original_position)
 
 
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
@@ -2004,6 +2051,7 @@ def _load(
     overall_storage=None,
     *,
     weights_only=False,
+    disallow_byteswap=False,
     **pickle_load_args,
 ):
     restore_location = _get_restore_location(map_location)
@@ -2035,6 +2083,11 @@ def _load(
         pass
     else:
         raise ValueError("Invalid load endianness type")
+
+    if disallow_byteswap and _is_torchscript_zip(zip_file):
+        raise _UnsupportedZipRegion("TorchScript archives are unsupported")
+    if disallow_byteswap and byteorderdata not in (None, sys.byteorder.encode()):
+        raise _UnsupportedZipRegion("mapped ZIP regions cannot be byteswapped")
 
     storage_alignment = 64
     if zip_file.has_record(".storage_alignment"):
@@ -2138,7 +2191,13 @@ def _load(
                         )
             else:
                 storage_offset = zip_file.get_record_offset(name)
-            storage = overall_storage[storage_offset : storage_offset + nbytes]
+            record_size = zip_file.get_record_size(name)
+            if record_size != nbytes:
+                raise RuntimeError(f"{name} size {record_size} does not match {nbytes}")
+            storage_end = storage_offset + nbytes
+            if not 0 <= storage_offset <= storage_end <= overall_storage.nbytes():
+                raise RuntimeError(f"mapped storage for {name} is out of bounds")
+            storage = overall_storage[storage_offset:storage_end]
         else:
             if can_calculate_storage_offsets and run_debug_asserts:
                 # This is debug code that we use to test the validity of
