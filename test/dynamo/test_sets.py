@@ -271,26 +271,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 class DictSetOperandTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @parametrize("operand", [[1], (1,), {1}])
-    def test_tensor_set_union(self, operand):
-        def fn(x):
-            result = {x}.union(operand)
-            return x + len(result), any(key is x for key in result)
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    @parametrize("first", [1.0, True])
-    @parametrize("operand", [[1], (1,), range(1, 2)])
-    def test_intersection_preserves_iterable_key_type(self, first, operand):
-        def fn(x):
-            result = {first}.intersection(operand)
-            return x + 1, tuple(type(key) for key in result)
-
-        x = torch.ones(1)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(result, (x + 1, (int,)))
-
     @parametrize("mapping_type", (dict, OrderedDict))
     @parametrize(
         "operation",
