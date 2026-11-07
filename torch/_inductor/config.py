@@ -2013,12 +2013,6 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
-    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
-    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
-    # a NaN difference from native) in Note [CPU flash attention accumulation order].
-    # No size heuristic, so benchmark the model before enabling.
-    enable_cpu_flash_attention_decomposition: bool = False
-
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
     no_redundant_loops = (
