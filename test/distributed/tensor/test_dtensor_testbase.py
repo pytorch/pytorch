@@ -18,6 +18,59 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DTensorContinuousTestBaseTest(TestCase):
+    def test_explicit_device_type_selects_backend(self):
+        class CPUTest(DTensorContinuousTestBase):
+            device_type = "cpu"
+            world_size = 4
+
+        class AcceleratorTest(DTensorContinuousTestBase):
+            device_type = "cuda"
+            world_size = 4
+
+        with (
+            patch.object(common_dtensor, "TEST_CUDA", True),
+            patch.object(common_dtensor, "DEVICE_TYPE", "cuda"),
+            patch.object(common_dtensor, "DEVICE_COUNT", 1, create=True),
+        ):
+            self.assertEqual(CPUTest.backend_str(), "gloo")
+            self.assertEqual(AcceleratorTest.backend_str(), "nccl")
+
+    def test_explicit_accelerator_requires_enough_devices(self):
+        class AcceleratorTest(DTensorContinuousTestBase):
+            device_type = "cuda"
+            world_size = 4
+
+        with (
+            patch.object(torch.accelerator, "is_available", return_value=True),
+            patch.object(torch.accelerator, "device_count", return_value=1),
+            patch.object(torch.accelerator, "set_device_index") as set_device,
+            patch.object(MultiProcContinuousTest, "_init_pg") as init_pg,
+            self.assertRaisesRegex(
+                SystemExit,
+                str(common_dtensor.TEST_SKIPS["multi-device-4"].exit_code),
+            ),
+        ):
+            AcceleratorTest._init_pg(0, 4, "unused")
+        set_device.assert_not_called()
+        init_pg.assert_not_called()
+
+    def test_explicit_cpu_does_not_bind_accelerator(self):
+        class CPUTest(DTensorContinuousTestBase):
+            device_type = "cpu"
+            world_size = 4
+
+        with (
+            patch.object(common_dtensor, "TEST_CUDA", True),
+            patch.object(common_dtensor, "DEVICE_TYPE", "cuda"),
+            patch.object(common_dtensor, "DEVICE_COUNT", 8, create=True),
+            patch.object(torch.accelerator, "is_available", return_value=True),
+            patch.object(torch.accelerator, "set_device_index") as set_device,
+            patch.object(MultiProcContinuousTest, "_init_pg") as init_pg,
+        ):
+            CPUTest._init_pg(3, 4, "unused")
+        init_pg.assert_called_once_with(3, 4, "unused")
+        set_device.assert_not_called()
+
     def test_device_selection_matches_instance_property(self):
         class Fixture(DTensorContinuousTestBase):
             world_size = 4
