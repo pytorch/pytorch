@@ -1495,6 +1495,71 @@ class TestUnaryUfuncs(TestCase):
             check_equal(t, torch.special.i1, scipy.special.i1)
             check_equal(t, torch.special.i1e, scipy.special.i1e)
 
+    @dtypes(torch.float64)
+    def test_special_bessel_airy_rational_denominators(self, device, dtype):
+        # The Cephes rational approximations behind bessel_j0/j1/y0/y1 and
+        # airy_ai have monic denominators (Cephes p1evl: implied leading
+        # coefficient 1). Seeding their Horner loops with 0 instead of 1 gave
+        # absolute errors of up to 8.7e-7 (Bessel, 5 < x < 20) and 3.0e-6
+        # (airy_ai, x < -2.09); see gh-198583. Reference values are mpmath at
+        # 50 digits; the comments give the error of the previous implementation.
+        cases = {
+            torch.special.bessel_j0: [
+                (2.5, -0.048383776468198),
+                (4.0, -0.39714980986384735),  # was off by 7.4e-10
+                (5.5, -0.006843869417819197),  # was off by 1.6e-07
+                (6.0, 0.15064525725099692),  # was off by 5.7e-08
+                (7.0, 0.3000792705195556),  # was off by 8.0e-10
+                (8.0, 0.1716508071375539),  # was off by 2.0e-09
+                (10.0, -0.24593576445134835),  # was off by 3.2e-11
+                (15.0, -0.014224472826780772),
+            ],
+            torch.special.bessel_j1: [
+                (2.5, 0.49709410246427405),
+                (4.0, -0.06604332802354913),  # was off by 4.1e-11
+                (5.5, -0.34143821542904335),  # was off by 8.2e-10
+                (6.0, -0.27668385812756563),  # was off by 7.1e-08
+                (7.0, -0.004682823482345833),  # was off by 2.6e-08
+                (8.0, 0.23463634685391463),  # was off by 3.2e-09
+                (10.0, 0.04347274616886144),  # was off by 3.3e-10
+                (15.0, 0.20510403861352275),
+            ],
+            torch.special.bessel_y0: [
+                (2.5, 0.4980703596152319),
+                (4.0, -0.016940739325064992),  # was off by 3.6e-10
+                (5.5, -0.339480592881911),  # was off by 3.6e-10
+                (6.0, -0.28819468398157916),  # was off by 3.1e-08
+                (7.0, -0.025949743967209265),  # was off by 1.2e-08
+                (8.0, 0.22352148938756622),  # was off by 1.5e-09
+                (10.0, 0.055671167283599395),  # was off by 1.5e-10
+                (15.0, 0.20546429603891828),
+            ],
+            torch.special.bessel_y1: [
+                (2.5, 0.1459181379667858),
+                (4.0, 0.3979257105571),  # was off by 4.7e-10
+                (5.5, -0.023758238956389618),  # was off by 3.7e-07
+                (6.0, -0.17501034430039825),  # was off by 1.3e-07
+                (7.0, -0.30266723702418485),  # was off by 1.8e-09
+                (8.0, -0.1580604617312475),  # was off by 4.4e-09
+                (10.0, 0.24901542420695388),  # was off by 7.0e-11
+                (15.0, 0.02107362803687351),  # was off by 1.4e-12
+            ],
+            torch.special.airy_ai: [
+                (-6.0, -0.3291451736298231),
+                (-4.0, -0.07026553294928951),  # was off by 2.6e-11
+                (-3.0, -0.37881429367765806),  # was off by 5.3e-09
+                (-2.5, -0.11232506769296609),  # was off by 2.3e-07
+                (-2.2, 0.09614537800766888),  # was off by 1.6e-06
+                (-2.1, 0.16348451299929267),  # was off by 2.8e-06
+                (-1.5, 0.4642565777488694),
+                (1.5, 0.07174949700810541),
+            ],
+        }
+        for fn, points in cases.items():
+            x = torch.tensor([p[0] for p in points], device=device, dtype=dtype)
+            expected = torch.tensor([p[1] for p in points], device=device, dtype=dtype)
+            self.assertEqual(fn(x), expected, atol=1e-14, rtol=1e-13)
+
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_ndtr_vs_scipy(self, device, dtype):
