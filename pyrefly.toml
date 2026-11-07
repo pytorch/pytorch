@@ -118,6 +118,9 @@ ignore-missing-imports = [
     "redis.*",
     "tabulate.*",
     "shtab.*",
+    # tools/ramjet's Modal SDK is not in the linter image
+    "modal",
+    "modal.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
