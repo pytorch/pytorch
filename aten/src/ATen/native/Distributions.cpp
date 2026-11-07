@@ -442,6 +442,14 @@ Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, std::optional<Ge
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [generator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
+      // Validate count: must be non-negative and finite.
+      // NaN causes binomial_inversion to loop indefinitely (geom_sum > count is always false).
+      // Negative counts are mathematically undefined for binomial distribution.
+      // Fixes #203568 (NaN hang) and #203569 (silent negative count).
+      TORCH_CHECK(
+          count_val >= 0 && std::isfinite(static_cast<double>(count_val)),
+          "torch.binomial requires count to be non-negative and finite, got count=",
+          count_val);
       auto uniform_lambda = [generator] () {
         at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
         return standard_uniform(generator);

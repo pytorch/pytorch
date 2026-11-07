@@ -1904,6 +1904,55 @@ class TestDistributionsDevice(DistributionsTestCase):
             ):
                 torch.binomial(total_count, total_prob)
 
+    def test_torch_binomial_invalid_count(self):
+        # Regression tests for #203568 (NaN count hang) and #203569 (silent negative count)
+        error_msg = "torch.binomial requires count to be non-negative and finite"
+
+        # 1. Negative counts must raise, not return 0
+        for count in [-5.0, -1.0, -0.1, -100.0]:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([count]), torch.tensor([0.5]))
+
+        # 2. NaN count must raise immediately and never hang
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.binomial(torch.tensor([float("nan")]), torch.tensor([0.5]))
+
+        # 3. Infinite counts must raise
+        for inf_val in [float("inf"), float("-inf")]:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([inf_val]), torch.tensor([0.5]))
+
+        # 4. Invalid counts must be rejected even when prob is 0 or 1
+        for prob in [0.0, 1.0]:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([-5.0]), torch.tensor([prob]))
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([float("nan")]), torch.tensor([prob]))
+
+        # 5. Mixed tensors containing any invalid value must be rejected
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.binomial(torch.tensor([5.0, -2.0, 8.0]), torch.tensor([0.5, 0.5, 0.5]))
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.binomial(torch.tensor([5.0, float("nan"), 8.0]), torch.tensor([0.5, 0.5, 0.5]))
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.binomial(torch.tensor([5.0, float("inf"), 8.0]), torch.tensor([0.5, 0.5, 0.5]))
+
+        # 6. Valid counts (including 0.0) must continue to succeed
+        self.assertEqual(torch.binomial(torch.tensor([0.0]), torch.tensor([0.5])).item(), 0.0)
+        self.assertEqual(torch.binomial(torch.tensor([10.0]), torch.tensor([0.0])).item(), 0.0)
+        self.assertEqual(torch.binomial(torch.tensor([10.0]), torch.tensor([1.0])).item(), 10.0)
+
+        # 7. CUDA support when available
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([-5.0], device="cuda"), torch.tensor([0.5], device="cuda"))
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.binomial(torch.tensor([float("nan")], device="cuda"), torch.tensor([0.5], device="cuda"))
+            self.assertEqual(
+                torch.binomial(torch.tensor([0.0], device="cuda"), torch.tensor([0.5], device="cuda")).item(),
+                0.0
+            )
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_multinomial_1d(self):
