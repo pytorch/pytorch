@@ -238,12 +238,13 @@ def _find_rocm_home() -> str | None:
 
 def _find_sycl_home() -> str | None:
     sycl_home = None
-    icpx_path = shutil.which('icpx')
-    # Guess 1: for source code build developer/user, we'll have icpx in PATH,
-    # which will tell us the SYCL_HOME location.
-    if icpx_path is not None:
+    # icpx is shipped with oneAPI, dpclang++ is the open source DPC++ compiler.
+    sycl_compiler_path = shutil.which('icpx') or shutil.which('dpclang++')
+    # Guess 1: for source code build developer/user, we'll have the SYCL compiler
+    # in PATH, which will tell us the SYCL_HOME location.
+    if sycl_compiler_path is not None:
         sycl_home = os.path.dirname(os.path.dirname(
-            os.path.realpath(icpx_path)))
+            os.path.realpath(sycl_compiler_path)))
 
     # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
     # inside intel-sycl-rt, which is automatically installed via pip dependency.
@@ -458,14 +459,25 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
-def _get_icpx_version() -> str:
-    icpx = 'icx' if IS_WINDOWS else 'icpx'
-    compiler_info = subprocess.check_output([icpx, '--version'])
+def _get_sycl_compiler() -> str:
+    if IS_WINDOWS:
+        return 'icx'
+    if shutil.which('icpx') is None and shutil.which('dpclang++') is not None:
+        return 'dpclang++'
+    return 'icpx'
+
+
+def _get_sycl_compiler_version() -> str:
+    sycl = _get_sycl_compiler()
+    compiler_info = subprocess.check_output([sycl, '--version'])
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
     version = ['0', '0', '0'] if match is None else list(match.groups())
     version = list(map(int, version))
     if len(version) != 3:
         raise AssertionError("Failed to parse DPC++ compiler version")
+    if sycl == 'dpclang++':
+        # Map dpclang version to oneAPI version as in cmake/Modules/FindSYCLToolkit.cmake
+        version[0] += 2019
     # Aligning version format with what torch.version.xpu() returns
     return f"{version[0]}{version[1]:02}{version[2]:02}"
 
@@ -1073,8 +1085,8 @@ class BuildExtension(_LazyBuildExt):
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
                 # escaping quoted arguments to pass them thru SYCL compiler
-                icpx_version = _get_icpx_version()
-                if int(icpx_version) >= 20250200:
+                sycl_compiler_version = _get_sycl_compiler_version()
+                if int(sycl_compiler_version) >= 20250200:
                     host_cflags = [item.replace('"', '\\"') for item in host_cflags]
                 else:
                     host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
@@ -1117,8 +1129,8 @@ class BuildExtension(_LazyBuildExt):
             """Filter out MSVC include dirs from pp_opts for oneAPI 2025.3+."""
             # oneAPI 2025.3+ changed include path ordering to match MSVC behavior.
             # Filter out MSVC headers to avoid conflicting declarations with oneAPI's std headers.
-            icpx_version = int(_get_icpx_version())
-            if icpx_version >= 20250300:
+            sycl_compiler_version = int(_get_sycl_compiler_version())
+            if sycl_compiler_version >= 20250300:
                 vc_tools_dir = os.path.normcase(os.environ.get('VCToolsInstallDir', ''))
                 if vc_tools_dir:
                     pp_opts = [
@@ -1804,7 +1816,7 @@ def SyclExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build SyclExtension.
     """
     library_dirs = kwargs.get("library_dirs", [])
-    library_dirs += library_paths()
+    library_dirs += library_paths(device_type="xpu")
     kwargs["library_dirs"] = library_dirs
 
     libraries = kwargs.get("libraries", [])
@@ -3193,8 +3205,8 @@ def _write_ninja_file_to_build_library(path,
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
-        icpx_version = _get_icpx_version()
-        if int(icpx_version) < 20250200:
+        sycl_compiler_version = _get_sycl_compiler_version()
+        if int(sycl_compiler_version) < 20250200:
             host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
 
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
@@ -3319,8 +3331,7 @@ e.
             nvcc = _shell_join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
-        sycl = 'icx' if IS_WINDOWS else 'icpx'
-        config.append(f'sycl = {sycl}')
+        config.append(f'sycl = {_get_sycl_compiler()}')
 
     if IS_HIP_EXTENSION:
         post_cflags = COMMON_HIP_FLAGS + post_cflags
