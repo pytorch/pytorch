@@ -7636,12 +7636,17 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
     device = x.get_device()
     check_for_split = False
     min_numel = 0
-    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    is_triton_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
     if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+    elif (
+        device
+        and device.type in ["cuda", "xpu"]
+        and is_triton(x)
+        and is_triton_two_step_dtype
+    ):
         min_numel = config.triton.use_two_step_variance_min_numel
         threshold = config.triton.use_two_step_variance_threshold
         check_for_split = True

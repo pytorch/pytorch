@@ -2458,7 +2458,7 @@ class triton:
     force_cooperative_reductions = False
 
     # Lower/upper bounds between two-step variance and Welford variance for
-    # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
+    # non-split CUDA/XPU Triton half/bfloat16 reductions. Mid-sized reductions use
     # two-step for throughput; smaller reductions keep the old heuristic because
     # training gradients are more sensitive to the different accumulation order.
     use_two_step_variance_min_numel = 1024
