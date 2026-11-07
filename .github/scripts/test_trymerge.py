@@ -73,6 +73,7 @@ from trymerge import (
     can_skip_internal_checks,
     categorize_checks,
     check_greenlight_reviewed_head_sha,
+    check_stacked_pr_merge_rule,
     DRCI_CHECKRUN_NAME,
     DRCI_RETRY_DELAYS_SECONDS,
     DRCI_TIMEOUT_SECONDS,
@@ -1708,6 +1709,40 @@ class TestGitHubPRGhstackDependencies(TestCase):
             waivers,
         )
 
+    @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_stops_on_a_lower_pr_failing_job(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        _mock_get_checkrun_conclusions: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """A failing non-mandatory job (a ciflow run) on a lower PR stops the land
+        before that PR is cherry-picked."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        red = ("inductor / test (inductor, 1, 2)", "", 1)
+        mock_find_matching_merge_rule.return_value = (None, [], [red], {})
+
+        with self.assertRaisesRegex(RuntimeError, "stacked PR #106034") as cm:
+            top_pr.merge_ghstack_into(mock_repo, False)
+
+        self.assertNotIsInstance(cm.exception, MergeRuleFailedError)
+        self.assertIn(red[0], str(cm.exception))
+        mock_repo.cherry_pick.assert_not_called()
+
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
@@ -2066,6 +2101,7 @@ class TestDockerCiGates(TestCase):
                 "docker-builds",
                 "linux-build / build",
                 "docker-builds-nightly / x",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
             )
         }
         self.assertEqual(
@@ -2073,6 +2109,7 @@ class TestDockerCiGates(TestCase):
             {
                 "docker-builds / docker-build (pytorch-linux-jammy)",
                 "docker-builds",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
             },
         )
 
@@ -3575,6 +3612,79 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
             self.top.merge_into.call_args.kwargs["ignore_current_checks"],
             {(1001, "red"), (1002, "red")},
         )
+
+
+class TestStackedPrChecks(NoNetworkTestCase):
+    """A PR landing below the merged one is held to the merged PR's bar: every check,
+    not only the mandatory ones of its rule."""
+
+    MANDATORY = "Lint"
+    CIFLOW = "inductor / test (inductor, 1, 2)"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.patch(
+            "trymerge.read_merge_rules",
+            return_value=[
+                MergeRule(
+                    name="rule",
+                    patterns=["*"],
+                    approved_by=[],
+                    mandatory_checks_name=[self.MANDATORY],
+                )
+            ],
+        )
+        self.drci = self.patch("trymerge.get_drci_classifications", return_value={})
+        self.pr = stacked_pr(1001)
+        self.pr.get_changed_files.return_value = ["torch/foo.py"]
+        self.pr.get_approved_by.return_value = []
+        self.pr.has_internal_changes.return_value = False
+
+    def gate(self, ciflow_status: str | None, **kwargs: Any) -> None:
+        self.pr.get_checkrun_conclusions.return_value = {
+            name: JobCheckState(name, "", status, None, i, None, None)
+            for i, (name, status) in enumerate(
+                [(self.MANDATORY, "SUCCESS"), (self.CIFLOW, ciflow_status)]
+            )
+        }
+        kwargs.setdefault("skip_mandatory_checks", False)
+        kwargs.setdefault("ignore_current_checks", None)
+        check_stacked_pr_merge_rule(
+            self.pr, mock.MagicMock(spec=GitRepo), skip_internal_checks=False, **kwargs
+        )
+
+    def test_a_green_pr_passes(self) -> None:
+        self.gate("SUCCESS")
+
+    def test_a_failing_ciflow_job_refuses(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "stacked PR #1001") as cm:
+            self.gate("FAILURE")
+        self.assertNotIsInstance(cm.exception, MergeRuleFailedError)
+        self.assertIn(self.CIFLOW, str(cm.exception))
+
+    def test_a_pending_ciflow_job_waits(self) -> None:
+        with self.assertRaisesRegex(
+            MandatoryChecksMissingError, "stacked PR #1001"
+        ) as cm:
+            self.gate(None)
+        self.assertIn(self.CIFLOW, str(cm.exception))
+
+    def test_a_startup_failure_refuses_even_when_dr_ci_excuses_it(self) -> None:
+        self.drci.return_value = {"FLAKY": [{"name": self.CIFLOW, "id": 1}]}
+        with self.assertRaisesRegex(RuntimeError, "STARTUP failures .* #1001"):
+            self.gate("STARTUP_FAILURE")
+
+    def test_a_flaky_failure_does_not_block(self) -> None:
+        self.drci.return_value = {"FLAKY": [{"name": self.CIFLOW, "id": 1}]}
+        self.gate("FAILURE")
+
+    def test_ignore_current_waives_a_failure_present_at_the_start(self) -> None:
+        self.gate("FAILURE", ignore_current_checks={(1001, self.CIFLOW)})
+
+    def test_force_merge_is_not_gated(self) -> None:
+        for status in ("FAILURE", None):
+            with self.subTest(status=status):
+                self.gate(status, skip_mandatory_checks=True)
 
 
 TARGETS_ANOTHER_BRANCH = "PR targets user/1001 rather than main, refusing merge request"
