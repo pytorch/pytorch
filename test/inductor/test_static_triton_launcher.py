@@ -44,6 +44,7 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -572,6 +573,22 @@ class TestStaticTritonLauncherUnit(TestCase):
                 HeuristicType.POINTWISE,
             )
         return static_kernel, metadata_group
+
+
+@instantiate_parametrized_tests
+class TestStaticTritonLauncherUnitMetadataGroup(TestCase):
+    """Launcher-cubin metadata-group resolution tests, split out of
+    TestStaticTritonLauncherUnit so that class holds only device-independent tests.
+
+    Classified CUDA and not instantiated: cubin metadata-group behavior is
+    CUDA-internal; device-class variants would duplicate coverage meaninglessly.
+    The _can_statically_launch helper stays on the unit class and is delegated by
+    reference. Nothing is copied.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    _can_statically_launch = TestStaticTritonLauncherUnit._can_statically_launch
 
     @skipIfRocm
     def test_static_launch_takes_cubin_from_metadata_group(self):
