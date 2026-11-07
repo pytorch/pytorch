@@ -3338,27 +3338,42 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
-@functools.cache
+# Not cached: for a dynamic K this installs a guard on the current graph.
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
     from torch._inductor.virtualized import V
 
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
-
-    return (
-        V.graph.sizevars.statically_known_true(
-            sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
-            )
-        )
-        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
-        and not V.graph.cpp_wrapper
-        and config.triton.num_decompose_k_splits > 0
-        # Callers rely on False to retain the regular MM fallback.
-        and bool(get_k_splits(m, n, k))
+    large_k = sympy.And(
+        sympy.Ge(k, decompose_k_threshold * m),
+        sympy.Ge(k, decompose_k_threshold * n),
     )
+    sizevars = V.graph.sizevars
+    if (
+        V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        or V.graph.cpp_wrapper
+        or config.triton.num_decompose_k_splits <= 0
+        # Callers rely on False to retain the regular MM fallback.
+        or not get_k_splits(m, n, k)
+    ):
+        return False
+    if sizevars.statically_known_true(large_k):
+        return True
+    # A backed dynamic K is decided on its hint, using splits that divide every K,
+    # and guarded so a later K below the threshold recompiles. The
+    # threshold_multiple > 1 check only drops Triton mm; keep it for a dynamic K
+    # rather than add a second guard.
+    if not isinstance(k, sympy.Expr) or k.is_number or free_unbacked_symbols(large_k):
+        return False
+    m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
+    divisible = any(
+        sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
+        for s in get_k_splits(m, n, k)
+    )
+    if not divisible or k_hint < decompose_k_threshold * max(m_hint, n_hint):
+        return False
+    return threshold_multiple == 1 and sizevars.guard_or_false(large_k)
 
 
 @functools.cache

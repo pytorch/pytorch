@@ -90,8 +90,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             for k_split in exact_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
-        # Return before the TMA checks below, which install guards.
-        if "TRITON" not in bmm_backends or not exact_k_splits:
+        # Return before the TMA checks below, which install guards. The Triton
+        # partial BMM specializes K, which would recompile for every dynamic K.
+        dynamic_k = bool(get_free_symbols(k, unbacked_only=False))
+        if "TRITON" not in bmm_backends or not exact_k_splits or dynamic_k:
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
