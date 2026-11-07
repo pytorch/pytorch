@@ -444,12 +444,35 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  // From torch/headeronly/util/FloatRounding.h
+  inline float round_to_odd_float(double x) {
+    const float f = static_cast<float>(x);
+    const double back = static_cast<double>(f);
+    uint32_t bits = __float_as_uint(f);
+    const uint32_t step = (back != x) & (x == x) & ~bits & 1u;
+    const uint32_t up = fabs(back) < fabs(x);
+    bits += step * (2 * up - 1);
+    return __uint_as_float(bits);
+  }
+
+  // Mirrors detail::rounds_through_float in TypeCast.h. The jiterator's Half
+  // and BFloat16 have no numeric_limits, so it lists its only narrower types.
+  template <typename T>
+  constexpr bool rounds_through_float = std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value ||
+      std::is_same<T, std::complex<at::Half>>::value;
+
   template <typename dest_t, typename src_t>
   struct static_cast_with_inter_type {
     static inline dest_t apply(
         src_t src) {
       constexpr bool real = needs_real<dest_t, src_t>::value;
-      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+      auto r = maybe_real<real, src_t>::apply(src);
+      if constexpr (std::is_same<decltype(r), double>::value && rounds_through_float<dest_t>) {
+        return static_cast<dest_t>(round_to_odd_float(r));
+      } else {
+        return static_cast<dest_t>(r);
+      }
     }
   };
 
@@ -482,7 +505,8 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
       std::complex<at::Half>,
       std::complex<double>> {
     static inline std::complex<at::Half> apply(std::complex<double> src) {
-      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+      return static_cast<std::complex<at::Half>>(std::complex<float>(
+          round_to_odd_float(src.real()), round_to_odd_float(src.imag())));
     }
   };
 

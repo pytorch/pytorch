@@ -1925,6 +1925,58 @@ namespace {
          }
       }
     }
+    // The pointer convert from double to Half/BFloat16 has vectorized
+    // specializations; c10::convert rounds once.
+    template <typename T>
+    void test_convert_from_double() {
+      constexpr double inf = std::numeric_limits<double>::infinity();
+      const double flt_max = std::numeric_limits<float>::max();
+      std::vector<double> xs = {
+          0.0, -0.0, inf, -inf, std::numeric_limits<double>::quiet_NaN(),
+          flt_max, -flt_max, std::nextafter(flt_max, inf), 1e39, -1e39,
+          0x1p-140, -0x1.8p-140, 0x1p-149, 0x1.0000001p-130};
+      // Every finite value, the midpoints to the next encoding (past the
+      // largest value, to the next one were the exponent range wider), and
+      // their neighbours.
+      const auto value = [](int bits) {
+        return static_cast<double>(
+            static_cast<float>(T(static_cast<uint16_t>(bits), T::from_bits())));
+      };
+      for (const auto i : c10::irange(0xFFFF)) {
+        const double v = value(i);
+        if (!std::isfinite(v)) {
+          continue;
+        }
+        double next = value(i + 1);
+        if (!std::isfinite(next)) {
+          next = 2 * v - value(i - 1);
+        }
+        const double mid = (v + next) / 2;
+        xs.insert(
+            xs.end(),
+            {v, mid, std::nextafter(mid, -inf), std::nextafter(mid, inf)});
+      }
+      // Leave a tail after the vectorized loop.
+      while (xs.size() % 64 != 37) {
+        xs.push_back(1.0 + static_cast<double>(xs.size()) * 0x1p-40);
+      }
+      std::vector<T> actual(xs.size());
+      at::vec::convert(xs.data(), actual.data(), static_cast<int64_t>(xs.size()));
+      for (const auto i : c10::irange(xs.size())) {
+        const T expected = c10::convert<T>(xs[i]);
+        const bool same = std::isnan(static_cast<float>(expected))
+            ? std::isnan(static_cast<float>(actual[i]))
+            : actual[i].x == expected.x;
+        ASSERT_TRUE(same) << "x=" << xs[i] << " at " << i << ": got "
+                          << actual[i] << ", expected " << expected;
+      }
+    }
+    TEST(ConvertFromDoubleTest, Half) {
+      test_convert_from_double<c10::Half>();
+    }
+    TEST(ConvertFromDoubleTest, BFloat16) {
+      test_convert_from_double<c10::BFloat16>();
+    }
     TEST(HalfConversionTest, HalfFloat) {
       float f32s[100];
       for (const auto i : c10::irange(100)) {
@@ -2330,7 +2382,7 @@ namespace {
         x[i] = generator.get();
       }
       for (const auto i : c10::irange(N)) {
-        ref[i] = static_cast<dst_t>(x[i]);
+        ref[i] = c10::convert<dst_t>(x[i]);
       }
       auto x_vec = vec::loadu(x);
       auto y_vec = at::vec::convert<dst_t>(x_vec);
