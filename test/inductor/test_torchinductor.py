@@ -21056,6 +21056,62 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
 
+    @config.patch({"triton.decompose_sort_ops": True})
+    def test_median_decompose_sort_ops_nan(self):
+        def fn_default(a):
+            return torch.median(a)
+
+        def fn_dim(a):
+            return torch.median(a, dim=-1)
+
+        # 1. Default median (values only) with single and multiple NaNs
+        x_single = torch.tensor([float("nan"), 1.0, 2.0], device=self.device)
+        x_multi = torch.tensor([float("nan"), 1.0, float("nan")], device=self.device)
+        for x in (x_single, x_multi):
+            torch._dynamo.reset()
+            result = torch.compile(fn_default)(x)
+            expected = fn_default(x)
+            torch.testing.assert_close(result, expected, equal_nan=True)
+
+        # 2. Median with dim (values and indices)
+        # Case A: Unique median / unique NaN: indices must match eager exactly
+        x_unique = torch.tensor(
+            [[float("nan"), 1.0, 2.0], [3.0, 4.0, 5.0]], device=self.device
+        )
+        torch._dynamo.reset()
+        res_unique = torch.compile(fn_dim)(x_unique)
+        exp_unique = fn_dim(x_unique)
+        torch.testing.assert_close(res_unique.values, exp_unique.values, equal_nan=True)
+        torch.testing.assert_close(res_unique.indices, exp_unique.indices)
+
+        # Case B: Multiple NaNs (non-unique medians)
+        # Per PyTorch contract, indices for non-unique medians may vary across implementations/devices.
+        # We verify exact median value parity and that returned indices are valid by gathering input values.
+        x_non_unique = torch.tensor(
+            [
+                [float("nan"), 1.0, float("nan")],
+                [float("nan"), float("nan"), float("nan")],
+            ],
+            device=self.device,
+        )
+        torch._dynamo.reset()
+        res_non_unique = torch.compile(fn_dim)(x_non_unique)
+        exp_non_unique = fn_dim(x_non_unique)
+        torch.testing.assert_close(
+            res_non_unique.values, exp_non_unique.values, equal_nan=True
+        )
+        gathered = x_non_unique.gather(
+            -1, res_non_unique.indices.unsqueeze(-1)
+        ).squeeze(-1)
+        torch.testing.assert_close(gathered, res_non_unique.values, equal_nan=True)
+        self.assertTrue(torch.isnan(gathered).all())
+        self.assertTrue(
+            (
+                (res_non_unique.indices >= 0)
+                & (res_non_unique.indices < x_non_unique.size(-1))
+            ).all()
+        )
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -23355,6 +23411,46 @@ if RUN_GPU:
                     "Expected Triton sort codegen for median",
                 )
                 torch.testing.assert_close(result, fn(inp))
+
+            # NaN propagation with decompose_sort_ops (issue #203492)
+            inp_nan = inp.clone()
+            inp_nan[0, 2] = float("nan")
+            inp_nan[1, :] = float("nan")
+
+            torch._dynamo.reset()
+            result_default, code_default = run_and_get_code(
+                torch.compile(fn_default), inp_nan
+            )
+            self.assertIn(
+                "sort_with_index",
+                " ".join(code_default),
+                "Expected Triton sort codegen for median",
+            )
+            torch.testing.assert_close(
+                result_default, fn_default(inp_nan), equal_nan=True
+            )
+
+            torch._dynamo.reset()
+            result_dim, code_dim = run_and_get_code(torch.compile(fn_dim), inp_nan)
+            self.assertIn(
+                "sort_with_index",
+                " ".join(code_dim),
+                "Expected Triton sort codegen for median",
+            )
+            expected_dim = fn_dim(inp_nan)
+            # Exact median value parity across all rows
+            torch.testing.assert_close(
+                result_dim.values, expected_dim.values, equal_nan=True
+            )
+            # Unique medians: row 0 has a single NaN; rows 2: have distinct normal floats
+            torch.testing.assert_close(result_dim.indices[0], expected_dim.indices[0])
+            torch.testing.assert_close(result_dim.indices[2:], expected_dim.indices[2:])
+            # Non-unique NaN medians: row 1 is all-NaN.
+            # Per PyTorch contract, indices for non-unique medians are implementation-defined.
+            # Verify the returned index is valid by gathering the input value.
+            gathered = inp_nan.gather(1, result_dim.indices.unsqueeze(1)).squeeze(1)
+            torch.testing.assert_close(gathered, result_dim.values, equal_nan=True)
+            self.assertTrue(torch.isnan(gathered[1]).all())
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_mode_decompose_sort_ops(self):

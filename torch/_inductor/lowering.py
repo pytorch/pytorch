@@ -8475,7 +8475,11 @@ def median_default(self):
     flat = view(self, [numel])
     sorted_vals, _ = sort_stable(flat, dim=0)
     k = (numel - 1) // 2
-    return select(sorted_vals, 0, k)
+    values = select(sorted_vals, 0, k)
+    if self.get_dtype().is_floating_point:
+        last = select(sorted_vals, 0, numel - 1)
+        values = where(isnan(last), last, values)
+    return values
 
 
 @register_lowering(aten.median.dim, type_promotion_kind=None)
@@ -8492,6 +8496,11 @@ def median_dim(self, dim, keepdim=False):
     k = (n - 1) // 2
     values = select(sorted_vals, dim, k)
     indices = select(sorted_idxs, dim, k)
+    if self.get_dtype().is_floating_point:
+        last = select(sorted_vals, dim, n - 1)
+        is_nan = isnan(last)
+        values = where(is_nan, last, values)
+        indices = where(is_nan, select(sorted_idxs, dim, n - 1), indices)
     if keepdim:
         values = unsqueeze(values, dim)
         indices = unsqueeze(indices, dim)
