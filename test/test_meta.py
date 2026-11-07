@@ -2220,6 +2220,17 @@ class TestMetaCore(TestCase):
         else:
             self.assertEqual(out_dtype, [in_dtype,])
 
+    @parametrize("in_dtype", [torch.float16, torch.bfloat16])
+    @parametrize("M", [4, 0])
+    def test_mixed_dtype_for_fused_rms_norm_backward(self, in_dtype, M):
+        # Called directly because rms_norm only dispatches a mixed-dtype weight to the
+        # fused op on CUDA. On meta it takes the composite path.
+        input = torch.empty([M, 8], dtype=in_dtype, device="meta")
+        rstd = torch.empty([M, 1], device="meta")
+        weight = torch.empty([8], dtype=torch.float32, device="meta")
+        outs = torch.ops.aten._fused_rms_norm_backward(input, input, [8], rstd, weight, [True, True])
+        self.assertEqual([t.dtype for t in outs], [in_dtype, torch.float32])
+
     @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
     def test_scaled_dot_product_flash_attention_for_cpu_logsumexp_dtype(self, dtype):
         B, H, L, E = 2, 4, 8, 16

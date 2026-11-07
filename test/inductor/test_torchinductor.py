@@ -18794,6 +18794,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(codes[0])
 
+    # Default mode elides the downcast-upcast pairs that would expose a weight grad
+    # rounded to the input dtype, so emulate_precision_casts keeps them. Lite mode runs
+    # the kernel and checks its outputs against the meta dtype.
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("mode", ("default", "lite"))
+    @config.patch(emulate_precision_casts=True)
+    def test_rms_norm_mixed_dtype_weight_backward(self, dtype, mode):
+        if self.device != "cuda":
+            raise unittest.SkipTest("only the CUDA kernel takes a mixed-dtype weight")
+
+        def f(x, weight):
+            # A literal stays static in the dynamic-shapes suites. Lite mode fails on a
+            # symbolic normalized_shape for any weight dtype.
+            return torch.nn.functional.rms_norm(x, [1024], weight, 1e-5)
+
+        x = torch.randn(2048, 1024, dtype=dtype, device=self.device, requires_grad=True)
+        weight = torch.randn(1024, device=self.device, requires_grad=True)
+        # Scaled so the weight grad exceeds the fp16 range.
+        grad_out = 1000 * torch.randn(2048, 1024, dtype=dtype, device=self.device)
+
+        x_ref = x.detach().double().cpu().requires_grad_(True)
+        weight_ref = weight.detach().double().cpu().requires_grad_(True)
+        f(x_ref, weight_ref).backward(grad_out.double().cpu())
+
+        torch.compile(f, mode=mode)(x, weight).backward(grad_out)
+        self.assertEqual(weight.grad.double().cpu(), weight_ref.grad, atol=1, rtol=1e-4)
+
     def test_lite_regional_compile_flex_attention(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
