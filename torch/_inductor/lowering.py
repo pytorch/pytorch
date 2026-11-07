@@ -5313,6 +5313,8 @@ def scatter_fallback(
 def scatter_(self, dim: int, index, src, *, reduce: str | None = None):
     if reduce not in (None, "add", "multiply"):
         raise AssertionError('expected: reduce in (None, "add", "multiply")')
+    if index.get_numel() == 0:
+        return self
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -5357,6 +5359,12 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
         )
 
+    if not (isinstance(self, TensorBox)):
+        raise AssertionError("expected: isinstance(self, TensorBox)")
+
+    if index.get_numel() == 0:
+        return self
+
     if isinstance(src, Number):
         src = full_like(self, src)
 
@@ -5373,9 +5381,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if fallback_result:
         return fallback_result
 
-    if not (isinstance(self, TensorBox)):
-        raise AssertionError("expected: isinstance(self, TensorBox)")
-
     ndim = len(self.get_size())
     if ndim == 0:
         self = view(self, [1])
@@ -5385,9 +5390,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
-
-    if index.get_numel() == 0:
-        return self
 
     if "int" not in str(index.get_dtype()):
         raise AssertionError('expected: "int" in str(index.get_dtype())')
