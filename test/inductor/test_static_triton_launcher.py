@@ -1106,7 +1106,49 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
                 cubin_file, "no_such_kernel", 0, device_interface.current_device()
             )
 
-    @skipIfXpu(msg="Only testing CUDA OOM behavior")
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_load_kernel_invalid_device_raises(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        from torch._C import _StaticXpuLauncher
+
+        # 256 wraps to device 0 if narrowed before the range check.
+        for invalid_device in (-1, 256):
+            with self.subTest(device=invalid_device):
+                with self.assertRaisesRegex(
+                    RuntimeError, "device index is out of range"
+                ):
+                    _StaticXpuLauncher._load_kernel(
+                        cubin_file, "simple_kernel", 99999999, invalid_device
+                    )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_shared_mem_limit(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        device = get_interface_for_device(GPU_TYPE).current_device()
+        limit = torch.xpu.get_device_properties(device).local_mem_size
+        from torch._C import _StaticXpuLauncher
+
+        _StaticXpuLauncher._load_kernel(cubin_file, "simple_kernel", limit, device)
+        with self.assertRaisesRegex(
+            torch.OutOfMemoryError,
+            rf"out of resource: simple_kernel Required: {limit + 1} Hardware limit:\s*{limit}",
+        ):
+            _StaticXpuLauncher._load_kernel(
+                cubin_file, "simple_kernel", limit + 1, device
+            )
+
     def test_too_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):
@@ -1121,8 +1163,8 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         # Allocate too much shared memory
         compiled_kernel.shared = 99999999
         self.assertRaisesRegex(
-            RuntimeError,
-            "out of resource: simple_kernel",
+            torch.OutOfMemoryError,
+            r"out of resource: simple_kernel Required: 99999999 Hardware limit:\s*\d+",
             lambda: self._make_launcher(compiled_kernel),
         )
 
