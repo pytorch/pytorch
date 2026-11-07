@@ -218,16 +218,49 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
+#ifdef USE_ROCM
+// On ROCm the 2D helpers below take the kernel's index type, so spatial offset
+// products stay in it: channels-last strides can exceed the 32-bit range even
+// when each spatial extent fits int. The #else branches keep CUDA's int
+// helpers unchanged.
+template<typename index_t>
+__forceinline__ __device__
+bool within_bounds_2d(index_t h, index_t w, index_t H, index_t W) {
+  return h >= 0 && h < H && w >= 0 && w < W;
+}
+#else
 __forceinline__ __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
+#endif
 
 __forceinline__ __device__
 bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
+#ifdef USE_ROCM
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t get_value_bounded(
+    const scalar_t *data, scalar_t x, scalar_t y,
+    index_t W, index_t H, index_t sW, index_t sH,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  x = compute_coordinates(x, static_cast<int>(W), padding_mode, align_corners);
+  y = compute_coordinates(y, static_cast<int>(H), padding_mode, align_corners);
+
+  index_t ix = static_cast<index_t>(x);
+  index_t iy = static_cast<index_t>(y);
+
+  if (within_bounds_2d(iy, ix, H, W)) {
+    return data[iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
+}
+#else
 template<typename scalar_t>
 __forceinline__ __device__
 scalar_t get_value_bounded(
@@ -246,7 +279,25 @@ scalar_t get_value_bounded(
   }
   return static_cast<scalar_t>(0);
 }
+#endif
 
+#ifdef USE_ROCM
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void safe_add_2d(scalar_t *data, index_t h, index_t w,
+                 index_t sH, index_t sW, index_t H, index_t W,
+                 scalar_t delta,
+                 const index_t NC_offset,
+                 const index_t memory_span) {
+  if (within_bounds_2d(h, w, H, W)) {
+    fastAtomicAdd(data,
+                  NC_offset + h * sH + w * sW,
+                  memory_span,
+                  delta,
+                  true);
+  }
+}
+#else
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
@@ -262,6 +313,7 @@ void safe_add_2d(scalar_t *data, int h, int w,
                   true);
   }
 }
+#endif
 
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
@@ -279,6 +331,27 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
   }
 }
 
+#ifdef USE_ROCM
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void add_value_bounded(
+    scalar_t* data, scalar_t x, scalar_t y,
+    index_t W, index_t H, index_t sW, index_t sH,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    const index_t NC_offset,
+    const index_t memory_span) {
+
+  x = compute_coordinates(x, static_cast<int>(W), padding_mode, align_corners);
+  y = compute_coordinates(y, static_cast<int>(H), padding_mode, align_corners);
+
+  index_t ix = static_cast<index_t>(x);
+  index_t iy = static_cast<index_t>(y);
+
+  safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span);
+}
+#else
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void add_value_bounded(
@@ -297,6 +370,7 @@ void add_value_bounded(
 
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span);
 }
+#endif
 
 // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
 template<typename scalar_t>

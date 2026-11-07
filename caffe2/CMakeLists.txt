@@ -1024,6 +1024,72 @@ if(USE_ROCM)
   set(__caffe2_hip_srcs_hip ${Caffe2_HIP_SRCS})
   list(FILTER __caffe2_hip_srcs_hip INCLUDE REGEX "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_hip} PROPERTIES LANGUAGE HIP)
+
+  # gfx1250: LLVM without llvm/llvm-project#209861 emits
+  # v_pk_{add,mul,fma}_bf16 with an inline-constant operand (such as 1.0 or
+  # 0.5) but not the op_sel that selects its upper 16 bits, so the instruction
+  # reads zero; the 2D BF16 bicubic backward then returns a zero grid gradient
+  # and a wrong input gradient. A compiler version does not show whether a
+  # given LLVM 23 build has the fix, so compile the smallest affected case and
+  # check for the fixed encoding (op_sel:[0,1]). Only with it does the grid
+  # sampler keep packed BF16 instructions; otherwise, including when the probe
+  # cannot run or its output is inconclusive, it is built without them, and
+  # the configure message says which case applied. The flag covers every BF16
+  # kernel in this file, including the 3D backward, which then use v_fma_mix
+  # and f32 instructions; other dtypes, and architectures without the
+  # feature, compile unchanged. The host pass of this HIP compile ignores the
+  # feature with a "not a recognized feature" warning; -Xarch_device cannot
+  # carry the -Xclang pairs to the device only.
+  # Match the base architecture so target IDs such as gfx1250:sramecc+ count.
+  set(_gs_base_archs "")
+  foreach(_gs_arch IN LISTS PYTORCH_ROCM_ARCH)
+    string(REGEX REPLACE ":.*$" "" _gs_base "${_gs_arch}")
+    list(APPEND _gs_base_archs "${_gs_base}")
+  endforeach()
+  if("gfx1250" IN_LIST _gs_base_archs)
+    set(_gs_probe "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_bf16_inline_constant.ll")
+    file(WRITE "${_gs_probe}"
+      "target triple = \"amdgcn-amd-amdhsa\"\n"
+      "define <2 x bfloat> @probe(<2 x bfloat> %x) {\n"
+      "  %r = fadd <2 x bfloat> %x, <bfloat 0xR3F80, bfloat 0xR3F80>\n"
+      "  ret <2 x bfloat> %r\n"
+      "}\n")
+    execute_process(
+      COMMAND "${CMAKE_HIP_COMPILER}" -target amdgcn-amd-amdhsa -mcpu=gfx1250
+              -O3 -S -x ir "${_gs_probe}" -o -
+      RESULT_VARIABLE _gs_probe_result
+      OUTPUT_VARIABLE _gs_probe_asm
+      ERROR_VARIABLE _gs_probe_err)
+    string(REGEX MATCH "v_pk_add_bf16[^\n]*" _gs_probe_insn "${_gs_probe_asm}")
+    string(STRIP "${_gs_probe_err}" _gs_probe_err)
+    if(NOT _gs_probe_result EQUAL 0)
+      message(STATUS "gfx1250 packed BF16 probe could not run "
+                     "(${_gs_probe_result}): ${_gs_probe_err}; building "
+                     "GridSampler.hip without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    elseif(_gs_probe_insn MATCHES "op_sel:\\[0,1\\]")
+      message(STATUS "gfx1250 packed BF16 inline constants are encoded "
+                     "correctly; GridSampler.hip keeps packed BF16")
+      set(_gs_no_bf16_pk OFF)
+    elseif(_gs_probe_insn STREQUAL "")
+      message(STATUS "gfx1250 packed BF16 probe inconclusive: no "
+                     "v_pk_add_bf16 in its output; building GridSampler.hip "
+                     "without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    else()
+      message(STATUS "gfx1250 packed BF16 probe did not find the fixed "
+                     "encoding (llvm/llvm-project#209861) in "
+                     "\"${_gs_probe_insn}\"; building GridSampler.hip "
+                     "without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    endif()
+    if(_gs_no_bf16_pk)
+      set_property(SOURCE
+          "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/hip/GridSampler.hip"
+          APPEND PROPERTY COMPILE_OPTIONS
+          "-Xclang" "-target-feature" "-Xclang" "-bf16-pk-insts")
+    endif()
+  endif()
 endif()
 
 # Compile exposed libraries.
