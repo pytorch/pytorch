@@ -8578,6 +8578,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_cross_entropy_loss_ctor_dim(self):
+        input = torch.randn(2, 4, 5)
+        target = torch.randint(5, (2, 4))
+
+        def fn(input, target):
+            return torch.nn.CrossEntropyLoss(reduction="none", dim=-1)(input, target)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(input, target), fn(input, target))
+
     def test_cross_entropy_loss_prob_target_dynamic(self):
         shapes = [(3, 5), (4, 7)]
         compiled = torch.compile(F.cross_entropy, dynamic=True, backend="eager")
@@ -8603,6 +8613,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                             label_smoothing=label_smoothing,
                         )
                         self.assertEqual(expected, actual)
+
+    def test_cross_entropy_loss_dim_dynamic(self):
+        cnt = CompileCounter()
+        fn = torch.compile(F.cross_entropy, dynamic=True, fullgraph=True, backend=cnt)
+
+        def check(shape, dim):
+            x = torch.randn(shape)
+            index_target = torch.randint(shape[dim], x.select(dim, 0).shape)
+            for target in (index_target, torch.rand(shape).softmax(dim)):
+                for reduction in ["none", "mean", "sum"]:
+                    expected = F.cross_entropy(x, target, reduction=reduction, dim=dim)
+                    actual = fn(x, target, reduction=reduction, dim=dim)
+                    self.assertEqual(expected, actual)
+
+        # Classes last, in the middle and first, each at two sets of sizes.
+        for shape, new_shape, dim in (
+            ((2, 3, 5), (3, 4, 7), -1),
+            ((2, 3, 5, 2), (3, 4, 7, 3), 2),
+            ((5, 2, 3), (7, 3, 4), 0),
+        ):
+            torch._dynamo.reset()
+            check(shape, dim)
+            frame_count = cnt.frame_count
+            check(new_shape, dim)
+            self.assertEqual(cnt.frame_count, frame_count)
 
     def test_repr(self):
         class Config:
