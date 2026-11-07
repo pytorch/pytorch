@@ -6,8 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any, cast, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING
 
 import sympy
 
@@ -1472,6 +1471,19 @@ class CppWrapperGpu(CppWrapperCpu):
             return "stream"
         return f"_aoti_aux_stream_cache.get({stream_idx}, this->device_idx_, stream)"
 
+    def _launch_streams(
+        self, device_idx: int, graph_name: str, current_stream_idx: int | None
+    ) -> tuple[str, str]:
+        """The stream a kernel launch passes, as (JIT, AOT) C++ expressions: inside
+        a user stream region of an AOTInductor model, the region's stream, which its
+        aten fallbacks run on, named as the region's entry names it (its stream<i>
+        local is declared once per wrapper and may be out of scope in a later
+        subgraph block); otherwise the wrapper's stream."""
+        if V.graph.aot_mode and current_stream_idx not in (None, 0):
+            region = self._stream_expr_for_idx(current_stream_idx)
+            return get_stream_name(current_stream_idx), region
+        return self.write_get_raw_stream(device_idx, graph_name), "stream"
+
     def _emit_stream_op_inline(self, kernel_name: str | None, args: list[str]) -> bool:
         if kernel_name is None or not V.graph.aot_mode:
             return False
@@ -2030,16 +2042,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        if (
-            V.graph.aot_mode
-            and current_stream_idx is not None
-            and current_stream_idx != 0
-        ):
-            stream = get_stream_name(current_stream_idx)
-            aot_stream = self._stream_expr_for_idx(current_stream_idx)
-        else:
-            stream = self.write_get_raw_stream(device.index, graph_name)
-            aot_stream = "stream"
+        stream, aot_stream = self._launch_streams(
+            device.index, graph_name, current_stream_idx
+        )
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -2089,8 +2094,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
             # assignment; JIT side has no this->device_idx_ in scope, so use the
             # concrete graph device index. Similarly, AOTI side uses the `stream`
             # function parameter of run_impl (in a user stream region, the region's
-            # stream, which its aten fallbacks run on), while JIT side uses the
-            # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
+            # stream: see _launch_streams), while JIT side uses the locally-declared
+            # stream{idx} (see _codegen_entry_impl_prologue).
             aoti_device_idx = (
                 "this->device_idx_" if V.graph.aot_mode else str(device.index)
             )
@@ -2193,17 +2198,10 @@ static inline void ensure_triton_kernel_compiles_started() {{
         call_args = flydsl_call_args(self, kernel_name, runtime_args)
         # The stream a user Triton kernel launches on, so the kernel stays ordered with
         # the kernels and aten fallbacks around it.
-        current_stream_idx = V.graph.scheduler.current_stream_idx
-        if (
-            V.graph.aot_mode
-            and current_stream_idx is not None
-            and current_stream_idx != 0
-        ):
-            # Inside a user stream region: the region's stream, which its aten
-            # fallbacks and kernels run on (see _generate_kernel_call_helper).
-            stream = self._stream_expr_for_idx(current_stream_idx)
-        else:
-            stream = self.write_get_raw_stream(device.index, V.graph.name)
+        jit_stream, aot_stream = self._launch_streams(
+            device.index, V.graph.name, V.graph.scheduler.current_stream_idx
+        )
+        stream = aot_stream if V.graph.aot_mode else jit_stream
         self.writeline(f"{kernel_name}({', '.join([*call_args, stream])});")
 
     def prepare_triton_wrapper_args(

@@ -1134,6 +1134,22 @@ class WrapperLine:
 
 
 @dataclasses.dataclass
+class ProfilerMarkerLine(WrapperLine):
+    marker: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        # No `_is_profiler_enabled` guard: that Python flag stays False for
+        # on-demand (Kineto daemon) sessions, while _RecordFunctionFast checks
+        # the native profiler state and does nothing when no profiler is active.
+        code.writeline(
+            f"with torch._C._profiler._RecordFunctionFast({self.marker!r}): pass"
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_profiler_marker
+
+
+@dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     graph: GraphLowering
@@ -3111,21 +3127,22 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
-            # compile-on-one-rank: resolve at runtime so the autotune block matches the
-            # rank-agnostic call() body (see codegen_device_guard_enter).
-            autotune_idx = (
-                V.graph.device_ops.current_device_idx_expr()
-                if _coor_enabled()
-                else device_idx
-            )
-            self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({autotune_idx})"
-            )
+            self._write_autotune_get_raw_stream(name, device_idx)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
         self.writeline(f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})")
         return name
+
+    def _write_autotune_get_raw_stream(self, name: str, device_idx: int) -> None:
+        # compile-on-one-rank: resolve at runtime so the autotune block matches the
+        # rank-agnostic call() body (see codegen_device_guard_enter).
+        autotune_idx = (
+            V.graph.device_ops.current_device_idx_expr()
+            if _coor_enabled()
+            else device_idx
+        )
+        self.kernel_autotune_calls.writeline(f"{name} = get_raw_stream({autotune_idx})")
 
     def get_codegened_graph(self):
         return self.codegened_graph_stack[-1]
@@ -3220,8 +3237,8 @@ class PythonWrapperCodegen(CodeGen):
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
-            self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
+            self._write_autotune_get_raw_stream(
+                get_raw_stream_name(device_idx), device_idx
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -3360,6 +3377,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExternKernelAllocLine(self, node))
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
+        self.codegen_free_unused_outputs(node)
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
@@ -3623,8 +3641,9 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-        else:
-            self.header.splice(kernel_defs)
+            if V.graph.cpp_wrapper:
+                return
+        self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
         if config.profile_bandwidth:
@@ -5706,6 +5725,8 @@ class PythonWrapperCodegen(CodeGen):
             # it picks up the active stream at runtime, rather than reusing the
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
+            if config.triton.autotune_at_compile_time:
+                self._write_autotune_get_raw_stream("raw_stream", device.index)
             device_idx = _coor_device_idx_ref(device.index)
             self.writeline(f"raw_stream = get_raw_stream({device_idx})")
             return "raw_stream"
@@ -6129,6 +6150,10 @@ class PythonWrapperCodegen(CodeGen):
     def make_free_by_names(self, names_to_del: list[str]):
         return f"del {', '.join(name for name in names_to_del)}"
 
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # The Python wrapper drops unused outputs when it deletes the result tuple.
+        pass
+
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
@@ -6138,9 +6163,15 @@ class PythonWrapperCodegen(CodeGen):
         debug_handle: int | None = None,
     ):
         if debug_handle is not None:
-            self.writeline(
+            self.make_comment(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if config.trace.provenance_profiler_markers and not V.graph.cpp_wrapper:
+                self.writeline(
+                    ProfilerMarkerLine(
+                        f"inductor_provenance:{kernel_name}:{debug_handle}"
+                    )
+                )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         if old.get_dtype() != new.get_dtype():

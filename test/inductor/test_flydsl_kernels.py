@@ -961,7 +961,9 @@ def forward(self, x_1, y_1):
                 RuntimeError,
                 r"^FlyDSL kernel add_kernel: 'X' and 'Out' are the same tensor or views "
                 r"that may overlap, and both count as written "
-                r"\(mutates_args=\('X', 'Out'\)\), which PT2 cannot functionalize",
+                r"\(mutates_args=\('X', 'Out'\)\)\. PT2 clones each written argument "
+                r"and writes it back on its own, so one write could be lost\. Pass "
+                r"tensors that do not overlap\.$",
             ):
                 trace(f, x.clone(), y)
         base = torch.stack([x, torch.zeros_like(x)])
@@ -2249,8 +2251,9 @@ class FlyDSLDynamoTests(TestCase):
 
     def test_refused_constant_graph_breaks(self):
         # A constant FlyDSL's side table refuses (an unhashable value that is no
-        # container, here a set in the Constexpr tuple) is a graph break naming the
-        # kernel, not an internal error; eager refuses it with the same TypeError.
+        # container, here a set in the Constexpr tuple, or an object that refers to
+        # itself) is a graph break naming the kernel, not an internal error; eager
+        # refuses it with the same TypeError or ValueError.
         w = wrap_flydsl(scale_by_first_kernel, mutates_args=["Out"])
 
         def f(x):
@@ -2266,6 +2269,25 @@ class FlyDSLDynamoTests(TestCase):
             torch._dynamo.exc.Unsupported, rf"scale_by_first_kernel\(\): {msg}"
         ):
             torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        class Cfg:
+            def __init__(self) -> None:
+                self.me = self
+
+        cfg = Cfg()
+
+        def g(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        msg = r"a constant kernel argument of type Cfg refers to itself through \.me"
+        with self.assertRaisesRegex(ValueError, msg):
+            g(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, rf"scale_by_first_kernel\(\): {msg}"
+        ):
+            torch.compile(g, backend="eager", fullgraph=True)(x)
 
     @parametrize("backend", ("eager", "aot_eager"))
     def test_constexpr_lambda_defaults_are_guarded(self, backend):
