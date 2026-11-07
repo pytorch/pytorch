@@ -387,7 +387,7 @@ requires-python = ">=3.11"
 #   - Explicit license-files list; audit in test/test_license.py (issue #183434).
 #   - third_party/nccl/ is gitignored and populated only when USE_SYSTEM_NCCL=0;
 #     static-NCCL wheels therefore ship no NCCL license text.
-license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib"
+license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND NCSA AND Zlib"
 license-files = [
     "LICENSE",
     "third_party/FP16/LICENSE",
@@ -451,6 +451,10 @@ license-files = [
     "third_party/tensorpipe/third_party/libnop/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
+    "third_party/zendnn/LICENSE",
+    "third_party/zendnn/THIRD-PARTY-NOTICES",
+    "third_party/zendnn/aocl-dlp/LICENSE",
+    "third_party/zendnn/aocl-utils/License.txt",
     "torch/csrc/profiler/kineto/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]

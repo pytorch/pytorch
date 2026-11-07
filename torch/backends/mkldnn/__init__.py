@@ -25,6 +25,12 @@ def is_acl_available():
     return torch._C._has_mkldnn_acl
 
 
+def is_zendnn_available():
+    r"""Return whether PyTorch is built with MKL-DNN + ZenDNN support."""
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._has_mkldnn_zendnn
+
+
 VERBOSE_OFF = 0
 VERBOSE_ON = 1
 VERBOSE_ON_CREATION = 2

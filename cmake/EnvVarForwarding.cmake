@@ -53,6 +53,7 @@
 #   USE_MKLDNN=0              disables MKLDNN
 #   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm
 #                            (USE_MKLDNN must be explicitly enabled)
+#   USE_MKLDNN_ZENDNN=0      disables ZenDNN in MKLDNN (on by default on Linux x86_64)
 #   USE_STATIC_MKL           prefer to link MKL statically (Unix only)
 #   USE_FLASH_ATTENTION=0    disables flash attention for scaled dot product attn
 #   USE_MEM_EFF_ATTENTION=0  disables memory efficient attention for SDPA

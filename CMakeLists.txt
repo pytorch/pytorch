@@ -485,6 +485,9 @@ cmake_dependent_option(
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_MKLDNN_ZENDNN "Use ZenDNN in MKLDNN for AMD Zen CPUs." ON
+  "USE_MKLDNN AND CPU_INTEL AND LINUX" OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON

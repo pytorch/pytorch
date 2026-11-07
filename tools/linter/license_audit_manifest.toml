@@ -71,6 +71,7 @@ paths = [
   'third_party/onnx/LICENSE',
   'third_party/perfetto/LICENSE',
   'third_party/tensorpipe/third_party/libnop/LICENSE',
+  'third_party/zendnn/LICENSE',
 ]
 
 [[spdx]]
@@ -169,4 +170,22 @@ paths = [
 expression = 'Apache-2.0 WITH LLVM-exception AND MIT'
 paths = [
   'third_party/nccl_ep/ThirdPartyNotices.txt',
+]
+
+[[spdx]]
+expression = 'Apache-2.0 AND BSD-3-Clause AND MIT'
+paths = [
+  'third_party/zendnn/THIRD-PARTY-NOTICES',
+]
+
+[[spdx]]
+expression = 'BSD-2-Clause AND BSD-3-Clause'
+paths = [
+  'third_party/zendnn/aocl-dlp/LICENSE',
+]
+
+[[spdx]]
+expression = 'BSD-3-Clause AND MIT AND NCSA'
+paths = [
+  'third_party/zendnn/aocl-utils/License.txt',
 ]
