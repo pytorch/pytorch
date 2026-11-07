@@ -3885,6 +3885,11 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        """Time this extern candidate, in the TunableOp worker where possible.
+
+        Routed GEMMs are timed in the worker so hipBLASLt tuning cannot abort
+        or hang this process; every other path times inline with tuning off.
+        """
         if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
 

@@ -1014,7 +1014,7 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(bypassed, expect_bypass)
 
     @parametrize(
-        "mode,device,expect_bypass",
+        "mode,dev,expect_bypass",
         (
             ("off", "cuda", False),
             ("tune", "cuda", True),
@@ -1022,7 +1022,7 @@ class TestTunableOpPretune(TestCase):
             ("tune", "cpu", False),
         ),
     )
-    def test_enabled_modes_bypass_the_fx_graph_cache(self, mode, device, expect_bypass):
+    def test_enabled_modes_bypass_the_fx_graph_cache(self, mode, dev, expect_bypass):
         # Both passes work while lowering -- tune records, reuse borrows and
         # validates -- so a cache hit does neither and a rerun writes an empty
         # results file. AOTAutogradCache routes through the same validator.
@@ -1030,7 +1030,7 @@ class TestTunableOpPretune(TestCase):
         # GEMM-free graph recompiles it every time for nothing.
         from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 
-        gm = self._gemm_gm(device)
+        gm = self._gemm_gm(dev)
         with mock.patch("torch.cuda.is_available", return_value=True):
             with config.patch({"cuda.autotune_tunableop_mode": mode}):
                 try:
@@ -1053,8 +1053,8 @@ class TestTunableOpPretune(TestCase):
             ):
                 self.assertEqual(use_pipelined_autotuning(), not tunableop_on)
 
-    @parametrize("device", ("cuda", "cpu"))
-    def test_autotune_local_cache_is_bypassed_for_routed_gemms(self, device):
+    @parametrize("dev", ("cuda", "cpu"))
+    def test_autotune_local_cache_is_bypassed_for_routed_gemms(self, dev):
         # A cached timing skips benchmark(), so neither tuning nor borrow
         # validation runs. The write side matters as much: update_local_cache
         # rewrites the whole file from the dict given, so a bypass that still
@@ -1062,13 +1062,13 @@ class TestTunableOpPretune(TestCase):
         # inline, never routed, and must keep its cache.
         from torch._inductor.codecache import PersistentCache
 
-        s = sympy.Symbol(f"s_cache_{device}", positive=True, integer=True)
+        s = sympy.Symbol(f"s_cache_{dev}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         winner.hash_key = lambda: "fake-choice"
         winner.layout = ir.FixedLayout(
-            torch.device(device), DTYPE, [s, 512], _contiguous_strides([s, 512])
+            torch.device(dev), DTYPE, [s, 512], _contiguous_strides([s, 512])
         )
-        routed = device == "cuda"
+        routed = dev == "cuda"
         with (
             mock.patch.object(
                 PersistentCache, "get_local_cache", return_value={}

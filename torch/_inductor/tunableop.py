@@ -243,7 +243,7 @@ def _routable_packets() -> Any:
     if _ROUTABLE_PACKETS is None:
         aten = torch.ops.aten
         _ROUTABLE_PACKETS = frozenset(
-            {
+            [
                 aten.mm,
                 aten.addmm,
                 aten.bmm,
@@ -253,7 +253,7 @@ def _routable_packets() -> Any:
                 # Routable only when _conv_lowers_to_mm says so.
                 aten.convolution,
                 aten._convolution,
-            }
+            ]
         )
     return _ROUTABLE_PACKETS
 
@@ -271,7 +271,7 @@ def _conv_packets() -> Any:
     global _CONV_PACKETS
     if _CONV_PACKETS is None:
         aten = torch.ops.aten
-        _CONV_PACKETS = frozenset({aten.convolution, aten._convolution})
+        _CONV_PACKETS = frozenset([aten.convolution, aten._convolution])
     return _CONV_PACKETS
 
 
