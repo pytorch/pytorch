@@ -48,7 +48,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4487,6 +4490,84 @@ class TestPatternMatcherLogging(LoggingTestCase):
             ]
             self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
+
+
+class TestScaledSoftmax(TestCase):
+    def check_scaled(self, fn, args, expected_matches):
+        expected = fn(*args)
+        counters.clear()
+        actual = torch.compile(fn, fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(
+            counters["inductor"]["pattern_matcher_count"], expected_matches
+        )
+
+    @inductor_config.patch(fx_graph_cache=False, online_softmax=False)
+    @parametrize(
+        "input_dtype",
+        (
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        ),
+    )
+    @parametrize("op", ("mul", "reverse_mul", "div"))
+    def test_scaled_softmax_dtypes(self, device, input_dtype, op):
+        def fn(x, scale):
+            if op == "div":
+                scaled = x / scale
+            else:
+                scaled = scale * x if op == "reverse_mul" else x * scale
+            return torch.softmax(scaled, dim=-1)
+
+        if input_dtype.is_floating_point or input_dtype == torch.bool:
+            values = [[0, 1], [1, 0]]
+        else:
+            limits = torch.iinfo(input_dtype)
+            values = [[limits.min, limits.max], [limits.max, limits.min]]
+        x = torch.tensor(values, dtype=input_dtype, device=device)
+        scale_dtype = input_dtype if input_dtype.is_floating_point else torch.float32
+        scale = torch.tensor([[2.0], [-2.0]], dtype=scale_dtype, device=device)
+        self.check_scaled(fn, (x, scale), int(input_dtype.is_floating_point))
+
+    @inductor_config.patch(fx_graph_cache=False, online_softmax=False)
+    @parametrize(
+        "input_dtype,result_dtype",
+        (
+            (torch.int8, torch.float32),
+            (torch.uint8, torch.float32),
+            (torch.float32, torch.int32),
+        ),
+    )
+    @parametrize("op", ("mul", "reverse_mul", "div"))
+    def test_scaled_amax_sub_cast(self, device, input_dtype, result_dtype, op):
+        def fn(x, scale):
+            if op == "div":
+                scaled = x / scale
+            else:
+                scaled = scale * x if op == "reverse_mul" else x * scale
+            scaled = scaled.to(result_dtype)
+            return scaled - scaled.amax(dim=-1, keepdim=True)
+
+        if input_dtype.is_floating_point:
+            values = [[0.75, 1.25]]
+        else:
+            values = [[0, torch.iinfo(input_dtype).max]]
+        x = torch.tensor(values, dtype=input_dtype, device=device)
+        scale = torch.tensor(2, dtype=input_dtype, device=device)
+        self.check_scaled(fn, (x, scale), 0)
+
+
+instantiate_device_type_tests(TestScaledSoftmax, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":

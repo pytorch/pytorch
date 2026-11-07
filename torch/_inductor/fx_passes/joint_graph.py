@@ -1187,6 +1187,16 @@ def _other_is_broadcasted_in_dim(match):
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
+def _scaled_softmax_is_eligible(match):
+    if not _other_is_broadcasted_in_dim(match):
+        return False
+    # Reordering integral arithmetic can change overflow and rounding, even
+    # when a later conversion makes the result floating point.
+    inp_dtype = match.kwargs["inp"].meta["val"].dtype
+    result_dtype = match.output_node().meta["val"].dtype
+    return inp_dtype.is_floating_point and result_dtype.is_floating_point
+
+
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         scaled = inp * other
@@ -1218,7 +1228,7 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
         _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
-        extra_check=_other_is_broadcasted_in_dim,
+        extra_check=_scaled_softmax_is_eligible,
     )(mul_softmax_pattern)
 
 
@@ -1253,7 +1263,7 @@ for to_dtype in (False, True):
         _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
-        extra_check=_other_is_broadcasted_in_dim,
+        extra_check=_scaled_softmax_is_eligible,
     )(div_softmax_pattern)
 
 
