@@ -30,8 +30,8 @@ buffer, freed on reshard and refilled on the next unshard.
 
 from __future__ import annotations
 
+import itertools
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TYPE_CHECKING
 from typing_extensions import override
@@ -57,6 +57,8 @@ from .utils import foreach_copy_
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.distributed.device_mesh import DeviceMesh
 
     from ..bucket_storage import ParamInfo
@@ -435,10 +437,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
             raise ValueError(f"num_partitions must be positive, got {num_partitions}.")
         if not unit_costs:
             return 0
-        low = max(
-            max(unit_costs),
-            (sum(unit_costs) + num_partitions - 1) // num_partitions,
-        )
+        low = max(*unit_costs, (sum(unit_costs) + num_partitions - 1) // num_partitions)
         high = sum(unit_costs)
         while low < high:
             mid = (low + high) // 2
@@ -469,7 +468,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
 
         while len(cuts) - 1 < world_size:
             split_at = None
-            for idx, (start, end) in enumerate(zip(cuts, cuts[1:])):
+            for idx, (start, end) in enumerate(itertools.pairwise(cuts)):
                 if end - start > 1:
                     split_at = idx + 1
                     cuts.insert(split_at, start + 1)
@@ -582,9 +581,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
         rank_pack_plans: list[BlockwiseQuantBucketedBlockShard._QuantRankPackPlan] = []
         rank_qdata_numels: list[int] = []
         rank_scale_numels: list[int] = []
-        for rank, (unit_start, unit_end) in enumerate(
-            zip(unit_cuts[:-1], unit_cuts[1:], strict=True)
-        ):
+        for rank, (unit_start, unit_end) in enumerate(itertools.pairwise(unit_cuts)):
             rank_dense_offset = 0
             qdata_offset = 0
             rank_units = units[unit_start:unit_end]
@@ -743,6 +740,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
             # replacement tensor into a false cache hit.
             storage=tensor.untyped_storage(),
             version=tensor._version,
+            # pyrefly: ignore [bad-argument-type]
             storage_offset=tensor.storage_offset(),
             shape=tensor.shape,
             stride=tensor.stride(),
@@ -757,6 +755,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
         state: _LocalPackedSourceState,
     ) -> bool:
         return (
+            # pyrefly: ignore [bad-return]
             tensor._version == state.version
             and tensor.untyped_storage() is state.storage
             and tensor.storage_offset() == state.storage_offset
@@ -888,8 +887,8 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
             packed_dsts = [local_qdata_bytes, local_scale_bytes]
         elif qdata_srcs:
             packed_dsts = [
-                *torch.split(local_qdata_bytes, pack_plan.qdata_chunk_numels),
-                *torch.split(local_scale_bytes, pack_plan.scale_chunk_nbytes),
+                *torch.split(local_qdata_bytes, list(pack_plan.qdata_chunk_numels)),
+                *torch.split(local_scale_bytes, list(pack_plan.scale_chunk_nbytes)),
             ]
         else:
             packed_dsts = []
@@ -1575,6 +1574,7 @@ def _is_vec_copy_viewable(tensor: torch.Tensor) -> bool:
     if torch.compiler.is_compiling():
         return False
     return (
+        # pyrefly: ignore [bad-return]
         tensor.dtype == torch.uint8
         and tensor.ndim > 0
         and tensor.stride(-1) == 1

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -54,6 +53,9 @@ from .utils import foreach_copy_, reduce_scatter_grads, reduce_scatter_grads_une
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
     from ..bucket_storage import ParamInfo, PlacementFn
@@ -763,6 +765,7 @@ class MixedBucketPlacement(Placement):
         ):
             return None
         for group in groups:
+            # pyrefly: ignore [missing-attribute]
             group.placement._validate_bucket_inputs(group.tensors, group.infos)
         layouts, offsets, owner_ranks, row_numels = plan
         # This rank's params, each with its offset in this rank's row.
@@ -925,6 +928,7 @@ class MixedBucketPlacement(Placement):
                 zip(group.indices, group_state.infos, strict=True)
             ):
                 start = (
+                    # pyrefly: ignore [bad-index]
                     row_starts[owner_rank]
                     + group.offset
                     + group_state.layout.param_offsets[index]
@@ -933,6 +937,7 @@ class MixedBucketPlacement(Placement):
                     info.global_shape
                 )
         return PlacementUnshardResult(
+            # pyrefly: ignore [bad-argument-type]
             full_params=full_params,
             persistent_buffers=[rows] if prepared.persistent else [],
         )
@@ -1029,6 +1034,7 @@ class MixedBucketPlacement(Placement):
             for group, layout, offset, owner_rank in zip(
                 groups, layouts, offsets, owner_ranks, strict=True
             ):
+                # pyrefly: ignore [missing-attribute]
                 group.placement._validate_bucket_inputs(group.tensors, group.infos)
                 for index, (tensor, info) in enumerate(
                     zip(group.tensors, group.infos, strict=True)
@@ -1083,7 +1089,9 @@ class MixedBucketPlacement(Placement):
                     # packed straight into the bucket's send buffer below,
                     # rather than into a world-size buffer of its own, which
                     # would be zeros but for that row.
+                    # pyrefly: ignore [missing-attribute]
                     group.placement._validate_bucket_inputs(group.tensors, group.infos)
+                    # pyrefly: ignore [missing-attribute]
                     layout = group.placement._padded_bucket_layout(group.infos)
                     prepared = PlacementPreparedReduceGrad(
                         placement=group.placement,
@@ -1193,6 +1201,7 @@ class MixedBucketPlacement(Placement):
                 start = group_state.offset
                 end = start + group_state.numel
                 if not group_state.prepared.buffers:
+                    # pyrefly: ignore [missing-attribute]
                     group.placement._pack_reduce_scatter_grad(
                         group.tensors,
                         group.infos,
@@ -1272,6 +1281,7 @@ class MixedBucketPlacement(Placement):
                     reduce.hosts,
                     reduce.buffers,
                     rank=reduce.rank,
+                    # pyrefly: ignore [bad-argument-type]
                     row_start=_row_starts(state.row_numels)[reduce.rank],
                     send=send,
                     recv=recv,
@@ -1662,6 +1672,7 @@ def _owner_rows_plan(
         _one_hot_block_owner(group.placement, world_size) is None for group in groups
     ):
         return None
+    # pyrefly: ignore [missing-attribute]
     layouts = [group.placement._padded_bucket_layout(group.infos) for group in groups]
     group_numels = [layout.padded_segment_numel for layout in layouts]
     offsets, owner_ranks, _, _ = _plan_group_offsets(
@@ -1670,6 +1681,7 @@ def _owner_rows_plan(
     row_numels = _gathered_row_numels(
         _owner_row_numels(owner_ranks, offsets, group_numels, world_size)
     )
+    # pyrefly: ignore [bad-return]
     return layouts, offsets, owner_ranks, row_numels
 
 
@@ -1741,6 +1753,7 @@ def _owner_rows_reduce_transport(
         hosts=transport[1],
         buffers=owner_rows_transport_buffers(mesh, transport[1]),
         rank=rank,
+        # pyrefly: ignore [bad-argument-type]
         recv_dtype=recv_dtype,
     )
 
@@ -1751,10 +1764,8 @@ def _validate_mixed_groups(groups: list[_PlacementGroup]) -> None:
     for group in groups:
         placement = group.placement
         if not (
-            isinstance(placement, BlockShard)
-            or isinstance(placement, Shard)
-            and placement.dim == 0
-            or isinstance(placement, BlockwiseQuantBucketedBlockShard)
+            isinstance(placement, (BlockShard, BlockwiseQuantBucketedBlockShard))
+            or (isinstance(placement, Shard) and placement.dim == 0)
         ):
             raise ValueError(
                 "Mixed FlexShard bucket collectives currently support only "

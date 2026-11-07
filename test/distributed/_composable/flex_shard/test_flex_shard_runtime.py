@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -31,7 +32,11 @@ from torch.distributed.fsdp._flex_shard.placements.mixed_bucket import (
     MixedBucketPlacement,
 )
 from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.common_flex_shard import (
     alloc_grads_in_param_layout,
     flex_shard_cuda,
@@ -48,7 +53,8 @@ class _TEStyleScaleFn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, module, *params):
-        assert params[0] is module.weight
+        if params[0] is not module.weight:
+            raise AssertionError("Expected the module weight as the first param")
         ctx.save_for_backward(x)
         ctx.module = module
         ctx.param = params[0]
@@ -59,7 +65,8 @@ class _TEStyleScaleFn(torch.autograd.Function):
         (x,) = ctx.saved_tensors
         weight = ctx.module.weight
         # With one rank the local shard equals the full param, so check identity.
-        assert weight is ctx.param and weight.untyped_storage().size() > 0
+        if weight is not ctx.param or weight.untyped_storage().size() == 0:
+            raise AssertionError("Expected the saved param with allocated storage")
         return grad_output * weight, None, (grad_output * x).sum(0)
 
 
@@ -236,6 +243,8 @@ def _buckets(model: nn.Module):
 
 
 class TestFlexShardEagerRuntime(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_local_shard_shares_parameter_version_counter(self):
         module = nn.Linear(2, 2, bias=False)
         runtime = bucket_runtime.BucketRuntime(

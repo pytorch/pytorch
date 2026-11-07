@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -32,7 +33,11 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.common_flex_shard import (
     expected_shard,
     single_rank_cpu_mesh,
@@ -43,6 +48,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestFlexShardOuterLayout(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dtensor_adapter_declares_layout_and_preserves_grad_dtype(self) -> None:
         model = nn.Module()
         grad_dtypes = {"fp32_grad": torch.float32, "none_grad": None}
@@ -140,6 +147,8 @@ class _PartialGradGroup(FSDPTest):
 
 
 class TestFlexShardPartialGradGroupTwoRanks(_PartialGradGroup):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -167,6 +176,8 @@ class TestFlexShardPartialGradGroupTwoRanks(_PartialGradGroup):
 
 
 class TestFlexShardPartialGradGroupFourRanks(_PartialGradGroup):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 4

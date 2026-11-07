@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import unittest
-from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -18,7 +18,6 @@ import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._flex_shard import BucketSpec, flex_shard
 from torch.distributed.fsdp._flex_shard.bucket_storage import ParamInfo
-from torch.distributed.fsdp._flex_shard.placement_contract import Placement
 from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
 from torch.distributed.fsdp._flex_shard.utils import (  # noqa: F401
     alloc_grads_in_param_layout,
@@ -27,6 +26,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from torch.distributed.fsdp._flex_shard.placement_contract import Placement
 
 
 @contextmanager

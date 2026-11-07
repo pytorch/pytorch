@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import functools
 import os
-from collections.abc import Sequence
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, TYPE_CHECKING, TypeVar
 
@@ -25,7 +24,7 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from torch.distributed.device_mesh import DeviceMesh
 

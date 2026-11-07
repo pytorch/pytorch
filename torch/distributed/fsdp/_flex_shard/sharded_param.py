@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import torch
-
 
 if TYPE_CHECKING:
+    import torch
     from torch.distributed.device_mesh import DeviceMesh
 
     from .placement_contract import GlobalLayout, Placement
