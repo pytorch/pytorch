@@ -511,27 +511,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<torch::profiler::impl::ActivityType> activities{
-        torch::profiler::impl::ActivityType::CPU};
-#if defined(USE_KINETO)
-#if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
-    if (at::getNumGPUs() > 0) {
-      activities.insert(torch::profiler::impl::ActivityType::CUDA);
-    }
-#endif // defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
-    if (at::hasXPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::XPU);
-    }
-    if (at::hasMTIA()) {
-      activities.insert(torch::profiler::impl::ActivityType::MTIA);
-    }
-    if (at::hasHPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::HPU);
-    }
-    if (c10::get_privateuse1_backend() != "privateuseone") {
-      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
-    }
-#endif // defined(USE_KINETO)
+    auto activities =
+        torch::profiler::impl::kineto::supportedDeviceActivities();
+    activities.insert(torch::profiler::impl::ActivityType::CPU);
     return activities;
   });
 
