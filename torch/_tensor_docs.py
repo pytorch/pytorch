@@ -5234,6 +5234,8 @@ Here are the ways to call ``to``:
     ``torch.float8_e8m0fnu`` only has powers of two: values below
     :math:`2^{{-127}}` become :math:`2^{{-127}}`, and ties of
     ``"to_nearest_even"`` round up.
+    The results are the same on every device, except that NaN may be encoded
+    differently (e.g. without its sign), as CUDA uses hardware conversions.
 
     A device change, if any, is a separate transfer, and the result is never
     ``self``. Like a plain dtype conversion, its gradient is the identity (cast
