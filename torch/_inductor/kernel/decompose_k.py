@@ -7,7 +7,6 @@ import math
 from typing import Any
 
 import torch
-import torch.fx.experimental._config as fx_experimental_config
 from torch._inductor import inductor_prims, ir
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.lowering import register_lowering
@@ -80,15 +79,13 @@ def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
     if bmm_backend == "aten":
         n = b.shape[1]
         k_parts = k // k_splits
-        k_main = k_parts * k_splits
-        if not statically_known_true(k_main == k):
-            # A dynamic K need not be a multiple of k_splits: split the
-            # divisible prefix and run the leftover rows as one MM. The
-            # leftover has 0 to k_splits - 1 rows; size-oblivious tracing keeps
-            # its 0/1-size checks from guarding on K % k_splits.
-            with fx_experimental_config.patch(backed_size_oblivious=True):
-                remainder = torch.mm(a[:, k_main:], b[k_main:], out_dtype=torch.float32)
-                a, b = a[:, :k_main], b[:k_main]
+        if not statically_known_true(k_parts * k_splits == k):
+            # Leave k_splits to 2 * k_splits - 1 rows for the extra MM, so its K
+            # is never 0 or 1 and tracing adds no guard on K % k_splits.
+            k_parts -= 1
+            k_main = k_parts * k_splits
+            remainder = torch.mm(a[:, k_main:], b[k_main:], out_dtype=torch.float32)
+            a, b = a[:, :k_main], b[:k_main]
         a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
         b_reshaped = b.reshape(k_splits, k_parts, n)
         result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
@@ -104,7 +101,7 @@ def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
 
     reduced_buf = torch.sum(result, 0)
     if remainder is not None:
-        reduced_buf = reduced_buf + remainder
+        reduced_buf += remainder
     return reduced_buf.to(a.dtype)
 
 

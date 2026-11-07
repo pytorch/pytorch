@@ -3338,6 +3338,7 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
+# Not cached: for a dynamic K this installs a guard on the current graph.
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
@@ -3359,9 +3360,9 @@ def use_decompose_k_choice(
         return False
     if sizevars.statically_known_true(large_k):
         return True
-    # A backed dynamic K is decided on its hint. Only the base threshold is
-    # guarded, so the one recompile is a later K below it; a larger
-    # threshold_multiple just trims the other choices.
+    # A backed dynamic K is decided on its hint, and guarded so a later K below
+    # the threshold recompiles. The threshold_multiple > 1 check only drops
+    # Triton mm; keep it for a dynamic K rather than add a second guard.
     if not isinstance(k, sympy.Expr) or k.is_number or free_unbacked_symbols(large_k):
         return False
     m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
@@ -3369,13 +3370,13 @@ def use_decompose_k_choice(
         sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
         for s in get_k_splits(m, n, k)
     )
-    # decomposeK runs the K rows a split leaves over as a separate MM. That is
-    # only worth the extra autotune choices when the MM is not tiny.
-    if not (divisible or m_hint * n_hint * k_hint >= 2**30):
+    # Without a dividing split, decomposeK runs the leftover K rows as an extra
+    # MM; on B200 that only beat mm from M * N * K ~ 2**33.
+    if not (divisible or m_hint * n_hint * k_hint >= 2**33):
         return False
     if k_hint < decompose_k_threshold * max(m_hint, n_hint):
         return False
-    return threshold_multiple > 1 or sizevars.guard_or_false(large_k)
+    return threshold_multiple == 1 and sizevars.guard_or_false(large_k)
 
 
 @functools.cache

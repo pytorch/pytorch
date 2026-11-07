@@ -2161,7 +2161,7 @@ class TestMaxAutotune(TestCase):
 
         def check_decompose_k(code):
             fc = FileCheck()
-            (fc.check if M * N * K >= 2**30 else fc.check_not)("decompose_k").run(
+            (fc.check if M * N * K >= 2**33 else fc.check_not)("decompose_k").run(
                 code[0]
             )
 
@@ -2171,7 +2171,7 @@ class TestMaxAutotune(TestCase):
 
         if dynamic:
             # A dynamic K is not known to divide any split, which is only
-            # offered for M * N * K >= 2**30.
+            # offered for M * N * K >= 2**33.
             check_decompose_k(code)
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
@@ -2332,7 +2332,7 @@ class TestMaxAutotune(TestCase):
         "ignore decompose_k when native matmul codegen",
     )
     def test_decompose_k_dynamic_k_remainder_skips_small_mm(self):
-        """A small MM (M * N * K < 2**30) whose dynamic K no split divides gets
+        """A small MM (M * N * K < 2**33) whose dynamic K no split divides gets
         no decompose_k and no guard."""
         frames, names = self._compile_dynamic_k_mm((16391, 20011), k_multiple=1)
         self.assertEqual(frames, 1)
