@@ -9,6 +9,7 @@ import unittest
 import unittest.mock as mock
 import warnings
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from parameterized import parameterized_class
 
@@ -53,6 +54,7 @@ from torch._subclasses.functional_tensor import (
     FunctionalTensorMode,
     PythonFunctionalizeAPI,
 )
+from torch.fx.experimental.dynamic_spec import ShapeVar, TensorSpec
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
@@ -70,8 +72,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -92,8 +97,10 @@ class _ReuseGuardHolder:
             self.callback = torch.cos
         elif kind == "shape":
             self.shape_only = torch.ones(3)
-        else:
+        elif kind == "order":
             self.mapping[1] = self.mapping.pop(1)
+        else:
+            raise AssertionError(f"Unexpected guard kind: {kind}")
 
 
 if HAS_GPU:
@@ -403,30 +410,6 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
-
-    @torch._functorch.config.patch("donated_buffer", True)
-    @requires_cuda_and_triton
-    def test_reused_subgraph_square_backward(self):
-        @nested_compile_region
-        def region(x, weight):
-            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
-
-        def fn(x, weight1, weight2):
-            return region(x, weight1).sum() + region(x, weight2).sum()
-
-        inputs = (
-            torch.randn(4, 8, device="cuda", requires_grad=True),
-            torch.randn(1, 8, device="cuda", requires_grad=True),
-            torch.randn(1, 8, device="cuda", requires_grad=True),
-        )
-        compiled_inputs = tuple(
-            value.detach().clone().requires_grad_(True) for value in inputs
-        )
-
-        fn(*inputs).backward()
-        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
-
-        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
 
     def test_module_forward(self):
         class Mod(torch.nn.Module):
@@ -2550,35 +2533,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         res.sum().backward()
 
-    @requires_gpu
-    def test_ac_rng_cudagraphs(self):
-        def fn1(q, k, v):
-            return torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=0.5, is_causal=True
-            )
-
-        @nested_compile_region
-        def fn1_checkpoint(q, k, v):
-            return torch.utils.checkpoint.checkpoint(fn1, q, k, v, use_reentrant=False)
-
-        def fn(q, k, v):
-            return fn1_checkpoint(q, k, v) + fn1_checkpoint(q.cos(), k, v)
-
-        q = torch.randn(
-            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
-        )
-        k = torch.randn(
-            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
-        )
-        v = torch.randn(
-            1, 1, 32, 32, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
-        )
-
-        res = torch.compile(
-            fn, backend="inductor", fullgraph=True, mode="reduce-overhead"
-        )(q, k, v)
-        res.sum().backward()
-
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_fake_tensor_checking(self):
         @nested_compile_region
@@ -2812,96 +2766,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_gpu
-    def test_triton_kernel_native(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        def call_triton_add(
-            x: torch.Tensor,
-            y: torch.Tensor,
-            output: torch.Tensor,
-            grid_type: int,
-            num=1,
-            positional=False,
-        ):
-            n_elements = output.numel()
-
-            def grid_fn(meta):
-                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
-
-            if grid_type == 0:
-                grid = (x.numel(),)
-            elif grid_type == 1:
-                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            else:
-                grid = grid_fn
-
-            if positional:
-                add_kernel[grid](x, y, output, n_elements, 16)
-            else:
-                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-
-            return output
-
-        @nested_compile_region
-        def gn(x, y):
-            o = torch.zeros_like(x)
-            call_triton_add(x, y, o, 0)
-            return o.sin()
-
-        def fn(x, y):
-            x = x.sin()
-            y = y.sin()
-            z = gn(x, y)
-            return gn(z, y)
-
-        t1 = torch.rand(5, device=GPU_TYPE)
-        t2 = torch.rand(5, device=GPU_TYPE)
-
-        ref = fn(t1, t2)
-        backend = AotEagerAndRecordGraphs()
-
-        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-
-        self.assertEqual(opt_fn(t1, t2), ref)
-
-        # NOTE THAT THIS TEST DOES NOT REALLY WORK
-        # We wanted one invoke_subgraph called twice, but because of
-        # constant_args_idx changing in the graph, the graph equivalence fails
-
-        if not TEST_WITH_CROSSREF:
-            self.assertExpectedInline(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[5]", L_y_: "f32[5]"):
-        l_x_ = L_x_
-        l_y_ = L_y_
-
-        sin: "f32[5]" = l_x_.sin();  l_x_ = None
-
-        sin_1: "f32[5]" = l_y_.sin();  l_y_ = None
-
-        subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', sin, sin_1);  subgraph_0 = sin = None
-        getitem: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
-
-        subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, sin_1);  subgraph_1 = getitem = sin_1 = None
-        getitem_1: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1,)
-
-    class subgraph_0(torch.nn.Module):
-        def forward(self, x: "f32[5]", y: "f32[5]"):
-            o: "f32[5]" = torch.zeros_like(x)
-
-            triton_kernel_wrapper_mutation = torch.ops.higher_order.triton_kernel_wrapper_mutation(kernel_idx = 0, constant_args_idx = 0, grid = [(5, 1, 1)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x, 'in_ptr1': y, 'out_ptr': o}, launch_kwargs = ('BLOCK_SIZE',));  x = y = triton_kernel_wrapper_mutation = None
-
-            sin: "f32[5]" = o.sin();  o = None
-            return (sin,)
-""",
-            )
-
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_unbacked_symbol(self):
         @nested_compile_region
@@ -3068,171 +2932,6 @@ class GraphModule(torch.nn.Module):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    @requires_gpu
-    def test_preserves_strides(self):
-        class _CustomPass(PatternMatcherPass):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def __call__(self, g: torch.fx.Graph):
-                self.apply(g)
-
-        g = _CustomPass()
-        called = False
-
-        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
-        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
-
-        @register_graph_pattern(
-            CallFunctionVarArgs(torch.ops.aten.permute),
-            pass_dict=g,
-        )
-        def _(match, *args, **kwargs):
-            flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-            def decomp(*flat_args):
-                args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.mylib.force_channels_last(
-                    torch.ops.aten.permute(*args, **kwargs)
-                )
-
-            nonlocal called
-            called = True
-            match.replace_by_example(decomp, flat_args)
-
-        from torch._inductor import config
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define(
-                "force_channels_last(Tensor x) -> Tensor",
-                tags=[torch._C.Tag.flexible_layout],
-            )
-
-            def impl2(x):
-                return x.clone(memory_format=torch.channels_last)
-
-            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
-
-            lib.define(
-                "add_op(Tensor x, Tensor y) -> Tensor",
-            )
-
-            def impl(x, y):
-                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
-                out.add_(x.transpose(-1, -2))
-                return out
-
-            def meta(x, y):
-                return torch.empty_like(y, memory_format=torch.contiguous_format)
-
-            lib.impl("add_op", impl, "CompositeExplicitAutograd")
-            lib.impl("add_op", meta, "Meta")
-
-            @nested_compile_region
-            def gn(y, z):
-                return torch.ops.mylib.add_op.default(y, z)
-
-            def f(x, other):
-                y = x.transpose(2, 3).contiguous().transpose(2, 3)
-                z = y.sin().transpose(2, 3)
-                return gn(y, z)
-
-            with config.patch(
-                post_grad_custom_post_pass=g,
-            ):
-                f_compile = torch.compile(f, fullgraph=True)
-                self.assertEqual(f(x, other), f_compile(x, other))
-                self.assertTrue(called)
-
-    @requires_gpu
-    def test_preserves_output_strides(self):
-        # Have a graph pass that changes strides for the output op of the
-        # invoke_subgraph, and check if the output strides are preserved
-        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
-        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
-
-        class _CustomPass(PatternMatcherPass):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def __call__(self, g: torch.fx.Graph):
-                self.apply(g)
-
-        g = _CustomPass()
-        called = False
-
-        @register_graph_pattern(
-            CallFunctionVarArgs(torch.ops.aten.permute),
-            pass_dict=g,
-        )
-        def _(match, *args, **kwargs):
-            flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-            def decomp(*flat_args):
-                args, kwargs = pytree.tree_unflatten(flat_args, spec)
-                return torch.ops.mylib.force_channels_last(
-                    torch.ops.aten.permute(*args, **kwargs)
-                )
-
-            nonlocal called
-            called = True
-            match.replace_by_example(decomp, flat_args)
-
-        from torch._inductor import config
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define(
-                "force_channels_last(Tensor x) -> Tensor",
-                tags=[torch._C.Tag.flexible_layout],
-            )
-
-            def impl2(x):
-                return x.clone(memory_format=torch.channels_last)
-
-            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
-
-            lib.define(
-                "add_op(Tensor x, Tensor y) -> Tensor",
-            )
-
-            def impl(x, y):
-                # Check that the input strides are preserved. This helps in
-                # testing that the HOP preserves the output strides.
-                if x.stride() != (16, 4, 1, 2):
-                    raise AssertionError(
-                        f"Expected x.stride() == (16, 4, 1, 2), got {x.stride()}"
-                    )
-                if y.stride() != (16, 4, 2, 1):
-                    raise AssertionError(
-                        f"Expected y.stride() == (16, 4, 2, 1), got {y.stride()}"
-                    )
-                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
-                out.add_(x.transpose(-1, -2))
-                return out
-
-            def meta(x, y):
-                return torch.empty_like(y, memory_format=torch.contiguous_format)
-
-            lib.impl("add_op", impl, "CompositeExplicitAutograd")
-            lib.impl("add_op", meta, "Meta")
-
-            @nested_compile_region
-            def gn(x, other):
-                y = x.transpose(2, 3).contiguous().transpose(2, 3)
-                z = y.sin().transpose(2, 3)
-                return y, z
-
-            def f(x, other):
-                y, z = gn(x, other)
-                return torch.ops.mylib.add_op.default(y, z)
-
-            with config.patch(
-                post_grad_custom_post_pass=g,
-            ):
-                f_compile = torch.compile(f, fullgraph=True)
-                self.assertEqual(f(x, other), f_compile(x, other))
-                self.assertTrue(called)
 
     def test_udf_output(self):
         class Foo:
@@ -3636,6 +3335,294 @@ class TestInvokeSubgraphCompileDevice(TestCase):
         r1.sum().backward()
         weight.grad.clone()
 
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_ac_rng_cudagraphs(self, device):
+        def fn1(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.5, is_causal=True
+            )
+
+        @nested_compile_region
+        def fn1_checkpoint(q, k, v):
+            return torch.utils.checkpoint.checkpoint(fn1, q, k, v, use_reentrant=False)
+
+        def fn(q, k, v):
+            return fn1_checkpoint(q, k, v) + fn1_checkpoint(q.cos(), k, v)
+
+        q = torch.randn(
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
+        )
+
+        res = torch.compile(
+            fn, backend="inductor", fullgraph=True, mode="reduce-overhead"
+        )(q, k, v)
+        res.sum().backward()
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_triton_kernel_native(self, device):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            output: torch.Tensor,
+            grid_type: int,
+            num=1,
+            positional=False,
+        ):
+            n_elements = output.numel()
+
+            def grid_fn(meta):
+                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
+
+            if grid_type == 0:
+                grid = (x.numel(),)
+            elif grid_type == 1:
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            else:
+                grid = grid_fn
+
+            if positional:
+                add_kernel[grid](x, y, output, n_elements, 16)
+            else:
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            return output
+
+        @nested_compile_region
+        def gn(x, y):
+            o = torch.zeros_like(x)
+            call_triton_add(x, y, o, 0)
+            return o.sin()
+
+        def fn(x, y):
+            x = x.sin()
+            y = y.sin()
+            z = gn(x, y)
+            return gn(z, y)
+
+        t1 = torch.rand(5, device=device)
+        t2 = torch.rand(5, device=device)
+
+        ref = fn(t1, t2)
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        self.assertEqual(opt_fn(t1, t2), ref)
+
+        # NOTE THAT THIS TEST DOES NOT REALLY WORK
+        # We wanted one invoke_subgraph called twice, but because of
+        # constant_args_idx changing in the graph, the graph equivalence fails
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[5]", L_y_: "f32[5]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sin: "f32[5]" = l_x_.sin();  l_x_ = None
+
+        sin_1: "f32[5]" = l_y_.sin();  l_y_ = None
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', sin, sin_1);  subgraph_0 = sin = None
+        getitem: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, sin_1);  subgraph_1 = getitem = sin_1 = None
+        getitem_1: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_1,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, x: "f32[5]", y: "f32[5]"):
+            o: "f32[5]" = torch.zeros_like(x)
+
+            triton_kernel_wrapper_mutation = torch.ops.higher_order.triton_kernel_wrapper_mutation(kernel_idx = 0, constant_args_idx = 0, grid = [(5, 1, 1)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x, 'in_ptr1': y, 'out_ptr': o}, launch_kwargs = ('BLOCK_SIZE',));  x = y = triton_kernel_wrapper_mutation = None
+
+            sin: "f32[5]" = o.sin();  o = None
+            return (sin,)
+""",
+            )
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_preserves_strides(self, device):
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        x = torch.randn(4, 4, 2, 2, device=device)
+        other = torch.randn(4, 4, 2, 2, device=device)
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+            )
+
+            def impl(x, y):
+                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
+                out.add_(x.transpose(-1, -2))
+                return out
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            @nested_compile_region
+            def gn(y, z):
+                return torch.ops.mylib.add_op.default(y, z)
+
+            def f(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                return gn(y, z)
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f, fullgraph=True)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_preserves_output_strides(self, device):
+        # Have a graph pass that changes strides for the output op of the
+        # invoke_subgraph, and check if the output strides are preserved
+        x = torch.randn(4, 4, 2, 2, device=device)
+        other = torch.randn(4, 4, 2, 2, device=device)
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+        called = False
+
+        @register_graph_pattern(
+            CallFunctionVarArgs(torch.ops.aten.permute),
+            pass_dict=g,
+        )
+        def _(match, *args, **kwargs):
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return torch.ops.mylib.force_channels_last(
+                    torch.ops.aten.permute(*args, **kwargs)
+                )
+
+            nonlocal called
+            called = True
+            match.replace_by_example(decomp, flat_args)
+
+        from torch._inductor import config
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "force_channels_last(Tensor x) -> Tensor",
+                tags=[torch._C.Tag.flexible_layout],
+            )
+
+            def impl2(x):
+                return x.clone(memory_format=torch.channels_last)
+
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
+
+            lib.define(
+                "add_op(Tensor x, Tensor y) -> Tensor",
+            )
+
+            def impl(x, y):
+                # Check that the input strides are preserved. This helps in
+                # testing that the HOP preserves the output strides.
+                if x.stride() != (16, 4, 1, 2):
+                    raise AssertionError(
+                        f"Expected x.stride() == (16, 4, 1, 2), got {x.stride()}"
+                    )
+                if y.stride() != (16, 4, 2, 1):
+                    raise AssertionError(
+                        f"Expected y.stride() == (16, 4, 2, 1), got {y.stride()}"
+                    )
+                out = y.clone()  # contiguous with strides (16, 4, 2, 1)
+                out.add_(x.transpose(-1, -2))
+                return out
+
+            def meta(x, y):
+                return torch.empty_like(y, memory_format=torch.contiguous_format)
+
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
+            lib.impl("add_op", meta, "Meta")
+
+            @nested_compile_region
+            def gn(x, other):
+                y = x.transpose(2, 3).contiguous().transpose(2, 3)
+                z = y.sin().transpose(2, 3)
+                return y, z
+
+            def f(x, other):
+                y, z = gn(x, other)
+                return torch.ops.mylib.add_op.default(y, z)
+
+            with config.patch(
+                post_grad_custom_post_pass=g,
+            ):
+                f_compile = torch.compile(f, fullgraph=True)
+                self.assertEqual(f(x, other), f_compile(x, other))
+                self.assertTrue(called)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
@@ -3676,6 +3663,30 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
         res = opt_fn(q, k, v)
         res.sum().backward()
 
+    @torch._functorch.config.patch("donated_buffer", True)
+    @requires_cuda_and_triton
+    def test_reused_subgraph_square_backward(self):
+        @nested_compile_region
+        def region(x, weight):
+            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
+
+        def fn(x, weight1, weight2):
+            return region(x, weight1).sum() + region(x, weight2).sum()
+
+        inputs = (
+            torch.randn(4, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+        )
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_(True) for value in inputs
+        )
+
+        fn(*inputs).backward()
+        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
+
+        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @instantiate_parametrized_tests
@@ -3709,7 +3720,9 @@ class TestInvokeSubgraphReuse(TestCase):
                 return holder.callback(x)
             if kind == "shape":
                 return x + holder.shape_only.shape[0]
-            return x + next(iter(holder.mapping))
+            if kind == "order":
+                return x + next(iter(holder.mapping))
+            raise AssertionError(f"Unexpected guard kind: {kind}")
 
         def fn(x, holders):
             return tuple(region(x, holder) for holder in holders)
@@ -3739,7 +3752,9 @@ class TestInvokeSubgraphReuse(TestCase):
                 return holder.callback(x)
             if kind == "shape":
                 return x + holder.shape_only.shape[0]
-            return x + next(iter(holder.mapping))
+            if kind == "order":
+                return x + next(iter(holder.mapping))
+            raise AssertionError(f"Unexpected guard kind: {kind}")
 
         @nested_compile_region
         def outer(x, pair):
@@ -3811,12 +3826,83 @@ class TestInvokeSubgraphReuse(TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(count(), 2)
         for size in (5, 7):
             holders[1].tensor = torch.ones(size)
             mark(holders[1].tensor, 0)
             self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reused_region_explicit_spec_parameter_captures(self):
+        @nested_compile_region
+        def region(x, layer):
+            return x @ layer.weight
+
+        def fn(x, layers):
+            return tuple(region(x, layer) for layer in layers)
+
+        layers = [torch.nn.Linear(3, 3, bias=False) for _ in range(9)]
+        counter = CompileCounter()
+        compiled = torch.compile(
+            fn,
+            backend=counter,
+            fullgraph=True,
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), 3])},
+        )
+        with self._count_speculate_calls() as count:
+            for batch in (2, 4):
+                x = torch.randn(batch, 3)
+                self.assertEqual(compiled(x, layers), fn(x, layers))
+        self.assertEqual(count(), 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reused_region_dynamic_policy_with_static_first_capture(self):
+        class Holder:
+            def __init__(self):
+                self.tensor = torch.ones(2)
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.tensor.shape[0]
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(), Holder()]
+        torch._dynamo.mark_static(holders[0].tensor, 0)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        x = torch.ones(1)
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            holders[1].tensor = torch.ones(7)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(count(), 2)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_reused_region_merged_capture_policy(self):
+        class Holder:
+            def __init__(self, size):
+                self.tensor = torch.ones(size)
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.tensor.shape[0]
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        traces = []
+        with self._count_speculate_calls() as count:
+            for sizes in ([5, 2, 2], [5, 2, 5], [5, 2, 7]):
+                holders = [Holder(size) for size in sizes]
+                self.assertEqual(compiled(x, holders), fn(x, holders))
+                traces.append(count())
+        self.assertEqual(traces, [2, 5, 5])
+        self.assertEqual(counter.frame_count, 2)
 
     def test_reused_region_automatic_dynamic_capture(self):
         class Holder:
@@ -3840,9 +3926,11 @@ class TestInvokeSubgraphReuse(TestCase):
         x = torch.ones(1)
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        for mode, size in ((0, 2), (1, 3), (2, 2), (2, 5)):
-            holders[1].tensor = torch.ones(size)
-            self.assertEqual(compiled(x, holders, mode), fn(x, holders, mode))
+        with self._count_speculate_calls() as count:
+            for mode, size in ((0, 2), (1, 3), (2, 2), (2, 5)):
+                holders[1].tensor = torch.ones(size)
+                self.assertEqual(compiled(x, holders, mode), fn(x, holders, mode))
+        self.assertLess(count(), 8)
         # Captured sizes remain statically guarded under the automatic policy.
         self.assertEqual(counter.frame_count, 4)
 
@@ -3856,19 +3944,36 @@ class TestInvokeSubgraphReuse(TestCase):
         guard = sources[0].make_guard(
             functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=sources[1])
         )
-        tx = mock.Mock()
-        tx.output.guards.get_guards_for_source.side_effect = (
-            lambda source: [guard] if source == sources[0] else []
+        tensor = torch.ones(1)
+        tx = SimpleNamespace(
+            output=SimpleNamespace(
+                guards=SimpleNamespace(
+                    get_guards_for_source=lambda source: [guard]
+                    if source == sources[0]
+                    else []
+                ),
+                guard_on_key_order=set(mappings),
+                side_effects=SimpleNamespace(mutated_sources=set()),
+                resolve_source_value=lambda source: tensor,
+            )
         )
-        tx.output.guard_on_key_order = set(mappings)
-        tx.output.side_effects.mutated_sources = set()
-        tx.output.resolve_source_value.return_value = torch.ones(1)
         condition = build_reuse_condition(
             tx, InputFingerprint([], []), OrderedSet(sources[:1])
         )
         self.assertIsNotNone(condition)
         self.assertEqual(condition.guard_on_key_order, set(mappings))
         self.assertIn(sources[1], condition.traced_sources)
+
+        def resolve(source):
+            if source == sources[1]:
+                raise KeyError(source.name)
+            return tensor
+
+        tx.output.resolve_source_value = resolve
+        with self.assertRaisesRegex(
+            RuntimeError, "failed to resolve dependencies.*DUPLICATE_INPUT"
+        ):
+            build_reuse_condition(tx, InputFingerprint([], []), OrderedSet(sources[:1]))
         tx.output.side_effects.mutated_sources = {sources[1]}
         self.assertIsNone(
             build_reuse_condition(tx, InputFingerprint([], []), OrderedSet(sources[:1]))
@@ -3879,8 +3984,11 @@ class TestInvokeSubgraphReuse(TestCase):
             def forward(self, x):
                 return x.sin()
 
-        def hook(module, args, output):
+        def add(module, args, output):
             return output + 1
+
+        def scale(module, args, output):
+            return output * 2
 
         @nested_compile_region
         def region(x, module):
@@ -3891,14 +3999,20 @@ class TestInvokeSubgraphReuse(TestCase):
 
         modules = [Mod(), Mod()]
         for module in modules:
-            module._forward_hooks[1] = hook
+            module._forward_hooks = {1: add, 2: scale}
         x = torch.ones(1)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
         with self._count_speculate_calls() as count:
-            result = torch.compile(fn, backend="eager", fullgraph=True)(x, modules)
-        self.assertEqual(result, fn(x, modules))
+            self.assertEqual(compiled(x, modules), fn(x, modules))
         self.assertEqual(count(), 1)
+        self.assertEqual(counter.frame_count, 1)
+        modules[1]._forward_hooks = {2: scale, 1: add}
+        self.assertEqual(compiled(x, modules), fn(x, modules))
+        self.assertEqual(counter.frame_count, 2)
 
-    def test_reused_region_captured_tensor_aliases(self):
+    @parametrize("candidate_alias", [False, True])
+    def test_reused_region_captured_tensor_aliases(self, candidate_alias):
         class Holder:
             def __init__(self, alias):
                 self.left = torch.ones(1)
@@ -3911,16 +4025,16 @@ class TestInvokeSubgraphReuse(TestCase):
         def fn(x, holders):
             return tuple(region(x, holder) for holder in holders)
 
-        holders = [Holder(True), Holder(True)]
+        holders = [Holder(True), Holder(candidate_alias)]
         x = torch.ones(1)
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(count(), 1)
+        self.assertEqual(count(), 1 if candidate_alias else 2)
         holders[1].right = torch.full((1,), 3.0)
         self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 2 if candidate_alias else 1)
 
     def test_reused_region_in_trace_child_mutation(self):
         @nested_compile_region
@@ -3966,6 +4080,12 @@ class TestInvokeSubgraphReuse(TestCase):
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(count(), 1)
+        holders[1].unread = 9
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 1)
+        holders[2].scale = 4
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 2)
         for index in range(3):
             guards = [g for g in captured[0] if g.name == f"L['holders'][{index}]"]
             self.assertEqual(sum(g.create_fn_name() == "TYPE_MATCH" for g in guards), 1)
@@ -3976,12 +4096,6 @@ class TestInvokeSubgraphReuse(TestCase):
             ]
             self.assertEqual(attrs.count("scale"), 1)
             self.assertEqual(attrs.count("other"), 1 if index == 1 else 0)
-        holders[1].unread = 9
-        self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(counter.frame_count, 1)
-        holders[1].scale = 4
-        self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(counter.frame_count, 2)
 
     def test_reused_region_placeholder_order(self):
         class Holder:
@@ -4699,13 +4813,8 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(ri, ei)
 
     def _cleanup_pytree_registration(self, cls):
-        # _deregister_pytree_node raises KeyError for classes registered
-        # without serialized_type_name (they share a sentinel key in
-        # SERIALIZED_TYPE_TO_PYTHON_TYPE), so pop the registries directly
-        # instead, as in test_activation_checkpointing.py.
-        pytree.SUPPORTED_NODES.pop(cls, None)
-        pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
-        pytree.CONSTANT_NODES.discard(cls)
+        if cls in pytree.SUPPORTED_NODES:
+            pytree._deregister_pytree_node(cls)
 
     def test_subgraph_reuse_dataclass_pytree_arg(self):
         """Reuse must work for args that are registered pytree dataclasses.
