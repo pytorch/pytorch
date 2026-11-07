@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -28,7 +29,11 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     get_devtype,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.common_flex_shard import single_rank_cpu_mesh
 
 
@@ -36,7 +41,8 @@ device_type = torch.device(get_devtype())
 
 
 def _expected_bucketed_local(tensor: torch.Tensor, info: ParamInfo) -> torch.Tensor:
-    assert info.bucket_layout is not None
+    if info.bucket_layout is None:
+        raise AssertionError(f"Expected a bucket layout for {info.fqn}")
     param_layout = info.bucket_layout.param_layouts[info.fqn]
     start = param_layout.local_global_offset - param_layout.param_offset
     return (
@@ -59,6 +65,8 @@ class _TinyBlockModule(nn.Module):
 
 
 class TestBucketedBlockShardPlacement(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_equality_hash_and_repr_include_bucketed_block_semantics(self):
         placement = BucketedBlockShard(dims=(0,), blocks_per_rank=(1, 2))
 
@@ -150,6 +158,8 @@ class TestBucketedBlockShardPlacement(TestCase):
 
 
 class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -364,6 +374,8 @@ class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
 
 
 class TestBlockShardPlacement(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_local_shape_preserves_parameter_rank(self):
         placement = BlockShard(blocks_per_rank=(2, 1))
 
@@ -378,6 +390,8 @@ class TestBlockShardPlacement(TestCase):
 
 
 class TestBlockShardRuntime(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -428,6 +442,7 @@ class TestBlockShardRuntime(FSDPTest):
                     all_gather_single=mock.DEFAULT,
                     all_gather_into_tensor=mock.DEFAULT,
                     reduce_scatter_tensor=mock.DEFAULT,
+                    reduce_scatter_single=mock.DEFAULT,
                 ) as collectives:
                     optimizer.step()
                 self.assertTrue(
@@ -455,6 +470,8 @@ class TestBlockShardRuntime(FSDPTest):
 
 
 class TestBucketedBlockShardRuntime(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -510,7 +527,9 @@ class TestBucketedBlockShardRuntime(FSDPTest):
             ref_grad = reference_params[fqn].grad
             self.assertIsNotNone(param_grad)
             self.assertIsNotNone(ref_grad)
-            assert param_grad is not None
-            assert ref_grad is not None
             expected_grad = _expected_bucketed_local(ref_grad.detach(), info)
             self.assertEqual(param_grad.detach(), expected_grad)
+
+
+if __name__ == "__main__":
+    run_tests()

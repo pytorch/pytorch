@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -18,6 +17,9 @@ from .placement_contract import PlacementPreparedUnshard, PlacementUnshardResult
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import ModuleType
+
     from torch.distributed.device_mesh import DeviceMesh
 
     from .bucket_storage import ParamInfo
@@ -42,6 +44,14 @@ class UnshardHandle:
 
 class ReduceGradHandle:
     """Handle for a FlexShard bucket gradient reduction operation."""
+
+    # Where the reduced grads are ready (None: the reduce-grad stream), and
+    # whether the reduction only accumulated a partial output, with no grads.
+    post_stream: torch.Stream | None = None
+    partial: bool = False
+    # The streams that allocated the reduction's buffers, which wait for it
+    # before their memory is released
+    allocation_streams: tuple[torch.Stream, ...]
 
     def finish(self) -> list[torch.Tensor]:
         """Wait for the reduction and return local gradient shards."""
@@ -68,11 +78,19 @@ class ReduceGradHandle:
         raise NotImplementedError
 
 
+def _stream_device(stream: torch.Stream) -> torch.device | None:
+    # The device to wait on: an offloaded bucket's buffers can all be on CPU.
+    # torch.cpu's Stream stand-in has no device.
+    return stream.device if isinstance(stream, torch.Stream) else None
+
+
 def _first_tensor_device(*tensor_groups: list[torch.Tensor]) -> torch.device | None:
-    for tensors in tensor_groups:
-        if tensors:
-            return tensors[0].device
-    return None
+    """The device of the first tensor, preferring an accelerator one: an
+    offloaded bucket's buffers mix CPU and accelerator tensors."""
+    devices = [tensor.device for tensors in tensor_groups for tensor in tensors]
+    return next(
+        (d for d in devices if d.type != "cpu"), devices[0] if devices else None
+    )
 
 
 def _get_bucket_placement(
@@ -99,6 +117,7 @@ def begin_bucket_unshard(
     unshard_stream: torch.Stream,
     debug_fqn: str | None = None,
     persistent_buffers: list[torch.Tensor] | None = None,
+    **prepare_kwargs: Any,
 ) -> UnshardHandle:
     """Begin a bucket unshard and return a handle for full params.
 
@@ -110,19 +129,24 @@ def begin_bucket_unshard(
     is re-allocated before finish.
     """
     placement = _get_bucket_placement(infos, "unshard")
+    prepare_kwargs = {k: v for k, v in prepare_kwargs.items() if v is not None}
 
     if torch.compiler.is_compiling():
-        prepared = placement.prepare_unshard_bucket(tensors, infos, mesh, debug_fqn)
+        prepared = placement.prepare_unshard_bucket(
+            tensors, infos, mesh, debug_fqn, **prepare_kwargs
+        )
         result = _run_and_finish_unshard(prepared)
         return SyncUnshardResult(result.full_params)
 
-    device = tensors[0].device
+    device = prepare_kwargs.get("device", tensors[0].device)
     device_handle = _get_device_handle(device.type)
     copy_in_done = device_handle.Event()
     copy_in_done.record(device_handle.current_stream(device))
     with device_handle.stream(unshard_stream):
         unshard_stream.wait_event(copy_in_done)
-        prepared = placement.prepare_unshard_bucket(tensors, infos, mesh, debug_fqn)
+        prepared = placement.prepare_unshard_bucket(
+            tensors, infos, mesh, debug_fqn, **prepare_kwargs
+        )
         prepared.persistent = True
         prepared.persistent_buffers = persistent_buffers
         if persistent_buffers is None:
@@ -148,6 +172,23 @@ def begin_bucket_unshard(
     )
 
 
+@dataclass
+class PostReduceScatter:
+    """The steps between a bucket's reduce-scatter and its grad accumulation,
+    as FSDP2 runs them: the all-reduce over the replicas of the mesh (HSDP,
+    ``replicate()``) and the user's all-reduce hook, on ``stream`` so that the
+    next bucket's reduce-scatter does not wait for them. Without
+    ``requires_all_reduce``, the reduce-scatter output accumulates in
+    ``partial_output`` instead and the all-reduce of a later backward adds it.
+    """
+
+    stream: torch.Stream
+    replicate_group: dist.ProcessGroup | None = None
+    requires_all_reduce: bool = True
+    partial_output: torch.Tensor | None = None
+    hook: Callable[[torch.Tensor], None] | None = None
+
+
 def begin_reduce_grad(
     tensors: list[torch.Tensor],
     infos: list[ParamInfo],
@@ -155,11 +196,25 @@ def begin_reduce_grad(
     reduction: GradientReduction,
     reduce_grad_stream: torch.Stream,
     debug_fqn: str | None = None,
+    post_reduce_scatter: PostReduceScatter | None = None,
+    **prepare_kwargs: Any,
 ) -> ReduceGradHandle:
-    """Begin a bucket reduce-grad and return a handle for local grad shards."""
+    """Begin a bucket reduce-grad and return a handle for local grad shards.
+
+    The handle's ``post_stream`` is where the reduced grads are ready; it holds
+    no grads if the reduce-scatter output only accumulated into
+    ``post_reduce_scatter.partial_output``."""
     placement = _get_bucket_placement(infos, "reduce-grad")
-    prepared = placement.prepare_reduce_grad(tensors, infos, mesh, debug_fqn)
+    prepare_kwargs = {k: v for k, v in prepare_kwargs.items() if v is not None}
+    prepared = placement.prepare_reduce_grad(
+        tensors, infos, mesh, debug_fqn, **prepare_kwargs
+    )
     if torch.compiler.is_compiling():
+        if post_reduce_scatter is not None:
+            raise NotImplementedError(
+                "FlexShard: torch.compile does not support the HSDP all-reduce or "
+                "an all-reduce hook yet."
+            )
         result = prepared.placement.reduce_prepared_grad(prepared, reduction)
         return SyncReduceGradResult(result.sharded_grads)
 
@@ -168,17 +223,64 @@ def begin_reduce_grad(
     copy_in_stream = device_handle.current_stream(device)
     copy_in_done = device_handle.Event()
     copy_in_done.record(copy_in_stream)
+    post = post_reduce_scatter
+    all_reduce = post is not None and post.replicate_group is not None
     with device_handle.stream(reduce_grad_stream):
         reduce_grad_stream.wait_event(copy_in_done)
         result = prepared.placement.reduce_prepared_grad(prepared, reduction)
+        output = result.flat_output
+        if post is not None and output is None:
+            raise NotImplementedError(
+                f"FlexShard: {type(placement).__name__} does not support the HSDP "
+                "all-reduce or an all-reduce hook."
+            )
+        partial = False
+        if all_reduce and post is not None and output is not None:
+            if not post.requires_all_reduce:
+                if post.partial_output is None:
+                    post.partial_output = output
+                elif post.partial_output.dtype != output.dtype:
+                    # A wider reduce output widens the pending one
+                    post.partial_output = post.partial_output.to(output.dtype) + output
+                else:
+                    post.partial_output += output
+                partial = True
+            elif post.partial_output is not None:
+                output += post.partial_output
+                post.partial_output = None
         event = device_handle.Event()
         event.record(reduce_grad_stream)
+    post_stream = reduce_grad_stream
+    if post is not None and output is not None and not partial:
+        from .placements.utils import _gradient_reduce_ops
+
+        _, _, _, all_reduce_op, post_factor = _gradient_reduce_ops(
+            reduction, mesh.size(), output.dtype
+        )
+        post_stream = post.stream
+        post_stream.wait_event(event)
+        with device_handle.stream(post_stream):
+            if all_reduce:
+                dist.all_reduce(output, group=post.replicate_group, op=all_reduce_op)
+            if post.hook is not None:
+                post.hook(output)
+            if post_factor is not None:
+                output.div_(post_factor)
+            event = device_handle.Event()
+            event.record(post_stream)
+    # The reduce output is read on another stream only by the post-reduce
+    # steps; otherwise the sharded grads, which alias or copy it on its own
+    # stream, alone decide its lifetime, as in FSDP2 (e.g. freed once
+    # offloaded to CPU).
+    output_buffers = result.buffers if post_stream is not reduce_grad_stream else []
     return AsyncReduceGradResult(
-        sharded_grads=result.sharded_grads,
+        sharded_grads=[] if partial else result.sharded_grads,
         event=event,
-        buffers=[*prepared.buffers, *result.buffers],
-        allocation_streams=(copy_in_stream, reduce_grad_stream),
+        buffers=[*prepared.buffers, *output_buffers],
+        allocation_streams=(copy_in_stream, reduce_grad_stream, post_stream),
         device_handle=device_handle,
+        post_stream=post_stream,
+        partial=partial,
     )
 
 
@@ -190,6 +292,7 @@ def begin_explicit_bucket_unshard(
     async_op: bool,
     debug_fqn: str | None = None,
     persistent_buffers: list[torch.Tensor] | None = None,
+    **prepare_kwargs: Any,
 ) -> UnshardHandle:
     """Begin a bucket unshard for ``FlexShardModule.unshard()`` on the current
     stream, as FSDP2's ``FSDPModule.unshard()`` all-gathers on it
@@ -203,7 +306,10 @@ def begin_explicit_bucket_unshard(
     collective does. See ``begin_bucket_unshard`` for ``persistent_buffers``.
     """
     placement = _get_bucket_placement(infos, "unshard")
-    prepared = placement.prepare_unshard_bucket(tensors, infos, mesh, debug_fqn)
+    prepare_kwargs = {k: v for k, v in prepare_kwargs.items() if v is not None}
+    prepared = placement.prepare_unshard_bucket(
+        tensors, infos, mesh, debug_fqn, **prepare_kwargs
+    )
     prepared.persistent = True
     prepared.persistent_buffers = persistent_buffers
     if persistent_buffers is None:
@@ -246,7 +352,9 @@ class AsyncUnshardResult(UnshardHandle):
     _finished: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        self._device = _first_tensor_device(self.prepared.buffers)
+        self._device = _stream_device(self.unshard_stream) or _first_tensor_device(
+            self.prepared.buffers
+        )
 
     def finish(self) -> PlacementUnshardResult:
         if self._finished:
@@ -273,12 +381,84 @@ class AsyncUnshardResult(UnshardHandle):
     def _release(self, tensors: list[torch.Tensor]) -> None:
         if not tensors:
             return
-        current_stream = self.device_handle.current_stream(tensors[0].device)
+        current_stream = self.device_handle.current_stream(self._device)
         StreamHandoff(
             tensors,
             (self.unshard_stream, current_stream),
             self.device_handle,
         ).release_after_current_stream()
+
+
+@dataclass
+class PostForwardUnshardResult(UnshardHandle):
+    """An unshard from the chunks of the unsharded parameters kept after forward
+    (FSDP2's ``reshard_after_forward=int``): an all-gather over the smaller
+    post-forward group, then a copy into the persistent buffers."""
+
+    gathered: torch.Tensor
+    chunk_nbytes: list[int]
+    persistent_buffers: list[torch.Tensor]
+    world_size: int
+    event: torch.Event
+    stream: torch.Stream
+    device_handle: ModuleType
+
+    def finish(self) -> PlacementUnshardResult:
+        self.wait()
+        keep = [i for i, nbytes in enumerate(self.chunk_nbytes) if nbytes]
+        outputs = [self.persistent_buffers[i].view(-1).view(torch.uint8) for i in keep]
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs,
+            self.gathered,
+            [self.chunk_nbytes[i] for i in keep],
+            [1] * len(keep),
+            self.world_size,
+        )
+        self.release_buffers()
+        return PlacementUnshardResult(
+            full_params=[], persistent_buffers=self.persistent_buffers
+        )
+
+    def wait(self) -> None:
+        self.device_handle.current_stream(self.gathered.device).wait_event(self.event)
+
+    def release_buffers(self) -> None:
+        current_stream = self.device_handle.current_stream(self.gathered.device)
+        StreamHandoff(
+            [self.gathered], (self.stream, current_stream), self.device_handle
+        ).release_after_current_stream()
+
+
+def begin_post_forward_unshard(
+    post_forward_storage: torch.Tensor,
+    chunk_nbytes: list[int],
+    persistent_buffers: list[torch.Tensor],
+    group: dist.ProcessGroup,
+    stream: torch.Stream,
+) -> PostForwardUnshardResult:
+    """All-gather the chunks kept after forward over ``group`` on ``stream``."""
+    device = post_forward_storage.device
+    device_handle = _get_device_handle(device.type)
+    ready = device_handle.Event()
+    ready.record(device_handle.current_stream(device))
+    world_size = group.size()
+    with device_handle.stream(stream):
+        stream.wait_event(ready)
+        gathered = torch.empty(
+            world_size * post_forward_storage.numel(), dtype=torch.uint8, device=device
+        )
+        dist.all_gather_into_tensor(gathered, post_forward_storage, group=group)
+        event = device_handle.Event()
+        event.record(stream)
+    return PostForwardUnshardResult(
+        gathered=gathered,
+        chunk_nbytes=chunk_nbytes,
+        persistent_buffers=persistent_buffers,
+        world_size=world_size,
+        event=event,
+        stream=stream,
+        device_handle=device_handle,
+    )
 
 
 @dataclass
@@ -320,6 +500,7 @@ class SyncReduceGradResult(ReduceGradHandle):
     """Already-finished reduce-grad result used during graph capture."""
 
     sharded_grads: list[torch.Tensor]
+    allocation_streams: tuple[torch.Stream, ...] = ()
 
     def finish(self) -> list[torch.Tensor]:
         return self.sharded_grads
@@ -351,10 +532,14 @@ class AsyncReduceGradResult(ReduceGradHandle):
     buffers: list[torch.Tensor]
     allocation_streams: tuple[torch.Stream, ...]
     device_handle: ModuleType
+    post_stream: torch.Stream | None = None
+    partial: bool = False
     _device: torch.device | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
-        self._device = _first_tensor_device(self.sharded_grads, self.buffers)
+        self._device = _stream_device(
+            self.allocation_streams[0]
+        ) or _first_tensor_device(self.sharded_grads, self.buffers)
 
     def finish(self) -> list[torch.Tensor]:
         self.wait()
@@ -392,7 +577,9 @@ class AsyncReduceGradResult(ReduceGradHandle):
     ) -> None:
         self.sharded_grads = sharded_grads
         self._device = (
-            _first_tensor_device(self.sharded_grads, self.buffers) or self._device
+            _stream_device(stream)
+            or _first_tensor_device(self.sharded_grads, self.buffers)
+            or self._device
         )
         self.event = self.device_handle.Event()
         self.event.record(stream)
@@ -420,7 +607,10 @@ class StreamHandoff:
         device_handle: ModuleType | None = None,
     ) -> None:
         if device_handle is None:
-            device_handle = _get_device_handle(tensors[0].device.type)
+            device = _first_tensor_device(tensors)
+            if device is None:
+                raise AssertionError("Expected tensors to take the device from")
+            device_handle = _get_device_handle(device.type)
         self._tensors = tensors
         self._allocation_streams = allocation_streams
         self._device_handle = device_handle
@@ -447,7 +637,10 @@ class StreamHandoff:
         if not self._tensors:
             self._released = True
             return
-        device = self._tensors[0].device
+        streams = self._allocation_streams
+        device = (streams and _stream_device(streams[0])) or _first_tensor_device(
+            self._tensors
+        )
         event = self._device_handle.Event()
         event.record(self._device_handle.current_stream(device))
         self.release_after(event)

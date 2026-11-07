@@ -15,7 +15,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
-    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
@@ -62,15 +61,16 @@ device_type = torch.device(get_devtype())
 
 
 def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
-    def copy_in(grads, buffer, world_size):
-        grad_dtypes.append(tuple(grad.dtype for grad in grads))
-        foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+    """Record the dtypes of the grads each reduce-scatter copy-in reads."""
+    from torch.distributed.fsdp._flex_shard.placements import shard
 
-    return patch(
-        "torch.distributed.fsdp._fully_shard._fsdp_collectives."
-        "foreach_reduce_scatter_copy_in",
-        copy_in,
-    )
+    orig_copy_in = shard._reduce_scatter_copy_in
+
+    def copy_in(grads, num_leading_dims, world_size, out):
+        grad_dtypes.append(tuple(grad.dtype for grad in grads))
+        orig_copy_in(grads, num_leading_dims, world_size, out)
+
+    return patch.object(shard, "_reduce_scatter_copy_in", copy_in)
 
 
 def add_all_gather_extension(param: nn.Parameter) -> None:
@@ -507,7 +507,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         fsdp_param_group = fully_shard.state(model)._fsdp_param_group
         if fsdp_param_group is None:
             raise AssertionError("Expected root FSDP parameter group")
-        self.assertEqual(fsdp_param_group._reduce_dtype, torch.float32)
+        infos = fsdp_param_group.storage.param_infos.values()
+        self.assertEqual(
+            {info.grad_reduce_dtype for info in infos if info.dtype.is_floating_point},
+            {torch.float32},
+        )
 
         model.layers.requires_grad_(True)
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -820,6 +824,24 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(weight.grad.dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_chosen_by_each_forward(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        model.unshard()
+        weight = model.weight
+        model.reshard()
+        fwd_dtypes = []
+        model.register_forward_hook(lambda *_: fwd_dtypes.append(weight.grad_dtype))
+        inp = torch.ones(2, 8, device=device_type)
+        # A forward without gradient sync after one with it, e.g. a chunked
+        # loss calling the output projection after the model's forward, does
+        # not keep the first forward's deferred upcast
+        out = model(inp)
+        model.set_requires_gradient_sync(False)
+        (out + model(inp)).sum().backward()
+        self.assertEqual(fwd_dtypes, [None, torch.float32])
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_outside_forward_and_backward(self):
         model = nn.Linear(8, 8, bias=False, device=device_type)
         fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
@@ -1007,13 +1029,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             output = group._partial_reduce_output
             if sync:
                 self.assertIsNone(output)
-                self.assertEqual(
-                    len(group._partial_reduce_output_layout), len(model.params)
-                )
                 continue
             self.assertIsNotNone(output)
             self.assertEqual(output.dtype, inp_dtype)
-            if step in (1, 3):
+            # The engine reduce-scatters every parameter into the pending output,
+            # which it replaces only to widen its dtype
+            if previous_output is not None and previous_output.dtype == output.dtype:
                 self.assertIs(output, previous_output)
             else:
                 self.assertIsNot(output, previous_output)
@@ -1037,7 +1058,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             self.assertEqual(param.grad.full_tensor(), expected)
 
         # Reset discards the sharded and unsharded gradients, and the group's
-        # pending buffer and cached layout
+        # pending buffer
         model.set_requires_all_reduce(False)
         inp = torch.ones(8, device=device, dtype=torch.bfloat16)
         model(inp, (2,)).backward()
@@ -1046,7 +1067,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         model(inp, (3,)).backward()
         model.reset_iter_state()
         self.assertIsNone(group._partial_reduce_output)
-        self.assertEqual(group._partial_reduce_output_layout, {})
         model.set_requires_gradient_sync(True)
         model(inp, (3,)).backward()
         for param in model.params[:3]:
@@ -1210,7 +1230,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     def test_native_copy_in_mixed_grad_dtypes(self):
         # Mixes the Linear's deferred bf16 Shard(1) gradient with the fp32
-        # norm's. The default copy-in reorders the former; the native one doesn't.
+        # norm's. Both the default copy-in and the native one read the former
+        # in place, without reordering it to dim 0 first.
         copy_ins: list[tuple[list[torch.dtype], list[int] | None]] = []
 
         class RecordCopyIns(TorchDispatchMode):
@@ -1245,7 +1266,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 loss.backward()
             models.append(model)
         dtypes = [torch.bfloat16, torch.float32]
-        self.assertEqual(copy_ins, [(dtypes, None), (dtypes, [1, 0])])
+        self.assertEqual(copy_ins, [(dtypes, [1, 0]), (dtypes, [1, 0])])
         ref_model, model = models
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.full_tensor(), ref_param.grad.full_tensor())

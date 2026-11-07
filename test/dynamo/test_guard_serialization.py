@@ -5010,38 +5010,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
-    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
-    def test_fsdp_training_state(self):
-        from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
-        from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-
-        param_group = FSDPParamGroup(
-            [],  # params: List[nn.Parameter],
-            (torch.nn.Linear(1, 1),),  # module: nn.Module,
-            None,  # mesh_info: FSDPMeshInfo,
-            None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            torch.device("cpu"),  # device: torch.device,
-            None,  # shard_placement_fn: Optional[Callable],
-            None,  # mp_policy: MixedPrecisionPolicy,
-            None,  # offload_policy: OffloadPolicy,
-        )
-
-        def fn(x):
-            with param_group.use_training_state(TrainingState.FORWARD):
-                if param_group._training_state == TrainingState.FORWARD:
-                    return x + 1
-                else:
-                    return x - 1
-
-        x = torch.randn(3, 2)
-
-        with torch.enable_grad():
-            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
-        with torch.no_grad():
-            self._test_check_fn(ref, loaded, {"x": x}, False)
-        with torch.enable_grad():
-            self._test_check_fn(ref, loaded, {"x": x}, True)
-
     def test_default_device(self):
         device = torch.get_default_device()
 

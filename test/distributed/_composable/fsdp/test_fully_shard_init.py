@@ -14,9 +14,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+from torch.distributed.fsdp._fully_shard._fsdp_param import (
     _get_param_module_infos,
+    ParamModuleInfo,
 )
 from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
