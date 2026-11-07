@@ -86,7 +86,11 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._prims_common import compute_required_storage_length
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    evaluate_gfx_arch_within,
+    PLATFORM_SUPPORTS_FP8,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -111,6 +115,7 @@ aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
+    _ROCM_DECOMPOSE_K_ARCHS,
     fresh_cache,
     get_k_splits,
     run_and_get_code,
@@ -3025,9 +3030,7 @@ class TestMaxAutotune(TestCase):
             return_value=(16, 128 * 1024),
         ):
             _, code = run_and_get_code(compiled_func, a, b)
-        decompose_count = sum(
-            "benchmark_decompose_k_mm" in codegen for codegen in code
-        )
+        decompose_count = sum("benchmark_decompose_k_mm" in codegen for codegen in code)
         self.assertEqual(decompose_count, len(expected_splits))
 
     def test_filter_decompose_k_splits(self):
@@ -3047,18 +3050,25 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(filter_decompose_k_splits([], 16, 16, 64, 8, 0), [])
 
     def test_decompose_k_split_bounds(self):
-        def bounds_for(device_type, major, multi_processor_count):
+        def bounds_for(device_type, major, multi_processor_count, arch=""):
             props = mock.Mock(
                 type=device_type,
                 major=major,
                 multi_processor_count=multi_processor_count,
             )
-            with mock.patch.object(DeviceProperties, "create", return_value=props):
+            with (
+                mock.patch.object(DeviceProperties, "create", return_value=props),
+                mock.patch(
+                    "torch._inductor.heuristics.template.decompose_k.rocm_gfx_arch",
+                    return_value=arch,
+                ),
+            ):
                 return decompose_k_split_bounds(torch.device(GPU_TYPE))
 
         self.assertEqual(bounds_for("cuda", 10, 148), (74, 0))
         self.assertEqual(bounds_for("cuda", 9, 132), (8, 8 * 1024 * 1024))
-        self.assertEqual(bounds_for("hip", 9, 304), (0, 0))
+        self.assertEqual(bounds_for("hip", 9, 304, "gfx942"), (0, 0))
+        self.assertEqual(bounds_for("hip", 9, 256, "gfx950"), (32, 64 * 1024 * 1024))
         self.assertEqual(bounds_for("xpu", None, 64), (0, 0))
 
     @unittest.skipIf(
@@ -3283,6 +3293,147 @@ class TestMaxAutotune(TestCase):
         self.assertFalse(
             any(name.startswith("decompose_k_mm") for name in names), names
         )
+
+    @config.patch({"triton.num_decompose_k_splits": -1})
+    def test_decompose_k_num_splits_auto(self):
+        """-1 turns decompose_k on only for validated ROCm archs; explicit values win."""
+        from torch._inductor.utils import decompose_k_num_splits
+
+        for arch, expected in (("gfx950", 10), ("gfx942", 0), ("", 0)):
+            with mock.patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch):
+                self.assertEqual(decompose_k_num_splits(), expected, arch)
+        with config.patch({"triton.num_decompose_k_splits": 5}):
+            with mock.patch(
+                "torch._inductor.utils.rocm_gfx_arch", return_value="gfx942"
+            ):
+                self.assertEqual(decompose_k_num_splits(), 5)
+
+    def test_decompose_k_rocm_bounds_only_on_gfx950(self):
+        """The rocm.decompose_k_* bounds apply only to the gfx950 default (-1 splits);
+        CUDA, other ROCm archs and explicit split counts keep
+        triton.decompose_k_threshold and no K or tile caps."""
+        graph = mock.Mock(aot_mode=False, cpp_wrapper=False)
+        graph.sizevars.statically_known_true = bool
+
+        def offered(arch, m, n, k, num_splits):
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            with (
+                mock.patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
+                V.set_graph_handler(graph),
+                config.patch(
+                    {
+                        "triton.num_decompose_k_splits": num_splits,
+                        "triton.decompose_k_threshold": 32,
+                    }
+                ),
+            ):
+                try:
+                    return use_decompose_k_choice(m, n, k)
+                finally:
+                    get_k_splits.cache_clear()
+                    use_decompose_k_choice.cache_clear()
+
+        shapes = {
+            "K/max = 16": (1024, 1024, 16384),
+            "K/max = 8": (1024, 1024, 8192),
+            "K > 2M": (32, 32, 4 * 1024 * 1024),
+            "32 output tiles": (2048, 1024, 65536),
+            "K < 8192": (256, 256, 4096),
+        }
+        expected = {
+            # CUDA and MI300 (explicit splits): triton.decompose_k_threshold = 32 only.
+            "": {
+                "K/max = 16": False,
+                "K/max = 8": False,
+                "K > 2M": True,
+                "32 output tiles": True,
+                "K < 8192": False,
+            },
+            # gfx950: K >= 8 * max(M, N), 8192 <= K <= 2M, fewer than 32 tiles.
+            "gfx950": {
+                "K/max = 16": True,
+                "K/max = 8": True,
+                "K > 2M": False,
+                "32 output tiles": False,
+                "K < 8192": False,
+            },
+        }
+        for arch, num_splits in (
+            ("", 10),
+            ("gfx942", 10),
+            ("gfx950", 10),  # explicit split count: generic behavior
+            ("gfx950", -1),
+        ):
+            rule = "gfx950" if (arch, num_splits) == ("gfx950", -1) else ""
+            for name, (m, n, k) in shapes.items():
+                self.assertEqual(
+                    offered(arch, m, n, k, num_splits),
+                    expected[rule][name],
+                    (arch, num_splits, name),
+                )
+        # The ROCm default (-1) leaves decompose_k off outside gfx950.
+        self.assertFalse(offered("gfx942", 1024, 1024, 65536, -1))
+
+    @unittest.skipIf(
+        not TEST_WITH_ROCM
+        or not evaluate_gfx_arch_within(list(_ROCM_DECOMPOSE_K_ARCHS)),
+        "gfx950 decompose_k default",
+    )
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @fresh_cache()
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_decompose_k_gfx950_default_on(self):
+        """With default configs, gfx950 offers decompose_k in bounds and not outside."""
+        for (M, N, K), expected in (
+            ((1024, 1024, 8192), True),
+            (
+                (256, 256, 4096),
+                False,
+            ),  # K/max(M, N) = 16 but K < rocm.decompose_k_min_k
+        ):
+            a, b = self._make_matrices(
+                M=M,
+                K=K,
+                N=N,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=False,
+            )
+            names: list[str] = []
+
+            def record(choices):
+                names.extend(choice.name for choice in choices)
+                return choices
+
+            torch._dynamo.reset()
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            add_preprocessing_fn(record)
+            try:
+                with config.patch({"test_configs.max_mm_configs": 1}):
+                    actual = torch.compile(lambda x, y: x @ y)(a, b)
+            finally:
+                clear_preprocessing_fns(clear_defaults=False)
+                get_k_splits.cache_clear()
+                use_decompose_k_choice.cache_clear()
+
+            self.assertEqual(
+                any(name.startswith("decompose_k_mm") for name in names),
+                expected,
+                (M, N, K, names),
+            )
+            torch.testing.assert_close(actual, a @ b, atol=1e-2, rtol=1e-2)
 
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}

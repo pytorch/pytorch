@@ -2548,11 +2548,12 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
-    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
-    # Disabled on ROCm by default pending performance validation.
+    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k.
+    # -1 (the ROCm default) means 10 on the ROCm archs where decompose_k was validated
+    # (utils._ROCM_DECOMPOSE_K_ARCHS) and 0 elsewhere.
     num_decompose_k_splits = int(
         os.environ.get(
-            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
+            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "-1" if torch.version.hip else "10"
         )
     )
 
@@ -3125,6 +3126,17 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+
+    # decompose_k bounds on the archs in utils._ROCM_DECOMPOSE_K_ARCHS (MI350X) when
+    # triton.num_decompose_k_splits is -1 (the ROCm default), used in place of
+    # triton.decompose_k_threshold. An explicit split count skips them. decompose_k is offered when
+    # K >= decompose_k_threshold * max(M, N), decompose_k_min_k <= K <= decompose_k_max_k,
+    # and the unsplit GEMM has fewer than decompose_k_max_output_tiles 256x256 output
+    # tiles. Outside these bounds it rarely beats hipBLASLt and only adds autotune time.
+    decompose_k_threshold: int = 8
+    decompose_k_min_k: int = 8192
+    decompose_k_max_k: int = 2 * 1024 * 1024
+    decompose_k_max_output_tiles: int = 32
     # Enable origami GEMM autotuning on Triton templates (ROCm only).
     #
     # When True, the rocm-origami pip package is consulted at GEMM compile time
