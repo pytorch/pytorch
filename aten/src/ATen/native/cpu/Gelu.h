@@ -8,6 +8,9 @@
 #include <math.h>
 #endif // _WIN32
 
+#include <cmath>
+#include <limits>
+
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/BFloat16.h> // For c10::is_reduced_floating_point_v.
 
@@ -33,9 +36,20 @@ template <typename T>
 T scalar_gelu_approximated_with_tanh(T x) {
   using opmath_t = reduced_fp_to_float_t<T>;
   auto x_float = reduced_fp_to_float(x);
+  if (std::isinf(x_float)) {
+    return x_float > opmath_t(0) ? x : T(0);
+  }
   auto x_cube = x_float * x_float * x_float;
   auto inner = opmath_t(kGeluBeta) * (x_float + opmath_t(kGeluKappa) * x_cube);
   return opmath_t(0.5) * x_float * (opmath_t(1) + std::tanh(inner));
+}
+
+template <typename T>
+vec::Vectorized<T> fixup_gelu_inf(vec::Vectorized<T> res, vec::Vectorized<T> x) {
+  const vec::Vectorized<T> kInfVec(std::numeric_limits<T>::infinity());
+  const vec::Vectorized<T> kZeroVec(T(0));
+  res = vec::Vectorized<T>::blendv(res, kZeroVec, x == -kInfVec);
+  return vec::Vectorized<T>::blendv(res, kInfVec, x == kInfVec);
 }
 
 template <typename T, std::enable_if_t<!c10::is_reduced_floating_point_v<T>, bool> = true>
@@ -46,7 +60,7 @@ vec::Vectorized<T> vectorized_gelu_approximated_with_tanh(vec::Vectorized<T> x) 
   const vec::Vectorized<T> kGeluKappaVec((T(kGeluKappa)));
   auto x_cube = x * x * x;
   vec::Vectorized<T> inner_vec = kGeluBetaVec * (x + kGeluKappaVec * x_cube);
-  return kPointFiveVec * x * (kOneVec + inner_vec.tanh());
+  return fixup_gelu_inf(kPointFiveVec * x * (kOneVec + inner_vec.tanh()), x);
 }
 
 template <typename T, std::enable_if_t<c10::is_reduced_floating_point_v<T>, bool> = true>
@@ -62,7 +76,11 @@ template <typename T>
 T scalar_gelu(T x) {
   using opmath_t = reduced_fp_to_float_t<T>;
   const auto kAlpha = opmath_t(M_SQRT1_2);
-  return reduced_fp_to_float(x) * opmath_t(0.5) * (opmath_t(1) + std::erf(reduced_fp_to_float(x) * kAlpha));
+  auto x_float = reduced_fp_to_float(x);
+  if (std::isinf(x_float)) {
+    return x_float > opmath_t(0) ? x : T(0);
+  }
+  return x_float * opmath_t(0.5) * (opmath_t(1) + std::erf(x_float * kAlpha));
 }
 
 template<typename T, std::enable_if_t<!c10::is_reduced_floating_point_v<T>, bool> = true>
@@ -70,7 +88,7 @@ vec::Vectorized<T> vectorized_gelu(vec::Vectorized<T> x) {
   const vec::Vectorized<T> kAlphaVec(T(M_SQRT1_2));
   const vec::Vectorized<T> kOneVec(T(1));
   const vec::Vectorized<T> kPointFiveVec(T(0.5));
-  return x * kPointFiveVec * (kOneVec + (x * kAlphaVec).erf());
+  return fixup_gelu_inf(x * kPointFiveVec * (kOneVec + (x * kAlphaVec).erf()), x);
 }
 
 template<typename T, std::enable_if_t<c10::is_reduced_floating_point_v<T>, bool> = true>
