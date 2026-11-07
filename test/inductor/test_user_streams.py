@@ -2891,7 +2891,7 @@ class TestAOTIUserStreams(InductorTestCase):
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
 
-    def _compile_and_run(self, model, inputs):
+    def _compile_and_run(self, model, inputs, run_inputs=None):
         from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 
         with fresh_cache():
@@ -2903,6 +2903,8 @@ class TestAOTIUserStreams(InductorTestCase):
             package_path, code = run_and_get_cpp_code(_compile)
             loaded = torch._inductor.aoti_load_package(package_path)
             result = loaded(*inputs)
+            if run_inputs is not None:
+                result = loaded(*run_inputs)
         return result, code
 
     @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
@@ -2961,6 +2963,59 @@ class TestAOTIUserStreams(InductorTestCase):
                 code.count(self._runtime_name("cudaStreamWaitEvent")), 2
             )
             self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
+    def test_triton_launch_in_region_uses_region_stream(self):
+        # A Triton kernel in a user stream region launches on the region's stream
+        # (named as the region's entry names it), which the region's aten mms run
+        # on, so it reads their finished output.
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                s = device_module.Stream()
+                with device_module.stream(s):
+                    a = x
+                    for _ in range(8):
+                        a = a @ w
+                    b = torch.relu(a) + 1
+                event = s.record_event()
+                event.wait()
+                return b
+
+        model = Model().to(GPU_TYPE)
+        inputs = (
+            torch.randn(4096, 4096, device=GPU_TYPE),
+            torch.eye(4096, device=GPU_TYPE) * 0.9,
+        )
+        # Checked on a second run, with other inputs: the first run loads the Triton
+        # kernel, which synchronizes the device, and a kernel on the wrong stream
+        # could find the first run's results in the buffers it reads.
+        run_inputs = (
+            torch.randn(4096, 4096, device=GPU_TYPE),
+            torch.eye(4096, device=GPU_TYPE) * 0.8,
+        )
+        # The model's side stream does not wait for the default stream, which made
+        # the inputs.
+        device_module.synchronize()
+        expected = model(*run_inputs)
+
+        result, code = self._compile_and_run(model, inputs, run_inputs)
+
+        self.assertEqual(result, expected)
+        (region,) = set(
+            re.findall(
+                r"_aoti_current_stream_guard = std::make_unique<[\w:]+>\((.*), "
+                r"this->device_idx_\);",
+                code,
+            )
+        )
+        self.assertEqual(
+            region, "_aoti_aux_stream_cache.get(1, this->device_idx_, stream)"
+        )
+        # A Triton launch ends with the device index, stream, kernels and cubin dir.
+        calls = re.findall(r"\bcall_triton_\w+\((.*)\);", code)
+        self.assertGreaterEqual(len(calls), 1)
+        tail = f", this->device_idx_, {region}, kernels, this->cubin_dir_"
+        self.assertTrue(all(call.endswith(tail) for call in calls), calls)
 
     @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
     def test_stream_synchronize_raises(self):
