@@ -16,6 +16,7 @@
 #include <c10/util/error.h>
 
 #include <c10/util/irange.h>
+#include <exception>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -980,6 +981,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   // through the process group's NCCL allgather instead.
   bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
       group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  const bool coordinate_failure = !use_pg;
+#else
+  const bool coordinate_failure = false;
+#endif
+  std::vector<c10::intrusive_ptr<AllocationRef>> peer_alloc_refs(
+      coordinate_failure ? world_size : 0);
   std::vector<RendezvousRequest> reqs;
   std::vector<int> pids(world_size);
   std::vector<HandleType> handles(world_size);
@@ -1048,61 +1056,109 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           : storeExchange.all_gather(store, rank, world_size, block_handle);
     }
 
-    for (const auto r : c10::irange(world_size)) {
-      if (r == rank) {
-        // Derive pointers from the allocation base (not the rendezvous ptr,
-        // which may be an interior MemPool pointer): this pai is shared by
-        // every handle on the allocation, and per-handle offsets are applied
-        // separately.
-        handles[r] = block->alloc_ref->handle;
-        signal_pads[r] = block->alloc_ref->ptr;
-        buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
-        continue;
+    auto close_received_handles = c10::make_scope_exit([&]() noexcept {
+      if constexpr (!use_fabric_handle) {
+        if (coordinate_failure) {
+          close_peer_fds(imported_handles, rank, [](int fd) { close(fd); });
+        }
       }
-      // This api imports a GPU memory allocation that was previously exported
-      // as a file descriptor or fabric handle and it returns a memory handle.
+    });
+    std::exception_ptr local_error;
+    try {
+      for (const auto r : c10::irange(world_size)) {
+        if (r == rank) {
+          // Derive pointers from the allocation base (not the rendezvous ptr,
+          // which may be an interior MemPool pointer): this pai is shared by
+          // every handle on the allocation, and per-handle offsets are applied
+          // separately.
+          handles[r] = block->alloc_ref->handle;
+          signal_pads[r] = block->alloc_ref->ptr;
+          buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
+          continue;
+        }
+        // This api imports a GPU memory allocation that was previously exported
+        // as a file descriptor or fabric handle and it returns a memory handle.
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-      // note how in one case it's directly imported_handles[r] and in another
-      // &(imported_handles[r]) so can't do with just type definitions
-      if constexpr (!use_fabric_handle) {
-        C10_CUDA_DRIVER_CHECK_MSG(
-            driver_api->cuMemImportFromShareableHandle_(
-                &handles[r],
-                (void*)(uintptr_t)imported_handles[r],
-                CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
-            import_err_msg(rank, r, reqs));
-      } else {
-        C10_CUDA_DRIVER_CHECK_MSG(
-            driver_api->cuMemImportFromShareableHandle_(
-                &handles[r],
-                (void*)&(imported_handles[r]),
-                CU_MEM_HANDLE_TYPE_FABRIC),
-            import_err_msg(rank, r, reqs));
-      }
+        // note how in one case it's directly imported_handles[r] and in another
+        // &(imported_handles[r]) so can't do with just type definitions
+        if constexpr (!use_fabric_handle) {
+          C10_CUDA_DRIVER_CHECK_MSG(
+              driver_api->cuMemImportFromShareableHandle_(
+                  &handles[r],
+                  (void*)(uintptr_t)imported_handles[r],
+                  CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
+              import_err_msg(rank, r, reqs));
+        } else {
+          C10_CUDA_DRIVER_CHECK_MSG(
+              driver_api->cuMemImportFromShareableHandle_(
+                  &handles[r],
+                  (void*)&(imported_handles[r]),
+                  CU_MEM_HANDLE_TYPE_FABRIC),
+              import_err_msg(rank, r, reqs));
+        }
 #elif defined(USE_ROCM)
-      C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-          &handles[r],
+        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+            &handles[r],
 #if ROCM_VERSION >= 70100
-          reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+            reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
 #else
-          (void*)(uintptr_t)&(imported_handles[r]),
+            (void*)(uintptr_t)&(imported_handles[r]),
 #endif
-          hipMemHandleTypePosixFileDescriptor));
+            hipMemHandleTypePosixFileDescriptor));
 #else
-      TORCH_CHECK(
-          false,
-          "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+        TORCH_CHECK(
+            false,
+            "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-      // map_block returns the mapped base (== signal pad base); the data buffer
-      // follows at buffer_offset.
-      map_block(
-          &signal_pads[r], handles[r], block->block_size, block->device_idx);
-      buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
-      if constexpr (!use_fabric_handle) {
-        close(imported_handles[r]);
+        // Cover the imported handle until a peer owner takes it, including a
+        // failure to allocate that owner after a successful map.
+        auto release_import = [&]() noexcept {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+          release_unowned_peer(
+              signal_pads[r], handles[r], block->block_size, driver_api);
+#endif
+        };
+        // map_block returns the mapped base (== signal pad base); the data buffer
+        // follows at buffer_offset.
+        auto map_peer = [&]() {
+          map_block(
+              &signal_pads[r], handles[r], block->block_size, block->device_idx);
+        };
+        if (coordinate_failure) {
+          peer_alloc_refs[r] = map_and_own_peer(
+              map_peer,
+              [&]() {
+                return c10::make_intrusive<AllocationRef>(
+                    signal_pads[r],
+                    handles[r],
+                    block->block_size,
+                    block->device_idx);
+              },
+              release_import);
+        } else {
+          map_peer();
+        }
+        buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
+        if constexpr (!use_fabric_handle) {
+          if (!coordinate_failure) {
+            close(imported_handles[r]);
+          }
+        }
       }
+    } catch (...) {
+      if (!coordinate_failure) {
+        throw;
+      }
+      local_error = std::current_exception();
     }
-    if (use_pg) {
+    if (coordinate_failure) {
+      const bool failed =
+          storeExchange.barrier_with_error(store, world_size, local_error);
+      TORCH_CHECK(
+          !failed,
+          "SymmetricMemory rendezvous: a peer failed to import, map, or own "
+          "an allocation");
+    } else if (use_pg) {
       pg_barrier(group, block->device_idx);
     } else {
       storeExchange.barrier(store, rank, world_size);
@@ -1147,9 +1203,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     }
     // signal_pads[r] is peer r's mapped base, i.e. the address AllocationRef
     // unmaps.
-    alloc_refs.push_back(
-        c10::make_intrusive<AllocationRef>(
-            signal_pads[r], handles[r], block->block_size, block->device_idx));
+    if (coordinate_failure) {
+      alloc_refs.push_back(std::move(peer_alloc_refs[r]));
+    } else {
+      alloc_refs.push_back(
+          c10::make_intrusive<AllocationRef>(
+              signal_pads[r], handles[r], block->block_size, block->device_idx));
+    }
   }
 
   // The multicast mapping mirrors the block layout: the signal pad is at the
