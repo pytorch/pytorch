@@ -968,9 +968,11 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       " and ",
       other.numel(),
       " elements respectively");
+  // A length-1 vector's stride is unused; dot_cuda and vdot_cuda pass increment one
   TORCH_CHECK(
-      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
-          (other.stride(0) <= INT_MAX),
+      (self.numel() <= INT_MAX) &&
+          (self.numel() == 1 ||
+           (self.stride(0) <= INT_MAX && other.stride(0) <= INT_MAX)),
       "dot only supports n, incx, incy with the bound [val] <= ",
       INT_MAX);
 }
