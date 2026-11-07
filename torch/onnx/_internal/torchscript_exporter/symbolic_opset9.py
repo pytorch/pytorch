@@ -5779,7 +5779,9 @@ def _weight_norm(g: jit_utils.GraphContext, weight_v, weight_g, dim):
                 dim += rank
             if dim != -1:
                 axes.remove(dim)
-        norm_v = norm(g, weight_v, 2, axes, 1)
+        # ReduceL2 treats an empty axes list as "reduce all dims", but an empty
+        # reduction (1-D weight) must be an elementwise abs instead
+        norm_v = norm(g, weight_v, 2, axes, 1) if axes else g.op("Abs", weight_v)
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)
     raise errors.SymbolicValueError(
