@@ -561,6 +561,10 @@ class CompiledFxGraph(OutputCode):
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
+    # User FlyDSL kernels that keep this graph from being serialized (see
+    # prepare_for_serialization). A class attribute, unlike a default_factory, is
+    # also read by an instance made without __init__.
+    process_local_kernels: Sequence[str] = ()
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False
@@ -646,6 +650,9 @@ class CompiledFxGraph(OutputCode):
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
+        self.process_local_kernels = sorted(
+            graph.wrapper_code.user_defined_flydsl_launchers
+        )
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.kernel_free_cudagraph = graph.kernel_free_cudagraph
@@ -1018,6 +1025,13 @@ class CompiledFxGraph(OutputCode):
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
+        if self.process_local_kernels:
+            raise RuntimeError(
+                "This compiled graph launches user FlyDSL kernels "
+                f"({', '.join(self.process_local_kernels)}) through objects bound in "
+                "this process, so it cannot be serialized (aot_compile, precompile). "
+                "Compile it in the process that runs it."
+            )
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
         # TODO: This could be better if we're ever able to serialize compiled

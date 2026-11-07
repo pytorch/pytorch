@@ -28,6 +28,7 @@ from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_wrapper_mutation
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._library.fake_class_registry import FakeScriptObject
@@ -9382,6 +9383,27 @@ def triton_kernel_wrap_(
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         launch_kwargs=() if launch_kwargs is None else launch_kwargs,
+    )
+
+
+@register_lowering(flydsl_kernel_wrapper_mutation)
+def flydsl_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    kwargs,
+):
+    from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_hop_info
+
+    # The write set is decided on the FX node's (fake) values, as when the node was
+    # functionalized.
+    mutated = flydsl_kernel_hop_info.get_node_mutated_tensors(V.graph.current_node)
+    return ir.UserDefinedFlyDSLKernel.lower_mutation_hop(
+        flydsl_kernel_hop_info.get_side_table(),
+        constant_args_idx,
+        kwargs,
+        kernel_idx=kernel_idx,
+        mutated_arg_names=mutated,
     )
 
 
