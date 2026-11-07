@@ -23,7 +23,7 @@ from io import BytesIO
 from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
-from unittest import main, mock, skip, TestCase
+from unittest import main, mock, TestCase
 from urllib.error import HTTPError, URLError
 
 from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
@@ -848,12 +848,6 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
-    @skip("GitHub doesn't keep this data anymore")
-    def test_gql_retrieve_checksuites(self, *args: Any) -> None:
-        "Fetch comments and conclusions for PR with 60 commits"
-        pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
-
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
         dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
@@ -1540,17 +1534,26 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
-    @skip(
-        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
+    # The stack has since merged, so pin the state this test describes: the two
+    # bottom PRs merged, the top two open. The merge-rule check is mocked; the
+    # tests below cover how its errors and waivers are handled.
+    @mock.patch.object(
+        GitHubPR,
+        "is_closed",
+        autospec=True,
+        side_effect=lambda pr: pr.pr_num in (106032, 106033),
     )
-    @mock.patch("trymerge.read_merge_rules")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=True)
+    @mock.patch("trymerge.find_matching_merge_rule")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")
     def test_merge_ghstack_into(
         self,
         mock_get_ghstack_prs: mock.MagicMock,
         mock_repo: mock.MagicMock,
-        mock_merge_rules: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
         *args: Any,
     ) -> None:
         """
@@ -1569,24 +1572,35 @@ class TestGitHubPRGhstackDependencies(TestCase):
             (pr, "rev123"),
         ]
 
-        mock_merge_rules.return_value = [
-            MergeRule(
-                "Mock title", patterns=["*"], approved_by=[], mandatory_checks_name=None
-            )
-        ]
-
         mock_repo.cherry_pick.return_value = None
         mock_repo.amend_commit_message.return_value = None
 
         # Call the method under test
-        res = pr.merge_ghstack_into(mock_repo, True)
+        res = pr.merge_ghstack_into(mock_repo, False, comment_id=7)
 
         self.assertEqual(res, [pr2, pr])
+        mock_get_ghstack_prs.assert_called_once_with(mock_repo, pr, open_only=False)
 
-        mock_repo.cherry_pick.assert_any_call("rev2")
-        mock_repo.cherry_pick.assert_any_call("rev123")
+        self.assertEqual(
+            mock_repo.cherry_pick.call_args_list,
+            [mock.call("rev2"), mock.call("rev123")],
+        )
 
-        self.assertTrue(mock.call("rev1") not in mock_repo.cherry_pick.call_args_list)
+        # Only the open PR below the one being merged gets the stacked rule check
+        mock_find_matching_merge_rule.assert_called_once_with(
+            pr2,
+            mock_repo,
+            skip_mandatory_checks=False,
+            skip_internal_checks=True,
+            ignore_current_checks=None,
+        )
+        mock_can_skip_internal_checks.assert_called_once_with(pr, 7)
+
+        # Each cherry-pick is followed by the amend of its own message
+        self.assertEqual(
+            [name for name, _, _ in mock_repo.method_calls],
+            ["cherry_pick", "amend_commit_message"] * 2,
+        )
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
@@ -1595,22 +1609,21 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "### Background: Gradient Pre-Divide"
         )
         suffix = (
-            "\nPull Request resolved: https://github.com/pytorch/pytorch/pull/106034\nApproved by: \nghstack "
-            "dependencies: #106032, #106033\n"
+            "\nPull Request resolved: https://github.com/pytorch/pytorch/pull/106034\n"
+            "Approved by: https://github.com/rohan-varma\n"
+            "ghstack dependencies: #106032, #106033\n"
         )
 
         self.assertTrue(message.startswith(prefix))
         self.assertTrue(message.endswith(suffix))
 
         # Verify the second call
-        mock_repo.amend_commit_message.assert_any_call(
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\n"
-            "Differential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\n"
-            "Pull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\n"
-            "Approved by: \n"
-            "ghstack dependencies: #106032, #106033, #106034\n"
+        self.assertEqual(
+            mock_repo.amend_commit_message.call_args_list[1].args[0],
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n"
+            "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
     @mock.patch.object(GitHubPR, "is_closed", return_value=False)
@@ -1703,10 +1716,12 @@ class TestGitHubPRGhstackDependencies(TestCase):
 
         top_pr.merge_ghstack_into(mock_repo, True, ignore_current_checks=waivers)
 
-        mock_find_matching_merge_rule.assert_called_once()
-        self.assertEqual(
-            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
-            waivers,
+        mock_find_matching_merge_rule.assert_called_once_with(
+            parent_pr,
+            mock_repo,
+            skip_mandatory_checks=True,
+            skip_internal_checks=False,
+            ignore_current_checks=waivers,
         )
 
     @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
