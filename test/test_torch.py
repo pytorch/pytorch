@@ -1282,7 +1282,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1291,11 +1290,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'avg_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'avg_pool3d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1304,11 +1302,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_avg_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_avg_pool2d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1317,11 +1314,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_avg_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_avg_pool3d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1330,11 +1326,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'max_pool3d_with_indices_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'max_pool3d_with_indices_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1343,11 +1338,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_max_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_max_pool2d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1356,11 +1350,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'fractional_max_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'fractional_max_pool2d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1369,8 +1362,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'fractional_max_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'fractional_max_pool3d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @dtypes(*floating_types_and(torch.half))
     @onlyNativeDeviceTypes
@@ -1406,7 +1399,6 @@ class TestTorchDeviceType(TestCase):
             'max_unpooling3d_forward_out')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1418,11 +1410,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_linear1d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_linear1d_backward_out_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
 
@@ -1595,7 +1586,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(grad.cpu(), reference_input.grad, atol=atol, rtol=rtol)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1607,8 +1597,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_bicubic2d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_bicubic2d_backward_out_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bicubic(self, device):
@@ -1630,7 +1620,6 @@ class TestTorchDeviceType(TestCase):
                 input.grad = None
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1642,11 +1631,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_trilinear3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_trilinear3d_backward_out_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1655,11 +1643,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad1d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'reflection_pad1d_backward_out_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1668,11 +1655,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'reflection_pad3d_backward_out_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1681,11 +1667,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad1d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad1d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
@@ -1696,8 +1681,8 @@ class TestTorchDeviceType(TestCase):
         # nondeterministic
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad2d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
         with DeterministicGuard(True):
             res = module(input)
@@ -1708,11 +1693,10 @@ class TestTorchDeviceType(TestCase):
         # not be raised
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad2d_backward_cuda',
+            f'replication_pad2d_backward_{torch.device(device).type}',
             False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1721,11 +1705,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad3d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchDynamo("Warning is not raised.")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
@@ -1734,11 +1717,11 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: module(input, target),
-            'nll_loss2d_forward_out_cuda_template',
-            torch.device(device).type == 'cuda')
+            'nll_loss2d_forward_xpu' if torch.device(device).type == 'xpu'
+            else 'nll_loss2d_forward_out_cuda_template',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1750,11 +1733,11 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'ctc_loss_backward_gpu',
-            torch.device(device).type == 'cuda')
+            'ctc_loss_backward_xpu' if torch.device(device).type == 'xpu'
+            else 'ctc_loss_backward_gpu',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -1765,8 +1748,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'embedding_bag_backward_cuda_max',
-            torch.device(device).type == 'cuda')
+            f'embedding_bag_backward_{torch.device(device).type}_max',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyAccelerator
@@ -1845,7 +1828,6 @@ class TestTorchDeviceType(TestCase):
     # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
     # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
     @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_put_accumulate(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -1855,20 +1837,18 @@ class TestTorchDeviceType(TestCase):
             self.check_nondeterministic_alert(
                 lambda: op_call(a, indices, values, accumulate=True),
                 'put_',
-                torch.device(device).type == 'cuda')
+                torch.device(device).type in ('cuda', 'xpu'))
 
     @dtypes(torch.float32)
     @dtypesIfCUDA(torch.float32, torch.int32)
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_histc(self, device, dtype):
         a = torch.tensor([], device=device, dtype=dtype)
         for op_call in [torch.histc, torch.Tensor.histc]:
             self.check_nondeterministic_alert(
                 lambda: op_call(a, min=0, max=3),
-                '_histc_cuda with floating point input',
-                torch.device(device).type == 'cuda' and dtype.is_floating_point)
+                f'_histc_{torch.device(device).type} with floating point input',
+                torch.device(device).type in ('cuda', 'xpu') and dtype.is_floating_point)
 
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_bincount(self, device):
         a = torch.tensor([], device=device, dtype=torch.long)
         weights = torch.tensor([], device=device)
@@ -1878,16 +1858,15 @@ class TestTorchDeviceType(TestCase):
             # given
             self.check_nondeterministic_alert(
                 lambda: op_call(a, weights),
-                '_bincount_cuda',
-                torch.device(device).type == 'cuda')
+                f'_bincount_{torch.device(device).type}',
+                torch.device(device).type in ('cuda', 'xpu'))
 
             self.check_nondeterministic_alert(
                 lambda: op_call(a),
-                '_bincount_cuda',
+                f'_bincount_{torch.device(device).type}',
                 False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1896,11 +1875,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'grid_sampler_2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'grid_sampler_2d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -1909,8 +1887,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'grid_sampler_3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'grid_sampler_3d_backward_{torch.device(device).type}',
+            torch.device(device).type in ('cuda', 'xpu'))
 
     def test_invalid_shapes_grid_sampler(self, device):
         make_arg = partial(
