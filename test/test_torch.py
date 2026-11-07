@@ -7187,6 +7187,23 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
+    def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
+        def check(x, split_sizes, dim, out):
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for t, expect in zip(out, x.split_with_sizes(split_sizes, dim=dim)):
+                self.assertEqual(t, expect)
+
+        # Dense but not contiguous input
+        x = torch.arange(12.0, device=device).reshape(3, 4).t()
+        check(x, [2, 2], 0, [torch.empty(2, 3, device=device) for _ in range(2)])
+        # Contiguous input whose size-1 split dim has an arbitrary stride; nothing
+        # past the output may be written
+        x = torch.zeros(64, device=device).as_strided((2, 1, 2), (2, 16, 1))
+        x.copy_(torch.arange(4.0, device=device).view(2, 1, 2))
+        guard = torch.full((16,), -1.0, device=device)
+        check(x, [1], 1, [guard[:4].view(2, 1, 2)])
+        self.assertEqual(guard[4:], torch.full((12,), -1.0, device=device))
+
     def test_copy_float16(self, device):
         # Check that fbgemm code no longer reads memory out of bounds, see
         # copy_impl and fbgemm::Float16ToFloat_ref.
