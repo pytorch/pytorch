@@ -4,7 +4,6 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -106,8 +105,20 @@ class TestTransportRegistry(TestCase):
                 transport.unregister_memory(None)
 
     def test_mutable_view_protocol(self):
-        readonly = SimpleNamespace(size=lambda: 8)
-        mutable = SimpleNamespace(size=lambda: 8, writable=True)
+        class View:
+            def size(self):
+                return 8
+
+            def slice(self, offset=None, length=None):
+                return self
+
+            def __getitem__(self, key):
+                return self
+
+        class MutableView(View):
+            writable = True
+
+        readonly, mutable = View(), MutableView()
         self.assertIsInstance(readonly, MemoryView)
         self.assertNotIsInstance(readonly, MutableMemoryView)
         self.assertIsInstance(mutable, MutableMemoryView)
