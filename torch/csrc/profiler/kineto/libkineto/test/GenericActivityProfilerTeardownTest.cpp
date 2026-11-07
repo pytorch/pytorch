@@ -8,6 +8,8 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -19,6 +21,34 @@ using namespace KINETO_NAMESPACE;
 using namespace std::chrono;
 
 namespace {
+
+class RecordingGpuProfiler : public GenericActivityProfiler {
+ public:
+  RecordingGpuProfiler() : GenericActivityProfiler(/*cpuOnly=*/false) {}
+
+  std::vector<std::string> events;
+  bool useCpuOnly{false};
+
+ protected:
+  void ensureGpuTracingReady() override {
+    events.emplace_back("ready");
+    if (useCpuOnly) {
+      cpuOnly_ = true;
+    }
+  }
+
+  void clearGpuActivities() override {
+    events.emplace_back("clear");
+  }
+
+  void requestGpuTracingTeardown() override {
+    events.emplace_back("teardown");
+  }
+
+  void enableGpuTracing() override {
+    events.emplace_back("enable");
+  }
+};
 
 // Run one full synchronous trace and leave the profiler in the post-teardown
 // state the guards protect: processTrace() -> finalizeTrace() std::move()s
@@ -72,4 +102,30 @@ TEST_F(GenericActivityProfilerTeardownTest, RedundantProcessTraceIsNoOp) {
 
   MemoryTraceLogger logger(*cfg_);
   profiler.processTrace(logger); // must not crash
+}
+
+TEST_F(
+    GenericActivityProfilerTeardownTest,
+    ConfigureEnsuresGpuTracingReadyWithoutRequestingTeardown) {
+  RecordingGpuProfiler profiler;
+
+  profiler.configure(*cfg_, system_clock::now());
+  EXPECT_EQ(
+      profiler.events, (std::vector<std::string>{"ready", "clear", "enable"}));
+
+  profiler.events.clear();
+  profiler.reset();
+  EXPECT_EQ(profiler.events, (std::vector<std::string>{"clear", "teardown"}));
+}
+
+TEST_F(GenericActivityProfilerTeardownTest, ConfigureContinuesCpuOnly) {
+  RecordingGpuProfiler profiler;
+  profiler.useCpuOnly = true;
+
+  profiler.configure(*cfg_, system_clock::now());
+  EXPECT_EQ(profiler.events, (std::vector<std::string>{"ready"}));
+
+  profiler.events.clear();
+  profiler.configure(*cfg_, system_clock::now());
+  EXPECT_TRUE(profiler.events.empty());
 }

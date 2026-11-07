@@ -296,9 +296,11 @@ class GenericActivityProfiler {
   // these virtual member functions. We provide empty defaults because
   // GenericActivityProfiler can also be in cpuOnly mode.
   virtual void logGpuVersions() {}
+  virtual void ensureGpuTracingReady() {}
   virtual void setMaxGpuBufferSize([[maybe_unused]] int64_t size) {}
   virtual void enableGpuTracing() {}
   virtual void disableGpuTracing() {}
+  virtual void requestGpuTracingTeardown() {}
   virtual void clearGpuActivities() {}
   virtual void processGpuActivities([[maybe_unused]] ActivityLogger& logger) {}
   virtual void synchronizeGpuDevice() {}
