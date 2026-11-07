@@ -54,7 +54,9 @@ from ..exc import (
     CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
+    handle_observed_exception,
     InfiniteGeneratorError,
+    ObservedAttributeError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
@@ -1579,6 +1581,28 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # exits without yielding another value
         return self.gen_send_ex(tx, args[0], False)
 
+    @staticmethod
+    def _get_delegate_method(
+        tx: "InstructionTranslatorBase", delegate: VariableTracker, name: str
+    ) -> VariableTracker | None:
+        from .object_protocol import generic_getattr
+
+        if isinstance(delegate, variables.IteratorVariable) and not hasattr(
+            delegate.python_type(), name
+        ):
+            return None
+        try:
+            return generic_getattr(tx, delegate, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+            if delegate.source:
+                install_guard(
+                    delegate.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+            return None
+
     def gen_close(
         self,
         tx: "InstructionTranslatorBase",
@@ -1611,7 +1635,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    yf.call_method(tx, "close", [], {})
+                    close = self._get_delegate_method(tx, yf, "close")
+                    if close is not None:
+                        close.call_function(tx, [], {})
                 except ObservedException:
                     err = True
 
@@ -1682,14 +1708,18 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 try:
                     # CPython uses gen_close_iter here
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
+                        close = self._get_delegate_method(tx, yf, "close")
+                        if close is not None:
+                            close.call_function(tx, [], {})
                 except ObservedException:
-                    pass
+                    return self.gen_send_ex(tx, ConstantVariable.create(None), True)
                 return throw_here()
 
             try:
                 with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                    return yf.call_method(tx, "throw", [arg], {})
+                    throw = self._get_delegate_method(tx, yf, "throw")
+                    if throw is not None:
+                        return throw.call_function(tx, [arg], {})
             except ObservedException:
                 return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
