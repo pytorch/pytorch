@@ -13,12 +13,13 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     e4m3_type,
     instantiate_device_type_tests,
+    requires_capabilities,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -857,10 +858,7 @@ class TestFlopCounterDevice(TestCase):
             "Custom formula for cos_kernel not recorded during partitioning",
         )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
-    )
+    @requires_capabilities(Capability.dtype.fp8)
     def test_scaled_mm(self, device):
         dtype = e4m3_type
         with FlopCounterMode() as mode:
@@ -874,10 +872,7 @@ class TestFlopCounterDevice(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Flash attention not supported",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5522")
     def test_sdpa_gqa(self, device):
         """Test flop counting for grouped-query attention (GQA)."""
@@ -938,10 +933,9 @@ class TestFlopCounterDevice(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION
-        or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "Does not support all SDPA backends",
+    @requires_capabilities(
+        Capability.attention.flash_attention,
+        Capability.attention.mem_efficient_attention,
     )
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3093")
     def test_sdpa_nested_tensor(self, device):
@@ -1157,10 +1151,7 @@ class TestFlopCounterDevice(TestCase):
             ),
         )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support all SDPA backends",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
     def test_nested_attention_fake_tensors(self, device):
         x = torch.randn(123, 4, 16, device=device, dtype=torch.bfloat16)
@@ -1205,10 +1196,7 @@ class TestFlopCounterDevice(TestCase):
             int(get_total_flops(real_flop_counter_mode)),
         )
 
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Flash attention not supported",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
     def test_varlen_attn(self, device):
         import torch.nn.attention.varlen
