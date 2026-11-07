@@ -6,14 +6,23 @@ import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
-from torch._dynamo.utils import ReinplaceCounters
+from torch._dynamo.utils import counters, detect_fake_mode, ReinplaceCounters
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _generalized_scatter,
+    _is_inplace_mutation_result,
+    _scatter_input_realized_by_inplace_mutation,
+    _src_is_view_of_inp,
+    canonicalize_view_scatter_ops,
+    reinplace_inplaceable_ops_core,
+    remove_identity_generalized_scatters,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -48,6 +57,27 @@ def sin(x: torch.Tensor, result: torch.Tensor) -> None:
 def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> None:
     out_sin.copy_(x.sin())
     out_cos.copy_(x.cos())
+
+
+@torch.library.custom_op("_reinplacing::write3_views", mutates_args={"b", "c", "d"})
+def write3_views(x: Tensor, b: Tensor, c: Tensor, d: Tensor) -> None:
+    b.copy_(x)
+    c.copy_(x + 1)
+    d.copy_(x + 2)
+
+
+@write3_views.register_fake
+def _(x, b, c, d) -> None:
+    return None
+
+
+def mutated_base_scatter(x, weight):
+    w = x.shape[1]
+    buf = torch.empty((x.shape[0], 4 * w), dtype=x.dtype, device=x.device)
+    a, b, c, d = [buf[:, i * w : (i + 1) * w] for i in range(4)]
+    write3_views(x, b, c, d)
+    a.copy_(x * 0.5)
+    return buf @ weight
 
 
 if HAS_GPU:
@@ -290,6 +320,345 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         actual = gm(input_pos, val, actual_cache)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_cache, expected_cache)
+
+    @staticmethod
+    def _generalized_scatter_count(gm):
+        return sum(1 for n in gm.graph.nodes if n.target is _generalized_scatter)
+
+    @staticmethod
+    def _counter_delta(name, before):
+        return counters["inductor"][name] - before
+
+    def _canonicalized(self, f, *args):
+        # NOTE: the canonicalized graph holds ViewOp objects in
+        # _generalized_scatter args, which gm.recompile() cannot codegen, so
+        # run numerics through torch.fx.Interpreter instead of calling gm.
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        fake_inputs = [
+            node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        with V.set_fake_mode(detect_fake_mode(fake_inputs)):
+            canonicalize_view_scatter_ops(gm.graph)
+        gm.graph.lint()
+        return gm
+
+    def _interpret(self, gm, *args):
+        return torch.fx.Interpreter(gm).run(*args)
+
+    def _test_identity_scatter_removal(self, f, *args, removed, gm=None):
+        if gm is None:
+            gm = self._canonicalized(f, *args)
+        initial = self._generalized_scatter_count(gm)
+        self.assertGreater(initial, 0)
+        before = counters["inductor"]["identity_generalized_scatter_removed"]
+        remove_identity_generalized_scatters(gm.graph)
+        gm.graph.lint()
+        self.assertEqual(self._generalized_scatter_count(gm), initial - removed)
+        self.assertEqual(
+            self._counter_delta("identity_generalized_scatter_removed", before), removed
+        )
+        actual = self._interpret(gm, *args)
+        self.assertEqual(actual, f(*args))
+        return gm, actual
+
+    @parametrize("enabled", [False, True])
+    def test_reinplace_mutated_base_scatter(self, enabled):
+        # Mirrors dq/dk/dv writes into a fresh duvqk gradient concat, followed
+        # by a separate head write and a GEMM consuming the whole buffer.
+        if not HAS_GPU:
+            self.skipTest("requires GPU")
+        x = torch.randn(16, 8, device=device)
+        weight = torch.randn(32, 8, device=device)
+        ref = mutated_base_scatter(x, weight)
+        before = (
+            counters["inductor"]["identity_generalized_scatter_removed"],
+            counters["inductor"]["reinplace_mutated_base_scatter"],
+        )
+        with inductor_config.patch(reinplace_mutated_base_scatters=enabled):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(mutated_base_scatter)(x, weight), ref)
+        delta = (
+            self._counter_delta("identity_generalized_scatter_removed", before[0]),
+            self._counter_delta("reinplace_mutated_base_scatter", before[1]),
+        )
+        if enabled:
+            self.assertGreater(delta[1], 0)
+        else:
+            self.assertEqual(delta, (0, 0))
+
+    def test_remove_identity_generalized_scatter(self):
+        def f(buf):
+            buf = buf + 1
+            return torch.slice_scatter(buf, buf[:, 0:8], 1, 0, 8)
+
+        buf = torch.randn(4, 16)
+        self._test_identity_scatter_removal(f, buf, removed=1)
+
+    def test_remove_identity_generalized_scatter_negatives(self):
+        buf = torch.randn(4, 16)
+        other = torch.randn(4, 16)
+
+        def f_different_base(buf, other):
+            return torch.slice_scatter(buf, other[:, 0:8], 1, 0, 8)
+
+        def f_mismatched_region(buf):
+            buf = buf + 1
+            return torch.slice_scatter(buf, buf[:, 8:16], 1, 0, 8)
+
+        def f_strided_src(buf):
+            # Same shape as the region but a non-unit-step view: not identical.
+            buf = buf + 1
+            return torch.slice_scatter(buf, buf[:, 0:16:2], 1, 0, 8)
+
+        def f_dtype_view(buf):
+            buf = buf + 1
+            return torch.slice_scatter(buf, buf[:, 0:8].view(torch.int32), 1, 0, 8)
+
+        for f, args in (
+            (f_different_base, (buf, other)),
+            (f_mismatched_region, (buf,)),
+            (f_strided_src, (buf,)),
+            (f_dtype_view, (buf,)),
+        ):
+            with self.subTest(f=f.__name__):
+                self._test_identity_scatter_removal(f, *args, removed=0)
+
+    @parametrize("kind", ["stride", "offset", "conj"])
+    def test_remove_identity_preserves_clone_metadata(self, kind):
+        def f(buf):
+            buf = buf + 1
+            if kind == "stride":
+                buf = buf[:, ::2]
+            elif kind == "offset":
+                buf = buf[1:]
+            else:
+                buf = buf.conj()
+            return torch.slice_scatter(buf, buf[:, :4], 1, 0, 4)
+
+        buf = torch.randn(
+            4, 16, dtype=torch.complex64 if kind == "conj" else torch.float32
+        )
+        self._test_identity_scatter_removal(f, buf, removed=0)
+
+    @parametrize("kind", ["input", "output", "output_view", "chain"])
+    def test_remove_identity_preserves_output_aliases(self, kind):
+        def f(buf):
+            base = buf if kind in ("input", "chain") else buf + 1
+            out = torch.slice_scatter(base, base[:, :8], 1, 0, 8)
+            if kind == "chain":
+                return torch.slice_scatter(out, out[:, 8:], 1, 8, 16)
+            if kind == "output":
+                return out, base
+            if kind == "output_view":
+                return out, base[:, 8:]
+            return out
+
+        buf = torch.randn(4, 16)
+        _, actual = self._test_identity_scatter_removal(
+            f, buf, removed=int(kind == "chain")
+        )
+        out, other = actual if isinstance(actual, tuple) else (actual, buf)
+        self.assertNotEqual(
+            out.untyped_storage()._cdata, other.untyped_storage()._cdata
+        )
+        # The compiled graph must preserve the same observable alias contract.
+        with inductor_config.patch(reinplace_mutated_base_scatters=True):
+            torch._dynamo.reset()
+            compiled = torch.compile(f)(buf)
+        self.assertEqual(compiled, f(buf))
+        out, other = compiled if isinstance(compiled, tuple) else (compiled, buf)
+        self.assertNotEqual(
+            out.untyped_storage()._cdata, other.untyped_storage()._cdata
+        )
+
+    def test_remove_identity_preserves_mutation_snapshot(self):
+        def f(buf):
+            base = buf + 1
+            out = torch.slice_scatter(base, base[:, :8], 1, 0, 8)
+            base.copy_(base + 1)
+            return out
+
+        buf = torch.randn(4, 16)
+        self._test_identity_scatter_removal(f, buf, removed=0)
+        with inductor_config.patch(reinplace_mutated_base_scatters=True):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f)(buf), f(buf))
+
+    @parametrize("v2", [False, True])
+    def test_functionalized_input_is_not_realized_by_mutation(self, v2):
+        def f(buf, x):
+            buf = buf.clone()
+            if v2:
+                _, updated = auto_functionalized_v2(
+                    sin._opoverload,
+                    x=x,
+                    _result_base_index=0,
+                    _result_size=(4, 8),
+                    _result_stride=(16, 1),
+                    _result_storage_offset=0,
+                    _all_bases=[buf],
+                )
+            else:
+                _, updated = auto_functionalized(
+                    sin._opoverload, x=x, result=buf[:, :8]
+                )
+            return torch.slice_scatter(buf, x, 1, 8, 16), updated
+
+        gm = self._canonicalized(f, torch.randn(4, 16), torch.randn(4, 8))
+        scatters = [n for n in gm.graph.nodes if n.target is _generalized_scatter]
+        self.assertEqual(len(scatters), 1)
+        self.assertFalse(_scatter_input_realized_by_inplace_mutation(scatters[0]))
+
+    def test_src_is_view_of_inp_structural(self):
+        # Storage sharing alone is not enough: src must reach inp through views.
+        def f(buf):
+            v = buf[:, 0:8]
+            return torch.slice_scatter(buf, v + 1, 1, 0, 8)
+
+        buf = torch.randn(4, 16)
+        gm = make_fx(f, tracing_mode="fake")(buf)
+        nodes = list(gm.graph.nodes)
+        placeholders = [n for n in nodes if n.op == "placeholder"]
+        self.assertEqual(len(placeholders), 1)
+        inp = placeholders[0]
+        views = [n for n in nodes if n.target is aten.slice.Tensor]
+        self.assertTrue(views)
+        adds = [n for n in nodes if n.target is aten.add.Tensor]
+        self.assertEqual(len(adds), 1)
+        for v in views:
+            self.assertTrue(_src_is_view_of_inp(v, inp))
+        self.assertFalse(_src_is_view_of_inp(adds[0], inp))
+
+    def test_scatter_input_realized_ordering(self):
+        buf = torch.randn(4, 16)
+        x = torch.randn(4, 8)
+
+        def f_before(buf, x):
+            buf = buf.clone()
+            buf[:, 0:8].copy_(x)
+            return torch.slice_scatter(buf, buf[:, 8:16], 1, 8, 16)
+
+        gm = self._canonicalized(f_before, buf, x)
+        scatters = [n for n in gm.graph.nodes if n.target is _generalized_scatter]
+        self.assertEqual(len(scatters), 1)
+        # The direct mutating write precedes the scatter: the base is realized.
+        self.assertTrue(_scatter_input_realized_by_inplace_mutation(scatters[0]))
+
+        def f_after(buf, x):
+            buf = buf.clone()
+            out = torch.slice_scatter(buf, buf[:, 8:16], 1, 8, 16)
+            buf[:, 0:8].copy_(x)
+            return out
+
+        gm = self._canonicalized(f_after, buf, x)
+        scatters = [n for n in gm.graph.nodes if n.target is _generalized_scatter]
+        self.assertEqual(len(scatters), 1)
+        # A writer after the scatter does not realize the base at this point.
+        self.assertFalse(_scatter_input_realized_by_inplace_mutation(scatters[0]))
+
+    def test_inplace_mutation_result_v1_v2(self):
+        x = torch.randn(3)
+
+        def f_v1(x):
+            out = torch.empty_like(x)
+            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
+            return new_out * 2
+
+        gm = make_fx(f_v1, tracing_mode="fake")(x)
+        af = [
+            n
+            for n in gm.graph.nodes
+            if n.target is torch.ops.higher_order.auto_functionalized
+        ]
+        self.assertEqual(len(af), 1)
+        self.assertTrue(any(_is_inplace_mutation_result(u) for u in af[0].users))
+
+        def f_v2(x):
+            out = torch.empty_like(x)
+            _, new_out = auto_functionalized_v2(
+                sin._opoverload,
+                x=x,
+                _result_base_index=0,
+                _result_size=(3,),
+                _result_stride=(1,),
+                _result_storage_offset=0,
+                _all_bases=[out],
+            )
+            return new_out * 2
+
+        gm = make_fx(f_v2, tracing_mode="fake")(x)
+        af = [
+            n
+            for n in gm.graph.nodes
+            if n.target is torch.ops.higher_order.auto_functionalized_v2
+        ]
+        self.assertEqual(len(af), 1)
+        self.assertTrue(any(_is_inplace_mutation_result(u) for u in af[0].users))
+
+    def test_remove_identity_dynamic_shapes_fallback(self):
+        # With symbolic shapes the identity check must fall back cleanly: no
+        # crash, and numerics match eager either way.
+        def f(buf):
+            return torch.slice_scatter(buf, buf[:, 0:8], 1, 0, 8)
+
+        buf = torch.randn(4, 16)
+        torch._dynamo.mark_dynamic(buf, 0)
+        opt_f = torch.compile(f, dynamic=True)
+        with inductor_config.patch(reinplace_mutated_base_scatters=True):
+            torch._dynamo.reset()
+            self.assertEqual(opt_f(buf), f(buf))
+
+    def test_training_grad_through_mutating_custom_op(self):
+        # The ragged-attention use case: the custom op's backward writes disjoint
+        # views of a fresh gradient concat buffer. Gradients must match eager,
+        # and the new pass must fire only with the flag on.
+        w = 8
+
+        class Ragged(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, q):
+                ctx.ww = q.shape[1]
+                return q * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                ww = ctx.ww
+                weight = (
+                    torch.arange(
+                        4 * ww * ww, dtype=grad.dtype, device=grad.device
+                    ).reshape(4 * ww, ww)
+                    * 0.01
+                )
+                return mutated_base_scatter(grad, weight)
+
+        def step(q):
+            return Ragged.apply(q).sum()
+
+        seed = torch.randn(16, w)
+        q_ref = seed.clone().detach().requires_grad_(True)
+        step(q_ref).backward()
+        ref = q_ref.grad.clone()
+
+        for enabled in (False, True):
+            before = (
+                counters["inductor"]["identity_generalized_scatter_removed"],
+                counters["inductor"]["reinplace_mutated_base_scatter"],
+            )
+            with inductor_config.patch(reinplace_mutated_base_scatters=enabled):
+                torch._dynamo.reset()
+                q = seed.clone().detach().requires_grad_(True)
+                torch.compile(step)(q).backward()
+                got = q.grad.clone()
+            # Bit-exact backward vs eager on the same input.
+            self.assertEqual(got, ref)
+            delta = (
+                self._counter_delta("identity_generalized_scatter_removed", before[0]),
+                self._counter_delta("reinplace_mutated_base_scatter", before[1]),
+            )
+            if enabled:
+                self.assertGreater(delta[0] + delta[1], 0)
+            else:
+                self.assertEqual(delta, (0, 0))
 
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
