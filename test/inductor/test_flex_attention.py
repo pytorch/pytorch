@@ -2295,6 +2295,18 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(*inputs)
 
     @supported_platform
+    @skip_on_cuda
+    @skip_on_xpu
+    @skip_on_mps
+    @dtypes(*device_configs["cpu"].dtypes)
+    def test_cpu_kv_seqlen_with_vector_aligned_tail(self, device, dtype: torch.dtype):
+        # 1120 = 8 * 128 + 96, so the last kv block is 96 wide. The CPU micro gemm
+        # splits that into one full BLOCK_N step plus a tail that is a multiple of
+        # the vector length
+        self.run_test(_identity, dtype, device, B, H, S, D, B, H, 1120, D) 
+        self.run_test(_identity, dtype, device, B, H, 255, D, B, H, 1120, D)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
