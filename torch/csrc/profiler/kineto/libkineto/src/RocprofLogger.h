@@ -70,6 +70,9 @@ class RocprofLogger {
       rocprofiler_buffer_tracing_kind_t kind,
       rocprofiler_tracing_operation_t op);
 
+  // HIP runtime API ids whose GPU work is reported as a memset or memcpy.
+  static bool isMemsetOrCopyApi(uint32_t id);
+
  private:
   static void insert_row_to_buffer(rocprofBase* row);
 

@@ -226,6 +226,21 @@ class FxirTestCase(InductorTestCase):
         num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
         self.assertEqual(num_extern, 1)
 
+    @config.patch(
+        {
+            "trace.provenance_tracking_level": 2,
+            "trace.provenance_profiler_markers": True,
+        }
+    )
+    def test_provenance_profiler_markers(self):
+        def foo(x, y):
+            return x @ y + y.sum()
+
+        args = [
+            torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
+        ]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
     def test_fallback(self):
         """
         Test a program that calls aten fallbacks.
