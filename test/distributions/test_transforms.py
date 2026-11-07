@@ -32,12 +32,14 @@ from torch.distributions.transforms import (
     SigmoidTransform,
     SoftmaxTransform,
     SoftplusTransform,
+    StackTransform,
     StickBreakingTransform,
     TanhTransform,
     Transform,
 )
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 def get_transforms(cache_size):
@@ -655,6 +657,63 @@ def test_transform_sign(transform: Transform):
     (derivatives,) = grad(y, [x])
     if not torch.less(torch.as_tensor(0.0), derivatives * sign).all():
         raise AssertionError("Transform sign test failed")
+
+
+class TestStackTransform(TestCase):
+    @parametrize("dim", [-3, -2, -1, 0, 1, 2])
+    def test_scalar_constraint_event_dim(self, device, dim):
+        part = torch.linspace(-1, 1, 20, device=device).reshape(4, 5)
+        value = torch.stack([part, part], dim=dim)
+        constraint = constraints.stack(
+            [constraints.positive, constraints.unit_interval], dim=dim
+        )
+        expected = torch.stack([part > 0, (part >= 0) & (part <= 1)], dim=dim)
+        self.assertEqual(constraint.event_dim, 0)
+        self.assertEqual(constraint.check(value), expected)
+
+    @parametrize("dim", [-3, -2, -1, 0, 1, 2])
+    @parametrize("independent", ["none", "base", "transform"])
+    def test_scalar_transform_log_prob(self, device, dim, independent):
+        part = torch.linspace(-1, 1, 20, device=device).reshape(4, 5)
+        value = torch.stack([part, part + 1], dim=dim)
+        loc = torch.stack([torch.ones_like(part), -torch.ones_like(part)], dim=dim)
+        scale = torch.stack(
+            [torch.full_like(part, 2), torch.full_like(part, 3)], dim=dim
+        )
+        transform = StackTransform(
+            [AffineTransform(1, 2), AffineTransform(-1, 3)], dim=dim
+        )
+        base = Normal(torch.zeros_like(value), torch.ones_like(value))
+        expected = Normal(loc, scale).log_prob(value)
+        self.assertEqual(transform.event_dim, 0)
+        self.assertEqual(transform.domain.event_dim, 0)
+        self.assertEqual(transform.codomain.event_dim, 0)
+        self.assertEqual(
+            transform.log_abs_det_jacobian(transform.inv(value), value), scale.log()
+        )
+
+        if independent == "base":
+            base = Independent(base, 1)
+        elif independent == "transform":
+            transform = IndependentTransform(transform, 1)
+            self.assertEqual(transform.event_dim, 1)
+            self.assertEqual(
+                transform.log_abs_det_jacobian(transform.inv(value), value),
+                scale.log().sum(-1),
+            )
+
+        dist = TransformedDistribution(base, transform)
+        if independent == "none":
+            self.assertEqual(dist.batch_shape, value.shape)
+            self.assertEqual(dist.event_shape, ())
+        else:
+            self.assertEqual(dist.batch_shape, value.shape[:-1])
+            self.assertEqual(dist.event_shape, value.shape[-1:])
+            expected = expected.sum(-1)
+        self.assertEqual(dist.log_prob(value), expected)
+
+
+instantiate_device_type_tests(TestStackTransform, globals())
 
 
 if __name__ == "__main__":
