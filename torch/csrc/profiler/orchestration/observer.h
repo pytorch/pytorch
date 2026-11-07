@@ -54,12 +54,9 @@ enum class C10_API_ENUM ActiveProfilerType {
 
 struct TORCH_API ExperimentalConfig {
   ExperimentalConfig(
-      std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false,
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
-      bool adjust_profiler_step = false,
       bool disable_external_correlation = false,
       bool profile_all_threads = false,
       bool capture_overload_names = false,
@@ -69,8 +66,6 @@ struct TORCH_API ExperimentalConfig {
       bool adjust_timestamps = false,
       bool trace_only = false);
 
-  std::vector<std::string> profiler_metrics;
-  bool profiler_measure_per_kernel;
   bool verbose;
   /*
    * List of performance events to be profiled.
@@ -83,13 +78,6 @@ struct TORCH_API ExperimentalConfig {
    * This feature is new and currently disabled by default.
    */
   bool enable_cuda_sync_events;
-  /*
-   * Deprecated no-op. Used to align ProfilerStep annotations with their parent
-   * Python event; removed because the alignment made downstream tools
-   * misreport step durations. Retained so the Python layer can detect it and
-   * warn, and so the constructor's argument order stays stable.
-   */
-  bool adjust_profiler_step;
   /*
    * Controls whether or not external correlation is disabled. This is used to
    * lower the amount of events received by CUPTI as correlation events are

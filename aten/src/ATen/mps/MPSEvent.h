@@ -16,10 +16,19 @@ class MPSEvent {
   explicit MPSEvent(id_t ID, MPSStream* stream, bool enable_timing);
   ~MPSEvent();
 
-  // records an event on the stream
-  void record(bool needsLock, bool syncEvent = false);
+  // records an event on the stream. If `stream` is null, records on the
+  // stream this event was last recorded or reset on.
+  void record(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr);
   // makes all future work submitted to the stream wait for this event.
-  bool wait(bool needsLock, bool syncEvent = false);
+  // If `stream` is null, wait on the stream this event was last recorded or
+  // reset on.
+  bool wait(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr);
   // checks if events are already signaled.
   bool query() const;
   // blocks the CPU thread until all the GPU work that were scheduled
@@ -51,6 +60,9 @@ class MPSEvent {
   std::atomic<uint64_t> m_signalCounter{0};
   // Stream on which this event is recorded.
   MPSStream* m_stream = nullptr;
+  // Stream on which the latest signal was recorded. This is used to detect if
+  // `m_stream` has changed since the last `record`.
+  MPSStream* m_signal_stream = nullptr;
   // Metal event used to signal and wait for GPU progress.
   MTLSharedEvent_t m_event = nullptr;
   // Guards timing state shared with command-buffer completion handlers.
@@ -65,8 +77,8 @@ class MPSEvent {
   // used to compute elapsed time
   double m_completion_time = 0.0;
 
-  void recordLocked(bool syncEvent);
-  bool waitLocked(bool syncEvent);
+  void recordLocked(bool syncEvent, MPSStream* stream);
+  bool waitLocked(bool syncEvent, MPSStream* stream);
   void notifyCpuSync(uint64_t timingGeneration, double completionTime);
   // assumes timing is enabled and waits for the latest recording's timestamp
   double waitForTiming();
@@ -89,8 +101,11 @@ class MPSEventPtrTarget : public c10::intrusive_ptr_target {
     return m_event;
   }
 
-  void record(bool needsLock, bool syncEvent = false) {
-    m_event->record(needsLock, syncEvent);
+  void record(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr) {
+    m_event->record(needsLock, syncEvent, stream);
   }
   bool synchronize() {
     return m_event->synchronize();
@@ -117,8 +132,10 @@ class MPSEventPool {
   // these are mainly used for MPSHooks and torch.mps.Event() bindings
   id_t acquireEvent(bool enable_timing);
   void releaseEvent(id_t event_id);
-  void recordEvent(id_t event_id, bool syncEvent);
-  void waitForEvent(id_t event_id, bool syncEvent);
+  // rebinds an already-acquired event to `stream`
+  void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
+  void recordEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
+  void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);
   // returns elapsed time between two recorded events in milliseconds
