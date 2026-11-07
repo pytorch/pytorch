@@ -131,6 +131,7 @@ from .polyfills import (
 from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
+    implicit_super_arg0,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
 )
@@ -1671,13 +1672,54 @@ class InstructionTranslatorBase(
             if name in fastlocals:
                 self.symbolic_locals.pop(name, None)
 
+    def check_resume_variable_names(self) -> None:
+        code = self.f_code
+        while code in ContinueExecutionCache.generated_code_metadata:
+            code = ContinueExecutionCache.generated_code_metadata[code].code
+        if {"__nested_resume_fns", "__nested_frame_values"}.intersection(
+            code.co_varnames
+        ):
+            unimplemented(
+                gb_type="Cannot resume a frame using reserved continuation locals",
+                context=code.co_name,
+                explanation="User locals collide with generated continuation state.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        if code.co_argcount and code.co_varnames[0] in code.co_cellvars:
+            started = False
+            for inst in dis.get_instructions(code):
+                if inst.opname == "RESUME":
+                    started = True
+                elif (
+                    started
+                    and inst.opname == "MAKE_CELL"
+                    and inst.argval == code.co_varnames[0]
+                ):
+                    unimplemented(
+                        gb_type="Cannot resume a frame replacing its receiver cell",
+                        context=code.co_name,
+                        explanation="A comprehension replaces the first argument's cell slot.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                        skip_frame=True,
+                        preserve_skip_frame_after_inline=True,
+                    )
+
+    def livevars_analysis(self, instruction: Instruction) -> set[str]:
+        reads = livevars_analysis(self.instructions, instruction)
+        name = implicit_super_arg0(self.f_code)
+        if name is not None:
+            reads.add(name)
+        return reads
+
     def prune_dead_locals(self) -> None:
         # keep cell and freevar references alive
         self.post_prune_cell_and_freevars = {
             name: self._cellvar(name) for name in self.cell_and_freevars()
         }
         # Only keep the locals that must remain on the stack.
-        reads = livevars_analysis(self.instructions, self.current_instruction)
+        reads = self.livevars_analysis(self.current_instruction)
         # inspect.signature() renames ".N" to "implicitN" for comprehension
         # iterator variables because dotted names aren't valid identifiers.
         # Normalize reads to match symbolic_locals keys.
@@ -1725,7 +1767,7 @@ class InstructionTranslatorBase(
                 # Before Python 3.11, creating a local generator does not run its
                 # inline tracer, so it still points at the synthetic initial NOP.
                 instruction = tx.instructions[0]
-            reads = livevars_analysis(tx.instructions, instruction)
+            reads = tx.livevars_analysis(instruction)
             for name in reads:
                 key = name.replace(".", "implicit") if name.startswith(".") else name
                 if key in tx.symbolic_locals:
@@ -2419,7 +2461,15 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        cell = cast(CellVariable, self._cellvar(inst.argval))
+        if (
+            self.output.side_effects.has_pending_mutation_of_attr(cell, "cell_contents")
+            and cell._current_contents(self) is None
+        ):
+            if inst.argval in self.cellvars():
+                self._raise_unbound_local_error(inst.argval)
+            msg = f"cannot access free variable '{inst.argval}' where it is not associated with a value in enclosing scope"
+            raise_observed_exception(NameError, self, args=[msg])
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -3448,7 +3498,30 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        cell = cast(CellVariable, self._cellvar(inst.argval))
+        contents = cell._current_contents(self)
+        if contents is None:
+            if (
+                cell.pre_existing_contents is not None
+                and not self.output.side_effects.has_pending_mutation_of_attr(
+                    cell, "cell_contents"
+                )
+            ):
+                unimplemented(
+                    gb_type="Delete an unguarded empty closure cell",
+                    context=inst.argval,
+                    explanation="Dynamo cannot guard an initially empty closure cell.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if inst.argval in self.cellvars():
+                self._raise_unbound_local_error(inst.argval)
+            msg = (
+                f"cannot access free variable '{inst.argval}' where it is not "
+                "associated with a value in enclosing scope"
+            )
+            raise_observed_exception(NameError, self, args=[msg])
+        # A cached delete must fail its input guards when the cell becomes empty.
+        contents.realize()
         self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
@@ -3589,7 +3662,7 @@ class InstructionTranslatorBase(
         # There should not be any pruning in the other frames since
         # the current instruction there should be a CALL.
         if is_leaf:
-            reads = livevars_analysis(self.instructions, resume_inst)
+            reads = self.livevars_analysis(resume_inst)
             # inspect.signature() renames ".N" to "implicitN" for comprehension
             # iterator variables. Build a mapping to emit the bytecode name
             # (.0) in argnames so the resume function's co_varnames matches
@@ -5647,6 +5720,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 function_live_names = livevars_analysis(
                     self.instructions, self.instructions[0]
                 )
+                if f_code.co_argcount:
+                    # Zero-argument super() implicitly reads the first positional argument.
+                    function_live_names.add(f_code.co_varnames[0])
 
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():

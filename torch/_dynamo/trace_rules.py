@@ -165,6 +165,7 @@ manual_torch_name_rule_map: dict[
     | type[SkipFunctionVariable]
     | type[UserFunctionVariable],
 ] = {
+    "torch._dynamo.resume_execution._call_resume": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,

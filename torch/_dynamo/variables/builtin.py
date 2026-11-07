@@ -23,6 +23,7 @@ import abc
 import ast
 import builtins
 import contextlib
+import dis
 import functools
 import inspect
 import itertools
@@ -2259,6 +2260,36 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if check_constant_args(args[1:], kwargs):
             const_args = [a.as_python_constant() for a in args[1:]]
+            definition_ops = {
+                "RESUME",
+                "MAKE_CELL",
+                "LOAD_CLOSURE",
+                "BUILD_TUPLE",
+                "MAKE_FUNCTION",
+                "SET_FUNCTION_ATTRIBUTE",
+                "LOAD_CONST",
+                "STORE_NAME",
+                "COPY",
+                "RETURN_VALUE",
+                "RETURN_CONST",
+                "EXTENDED_ARG",
+            }
+            pure_body = (
+                isinstance(fn, types.FunctionType)
+                and len(const_args) == 1
+                and not kwargs
+                and fn.__closure__ is None
+                and all(
+                    inst.opname in definition_ops
+                    or inst.opname == "LOAD_NAME"
+                    and inst.argval == "__name__"
+                    or inst.opname == "LOAD_FAST"
+                    and inst.argval == "__class__"
+                    for inst in dis.get_instructions(fn)
+                )
+            )
+            if not pure_body:
+                tx.output.side_effects.before_opaque_class_body()
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
@@ -2270,7 +2301,30 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # exception so a surrounding except can catch it, instead of
                 # escaping the compiled region.
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
-            return VariableTracker.build(tx, r)
+            result = VariableTracker.build(tx, r)
+            if type(r) is type and pure_body and "__del__" not in vars(r):
+                method_codes = tuple(
+                    value
+                    for value in fn.__code__.co_consts
+                    if isinstance(value, types.CodeType)
+                )
+                for method in vars(r).values():
+                    if (
+                        not isinstance(method, types.FunctionType)
+                        or not any(method.__code__ is code for code in method_codes)
+                        or "__class__" not in method.__code__.co_freevars
+                    ):
+                        continue
+                    idx = method.__code__.co_freevars.index("__class__")
+                    closure = method.__closure__
+                    if closure is None:
+                        raise AssertionError("expected a method closure")
+                    cell = closure[idx]
+                    if cell.cell_contents is r and cell not in tx.output.side_effects:
+                        tx.output.side_effects.track_cell_new(
+                            cell=cell, contents=result, class_owner=r
+                        )
+            return result
         else:
             fail(args, kwargs)
 
@@ -3040,9 +3094,105 @@ class BuiltinVariable(BaseBuiltinVariable):
         return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker:
-        return variables.SuperVariable.create(a, b)
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        no_keywords(tx, "super", kwargs)
+        check_positional(tx, "super", len(args), 0, 2)
+        if not args:
+            if tx.f_globals.get("__name__", "").startswith("torch._dynamo.polyfills"):
+                unimplemented(
+                    gb_type="super() invoked by an emulated C callback",
+                    context=tx.f_code.co_name,
+                    explanation="A Python polyfill cannot reproduce the caller frame "
+                    "used by CPython's zero-argument super() callback.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            code = tx.f_code
+            if code.co_argcount == 0:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): no arguments"]
+                )
+
+            arg0_name = code.co_varnames[0]
+            arg0 = tx.symbolic_locals.get(arg0_name)
+            if arg0_name in tx.cellvars():
+                arg0_cell = tx._cellvar(arg0_name)
+                if not isinstance(arg0_cell, CellVariable):
+                    raise AssertionError(f"expected receiver cell, got {arg0_cell}")
+                arg0 = arg0_cell._current_contents(tx)
+                if (
+                    arg0 is None
+                    and not tx.output.side_effects.has_pending_mutation_of_attr(
+                        arg0_cell, "cell_contents"
+                    )
+                ):
+                    unimplemented(
+                        gb_type="super() with an unguarded empty receiver cell",
+                        context=str(arg0_cell),
+                        explanation="Dynamo cannot guard an initially empty receiver cell.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            if arg0 is None or isinstance(
+                arg0, (variables.DeletedVariable, NullVariable)
+            ):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): arg[0] deleted"]
+                )
+
+            if "__class__" not in tx.cell_and_freevars():
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): __class__ cell not found"]
+                )
+            class_cell = tx._cellvar("__class__")
+            if not isinstance(class_cell, CellVariable):
+                raise AssertionError(f"expected class cell, got {class_cell}")
+            class_var = class_cell._current_contents(tx)
+            if class_var is None:
+                if not tx.output.side_effects.has_pending_mutation_of_attr(
+                    class_cell, "cell_contents"
+                ):
+                    unimplemented(
+                        gb_type="super() with an unguarded empty class cell",
+                        context=str(class_cell),
+                        explanation="Dynamo cannot guard an initially empty closure cell.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
+            if not issubclass(class_var.python_type(), type):
+                msg = (
+                    f"super(): __class__ is not a type ({class_var.python_type_name()})"
+                )
+                raise_observed_exception(RuntimeError, tx, args=[msg])
+            type_obj = class_var.as_python_constant()
+            if not type.__subclasscheck__(type_obj, arg0.python_type()):
+                try:
+                    obj = (
+                        types.CellType()
+                        if isinstance(arg0, CellVariable)
+                        else arg0.as_python_constant()
+                    )
+                    builtins.super(type_obj, obj)
+                except AsPythonConstantNotImplementedError:
+                    unimplemented(
+                        gb_type="super() receiver requires dynamic validation",
+                        context=str(arg0),
+                        explanation="Dynamo cannot validate this receiver's __class__ "
+                        "without evaluating its attribute lookup.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                except TypeError as error:
+                    raise_observed_exception(TypeError, tx, args=list(error.args))
+            return variables.SuperVariable.create(class_var, arg0)
+        if len(args) == 2:
+            return variables.SuperVariable.create(args[0], args[1])
+        return None
 
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker

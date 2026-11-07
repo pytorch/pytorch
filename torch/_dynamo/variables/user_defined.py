@@ -4312,15 +4312,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
-            if can_use_mro_source:
+            if can_use_mro_source or (
+                self.cls_source is not None
+                and "__class__" in type_attr.__code__.co_freevars
+            ):
                 var_source = self.get_source_by_walking_mro(tx, name)
-            # The MRO walk is not always available: can_use_mro_source also
-            # requires cls_source, and a torch function mode reaches here with
-            # self.source set but cls_source None, for __torch_function__. Do
-            # not drop this fallback - without a source here, bind_args builds
-            # the method's closure sourcelessly and SourcelessBuilder fails on
-            # a captured tensor (test_modes.py,
-            # test_nested_torch_function_mode).
+            # A torch function mode can have an instance source without a
+            # class source. Keep that fallback for its captured closure values.
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )

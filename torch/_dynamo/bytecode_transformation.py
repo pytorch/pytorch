@@ -1272,42 +1272,6 @@ def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> 
     instructions[:] = new_insts
 
 
-def explicit_super(code: types.CodeType, instructions: list[Instruction]) -> None:
-    """convert super() with no args into explicit arg form"""
-    cell_and_free = (code.co_cellvars or ()) + (code.co_freevars or ())
-    if not len(code.co_varnames):
-        # A function with no argument cannot contain a valid "super()" call
-        return
-    output = []
-    for idx, inst in enumerate(instructions):
-        output.append(inst)
-        if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
-            nexti = instructions[idx + 1]
-            if nexti.arg == 0 and (
-                (sys.version_info >= (3, 12) and nexti.opname == "CALL")
-                or (sys.version_info < (3, 12) and nexti.opname == "PRECALL")
-            ):
-                if "__class__" not in cell_and_free:
-                    raise AssertionError(
-                        "__class__ not found in cell_and_free for super() call"
-                    )
-                output.append(create_instruction("LOAD_DEREF", argval="__class__"))
-                first_var = code.co_varnames[0]
-                if first_var in cell_and_free:
-                    output.append(create_instruction("LOAD_DEREF", argval=first_var))
-                else:
-                    output.append(create_instruction("LOAD_FAST", argval=first_var))
-                nexti.arg = 2
-                nexti.argval = 2
-                if nexti.opname == "PRECALL":
-                    # also update the following CALL instruction
-                    call_inst = instructions[idx + 2]
-                    call_inst.arg = 2
-                    call_inst.argval = 2
-
-    instructions[:] = output
-
-
 def fix_extended_args(instructions: list[Instruction]) -> int:
     """Fill in correct argvals for EXTENDED_ARG ops"""
     output: list[Instruction] = []
@@ -1447,7 +1411,12 @@ def fix_vars(
             allnames[name] = idx
         except IndexError:
             break
-    varnames = {name: allnames[name] for name in code_options["co_varnames"]}
+    # Promoted freevars can retain old fast-local names. A retained cell
+    # parameter still uses its local slot when it also has a freevar alias.
+    varnames = {
+        name: idx if name in code_options["co_cellvars"] else allnames[name]
+        for idx, name in enumerate(code_options["co_varnames"])
+    }
     freenames = {
         name: allnames[name]
         for name in code_options["co_cellvars"] + code_options["co_freevars"]
@@ -1734,8 +1703,6 @@ def _cached_cleaned_instructions(
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
     if not safe:
-        if sys.version_info < (3, 12):
-            explicit_super(code, instructions)
         remove_jump_if_none(instructions)
         if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)

@@ -25,15 +25,18 @@ import collections
 import contextlib
 import dataclasses
 import enum
+import functools
 import inspect
 import logging
 import sys
 import textwrap
 import traceback
+import types
+import typing
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
 from types import CellType, SimpleNamespace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, Never, TYPE_CHECKING
 
 import torch
 import torch.nn
@@ -261,6 +264,9 @@ class SideEffects:
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
         | None = None,
+        materialized_cells: dict[int, tuple["variables.CellVariable", VariableTracker]]
+        | None = None,
+        emitted_class_cells: set[int] | None = None,
         tensor_hooks: dict[
             int,
             tuple[
@@ -281,6 +287,8 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        self.materialized_cells = materialized_cells or {}
+        self.emitted_class_cells = emitted_class_cells or set()
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -406,6 +414,8 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self.materialized_cells == other.materialized_cells
+            and self.emitted_class_cells == other.emitted_class_cells
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -429,6 +439,10 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif self.materialized_cells != other.materialized_cells:
+            return "materialized_cells"
+        elif self.emitted_class_cells != other.emitted_class_cells:
+            return "emitted_class_cells"
         else:
             return None
 
@@ -450,12 +464,16 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            materialized_cells=dict(self.materialized_cells),
+            emitted_class_cells=set(self.emitted_class_cells),
         )
 
     def __contains__(self, item: object) -> bool:
-        return id(item) in self.id_to_variable
+        return id(item) in self.id_to_variable or id(item) in self.materialized_cells
 
     def __getitem__(self, item: object) -> VariableTracker:
+        if id(item) in self.materialized_cells:
+            return self.materialized_cells[id(item)][0]
         return self.id_to_variable[id(item)]
 
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
@@ -631,6 +649,12 @@ class SideEffects:
         return result
 
     def store_cell(self, cellvar: VariableTracker, value: VariableTracker) -> None:
+        for key, (tracked, _) in self.materialized_cells.items():
+            if tracked is cellvar:
+                if tracked.native_class_escape:
+                    self._unsupported_materialized_cell()
+                self.materialized_cells[key] = (tracked, value)
+                break
         if cellvar.is_immutable():
             unimplemented(
                 gb_type="Write to immutable cell",
@@ -977,14 +1001,203 @@ class SideEffects:
 
     def track_cell_new(
         self,
+        *,
+        cell: CellType | None = None,
+        contents: VariableTracker | None = None,
+        class_owner: type | None = None,
     ) -> VariableTracker:
-        obj = object()
+        obj = object() if cell is None else cell
         variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
+            pre_existing_contents=contents,
+            class_owner=class_owner,
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
+        if class_owner is not None:
+            if contents is None:
+                raise AssertionError("expected initial class-cell contents")
+            self.materialized_cells[id(obj)] = (variable, contents)
         return variable
+
+    def _unsupported_materialized_cell(self) -> Never:
+        unimplemented(
+            gb_type="Escaping materialized class cell",
+            context="",
+            explanation="Dynamo cannot reconstruct a materialized class and its shared closure cell together.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
+        )
+
+    def before_opaque_class_body(self) -> None:
+        for cell, contents in self.materialized_cells.values():
+            if contents is not cell.pre_existing_contents:
+                self._unsupported_materialized_cell()
+            # Native exposure survives speculative retries; virtual contents
+            # are separately copied with SideEffects.
+            cell.native_class_escape = True
+
+    def _materialized_class_refs(self, value: object) -> set[int]:
+        if not self.materialized_cells:
+            return set()
+        owners = {
+            id(cell.class_owner): key
+            for key, (cell, _) in self.materialized_cells.items()
+        }
+        if type.__instancecheck__(VariableTracker, value):
+            tracker = cast(VariableTracker, value)
+            if not tracker.is_realized():
+                return set()
+            if isinstance(tracker, variables.CellVariable):
+                return {
+                    key
+                    for key, (cell, _) in self.materialized_cells.items()
+                    if cell is tracker
+                }
+            if isinstance(
+                tracker, (variables.UserFunctionVariable, variables.BuiltinVariable)
+            ):
+                value = tracker.fn
+            elif isinstance(tracker, variables.PropertyVariable):
+                value = tracker.descriptor
+            elif isinstance(
+                tracker,
+                (
+                    variables.UserDefinedClassVariable,
+                    variables.UserDefinedObjectVariable,
+                    variables.ConstantVariable,
+                ),
+            ):
+                value = tracker.value
+            else:
+                return set()
+        typing_namespace = vars(typing)
+        generic_alias = typing_namespace.get("_GenericAlias")
+        base_alias = typing_namespace.get("_BaseGenericAlias")
+        pending: list[Any] = [value]
+        seen = set()
+        refs = set()
+        while pending:
+            obj = pending.pop()
+            ident = id(obj)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            if ident in self.materialized_cells:
+                refs.add(ident)
+            obj_type = type(obj)
+            if issubclass(obj_type, type):
+                mro = type.__dict__["__mro__"].__get__(obj)
+                for base in tuple.__iter__(mro):
+                    if id(base) in owners:
+                        refs.add(owners[id(base)])
+                pending.extend(type.__dict__["__dict__"].__get__(obj).values())
+            elif obj_type is types.FunctionType:
+                if obj.__closure__ is not None:
+                    pending.extend(tuple.__iter__(obj.__closure__))
+                if obj.__defaults__ is not None:
+                    pending.extend(tuple.__iter__(obj.__defaults__))
+                if obj.__kwdefaults__ is not None:
+                    pending.extend(dict.values(obj.__kwdefaults__))
+                pending.extend(dict.values(obj.__dict__))
+            elif obj_type is types.CellType:
+                try:
+                    pending.append(obj.cell_contents)
+                except ValueError:
+                    pass
+            elif obj_type is types.MethodType:
+                pending.extend((obj.__func__, obj.__self__))
+            elif obj_type is types.BuiltinFunctionType:
+                pending.append(obj.__self__)
+            elif issubclass(obj_type, types.GenericAlias):
+                pending.extend(
+                    types.GenericAlias.__dict__[name].__get__(obj)
+                    for name in ("__origin__", "__args__")
+                )
+            elif obj_type is types.UnionType:
+                pending.append(types.UnionType.__dict__["__args__"].__get__(obj))
+            elif generic_alias is not None and issubclass(obj_type, generic_alias):
+                descriptor = (
+                    type.__dict__["__dict__"].__get__(base_alias).get("__dict__")
+                    if base_alias is not None
+                    else None
+                )
+                if type(descriptor) is types.GetSetDescriptorType:
+                    pending.extend(dict.values(descriptor.__get__(obj)))
+                else:
+                    refs.update(self.materialized_cells)
+            elif obj_type is typing.TypeVar or obj_type is typing_namespace.get(
+                "TypeAliasType"
+            ):
+                refs.update(self.materialized_cells)
+            elif issubclass(obj_type, enum.Enum):
+                namespace = enum.Enum.__dict__["__dict__"].__get__(obj)
+                pending.extend(dict.values(namespace))
+            elif obj_type is types.CodeType:
+                pending.extend(tuple.__iter__(obj.co_consts))
+            elif obj_type is slice:
+                pending.extend((obj.start, obj.stop, obj.step))
+            elif issubclass(obj_type, (staticmethod, classmethod)):
+                wrapper = (
+                    staticmethod if issubclass(obj_type, staticmethod) else classmethod
+                )
+                pending.append(wrapper.__dict__["__func__"].__get__(obj))
+            elif issubclass(obj_type, property):
+                pending.extend(
+                    property.__dict__[name].__get__(obj)
+                    for name in ("fget", "fset", "fdel")
+                )
+            elif issubclass(obj_type, functools.partial):
+                pending.extend(
+                    functools.partial.__dict__[name].__get__(obj)
+                    for name in ("func", "args", "keywords")
+                )
+            elif issubclass(obj_type, weakref.ReferenceType):
+                pending.append(weakref.ReferenceType.__call__(obj))
+                pending.append(
+                    weakref.ReferenceType.__dict__["__callback__"].__get__(obj)
+                )
+            elif any(obj_type is proxy_type for proxy_type in weakref.ProxyTypes):
+                refs.update(self.materialized_cells)
+            elif issubclass(obj_type, dict):
+                pending.extend(dict.keys(obj))
+                pending.extend(dict.values(obj))
+            elif obj_type is types.MappingProxyType:
+                pending.extend(obj.keys())
+                pending.extend(obj.values())
+            elif issubclass(obj_type, tuple):
+                pending.extend(tuple.__iter__(obj))
+            elif issubclass(obj_type, list):
+                pending.extend(list.__iter__(obj))
+            elif issubclass(obj_type, set):
+                pending.extend(set.__iter__(obj))
+            elif issubclass(obj_type, frozenset):
+                pending.extend(frozenset.__iter__(obj))
+            else:
+                for base in tuple.__iter__(type.__dict__["__mro__"].__get__(obj_type)):
+                    if id(base) in owners:
+                        refs.add(owners[id(base)])
+        return refs
+
+    def check_materialized_class_escape(
+        self, value: object, *, emitted: bool = False
+    ) -> None:
+        if not self.materialized_cells:
+            return
+        refs = self._materialized_class_refs(value)
+        if emitted:
+            self.emitted_class_cells.update(refs)
+        for key in refs:
+            cell, contents = self.materialized_cells[key]
+            if contents is not cell.pre_existing_contents:
+                self._unsupported_materialized_cell()
+
+    def check_emitted_class_cells(self) -> None:
+        for key in self.emitted_class_cells:
+            cell, contents = self.materialized_cells[key]
+            if contents is not cell.pre_existing_contents:
+                self._unsupported_materialized_cell()
 
     def track_cell_existing(
         self, source: Source | None, cell: CellType, contents: VariableTracker
@@ -1038,6 +1251,7 @@ class SideEffects:
             if var in visited:
                 return
             visited.add(var)
+            self.check_materialized_class_escape(var)
             # Object may have been mutated, store this mutation.
             if isinstance(var.mutation_type, AttributeMutationNew):
                 live_new_objects.add(var)
@@ -1127,12 +1341,18 @@ class SideEffects:
         self.store_attr_mutations = {
             k: v
             for k, v in self.store_attr_mutations.items()
-            if is_live(k) or k in gen_reachable_new
+            if is_live(k)
+            or k in gen_reachable_new
+            or isinstance(k, variables.CellVariable)
+            and k.class_owner is not None
         }
         self.attr_mutation_kinds = {
             k: v
             for k, v in self.attr_mutation_kinds.items()
-            if is_live(k) or k in gen_reachable_new
+            if is_live(k)
+            or k in gen_reachable_new
+            or isinstance(k, variables.CellVariable)
+            and k.class_owner is not None
         }
 
     def mutation(self, var: VariableTracker) -> None:
@@ -1207,6 +1427,8 @@ class SideEffects:
                 continue
 
             if isinstance(var, variables.CellVariable):
+                if var.class_owner is not None:
+                    self._unsupported_materialized_cell()
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
@@ -1570,6 +1792,8 @@ class SideEffects:
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+        self.materialized_cells.clear()
+        self.emitted_class_cells.clear()
 
 
 @register_side_effect_replay_handler(
