@@ -134,6 +134,15 @@ def _freeze(
     freezing_passes(aot_autograd_gm, aot_example_inputs)
 
     constant_fold(aot_autograd_gm)
+    if (
+        torch._C._has_mkldnn
+        and config.cpp.weight_prepack
+        and config.layout_optimization
+    ):
+        from .fx_passes.mkldnn_fusion import pack_frozen_qconv_weights
+
+        pack_frozen_qconv_weights(aot_autograd_gm)
+
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
