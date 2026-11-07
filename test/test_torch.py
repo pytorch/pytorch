@@ -7986,6 +7986,66 @@ class TestTorch(TestCase):
         sequence.add_(start - 1)
         return sequence.resize_(*size)
 
+    @parametrize("sequence", [(1,), [1], "x", b"x", bytearray(b"x")], name_fn=lambda s: type(s).__name__)
+    @parametrize("data", [2.0, [2.0], [2.0, 3.0], 2 + 1j, [2, 3], [True, False], []])
+    def test_mul_sequence_error(self, sequence, data):
+        tensor = torch.tensor(data)
+        if isinstance(sequence, (tuple, list)):
+            sequence = type(sequence)([tensor])
+        self.assertRaisesRegex(TypeError, r"mul\(\)", lambda: tensor * sequence)
+        self.assertRaisesRegex(TypeError, r"mul\(\)", lambda: sequence * tensor)
+        self.assertRaisesRegex(TypeError, "only integer tensors of a single element", tensor.__index__)
+
+    @parametrize("sequence", [(1,), [1], "x", b"x", bytearray(b"x")], name_fn=lambda s: type(s).__name__)
+    @parametrize("data", [2, [2], [[2]], True, [False], 0, -1])
+    def test_mul_sequence_repeat(self, sequence, data):
+        tensor = torch.tensor(data)
+        expected = sequence * tensor.item()
+        self.assertEqual(tensor * sequence, expected)
+        self.assertEqual(sequence * tensor, expected)
+
+    def test_mul_sequence_reflected(self):
+        class Sequence:
+            def __getitem__(self, index):
+                raise IndexError
+
+            def __rmul__(self, other):
+                return "reflected"
+
+        class NumericSequence(list):
+            def __mul__(self, other):
+                return "forward"
+
+            def __rmul__(self, other):
+                return "reflected"
+
+        tensor = torch.ones(2)
+        self.assertEqual(tensor * Sequence(), "reflected")
+        self.assertEqual(tensor * NumericSequence([1]), "reflected")
+        self.assertEqual(NumericSequence([1]) * tensor, "forward")
+
+    def test_mul_sequence_torch_function(self):
+        class Sequence(list):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return "torch_function"
+
+        tensor = torch.ones(2)
+        sequence = Sequence([1])
+        self.assertEqual(tensor * sequence, "torch_function")
+        self.assertEqual(sequence * tensor, "torch_function")
+
+    def test_mul_sequence_index_override(self):
+        class IndexTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            def __index__(self):
+                return 2
+
+        tensor = torch.ones(2).as_subclass(IndexTensor)
+        self.assertEqual(tensor * [1], [1, 1])
+        self.assertEqual([1] * tensor, [1, 1])
+
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that
