@@ -103,7 +103,10 @@ AdamW.__doc__ = (
             LR if you are not also specifying fused=True or capturable=True.
         betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
-            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
+            its square. If a tensor is provided, must be 1-element. If the
+            first coefficient is the float ``0.0``, no first moment is stored
+            and the gradient is used instead, except with ``fused=True``.
+            (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)

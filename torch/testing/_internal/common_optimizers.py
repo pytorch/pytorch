@@ -575,6 +575,11 @@ def optim_inputs_func_adam(device, dtype=None):
             },
             desc="Tensor lr, Tensor betas, with capturable",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"betas": (0.0, 0.999), "capturable": True},
+            desc="beta1 is zero, no first moment, capturable",
+        ),
     ]
     mps_supported_configs = [
         OptimizerInput(
@@ -598,6 +603,21 @@ def optim_inputs_func_adam(device, dtype=None):
                 params=None,
                 kwargs={"weight_decay": 0.1, "amsgrad": True},
                 desc="amsgrad",
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={"betas": (0.0, 0.999)},
+                desc="beta1 is zero, no first moment",
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={
+                    "betas": (0.0, 0.99),
+                    "weight_decay": 0.1,
+                    "amsgrad": True,
+                    "maximize": True,
+                },
+                desc="beta1 is zero, no first moment, amsgrad, maximize, weight_decay",
             ),
         ]
         + (
