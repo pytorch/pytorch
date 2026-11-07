@@ -860,6 +860,31 @@ Welford<scalar_t> welford_vec_reduce_all(
       acc.mean[1], acc.m2[1], acc.weight[1], acc.index};
   return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
 }
+
+// Same as at::vec::vec_reduce_all, but on AVX2 always reduces float lanes with
+// a shuffle tree. ATen's VecReduceAllSIMD requires __GNUC__ > 5, so clang
+// (__GNUC__ == 4) reduces the lanes serially. Emitted when
+// config.cpp.simd_horizontal_reduction is set.
+template <typename T, int N, typename OP>
+inline T simd_vec_reduce_all(const OP& op, at::vec::VectorizedN<T, N> acc) {
+#ifdef CPU_CAPABILITY_AVX2
+  if constexpr (std::is_same_v<T, float>) {
+    using Vec = at::vec::Vectorized<T>;
+    Vec v = acc[0];
+    for (int i = 1; i < N; i++) {
+      v = op(v, acc[i]);
+    }
+    Vec v1 = _mm256_permute2f128_ps(v, v, 0x1);
+    v = op(v, v1);
+    v1 = _mm256_shuffle_ps(v, v, 0x4E);
+    v = op(v, v1);
+    v1 = _mm256_shuffle_ps(v, v, 0xB1);
+    v = op(v, v1);
+    return _mm256_cvtss_f32(v);
+  }
+#endif
+  return at::vec::vec_reduce_all<T, N>(op, acc);
+}
 #endif
 
 inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
