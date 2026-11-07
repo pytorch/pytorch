@@ -57,6 +57,24 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
+    @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
+    def test_small_int_arithmetic_wraps(self, dtype):
+        # Check that uint8, int8 and int16 overflow behavior under various
+        # operations is the same for compiled and eager execution.
+        def fn(x):
+            y = x * 2 + x
+            out = [y.float(), y > 50, (~x) // 3, (x << 3).float(), (x - 100) // 3]
+            if x.dtype.is_signed:
+                trunc = torch.div(x, -1, rounding_mode="trunc")
+                out += [(x // -1).float(), trunc.float()]
+            return out
+
+        info = torch.iinfo(dtype)
+        spread = torch.arange(-128, 128) * max(1, info.max // 127)
+        edges = torch.tensor([info.min, info.min + 1, -1, 0, 1, info.max - 1, info.max])
+        x = torch.cat([spread, edges]).to(dtype).to(self.device)
+        self.common(fn, (x,), check_lowp=False)
+
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
 
