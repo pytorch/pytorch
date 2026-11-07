@@ -3419,33 +3419,40 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
-    @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
-    @dtypes(torch.float32, torch.float64)
-    def test_nextafter(self, device, dtype):
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("nextafter", "_refs.nextafter")],
+        allowed_dtypes=(torch.float16, torch.float32, torch.float64),
+    )
+    def test_nextafter(self, device, dtype, op):
         # Test special cases
         t1 = torch.tensor([0, 0, 10], device=device, dtype=dtype)
         t2 = torch.tensor([inf, -inf, 10], device=device, dtype=dtype)
-        actual = torch.nextafter(t1, t2)
+        actual = op(t1, t2)
         expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        actual = torch.nextafter(t2, t1)
+        actual = op(t2, t1)
         expected = np.nextafter(t2.cpu().numpy(), t1.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
         t1 = torch.tensor([0, nan], device=device, dtype=dtype)
         t2 = torch.tensor([nan, 0], device=device, dtype=dtype)
-        self.assertTrue(torch.nextafter(t1, t2).isnan().all())
+        self.assertTrue(op(t1, t2).isnan().all())
 
-        a = torch.randn(100, device=device, dtype=dtype)
-        b = torch.randn(100, device=device, dtype=dtype)
-        actual = torch.nextafter(a, b)
-        expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected, atol=0, rtol=0)
+        for sample in op.reference_inputs(device, dtype):
+            actual = op(sample.input, *sample.args, **sample.kwargs)
+            numpy_sample = sample.numpy()
+            expected = np.nextafter(
+                numpy_sample.input, *numpy_sample.args, **numpy_sample.kwargs
+            )
+            self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=False)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.bfloat16)
-    def test_nextafter_bfloat16(self, device, dtype):
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("nextafter", "_refs.nextafter")],
+        allowed_dtypes=(torch.bfloat16,),
+    )
+    def test_nextafter_bfloat16(self, device, dtype, op):
         nan = float("nan")
         inf = float("inf")
         cases = (
@@ -3483,7 +3490,7 @@ class TestBinaryUfuncsDevice(TestCase):
         for from_v, to_v, expected in cases:
             from_t = torch.tensor([from_v], device=device, dtype=dtype)
             to_t = torch.tensor([to_v], device=device, dtype=dtype)
-            actual = torch.nextafter(from_t, to_t).item()
+            actual = op(from_t, to_t).item()
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
