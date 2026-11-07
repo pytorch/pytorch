@@ -42,9 +42,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -54,10 +54,10 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -152,8 +152,15 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+# Not a module-level skip: other test files import this one, including on GPU
+# jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
@@ -544,6 +551,34 @@ class CPUReproTests(TestCase):
                             (v,),
                             **tol_kwargs,
                         )
+
+    @requires_vectorization
+    @parametrize("enabled", (False, True))
+    @parametrize("dtype", (torch.float32, torch.float64))
+    def test_sqrt_without_errno(self, enabled, dtype):
+        def fn(x):
+            return torch.nn.functional.layer_norm(x, [56]), torch.sqrt(x[:, 0])
+
+        x = torch.randn(9, 56, dtype=dtype)
+        # NaN for a negative or NaN input, -0 for -0, inf for inf; a subnormal
+        # input has a normal square root.
+        specials = (-1.0, -0.0, float("inf"), float("nan"), 0.0)
+        x[: len(specials), 0] = torch.tensor(specials, dtype=dtype)
+        x[len(specials), 0] = torch.finfo(dtype).smallest_normal / 4
+        with config.patch({"cpp.sqrt_without_errno": enabled}):
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+        self.assertEqual(actual[0], fn(x)[0], equal_nan=True)
+        # Both forms are IEEE square roots: correctly rounded, signed zero
+        # included. (Eager float32 sqrt can be 1 ulp off.)
+        expected = torch.sqrt(x[:, 0].double()).to(dtype)
+        self.assertEqual(actual[1], expected, equal_nan=True, atol=0, rtol=0)
+        self.assertTrue(actual[1][1].signbit())  # sqrt(-0) is -0
+        # LayerNorm's rsqrt and the explicit sqrt both use the helper when enabled.
+        n_rsqrt = code.count("1 / sqrt_without_errno(")
+        self.assertEqual(n_rsqrt > 0, enabled)
+        self.assertEqual(code.count("sqrt_without_errno(") > n_rsqrt, enabled)
+        self.assertEqual("std::sqrt(" in code, not enabled)
 
     @requires_vectorization
     def test_nn_fold_permuted_input(self):
@@ -3954,9 +3989,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (input, eps))
 
     @slowTest
-    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
-    # for the ~1h this test takes.
-    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -8071,7 +8103,6 @@ class CPUReproTests(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if RUN_CPU and not IS_MACOS:
         run_tests(needs="filelock")
