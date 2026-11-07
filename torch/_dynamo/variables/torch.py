@@ -2188,6 +2188,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and fill_value.ndim == 0
                 and not fill_value.requires_grad
             ):
+                # Eager converts fill_value with item(), which fails for meta tensors.
+                if fill_value.device.type == "meta":
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=["Tensor.item() cannot be called on meta tensors"],
+                    )
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
                 if (
