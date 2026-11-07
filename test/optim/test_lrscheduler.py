@@ -2012,6 +2012,33 @@ class TestLRScheduler(TestCase):
             expect_T_cur = (epoch + 1) % sch.T_0
             self.assertEqual(sch.T_cur, expect_T_cur)
 
+    def test_CosineAnnealingWarmRestarts_step_just_below_restart_epoch(self):
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=1, T_mult=2)
+        scheduler.step(math.nextafter(3, 0))
+        self.assertEqual(scheduler.T_i, 2)
+        self.assertTrue(0 <= scheduler.T_cur < scheduler.T_i)
+
+    # https://github.com/pytorch/pytorch/issues/203028
+    @parametrize("T_0,T_mult", [(1, 3), (2, 3), (10, 3), (1, 10), (3, 2), (7, 5)])
+    def test_CosineAnnealingWarmRestarts_step_at_restart_epochs(self, T_0, T_mult):
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_0, T_mult=T_mult)
+        for k in range(1, 13):
+            scheduler.step(T_0 * (T_mult**k - 1) // (T_mult - 1))
+            self.assertEqual(scheduler.T_cur, 0)
+            self.assertEqual(scheduler.T_i, T_0 * T_mult**k)
+            for group in self.opt.param_groups:
+                self.assertEqual(group["lr"], group["initial_lr"])
+
+    @parametrize("T_0,T_mult", [(1, 3), (2, 3), (1, 10), (3, 2)])
+    def test_CosineAnnealingWarmRestarts_step_epoch_matches_step(self, T_0, T_mult):
+        stepped = CosineAnnealingWarmRestarts(self.opt, T_0=T_0, T_mult=T_mult)
+        jumped = CosineAnnealingWarmRestarts(self.opt, T_0=T_0, T_mult=T_mult)
+        for epoch in range(1, 700):
+            stepped.step()
+            jumped.step(epoch)
+            self.assertEqual(jumped.T_cur, stepped.T_cur)
+            self.assertEqual(jumped.T_i, stepped.T_i)
+
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01
         initial_lrs = [group["lr"] for group in self.opt.param_groups]
