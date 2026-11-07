@@ -33,6 +33,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
     e4m3_type,
+    expectedFailureXPU,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
@@ -1006,6 +1007,7 @@ class TestFlexDecoding(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @with_tf32_off
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/2400
     def test_pointwise_query_producer(self, device, head_dims):
         # https://github.com/pytorch/pytorch/issues/198513
         # The pointwise producer's layout follows its [B, S, H, D] input, not the
