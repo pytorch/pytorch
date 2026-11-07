@@ -1960,6 +1960,9 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # either. One broad entry costs a run of a few seconds and never goes
         # stale when a skill is installed.
         ".agents/skills/**",
+        # post_review.py imports trymerge.py, which reads merge_rules.yaml.
+        ".github/merge_rules.yaml",
+        ".github/scripts/**",
         # This file's OWN path. Without it, an edit that rewires or weakens the
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
