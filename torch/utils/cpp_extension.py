@@ -408,8 +408,30 @@ if torch.version.hip is not None:
     HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
     ROCM_VERSION = _derive_rocm_version(torch.version)
 
+def _find_cudnn_home() -> str | None:
+    """Find the cuDNN install path (Linux only; None otherwise)."""
+    if IS_WINDOWS or IS_HIP_EXTENSION:
+        return None
+    if CUDA_HOME is not None and os.path.isfile(os.path.join(CUDA_HOME, 'include', 'cudnn.h')):
+        return None
+    candidates = []
+    # Guess #1: activated conda env
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        candidates.append(conda_prefix)
+    # Guess #2: un-activated conda env ($CONDA_PREFIX is only set on activation)
+    if os.path.isdir(os.path.join(sys.prefix, 'conda-meta')):
+        candidates.append(sys.prefix)
+    # Guess #3: pip nvidia-cudnn-cuXX wheel (data-only, so no find_spec)
+    candidates.append(os.path.join(sysconfig.get_paths()['purelib'], 'nvidia', 'cudnn'))
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, 'include', 'cudnn.h')):
+            return candidate
+    return None
+
+
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
-CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
+CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH') or _find_cudnn_home()
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
 WINDOWS_CUDA_HOME = os.environ.get('WINDOWS_CUDA_HOME')  # used for AOTI cross-compilation
 
@@ -1912,7 +1934,9 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
 
             paths.append(_join_cuda_home(lib_dir))
             if CUDNN_HOME is not None:
-                paths.append(os.path.join(CUDNN_HOME, lib_dir))
+                # cuDNN prefixes (e.g. conda) may use 'lib' instead of 'lib64'
+                cudnn_lib_dir = 'lib64' if os.path.exists(os.path.join(CUDNN_HOME, 'lib64')) else 'lib'
+                paths.append(os.path.join(CUDNN_HOME, cudnn_lib_dir))
     elif device_type == "xpu":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')
@@ -2771,7 +2795,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
             extra_ldflags.append(f'-L{_join_cuda_home(extra_lib_dir)}')
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
+                # cuDNN prefixes (e.g. conda) may use 'lib' instead of 'lib64'
+                cudnn_lib_dir = 'lib64' if os.path.exists(os.path.join(CUDNN_HOME, 'lib64')) else 'lib'
+                extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, cudnn_lib_dir)}')
         elif IS_HIP_EXTENSION:
             if IS_WINDOWS:
                 extra_ldflags.append(f'/LIBPATH:{_join_rocm_home("lib")}')
