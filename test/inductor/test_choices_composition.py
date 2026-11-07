@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from torch._inductor import config
+import torch
+from torch._inductor import config, ir, select_algorithm
 from torch._inductor.choices import (
     create_inductor_choices,
     InductorChoices,
+    MultiTemplateFusionDecision,
     register_inductor_choices,
     registered_inductor_choices,
     unregister_inductor_choices,
 )
+from torch._inductor.scheduler import Scheduler
+from torch.utils._ordered_set import OrderedSet
 from torch._inductor.virtualized import _choices, threadlocal, V
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -437,6 +442,229 @@ class ChoicesCompositionTest(TestCase):
 
 def _as_choices(obj: Any) -> InductorChoices:
     return obj
+
+
+class RecordingFusionChoices(InductorChoices):
+    """Returns a fixed MultiTemplateFusionDecision and records the call."""
+
+    def __init__(self, decision: MultiTemplateFusionDecision | None) -> None:
+        super().__init__()
+        self.decision = decision
+        self.calls: list[tuple[Any, list[Any], bool]] = []
+
+    def uuid(self) -> str:
+        return "recording-fusion"
+
+    def multi_template_fusion_decision(
+        self, scheduler: Any, multi_node: Any, other_nodes: Any, epilogue: bool
+    ) -> MultiTemplateFusionDecision | None:
+        self.calls.append((multi_node, list(other_nodes), epilogue))
+        return self.decision
+
+
+class MultiTemplateFusionDecisionTest(TestCase):
+    """V.choices.multi_template_fusion_decision through the real fusion loop:
+    Scheduler._try_fusion_pairs -> speedup_by_fusion -> the hook, with a real
+    MultiTemplateBuffer state and finalization. Legality inputs (can_fuse, cycle
+    and memory checks) are stubbed; fuse_two_nodes records commits."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.constraints: dict[str, Any] = {}
+        names = iter(f"buf{i}" for i in range(100))
+        graph = SimpleNamespace(
+            buffer_layout_constraints=self.constraints,
+            register_buffer=lambda buffer, set_name=False: next(names),
+            register_operation=lambda op: "op0",
+        )
+        for ctx in (
+            V.set_graph_handler(graph),
+            patch(
+                "torch._inductor.scheduler._is_atomic_add_mutation_epilogue",
+                return_value=False,
+            ),
+            config.patch(multi_kernel_hints=[]),
+        ):
+            ctx.__enter__()
+            self.addCleanup(ctx.__exit__, None, None, None)
+
+        self.layout = ir.FixedLayout(torch.device("cuda"), torch.float16, [64, 32], [32, 1])
+        self.t1, self.t2 = self._template_caller(), self._template_caller()
+        self.extern = MagicMock(spec=select_algorithm.ExternKernelCaller)
+        self.extern.has_out_variant = True
+        self.multi = ir.MultiTemplateBuffer(
+            self.layout,
+            [],
+            lambda hint: {},
+            [self.extern, self.t1, self.t2],
+            OrderedSet(),
+            OrderedSet(),
+        )
+        self.template = self._snode("template", template=self.multi)
+        self.epilogues = [self._snode(f"epi{i}") for i in range(3)]
+        self.commits: list[tuple[Any, Any, Any]] = []
+
+        self.scheduler = Scheduler.__new__(Scheduler)
+        self.scheduler.seen_template_fusions = OrderedSet()
+        self.scheduler._fusion_memory_state = None
+        for name, value in (
+            ("get_fused_node", lambda n: n),
+            ("can_fuse", lambda n1, n2, can_reorder=False: True),
+            ("will_fusion_create_cycle", lambda n1, n2: False),
+            ("fuse_two_nodes", self._record_commit),
+            ("_any_atomic_add", lambda nodes: False),
+        ):
+            setattr(self.scheduler, name, value)
+
+    def _template_caller(self) -> Any:
+        caller = MagicMock(spec=select_algorithm.TritonTemplateCaller)
+        caller.layout = self.layout
+        caller.load_input_fusion_allowed_inputs = OrderedSet()
+        caller.store_output_fusion_allowed_inputs = OrderedSet()
+        caller.get_make_kernel_render.return_value = object()
+        return caller
+
+    def _snode(self, name: str, template: Any = None) -> Any:
+        node = MagicMock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.is_template.return_value = template is not None
+        node.get_template_node.return_value = template
+        node.get_nodes.return_value = [node]
+        node.get_device.return_value = torch.device("cuda")
+        node.is_foreach.return_value = False
+        return node
+
+    def _record_commit(self, node1: Any, node2: Any, fused_nodes: Any) -> Any:
+        self.commits.append((node1, node2, self.multi._render_caller))
+        return node1
+
+    def _run(self, choices: InductorChoices, pairs: list[tuple[Any, Any]]) -> None:
+        with V.set_choices_handler(choices):
+            self.scheduler._try_fusion_pairs(pairs, {}, {}, OrderedSet(), False)
+
+    def _decide(self, decision: Any, prologue: bool = False) -> RecordingFusionChoices:
+        choices = RecordingFusionChoices(decision)
+        epi = self.epilogues[0]
+        self._run(choices, [(epi, self.template) if prologue else (self.template, epi)])
+        return choices
+
+    def assert_not_committed(self, render_caller: Any = None) -> None:
+        self.assertEqual(self.commits, [])
+        self.assertIs(self.multi._render_caller, render_caller)
+
+    def test_accept_commits_and_finalizes_chosen_template(self) -> None:
+        choices = self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t2))
+        self.assertEqual(self.commits, [(self.template, self.epilogues[0], self.t2)])
+        self.assertIs(self.multi.make_kernel_render, self.t2.get_make_kernel_render.return_value)
+        self.assertEqual(choices.calls, [(self.multi, [self.epilogues[0]], True)])
+
+    def test_decline_does_not_commit_or_finalize(self) -> None:
+        self._decide(MultiTemplateFusionDecision(fuse=False))
+        self.assert_not_committed()
+        self.assertIsNone(self.multi.make_kernel_render)
+
+    def test_layout_conflict_blocks_accepted_fusion(self) -> None:
+        inp = MagicMock()
+        inp.get_name.return_value = "arg0"
+        inp.layout = ir.FixedLayout(torch.device("cuda"), torch.float16, [64, 32], [1, 64])
+        self.multi.inputs = [inp]
+        self.constraints["arg0"] = ir.FixedLayout(
+            torch.device("cuda"), torch.float16, [64, 32], [32, 1]
+        )
+        with patch.object(select_algorithm, "should_use_layout_constraints", return_value=True):
+            self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t1))
+        self.assert_not_committed()
+
+    def test_accept_without_choice_on_unfinalized_buffer_is_declined(self) -> None:
+        self._decide(MultiTemplateFusionDecision(fuse=True))
+        self.assert_not_committed()
+
+    def test_accept_without_choice_reuses_finalized_template(self) -> None:
+        self.multi.finalize_as_triton_caller(self.t1)
+        self._decide(MultiTemplateFusionDecision(fuse=True))
+        self.assertEqual(self.commits, [(self.template, self.epilogues[0], self.t1)])
+
+    def test_extern_choice_is_declined(self) -> None:
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.extern))
+        self.assert_not_committed()
+
+    def test_caller_of_another_buffer_is_declined(self) -> None:
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self._template_caller()))
+        self.assert_not_committed()
+
+    def test_choice_with_other_layout_is_declined(self) -> None:
+        self.t2.layout = ir.FixedLayout(torch.device("cuda"), torch.float16, [64, 32], [1, 64])
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t2))
+        self.assert_not_committed()
+
+    def test_conflicting_finalized_choice_is_declined(self) -> None:
+        self.multi.finalize_as_triton_caller(self.t1)
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t2))
+        self.assert_not_committed(render_caller=self.t1)
+
+    def test_atomic_add_prologue_is_declined(self) -> None:
+        self.scheduler._any_atomic_add = lambda nodes: True
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t1), prologue=True)
+        self.assert_not_committed()
+
+    def test_unsupported_prologue_input_is_declined(self) -> None:
+        self.multi.allow_prologue_fusion = True
+        self.multi.load_input_fusion_allowed_inputs = OrderedSet(["arg0"])
+        choices = self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t1), prologue=True)
+        self.assert_not_committed()
+        self.assertEqual(choices.calls, [(self.multi, [self.epilogues[0]], False)])
+
+    def test_unsupported_store_output_input_is_declined(self) -> None:
+        # A producer of an input the template fuses in store_output (e.g. the
+        # addmm bias) that the chosen template does not support.
+        self.multi.allow_epilogue_fusion = True
+        self.multi.store_output_fusion_allowed_inputs = OrderedSet(["bias"])
+        self._decide(MultiTemplateFusionDecision(fuse=True, choice=self.t1), prologue=True)
+        self.assert_not_committed()
+
+    def test_commit_order_in_one_round(self) -> None:
+        """First pair declined, second committed with t1, third asks for t2 after
+        the buffer was finalized and is declined."""
+        decisions = iter([
+            MultiTemplateFusionDecision(fuse=False),
+            MultiTemplateFusionDecision(fuse=True, choice=self.t1),
+            MultiTemplateFusionDecision(fuse=True, choice=self.t2),
+        ])
+
+        class Sequenced(RecordingFusionChoices):
+            def multi_template_fusion_decision(self, *args: Any) -> Any:
+                super().multi_template_fusion_decision(*args)
+                return next(decisions)
+
+        choices = Sequenced(None)
+        self._run(choices, [(self.template, e) for e in self.epilogues])
+        self.assertEqual(self.commits, [(self.template, self.epilogues[1], self.t1)])
+        self.assertEqual(len(choices.calls), 3)
+        self.assertIs(self.multi._render_caller, self.t1)
+
+    def _reach_upstream_benchmark_path(self, choices: InductorChoices) -> Any:
+        """Stops the benchmark-based path at its layout-conflict check."""
+        self.scheduler.get_backend = lambda device: SimpleNamespace(
+            has_sub_parent_epilogue=lambda nodes: False
+        )
+        upstream = MagicMock(return_value=True)
+        self.scheduler._has_layout_conflict_for_template = upstream
+        self._run(choices, [(self.template, self.epilogues[0])])
+        return upstream
+
+    def test_default_choices_keep_the_benchmark_path(self) -> None:
+        upstream = self._reach_upstream_benchmark_path(PlainChoices())
+        upstream.assert_called_once_with(self.multi)
+        self.assert_not_committed()
+
+    def test_hook_not_consulted_with_multi_kernel_hints(self) -> None:
+        choices = RecordingFusionChoices(MultiTemplateFusionDecision(fuse=True, choice=self.t1))
+        with config.patch(multi_kernel_hints=[64]):
+            upstream = self._reach_upstream_benchmark_path(choices)
+        self.assertEqual(choices.calls, [])
+        upstream.assert_called_once_with(self.multi)
+        self.assert_not_committed()
 
 
 if __name__ == "__main__":
