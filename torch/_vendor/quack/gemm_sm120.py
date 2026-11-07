@@ -926,6 +926,11 @@ class GemmSm120(GemmSm90):
                 warp_idx >= self.ab_load_warp_id
                 and warp_idx < self.ab_load_warp_id + self.num_ab_load_warps
             ):
+                # PDL: wait for prior kernel before any TMA loads. The launch
+                # (inherited from GemmSm90) sets the PDL attribute whenever
+                # use_pdl=True, so the kernel must gate its first gmem reads.
+                if const_expr(self.use_pdl):
+                    cute.arch.griddepcontrol_wait()
                 # block_copy's lowering wants the coordinate held fixed by the
                 # multicast mask: A is same-M across N peers, while B is
                 # same-N across M peers. Degenerate cluster dimensions are
@@ -1538,6 +1543,10 @@ class GemmSm120(GemmSm90):
                             epi_producer_state.advance_iters(c_cnt)
                             tile_scheduler.advance_to_next_work()
                             work_tile = tile_scheduler.get_current_work()
+
+            # PDL: hint next kernel to launch (matches gemm_sm90 consumer)
+            if const_expr(self.use_pdl):
+                cute.arch.griddepcontrol_launch_dependents()
 
             # Wait for D store complete
             if const_expr(not self.pingpong):
