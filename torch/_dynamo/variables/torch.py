@@ -1547,6 +1547,46 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
+        @register(torch._library.flydsl.wrap_flydsl)
+        def handle_wrap_flydsl(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .flydsl import dynamo_flydsl_hopifier_singleton, FlyDSLKernelVariable
+
+            # Unlike wrap_triton this is not a no-op: the result carries the write set.
+            mutates_args = kwargs.get("mutates_args")
+            if (
+                len(args) == 1
+                and isinstance(args[0], FlyDSLKernelVariable)
+                # a @flyc.jit function, not a wrapper, as in eager
+                and not args[0].is_wrapper
+                and set(kwargs) <= {"mutates_args"}
+                # required: FlyDSL write sets are not inferred
+                and mutates_args is not None
+                and mutates_args.is_python_constant()
+            ):
+                # Checked here, where None is a user error (init_variable takes None
+                # for a host function that was not wrapped).
+                return args[0].with_mutates_args(
+                    dynamo_flydsl_hopifier_singleton.normalized_mutates_args(
+                        mutates_args.as_python_constant()
+                    )
+                )
+
+            unimplemented(
+                gb_type="unsupported torch._library.flydsl.wrap_flydsl call",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Dynamo supports wrap_flydsl(host_fn, mutates_args=...) "
+                "where host_fn is a @flyc.jit function and mutates_args is a constant.",
+                hints=[
+                    "Pass a @flyc.jit function and a constant mutates_args.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(
             self, tx: "InstructionTranslatorBase", input: VariableTracker

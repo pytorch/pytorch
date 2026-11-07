@@ -430,6 +430,7 @@ manual_torch_name_rule_map: dict[
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
     "torch._library.capture_triton": TorchInGraphFunctionVariable,
+    "torch._library.flydsl.wrap_flydsl": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -3446,6 +3447,9 @@ BUILTIN_INLINE_WHEN_CALLED: set[str] = set()
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
+    # FlyDSL's JIT machinery runs eagerly (Dynamo misreads its MLIR bindings); its
+    # kernels enter graphs through torch._library.flydsl.wrap_flydsl.
+    "flydsl",
     "fx2trt_oss",
     "hypothesis",
     "networkx",
