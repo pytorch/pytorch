@@ -2818,6 +2818,152 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
+    def test_del_global_multi_stream_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            _stream_del_global = x
+            z0 = _stream_del_global + 1
+            with s:
+                z = torch.add(_stream_del_global, y)
+                e.record()
+            e.wait()
+            del _stream_del_global
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        with patch.dict(globals(), {"_stream_del_global": inp[0]}):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+
+    def test_del_global_created_in_trace_multi_stream_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global_created
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            _stream_del_global_created = x
+            z0 = x + 1
+            with s:
+                z = torch.add(x, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_created
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        with patch.dict(globals()):
+            self.assertNotIn("_stream_del_global_created", globals())
+
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+            self.assertNotIn("_stream_del_global_created", globals())
+
+    @unittest.expectedFailure
+    def test_del_global_preexisting_tensor_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global_preexisting
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            z0 = _stream_del_global_preexisting + 1
+            with s:
+                z = torch.add(_stream_del_global_preexisting, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_preexisting
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
+            expected = fn(*inp)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+            globals()["_stream_del_global_preexisting"] = inp[0]
+
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+
+    def test_del_global_same_stream_no_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                _stream_del_global = x
+                z = torch.add(_stream_del_global, y)
+                del _stream_del_global
+                e.record()
+            e.wait()
+            return z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        with patch.dict(globals(), {"_stream_del_global": inp[0]}):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertNotIn("sync_dealloc", graph_str)
+
+    def test_del_global_crossfile_multi_stream_sync_dealloc(self, device):
+        try:
+            from . import mock_store_global_crossfile_inline as mod
+        except ImportError:
+            import mock_store_global_crossfile_inline as mod
+
+        def fn(x, y):
+            return mod.store_then_delete_multi_stream_tensor_fn(x, y, device)
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        expected = fn(*inp)
+        with patch.dict(
+            mod.__dict__, {"store_then_delete_multi_stream_tensor_value": inp[0]}
+        ):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+
     def test_del_subscr_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
