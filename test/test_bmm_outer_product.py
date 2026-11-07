@@ -30,7 +30,6 @@ class TestBmmOuterProductDevice(TestCase):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/180318")
     def test_shapes(self, device):
         shapes = [
             (4, 8, 16),
