@@ -2552,6 +2552,41 @@ class TestReductionsDevice(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double, torch.int32, torch.int64,
+            torch.complex32, torch.complex64, torch.complex128)
+    def test_reduction_global_reduce_across_blocks(self, device, dtype):
+        # Enough rows that each column is split across many blocks, so the last
+        # block to finish combines their partials in global_reduce. The sums are
+        # exact up to the final rounding of complex32, so a dropped or repeated
+        # partial changes them.
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.double
+        # Half and bfloat16 sum into float, since rounding to the output dtype would hide errors.
+        sum_dtype = torch.float if dtype in (torch.half, torch.bfloat16) else dtype
+        for shape in product((50003, 131101), (64, 62, 61)):  # 64, 62, 61 columns: output_vec_size 4, 2, 1
+            x = torch.randint(-2, 3, shape, device=device)
+            if dtype.is_complex:
+                x = torch.complex(x.double(), torch.randint(-2, 3, shape, device=device).double())
+            x = x.to(dtype)
+            expected = x.cpu().to(ref_dtype).sum(0).to(sum_dtype)
+            self.assertEqual(x.sum(0, dtype=sum_dtype), expected, atol=0, rtol=0)
+            # With the jiterator, prod, complex nansum and complex32 sum run its copy of global_reduce.
+            if dtype.is_complex:
+                self.assertEqual(x.nansum(0), expected, atol=0, rtol=0)
+            units = torch.tensor([1, 1j, -1, -1j] if dtype.is_complex else [1, -1], dtype=ref_dtype, device=device)
+            p = units[torch.randint(0, len(units), shape, device=device)].to(dtype)
+            self.assertEqual(p.prod(0, dtype=dtype), p.cpu().to(ref_dtype).prod(0), atol=0, rtol=0, exact_dtype=False)
+            if dtype.is_complex:
+                continue
+            if dtype.is_floating_point:
+                y = torch.randn(shape, device=device).to(dtype)
+                # On CUDA, Welford loads one partial at a time, but still runs global_reduce.
+                self.assertEqual(y.var(0), y.cpu().double().var(0), exact_dtype=False)
+            else:
+                y = torch.randperm(shape[0] * shape[1], device=device).view(shape).to(dtype)
+            self.assertEqual(y.argmax(0), y.cpu().argmax(0))
+            self.assertEqual(y.aminmax(dim=0), y.cpu().aminmax(dim=0))
+
     @onlyAccelerator
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
