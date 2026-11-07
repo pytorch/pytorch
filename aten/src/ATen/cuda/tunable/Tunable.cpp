@@ -62,10 +62,13 @@ namespace {
 // the reuse pass, 0 forces the feature off for the whole process, 1 defers to
 // the pass as well, and check_env warns on anything else. NEAREST_MATCH_ENABLED
 // governs borrowing, RECORD_BORROWED_ENABLED governs recording a borrow, in
-// memory as well as in the results file. Both are kept out of the user-facing
-// table in README.md: the mechanism they govern has no public entry point yet,
-// and documenting them there would promise a contract before there is a feature
-// to attach it to. Add them when it goes public.
+// memory as well as in the results file -- and, since a borrow that records
+// nothing leaves runtime on Default while the pass measured the donor, it
+// disables borrowing too. Both are kept out of the user-facing
+// table in README.md: they are kill switches for the compile-time reuse pass
+// rather than knobs a TunableOp user sets, and the reuse section there
+// describes the mechanism instead. Add them if the pass gains a runtime
+// contract of its own.
 bool NearestMatchDisabledByEnv() {
   static const bool disabled =
       !c10::utils::check_env("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED")
@@ -203,10 +206,10 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
 
 ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
     const std::string& params_signature) {
-  // No runtime-flag gate here. TunableOp dispatch resolves shapes through
-  // Lookup and never reaches this, so calling it is itself the opt-in; the
-  // reuse pass is the only caller and already decides whether borrowing
-  // applies. The env kill switch is honoured regardless of the caller.
+  // No runtime-flag gate here: calling it is the opt-in. Dispatch reaches this
+  // only with tuning disabled, no exact match, and IsNearestMatchEnabled() set
+  // -- which is normally the reuse pass, since borrowing costs a benchmark.
+  // The env kill switch is honoured regardless of the caller.
   if (NearestMatchDisabledByEnv()) {
     return ResultEntry::Null();
   }
@@ -851,6 +854,13 @@ bool TuningContext::IsNearestMatchEnabled() const {
   // Same kill switch LookupNearest itself applies, so the pass's own check and
   // the enforcement point cannot disagree. The member is the reuse pass's policy.
   if (NearestMatchDisabledByEnv()) {
+    return false;
+  }
+  // Borrowing without recording is worse than not borrowing: the pass measures
+  // the donor but writes nothing, so the deployed process misses the shape and
+  // runs Default -- the decision would rest on a measurement runtime cannot
+  // reproduce. IsRecordBorrowedEnabled() covers env switch and flag alike.
+  if (!IsRecordBorrowedEnabled()) {
     return false;
   }
   return nearest_match_enable_;
