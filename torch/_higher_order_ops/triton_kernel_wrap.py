@@ -25,7 +25,6 @@ from torch._higher_order_ops.user_kernel_hop import (
     KernelSideTable,
     register_user_kernel_hop_impls,
     specialize_symbolic,
-    store_non_graphable_args,
     UserKernelHOPifier,
     UserKernelLayoutConstraint,
     UserKernelWrapperHOP,
@@ -1867,6 +1866,8 @@ class TritonHOPifier(UserKernelHOPifier):
     TritonHOPifier is an abstract class that can be overridden by its subclasses.
     """
 
+    hop_info = triton_kernel_hop_info
+
     def is_callable(self, maybe_callable: object) -> bool:
         raise NotImplementedError("abstract method")
 
@@ -1988,12 +1989,7 @@ class TritonHOPifier(UserKernelHOPifier):
             raise AssertionError("kernel cannot be None")
 
         variable.kernel = kernel
-        variable.kernel_idx = kernel_side_table.add_kernel(kernel)
-
-        if kernel_idx is not None and variable.kernel_idx != kernel_idx:
-            raise AssertionError(
-                f"kernel_idx mismatch: expected {kernel_idx}, got {variable.kernel_idx}"
-            )
+        self.record_kernel(variable, kernel, kernel_idx)
 
         # pyrefly: ignore [bad-assignment]
         variable.grid = grid
@@ -2585,16 +2581,6 @@ class TracingTritonHOPifier(TritonHOPifier):
         # normalize to tuple
         return tuple(grid)
 
-    def store_non_graphable_args(
-        self,
-        combined_args: dict[str, Any],
-    ) -> tuple[dict, int]:
-        """
-        Some args cannot be stored in the FX graph.
-        Put them in the side table.
-        """
-        return store_non_graphable_args(kernel_side_table, combined_args)
-
     def is_dynamic_backend_option(self, value: object) -> bool:
         # Backend options are compile-time values. In proxy tracing, a value can
         # be a Proxy/Node directly or be nested inside a tuple/list option such
@@ -2647,7 +2633,6 @@ class TracingTritonHOPifier(TritonHOPifier):
                 combined_args[k] = tensor
                 tma_descriptor_metadata[k] = metadata
 
-        graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
         # must be concrete before entering the graph. Kernel launch kwargs may
@@ -2665,16 +2650,11 @@ class TracingTritonHOPifier(TritonHOPifier):
                 f"{sorted(non_const_options)!r}."
             )
 
-        if not isinstance(variable.kernel_idx, int):
-            raise AssertionError(
-                f"kernel_idx must be an int, got {type(variable.kernel_idx)}"
-            )
-        return triton_kernel_wrapper_mutation(
-            kernel_idx=variable.kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grids,  # type: ignore[arg-type]
+        return self.call_mutation_hop(
+            variable.kernel_idx,
+            combined_args,
+            grid=grids,
             tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=graphable_args,
             launch_kwargs=launch_kwargs,
         )
 
