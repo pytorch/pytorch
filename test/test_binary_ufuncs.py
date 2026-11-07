@@ -3943,6 +3943,43 @@ class TestBinaryUfuncsDevice(TestCase):
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_ldexp_broadcast_no_resize_warning(self, device, dtype):
+        import warnings
+
+        cases = [
+            ((1,), (4,)),
+            ((4,), (1,)),
+            ((), (4,)),
+            ((2, 1), (1, 3)),
+        ]
+
+        for mantissa_shape, exponent_shape in cases:
+            with self.subTest(
+                mantissa_shape=mantissa_shape,
+                exponent_shape=exponent_shape,
+            ):
+                mantissas = torch.ones(mantissa_shape, dtype=dtype, device=device)
+                exponents = torch.ones(exponent_shape, dtype=torch.int32, device=device)
+
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    result = torch.ldexp(mantissas, exponents)
+
+                expected = torch.full(
+                    torch.broadcast_shapes(mantissa_shape, exponent_shape),
+                    2.0,
+                    dtype=dtype,
+                    device=device,
+                )
+
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    len(caught),
+                    0,
+                    f"Unexpected warnings: {[str(w.message) for w in caught]}",
+                )
+
     @dtypes(torch.half, torch.bfloat16)
     def test_lerp_lowp(self, device, dtype):
         xvals = (0.0, -30000.0)
