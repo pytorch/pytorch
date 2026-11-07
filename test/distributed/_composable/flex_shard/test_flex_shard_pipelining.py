@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -21,7 +22,7 @@ from torch.distributed.pipelining import PipelineStage, ScheduleGPipe
 from torch.distributed.pipelining._recv_buffers import _RecvInfo
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 device_type = torch.device(get_devtype())
@@ -72,6 +73,8 @@ def _sharded_block(mesh) -> _MoEBlock:
 
 
 class TestFlexShardPipelining(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2

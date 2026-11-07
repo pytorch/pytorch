@@ -47,12 +47,7 @@ from ._all_gather_layout import (
     DefaultAllGatherLayout,
 )
 from ._fsdp_api import CPUOffloadPolicy
-from ._fsdp_common import (
-    _from_local_no_grad,
-    DDPMeshInfo,
-    FSDPMeshInfo,
-    TrainingState,
-)
+from ._fsdp_common import _from_local_no_grad, DDPMeshInfo, FSDPMeshInfo, TrainingState
 from ._fsdp_param import (
     _get_dtensor_spec_with_dtype,
     _get_param_module_infos,
@@ -105,9 +100,10 @@ class FSDPParamRepresentation(ParamRepresentation):
     def local_shard(
         self, index: int, sharded_param: nn.Parameter, *, use_autograd: bool
     ) -> torch.Tensor:
+        dtensor = cast(DTensor, sharded_param)
         if use_autograd:
-            return sharded_param.to_local()
-        return sharded_param._local_tensor.detach()
+            return dtensor.to_local()
+        return dtensor._local_tensor.detach()
 
     def unsharded_param(self, index: int, full_param: torch.Tensor) -> torch.Tensor:
         fsdp_param = self.fsdp_params[index]
@@ -119,7 +115,9 @@ class FSDPParamRepresentation(ParamRepresentation):
             full_param, _get_dtensor_spec_with_dtype(spec, full_param.dtype)
         )
 
-    def unsharded_local(self, index: int, unsharded_param: nn.Parameter) -> torch.Tensor:
+    def unsharded_local(
+        self, index: int, unsharded_param: nn.Parameter
+    ) -> torch.Tensor:
         if isinstance(unsharded_param, DTensor):
             return unsharded_param._local_tensor
         return unsharded_param
@@ -183,6 +181,9 @@ class FSDPParamRepresentation(ParamRepresentation):
                     "Set reduce_dtype to the dtype its gradients already have."
                 )
 
+    def before_unshard(self) -> None:
+        self.bucket.sync_aliases()
+
     def check_post_forward_unshard(self) -> None:
         for fsdp_param in self.fsdp_params:
             if hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather"):
@@ -210,12 +211,12 @@ class FSDPParamRepresentation(ParamRepresentation):
         total_numel = sum(g.numel() for g in sharded_grads)
         copy_uncast = cast_numel > total_numel - cast_numel
         new_grads = _cast_grad_runs(sharded_grads, dtypes, casts)
-        for index, grad, new_grad, cast in zip(
+        for index, grad, new_grad, needs_cast in zip(
             indices, sharded_grads, new_grads, casts, strict=True
         ):
             fsdp_param = self.fsdp_params[index]
             sharded_param = fsdp_param.sharded_param
-            if cast:
+            if needs_cast:
                 grad = new_grad
             elif copy_uncast:
                 grad = grad.clone()
@@ -270,6 +271,7 @@ def _cast_grad_runs(
         if all(g.is_contiguous() for g in run):
             start = min(g.storage_offset() for g in run)
             end = max(g.storage_offset() + g.numel() for g in run)
+            # pyrefly: ignore [no-matching-overload]
             flat = run[0].new_empty(0).set_(storage, start, (end - start,))
             cast_flat = flat.to(dtypes[i])
             for k, grad in enumerate(run, start=i):
@@ -338,7 +340,9 @@ class FSDPParamShard(EngineShard):
 
         bucket = self._bucket
         world_size, rank = mesh.size(), mesh.get_local_rank()
-        param_inputs = [fsdp_param.all_gather_inputs for fsdp_param in bucket.fsdp_params]
+        param_inputs = [
+            fsdp_param.all_gather_inputs for fsdp_param in bucket.fsdp_params
+        ]
         if world_size == 1:
             return PlacementPreparedUnshard(
                 placement=self,
@@ -361,7 +365,9 @@ class FSDPParamShard(EngineShard):
             for fsdp_param in bucket.fsdp_params
             for layout in fsdp_param.all_gather_output_layouts
         ]
-        param_dtypes, param_numels, dtype = _get_all_gather_input_metadatas(param_inputs)
+        param_dtypes, param_numels, dtype = _get_all_gather_input_metadatas(
+            param_inputs
+        )
         inputs = [
             t.view(torch.uint8) if dtype == torch.uint8 else t
             for ts in param_inputs
@@ -453,11 +459,18 @@ class FSDPParamShard(EngineShard):
         )
         try:
             bucket.layout_buffers = foreach_all_gather_copy_out(
-                result, fsdp_params, state.group, bucket.layout_buffers
+                result,
+                fsdp_params,
+                # pyrefly: ignore [bad-argument-type]
+                state.group,
+                bucket.layout_buffers,
             )
         except ValueError:
             # As FSDP2: free what a rejected refill re-allocated
-            if bucket.layout_buffers is not None and not bucket.bucket.keep_persistent_storage:
+            if (
+                bucket.layout_buffers is not None
+                and not bucket.bucket.keep_persistent_storage
+            ):
                 bucket.layout_buffers.free()
             for fsdp_param in fsdp_params:
                 if not fsdp_param.keep_unsharded_storage:
@@ -472,7 +485,10 @@ class FSDPParamShard(EngineShard):
         for fsdp_param, inputs in zip(bucket.fsdp_params, param_inputs, strict=True):
             if not fsdp_param.all_gather_outputs:
                 fsdp_param.init_all_gather_outputs(
-                    [t.numel() for t in inputs], [t.dtype for t in inputs], 1, bucket.device
+                    [t.numel() for t in inputs],
+                    [t.dtype for t in inputs],
+                    1,
+                    bucket.device,
                 )
             for tensor, inp in zip(fsdp_param.all_gather_outputs, inputs, strict=True):
                 alloc_storage(tensor)
@@ -500,7 +516,10 @@ class FSDPParamShard(EngineShard):
             )
         persistent: dict[int, torch.Tensor] = {}
         for fsdp_param in fsdp_params:
-            for tensor in (*fsdp_param.all_gather_outputs, *fsdp_param._unsharded_inner_tensors):
+            for tensor in (
+                *fsdp_param.all_gather_outputs,
+                *fsdp_param._unsharded_inner_tensors,
+            ):
                 persistent.setdefault(id(tensor), tensor)
         if bucket.layout_buffers is not None:
             for tensor in bucket.layout_buffers.tensors:
@@ -583,6 +602,9 @@ class FullyShardBucket:
         if self.offload:
             self.storage._compute_device = device
         self.views: list[torch.Tensor] = []
+        # (index, first index) of parameters that another FSDPParam of the
+        # group also holds (see _home)
+        self.aliases: list[tuple[int, int]] = []
         self.module_fqn: str | None = None
         self._lazy_initialized = False
         # FSDPModule.set_all_gather_layout, and the persistent buffers a custom
@@ -817,15 +839,15 @@ class FullyShardBucket:
     def _home(self) -> None:
         """Move each parameter's padded sharded data into one byte buffer and
         point its ``_sharded_param_data`` and sharded parameter at it."""
-        datas = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
-        if self.own_storage or any(data.is_meta for data in datas):
+        shards = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
+        if self.own_storage or any(data.is_meta for data in shards):
             # Meta parameters stay on meta until to_empty(), as FSDP2's; lazy
             # init homes them
             self._build_infos()
             return
-        nbytes = [data.numel() * data.element_size() for data in datas]
-        offsets = _aligned_offsets(datas)
-        total = offsets[-1] + nbytes[-1] if datas else 0
+        nbytes = [data.numel() * data.element_size() for data in shards]
+        offsets = _aligned_offsets(shards)
+        total = offsets[-1] + nbytes[-1] if shards else 0
         if self.offload:
             pin_memory = cast(CPUOffloadPolicy, self.offload_policy).pin_memory
             storage = torch.empty(
@@ -834,16 +856,26 @@ class FullyShardBucket:
         else:
             storage = torch.empty(total, dtype=torch.uint8, device=self.device)
         views = []
-        for fsdp_param, data, size, offset in zip(
-            self.fsdp_params, datas, nbytes, offsets, strict=True
+        first_index: dict[int, int] = {}
+        self.aliases = []
+        for index, (fsdp_param, data, size, offset) in enumerate(
+            zip(self.fsdp_params, shards, nbytes, offsets, strict=True)
         ):
             view = storage[offset : offset + size].view(data.dtype)
             if not data.is_meta and data.numel():
                 view.copy_(data)
             fsdp_param._sharded_param_data = view
             views.append(view)
+            first = first_index.setdefault(id(fsdp_param.sharded_param), index)
+            if first != index:
+                # A parameter tied after fully_shard (e.g. re-tied after
+                # to_empty) has an FSDPParam per module, as in FSDP2, so a
+                # slot per FSDPParam. The parameter views the first slot, and
+                # each unshard copies it into the others (sync_aliases).
+                self.aliases.append((index, first))
+                continue
             shard_dim = fsdp_param.fsdp_placement.dim
-            sharded_param = fsdp_param.sharded_param
+            sharded_param = cast(DTensor, fsdp_param.sharded_param)
             local = sharded_param._local_tensor
             length = local.size(shard_dim) if local.numel() > 0 else 0
             sharded_param._local_tensor = view.view(
@@ -854,14 +886,22 @@ class FullyShardBucket:
         self.storage._total_bytes = total
         self._build_infos()
 
+    @torch.no_grad()
+    def sync_aliases(self) -> None:
+        """Copy each tied parameter's data into its other slots (see _home)."""
+        for index, first in self.aliases:
+            self.views[index].copy_(self.views[first])
+
     def _build_infos(self) -> None:
-        datas = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
+        shards = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
         infos: dict[str, ParamInfo] = {}
         for index, (fsdp_param, data, offset) in enumerate(
-            zip(self.fsdp_params, datas, _aligned_offsets(datas), strict=True)
+            zip(self.fsdp_params, shards, _aligned_offsets(shards), strict=True)
         ):
             has_override = fsdp_param._has_sharded_grad_dtype_override
-            fqn = fsdp_param._param_fqn or f"{index}.{fsdp_param._module_info.param_name}"
+            fqn = (
+                fsdp_param._param_fqn or f"{index}.{fsdp_param._module_info.param_name}"
+            )
             infos[fqn] = ParamInfo(
                 fqn=fqn,
                 global_shape=fsdp_param._orig_size,
@@ -881,7 +921,9 @@ class FullyShardBucket:
                 storage_nbytes=data.numel() * data.element_size(),
                 global_numel=fsdp_param._orig_size.numel(),
                 has_explicit_grad_dtype=has_override,
-                grad_dtype_override=fsdp_param.sharded_grad_dtype if has_override else None,
+                grad_dtype_override=fsdp_param.sharded_grad_dtype
+                if has_override
+                else None,
             )
         trainable = [
             info.unsharded_grad_dtype or info.unsharded_dtype
@@ -1090,7 +1132,9 @@ def set_keep_unsharded_storage(state: Any, keep: bool) -> None:
             fsdp_param.keep_unsharded_storage = keep
 
 
-def set_modules_to_prefetch(state: Any, target_states: list[Any], *, forward: bool) -> None:
+def set_modules_to_prefetch(
+    state: Any, target_states: list[Any], *, forward: bool
+) -> None:
     targets = [
         target.storage
         for target_state in target_states
@@ -1159,7 +1203,9 @@ def set_allocate_memory_from_process_group(state: Any, enable: bool) -> None:
         _check_layout_comm(
             bucket,
             bucket.all_gather_layout,
-            ProcessGroupAllocAllGather if enable else type(bucket._default_all_gather_comm),
+            ProcessGroupAllocAllGather
+            if enable
+            else type(bucket._default_all_gather_comm),
         )
     for bucket in _buckets(state):
         storage = bucket.storage
@@ -1177,6 +1223,7 @@ def set_allocate_memory_from_process_group(state: Any, enable: bool) -> None:
                 )
         group = bucket.mesh.get_group()
         reduce_group = storage.reduce_mesh.get_group()
+        # pyrefly: ignore [bad-argument-type]
         storage._all_gather_comm = ProcessGroupAllocAllGather(group) if enable else None
         storage._reduce_scatter_comm = (
             ProcessGroupAllocReduceScatter(reduce_group) if enable else None
@@ -1202,6 +1249,7 @@ def set_symm_mem(state: Any, backend: str) -> None:
                 "cannot call set_symm_mem() when all gather comm is custom: "
                 f"{storage._all_gather_comm.__class__.__name__}"
             )
+        # pyrefly: ignore [bad-argument-type]
         storage._all_gather_comm = SymmMemAllGather(bucket.mesh.get_group(), backend)
         if storage._reduce_scatter_comm is not None and not isinstance(
             storage._reduce_scatter_comm, (DefaultReduceScatter, SymmMemReduceScatter)
@@ -1213,7 +1261,9 @@ def set_symm_mem(state: Any, backend: str) -> None:
         if storage.gradient_reduction.force_sum:
             # As of NCCL 2.29.3, NCCL symmetric reduce-scatter only supports SUM
             storage._reduce_scatter_comm = SymmMemReduceScatter(
-                storage.reduce_mesh.get_group(), backend
+                storage.reduce_mesh.get_group(),
+                # pyrefly: ignore [bad-argument-type]
+                backend,
             )
 
 
@@ -1258,6 +1308,7 @@ def set_separate_reduce_scatter_group(
             if storage._reduce_mesh is not None:
                 new_groups[ranks] = storage._reduce_mesh.get_group()
             else:
+                # pyrefly: ignore [unsupported-operation]
                 new_groups[ranks] = dist.new_group(
                     list(ranks), use_local_synchronization=True
                 )
@@ -1292,7 +1343,9 @@ def validate_finalize_backward(state: Any) -> None:
             "must be waited on before finalizing backward"
         )
     if not state._is_root:
-        raise RuntimeError(f"finalize_backward must be called on the root {name} module")
+        raise RuntimeError(
+            f"finalize_backward must be called on the root {name} module"
+        )
     if not state_ctx.manual_backward_finalization:
         raise RuntimeError(
             f"{name} finalize_backward requires manual backward finalization. "
@@ -1301,9 +1354,13 @@ def validate_finalize_backward(state: Any) -> None:
     if context is None:
         return
     if torch._C._current_graph_task_id() != -1:
-        raise RuntimeError(f"{name} finalize_backward must be called after backward completes")
+        raise RuntimeError(
+            f"{name} finalize_backward must be called after backward completes"
+        )
     buckets = [b for s in state_ctx.all_states for b in _buckets(s)]
-    if partial := next((b for b in buckets if b.bucket.partial_reduce_output is not None), None):
+    if partial := next(
+        (b for b in buckets if b.bucket.partial_reduce_output is not None), None
+    ):
         raise RuntimeError(
             f"{name} manual backward finalization does not support partial "
             f"gradient reductions for parameter group {partial.module_fqn or '<root>'!r}. "

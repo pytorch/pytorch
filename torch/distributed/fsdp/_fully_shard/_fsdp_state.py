@@ -22,6 +22,8 @@ from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
 
 
 if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
+
     from .._flex_shard.bucket_runtime import BucketCommContext
     from ._fsdp_engine import FullyShardBucket
     from ._fsdp_param import FSDPParam
@@ -83,6 +85,13 @@ class FSDPState(_State):
     def _engine_buckets(self) -> "list[FullyShardBucket]":
         return self._fsdp_param_groups
 
+    @property
+    def _modules_to_run_forward(self) -> "_PendingGroupModules":
+        """The modules of this state's open grouped forward, as FSDP2's
+        attribute, for callers that finish such forwards themselves (e.g.
+        torchtitan's evaluation cleanup)."""
+        return _PendingGroupModules(self)
+
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
         return _get_module_fsdp_state(module)
@@ -138,8 +147,8 @@ class FSDPState(_State):
             for module in modules
         ]
         handle = _MultiHandle(tuple(pre_handles + post_handles))
-        self._pre_forward_hook_handle = handle
-        self._post_forward_hook_handle = handle
+        self._pre_forward_hook_handle: RemovableHandle | _MultiHandle = handle
+        self._post_forward_hook_handle: RemovableHandle | _MultiHandle = handle
 
     def _root_pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -267,7 +276,11 @@ class FSDPState(_State):
         state, as FSDP2's root post-backward callback does."""
         logger.debug("FSDP::root_post_backward")
         self._state_ctx.iter_forward_root = None
-        if self._state_ctx.is_last_backward:
+        # With manual finalization, finalize_backward ends the iteration
+        if (
+            self._state_ctx.is_last_backward
+            and not self._state_ctx.manual_backward_finalization_active
+        ):
             self._state_ctx.manual_backward_finalization_active = None
         for state in self._state_ctx.all_states:
             state._training_state = TrainingState.IDLE
@@ -418,6 +431,40 @@ class FSDPState(_State):
             )
 
 
+class _PendingGroupModules:
+    """A view of the modules an open grouped forward has yet to run; clearing
+    it completes that forward."""
+
+    def __init__(self, state: FSDPState) -> None:
+        self._state = state
+
+    def _modules(self) -> set[nn.Module]:
+        return {
+            module
+            for bucket in self._state._engine_buckets
+            for module in bucket.bucket.modules_to_run
+        }
+
+    def __bool__(self) -> bool:
+        return bool(self._modules())
+
+    def __len__(self) -> int:
+        return len(self._modules())
+
+    def __iter__(self):
+        return iter(self._modules())
+
+    def __contains__(self, module: object) -> bool:
+        return module in self._modules()
+
+    def clear(self) -> None:
+        with _spmd_no_typecheck():
+            for bucket in self._state._engine_buckets:
+                if bucket.bucket.group_pass is not None:
+                    bucket.bucket.complete_group_pass(None)
+        self._state._training_state = TrainingState.IDLE
+
+
 class _FunctorchPreBackward(torch.autograd.Function):
     """Runs the buckets' pre-backward hooks for an output under functorch
     transforms (e.g. vmap, jvp)."""
@@ -434,11 +481,13 @@ class _FunctorchPreBackward(torch.autograd.Function):
         ctx.state = inputs[0]
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx: Any, grad: torch.Tensor) -> tuple[None, torch.Tensor]:
         ctx.state._functorch_pre_backward(grad)
         return None, grad
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def jvp(ctx: Any, state_tangent: Any, tangent: torch.Tensor | None) -> Any:
         # Keep the tangent's backward on the pre-backward path
         if tangent is None:

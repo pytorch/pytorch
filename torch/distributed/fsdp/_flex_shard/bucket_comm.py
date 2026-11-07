@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import ModuleType
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -19,6 +18,7 @@ from .placement_contract import PlacementPreparedUnshard, PlacementUnshardResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
     from torch.distributed.device_mesh import DeviceMesh
 
@@ -88,7 +88,9 @@ def _first_tensor_device(*tensor_groups: list[torch.Tensor]) -> torch.device | N
     """The device of the first tensor, preferring an accelerator one: an
     offloaded bucket's buffers mix CPU and accelerator tensors."""
     devices = [tensor.device for tensors in tensor_groups for tensor in tensors]
-    return next((d for d in devices if d.type != "cpu"), devices[0] if devices else None)
+    return next(
+        (d for d in devices if d.type != "cpu"), devices[0] if devices else None
+    )
 
 
 def _get_bucket_placement(
@@ -497,8 +499,8 @@ class ExplicitUnshardResult(UnshardHandle):
 class SyncReduceGradResult(ReduceGradHandle):
     """Already-finished reduce-grad result used during graph capture."""
 
-    allocation_streams: ClassVar[tuple[torch.Stream, ...]] = ()
     sharded_grads: list[torch.Tensor]
+    allocation_streams: tuple[torch.Stream, ...] = ()
 
     def finish(self) -> list[torch.Tensor]:
         return self.sharded_grads
@@ -605,7 +607,10 @@ class StreamHandoff:
         device_handle: ModuleType | None = None,
     ) -> None:
         if device_handle is None:
-            device_handle = _get_device_handle(_first_tensor_device(tensors).type)
+            device = _first_tensor_device(tensors)
+            if device is None:
+                raise AssertionError("Expected tensors to take the device from")
+            device_handle = _get_device_handle(device.type)
         self._tensors = tensors
         self._allocation_streams = allocation_streams
         self._device_handle = device_handle

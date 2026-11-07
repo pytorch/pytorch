@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
+from . import _fsdp_engine
 from ._all_gather_layout import AllGatherLayout
 from ._fsdp_api import (
     AllGather,
@@ -34,7 +35,6 @@ from ._fsdp_init import (
     _validate_mesh,
     _validate_module,
 )
-from . import _fsdp_engine
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -687,7 +687,9 @@ class FSDPModule:
         """
         _assert_all_fsdp_modules(modules)
         states = [module._get_fsdp_state() for module in modules]
-        _fsdp_engine.set_modules_to_prefetch(self._get_fsdp_state(), states, forward=True)
+        _fsdp_engine.set_modules_to_prefetch(
+            self._get_fsdp_state(), states, forward=True
+        )
 
     def set_modules_to_backward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
@@ -706,7 +708,9 @@ class FSDPModule:
         """
         _assert_all_fsdp_modules(modules)
         states = [module._get_fsdp_state() for module in modules]
-        _fsdp_engine.set_modules_to_prefetch(self._get_fsdp_state(), states, forward=False)
+        _fsdp_engine.set_modules_to_prefetch(
+            self._get_fsdp_state(), states, forward=False
+        )
 
     def set_custom_all_gather(self, comm: AllGather) -> None:
         """
@@ -1108,9 +1112,7 @@ class FSDPModule:
         self.reshard()
         state = self._get_fsdp_state()
         fsdp_params = [
-            param
-            for group in state._fsdp_param_groups
-            for param in group.fsdp_params
+            param for group in state._fsdp_param_groups for param in group.fsdp_params
         ]
         saved_grads = {}
         for fsdp_param in fsdp_params:

@@ -824,6 +824,24 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(weight.grad.dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_chosen_by_each_forward(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        model.unshard()
+        weight = model.weight
+        model.reshard()
+        fwd_dtypes = []
+        model.register_forward_hook(lambda *_: fwd_dtypes.append(weight.grad_dtype))
+        inp = torch.ones(2, 8, device=device_type)
+        # A forward without gradient sync after one with it, e.g. a chunked
+        # loss calling the output projection after the model's forward, does
+        # not keep the first forward's deferred upcast
+        out = model(inp)
+        model.set_requires_gradient_sync(False)
+        (out + model(inp)).sum().backward()
+        self.assertEqual(fwd_dtypes, [None, torch.float32])
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_outside_forward_and_backward(self):
         model = nn.Linear(8, 8, bias=False, device=device_type)
         fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))

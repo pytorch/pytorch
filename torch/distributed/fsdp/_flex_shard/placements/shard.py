@@ -617,6 +617,7 @@ class Shard(Placement):
             p if slot_dtype != torch.uint8 else p.view(torch.uint8)
             for p in padded_full_params
         ]
+        # pyrefly: ignore [bad-argument-type]
         keep = [i for i, (_, size) in enumerate(layout.slots) if size]
         if keep:
             torch.ops.fsdp._all_gather_copy_out_(
@@ -641,6 +642,7 @@ class Shard(Placement):
         comm: Any = None,
         copy_in_fn: Any = None,
     ) -> tuple[torch.Tensor, Shard._ReduceGradLayout]:
+        # pyrefly: ignore [missing-attribute]
         shard_dims = [info.placement.dim for info in infos]
         copy_in_tensors, num_leading_dims, padded_sizes = (
             _reduce_scatter_copy_in_layout(tensors, shard_dims, world_size)

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -42,7 +43,7 @@ from torch.distributed.fsdp._flex_shard.placements.shard import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed.common_flex_shard import (
     alloc_grads_in_param_layout,
     check_flex_shard_parity,
@@ -382,6 +383,8 @@ def _checkpoint_like_torch_remat(module: torch.nn.Module) -> None:
 
 
 class TestFlexShardTraining(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -467,9 +470,10 @@ class TestFlexShardTraining(FSDPTest):
 
         for index, layer in enumerate(model):
             for param in layer.parameters():
-                grad = param.grad
-                assert grad is not None
-                self.assertEqual(grad, torch.full_like(grad, 2 * (index + 1)))
+                self.assertIsNotNone(param.grad)
+                self.assertEqual(
+                    param.grad, torch.full_like(param.grad, 2 * (index + 1))
+                )
         self.assertEqual(len(packed_ptrs), len(model))
         self.assertEqual(packed_ptrs[0], packed_ptrs[1])
 

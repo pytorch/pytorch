@@ -7,20 +7,23 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import spmd_types as spmd
-
-import torch.nn as nn
-from torch.distributed.device_mesh import DeviceMesh
 
 from ..placement_contract import GlobalLayout, set_global_layout
 
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import torch.nn as nn
+    from torch.distributed.device_mesh import DeviceMesh
+
+
 def spmd_types_to_global_layout(
     module: nn.Module,
-    layouts: Mapping[str, spmd.SpmdType],
+    layouts: Mapping[str, spmd.SpmdType],  # pyrefly: ignore [missing-attribute]
     mesh: DeviceMesh,
 ) -> None:
     """Declare the layout of local parameters described by ``SpmdType`` layouts.
@@ -45,7 +48,9 @@ def spmd_types_to_global_layout(
 
 
 def _spmd_global_layout(
-    local_shape: tuple[int, ...], layout: spmd.SpmdType, mesh: DeviceMesh
+    local_shape: tuple[int, ...],
+    layout: spmd.SpmdType,  # pyrefly: ignore [missing-attribute]
+    mesh: DeviceMesh,
 ) -> GlobalLayout:
     ndim = len(local_shape)
     global_shape = list(local_shape)
@@ -69,7 +74,9 @@ def _spmd_global_layout(
 
 
 def _shard_axes_per_dim(
-    layout: spmd.SpmdType, ndim: int, mesh: DeviceMesh
+    layout: spmd.SpmdType,  # pyrefly: ignore [missing-attribute]
+    ndim: int,
+    mesh: DeviceMesh,
 ) -> list[list[tuple[int, int]]]:
     """Return ``(size, coordinate)`` of the axes sharding each tensor dim, in
     sharding order, skipping size-1 axes."""

@@ -26,17 +26,21 @@ import functools
 import itertools
 import os
 from collections import Counter, defaultdict
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.distributed.device_mesh import DeviceMesh
 
 from ..utils import mesh_rank_hosts
 from .utils import foreach_copy_, reduce_scatter_grads
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch.distributed.device_mesh import DeviceMesh
 
 
 # Chunk sizes, rail splits and relayed slices round up to this many elements,
@@ -231,9 +235,11 @@ class OwnerRowsTransportBuffers:
             # Collectives on any stream may still read the old buffer.
             torch.cuda.synchronize(device)
         tensor = symm_mem.empty(numel, dtype=dtype, device=device)
+        # pyrefly: ignore [bad-argument-type]
         handle = symm_mem.rendezvous(tensor, self.group)
         peers = {
             other: handle.get_buffer(
+                # pyrefly: ignore [bad-argument-type]
                 dist.get_group_rank(self.group, self._global_ranks[other]),
                 (numel,),
                 dtype,

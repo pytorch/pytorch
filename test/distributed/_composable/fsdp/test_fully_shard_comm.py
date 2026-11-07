@@ -25,11 +25,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.distributed.fsdp import (
-    FSDPModule,
-    fully_shard,
-    MixedPrecisionPolicy,
-)
+from torch.distributed.fsdp import FSDPModule, fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._all_gather_layout import (
     AllGatherFinalizeMetadata,
     AllGatherLayout,
@@ -57,7 +53,7 @@ from torch.distributed.fsdp.experimental import (
     DefaultAllGatherLayout,
     reduce_scatter_input_fn_with_native_copy,
 )
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module

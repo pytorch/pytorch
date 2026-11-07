@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -6,7 +7,11 @@
 
 import torch
 from torch.distributed.fsdp._flex_shard import is_flex_shard_param
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.common_flex_shard import (
     flex_shard_cuda,
     make_test_sgd,
@@ -32,6 +37,8 @@ def _make_flex_sharded_transformer(mesh, **kwargs):
 
 
 class TestFlexShardStateDict(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_state_dict_load_round_trip_into_flex_sharded_model(self):
         with single_rank_cuda_mesh() as mesh:
             torch.manual_seed(0)

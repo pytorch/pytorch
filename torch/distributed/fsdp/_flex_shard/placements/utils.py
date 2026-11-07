@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import importlib.util
-from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -15,6 +14,8 @@ import torch.distributed as dist
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..placement_contract import GradientReduceOp, GradientReduction
 
 
@@ -215,7 +216,9 @@ def reduce_scatter_grads(
             async_op=False,
         )
     else:
-        dist.reduce_scatter_single(output=output, input=input, op=reduce_op, group=group)
+        dist.reduce_scatter_single(
+            output=output, input=input, op=reduce_op, group=group
+        )
     if post_factor is not None:
         output.div_(post_factor)
 

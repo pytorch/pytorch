@@ -8,11 +8,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 
-from .placement_contract import GlobalLayout
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .placement_contract import GlobalLayout
 
 
 def init_from_full(

@@ -534,6 +534,9 @@ def register_symm_mem_lowerings():
 
     from torch._library._out_variant import register_out_variant
 
+    # Defines the symm_mem ops registered from Python, e.g. _low_contention_all_gather
+    from torch.distributed import _symmetric_memory  # noqa: F401
+
     # Register manual out variant mappings for symm_mem ops.
     register_out_variant(
         symm_mem.one_shot_all_reduce.default,

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,7 +16,11 @@ from torch.distributed.fsdp._flex_shard import get_global_layout, GlobalLayout
 from torch.distributed.fsdp._flex_shard.layout_adapters.spmd_types import (
     spmd_types_to_global_layout,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class _Mesh:
@@ -32,6 +37,8 @@ class _Mesh:
 
 
 class TestFlexShardSpmdTypesLayout(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_adapter_declares_layouts(self) -> None:
         model = nn.Linear(4, 3)
         spmd_types_to_global_layout(

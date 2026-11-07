@@ -11,7 +11,7 @@ from torch.distributed.fsdp._flex_shard.placements.shard import Shard as EngineS
 from torch.distributed.tensor import distribute_tensor, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 device_type = torch.device(get_devtype())
@@ -36,6 +36,8 @@ class _Net(nn.Module):
 class TestFullyShardEngine(FSDPTest):
     """``fully_shard`` runs on the FlexShard engine: each group's sharded
     parameters live in one engine bucket, also after meta-device init."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def world_size(self) -> int:

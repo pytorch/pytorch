@@ -1429,12 +1429,16 @@ class FSDPParam:
         same_local_tensor = False
         # TODO: need to support tensor subclass
         if type(self._sharded_param_data) is torch.Tensor:
+            data = self._sharded_param_data
             same_local_tensor = (
                 # when sharding param with shape (1, ...) over 2 ranks
                 # local_tensor on rank 1 can be size 0, data_ptr() can be 0
-                self._sharded_param_data.untyped_storage().data_ptr() > 0
-                and self._sharded_param_data.untyped_storage().data_ptr()
+                data.untyped_storage().data_ptr() > 0
+                and data.untyped_storage().data_ptr()
                 == local_tensor.untyped_storage().data_ptr()
+                # A group's parameters share one storage (its engine bucket)
+                and data.storage_offset() * data.element_size()
+                == local_tensor.storage_offset() * local_tensor.element_size()
             )
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim

@@ -2,6 +2,8 @@
 
 
 import copy
+import subprocess
+import sys
 import unittest
 
 import torch
@@ -21,7 +23,7 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -248,6 +250,18 @@ class TestFullyShardCompile(FSDPTest):
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
         inp = torch.randn(32, 784, device=device_type)
         m(inp)
+
+
+class TestFullyShardInductorImport(TestCase):
+    def test_inductor_import_defines_fsdp_ops(self):
+        # Inductor lowers ops that FSDP2 and symmetric memory define in Python,
+        # so importing Inductor first must define them
+        code = (
+            "import torch\n"
+            "from torch._inductor.lowering import lowerings\n"
+            "assert torch.ops.fsdp.copy_.default in lowerings\n"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True)
 
 
 if __name__ == "__main__":

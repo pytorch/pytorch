@@ -83,10 +83,10 @@ def set_global_layout(tensor: torch.Tensor, layout: GlobalLayout) -> None:
     passed to ``flex_shard()`` that are local shards of an outer (e.g. TP/EP)
     sharding must declare their layout this way.
     """
-    tensor.global_shape = layout.global_shape
-    tensor.global_offsets = layout.global_offsets
-    tensor.local_offsets = layout.local_offsets
-    tensor.local_sizes = layout.local_sizes
+    tensor.global_shape = layout.global_shape  # pyrefly: ignore [missing-attribute]
+    tensor.global_offsets = layout.global_offsets  # pyrefly: ignore [missing-attribute]
+    tensor.local_offsets = layout.local_offsets  # pyrefly: ignore [missing-attribute]
+    tensor.local_sizes = layout.local_sizes  # pyrefly: ignore [missing-attribute]
 
 
 _PARTIAL_GRAD_GROUP_ATTR = "_flex_shard_partial_grad_group"
@@ -147,6 +147,7 @@ def compose_global_layouts(outer: GlobalLayout, inner: GlobalLayout) -> GlobalLa
     )
 
 
+# pyrefly: ignore [invalid-literal]
 GradientReduceOp = Literal[dist.ReduceOp.AVG, dist.ReduceOp.SUM]
 
 

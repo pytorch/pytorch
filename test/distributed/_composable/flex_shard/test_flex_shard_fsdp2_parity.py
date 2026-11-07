@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -33,7 +34,7 @@ from torch.distributed.fsdp._flex_shard.placements.shard import Shard
 from torch.distributed.tensor import Shard as DTensorShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 device_type = torch.device(get_devtype())
@@ -472,6 +473,8 @@ class _FullyShardParity(FSDPTest):
 
 
 class TestFlexShardMatchesFullyShard(_FullyShardParity):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         # A sum of two values does not depend on their order, so buckets match
@@ -494,6 +497,8 @@ class TestFlexShardMatchesFullyShard(_FullyShardParity):
 
 
 class TestFlexShardFSDP2Parity(_FullyShardParity):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         # Sums of four values make the reduction order observable.
@@ -542,6 +547,8 @@ class TestFlexShardFSDP2Parity(_FullyShardParity):
 
 
 class TestFlexShardChunkedLossFSDP2Parity(_FullyShardParity):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 4
