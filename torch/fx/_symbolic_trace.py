@@ -336,9 +336,10 @@ class Tracer(TracerBase):
         super().__init__()
 
         # A Tracer built inside another trace must not resolve lazy globals under it.
-        if CURRENT_PATCHER is not None:
+        current_patcher = _get_current_patcher()
+        if current_patcher is not None:
             for m in autowrap_modules:
-                _resolve_lazy_imports(CURRENT_PATCHER, m.__dict__)
+                _resolve_lazy_imports(current_patcher, m.__dict__)
 
         # Functions we will eagerly wrap when we see them while tracing
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
@@ -1139,34 +1140,70 @@ class _PatchedFn(NamedTuple):
     orig_fn: Callable[..., Any] | None
     new_fn: Callable[..., Any]
 
-    def revert(self) -> None:
+    def _apply(self) -> None:
+        raise NotImplementedError
+
+    def _restore(self) -> None:
         raise NotImplementedError
 
     def patch(self) -> None:
-        raise NotImplementedError
+        key = (id(self.frame_dict), self.fn_name)
+        with _active_patches_lock:
+            _, active = _active_patches.setdefault(key, (self, []))
+            active.append(self)
+            self._apply()
+
+    def revert(self) -> None:
+        # Patches of traces running in different threads can be reverted in any
+        # order, so instead of restoring the value this patch replaced (which may be
+        # another trace's wrapper by now), restore the newest patch still active, or
+        # the original value once no patch is left.
+        key = (id(self.frame_dict), self.fn_name)
+        with _active_patches_lock:
+            entry = _active_patches.get(key)
+            if entry is None:
+                return
+            first, active = entry
+            for i, patch in enumerate(active):
+                if patch is self:
+                    del active[i]
+                    break
+            else:
+                return  # not applied
+            if active:
+                active[-1]._apply()
+            else:
+                del _active_patches[key]
+                first._restore()
+
+
+# For each (id(frame_dict), fn_name) currently patched: the first patch applied to
+# it, which holds the original value, and the patches still applied, oldest first.
+_active_patches: dict[tuple[int, str], tuple[_PatchedFn, list[_PatchedFn]]] = {}
+_active_patches_lock = threading.Lock()
 
 
 class _PatchedFnSetItem(_PatchedFn):
-    def revert(self) -> None:
+    def _restore(self) -> None:
         self.frame_dict[self.fn_name] = self.orig_fn
 
-    def patch(self) -> None:
+    def _apply(self) -> None:
         self.frame_dict[self.fn_name] = self.new_fn
 
 
 class _PatchedFnDel(_PatchedFn):
-    def revert(self) -> None:
+    def _restore(self) -> None:
         del self.frame_dict[self.fn_name]
 
-    def patch(self) -> None:
+    def _apply(self) -> None:
         self.frame_dict[self.fn_name] = self.new_fn
 
 
 class _PatchedFnSetAttr(_PatchedFn):
-    def revert(self) -> None:
+    def _restore(self) -> None:
         setattr(self.frame_dict, self.fn_name, self.orig_fn)
 
-    def patch(self) -> None:
+    def _apply(self) -> None:
         setattr(self.frame_dict, self.fn_name, self.new_fn)
 
 
@@ -1257,27 +1294,31 @@ class _Patcher:
         self.visited.clear()
 
 
-CURRENT_PATCHER: _Patcher | None = None
+# The innermost active patcher, per thread: traces running in different threads
+# must not see (or reset) each other's patcher.
+_current_patcher_tls = threading.local()
+
+
+def _get_current_patcher() -> _Patcher | None:
+    return getattr(_current_patcher_tls, "patcher", None)
 
 
 @contextlib.contextmanager
 def _new_patcher() -> Iterator[_Patcher]:
-    global CURRENT_PATCHER
-    prior_patcher = CURRENT_PATCHER
+    prior_patcher = _get_current_patcher()
+    patcher = _Patcher(outer=prior_patcher)
+    _current_patcher_tls.patcher = patcher
     try:
-        CURRENT_PATCHER = _Patcher(outer=prior_patcher)
-        yield CURRENT_PATCHER
+        yield patcher
     finally:
         # Clear all the patches made by when using current patcher.
-        if CURRENT_PATCHER is None:
-            raise AssertionError("CURRENT_PATCHER is None in finally block")
-        CURRENT_PATCHER.revert_all_patches()
-        CURRENT_PATCHER = prior_patcher
+        patcher.revert_all_patches()
+        _current_patcher_tls.patcher = prior_patcher
 
 
 @contextlib.contextmanager
 def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]:
-    current_patcher = CURRENT_PATCHER if patcher is None else patcher
+    current_patcher = _get_current_patcher() if patcher is None else patcher
     # A nested window, e.g. Dynamo compiling from a lazy import FX resolves, finds
     # the patches already reverted and leaves reapplying them to the outer one.
     if current_patcher is not None and current_patcher.revert_depth > 0:
@@ -1300,7 +1341,7 @@ def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]
             patches_made = current_patcher.reapply_all_patches()
         if patches_made != patches_removed:
             raise AssertionError(
-                "CURRENT_PATCHER was changed during a revert_all_patches"
+                "The current patcher was changed during a revert_all_patches"
             )
 
 

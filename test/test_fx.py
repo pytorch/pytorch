@@ -18,6 +18,7 @@ import os
 import pickle
 import subprocess
 import sys
+import threading
 import traceback
 import types
 import typing
@@ -2053,6 +2054,66 @@ assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
             self.assertEqual(seen, [(False, True)])
             self.assertIn("len", frame_dict)
             self.assertTrue(is_fx_symbolic_tracing())
+
+    def test_patcher_is_thread_local(self):
+        from torch.fx._symbolic_trace import _get_current_patcher, _new_patcher
+
+        seen = []
+        with _new_patcher() as patcher:
+            thread = threading.Thread(target=lambda: seen.append(_get_current_patcher()))
+            thread.start()
+            thread.join()
+            self.assertIs(_get_current_patcher(), patcher)
+        self.assertEqual(seen, [None])
+        self.assertIsNone(_get_current_patcher())
+
+    def test_patches_reverted_out_of_order(self):
+        # Traces in different threads patch the same method and can finish in any
+        # order. Reverting one must leave the other's patch applied, and the original
+        # must come back once both are reverted.
+        from torch.fx._symbolic_trace import _Patcher
+
+        class Foo:
+            def f(self):
+                return "orig"
+
+        orig = Foo.f
+        first, second = _Patcher(), _Patcher()
+        first.patch_method(Foo, "f", lambda self: "first", deduplicate=False)
+        second.patch_method(Foo, "f", lambda self: "second", deduplicate=False)
+        first.revert_all_patches()
+        self.assertEqual(Foo().f(), "second")
+        second.revert_all_patches()
+        self.assertIs(Foo.f, orig)
+
+    def test_make_fx_in_concurrent_threads(self):
+        from torch.fx._symbolic_trace import _orig_module_call, _orig_module_getattr
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            return torch.sin(x) + torch.cos(x) * 2.0
+
+        num_threads = 4
+        barrier = threading.Barrier(num_threads)
+        errors = []
+
+        def worker():
+            barrier.wait()
+            try:
+                for _ in range(5):
+                    x = torch.randn(4, 4)
+                    self.assertEqual(make_fx(fn)(x)(x), fn(x))
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertIs(torch.nn.Module.__call__, _orig_module_call)
+        self.assertIs(torch.nn.Module.__getattr__, _orig_module_getattr)
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
