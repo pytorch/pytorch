@@ -23,6 +23,16 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class _FormatSpecEcho:
+    def __format__(self, spec):
+        return f"<{spec}>"
+
+
+class _NonStringFormatResult:
+    def __format__(self, spec):
+        return 7
+
+
 class _OpaqueStrDescriptorObject:
     __str__ = str.upper
 
@@ -87,6 +97,82 @@ class TpStrTests(TestCase):
     @make_dynamo_test
     def test_object_dunder_str_on_list_uses_repr(self):
         assert object.__str__([1, 2, 3]) == "[1, 2, 3]"  # noqa: S101
+
+
+class FormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_builtin_format(self):
+        self.assertEqual(format(1.25, ".1f"), "1.2")
+        self.assertEqual(format(123, "04d"), "0123")
+        self.assertEqual(format(7), "7")
+        self.assertEqual(format("ab", ">4"), "  ab")
+        self.assertEqual(str.format("{:04d}", 42), "0042")
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_bound_numeric_methods(self):
+        self.assertEqual((1.25).__format__(".1f"), "1.2")
+        self.assertEqual((123).__format__("04d"), "0123")
+        self.assertEqual((255).to_bytes(2, "big"), b"\x00\xff")
+        self.assertEqual((2).__pow__(10, 1000), 24)
+        self.assertIs((1).__radd__(1.5), NotImplemented)
+        self.assertEqual((1).__getattribute__("real"), 1)
+        with self.assertRaises(AttributeError):
+            (1).__setattr__("x", 1)
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_format_errors(self):
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'Q'"):
+            format(1.5, "Q")
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'Q'"):
+            (1.5).__format__("Q")
+        with self.assertRaisesRegex(TypeError, "argument 2 must be str, not int"):
+            format(1.5, 3)
+        with self.assertRaisesRegex(TypeError, "at most 2 arguments, got 3"):
+            format(1.5, "f", "g")
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_builtin_format_user_defined(self):
+        obj = _FormatSpecEcho()
+        self.assertEqual(format(obj, "x"), "<x>")
+        self.assertEqual(format(obj), "<>")
+
+    def test_builtin_format_symbolic_graph_breaks(self):
+        def tensor_plain(t):
+            return t + 1, format(t)
+
+        def tensor_spec(t):
+            return t + 1, format(t, ".2f")
+
+        def symint_spec(t):
+            return t + 1, format(t.shape[0], "d")
+
+        cases = [
+            (tensor_plain, torch.tensor(1.5), False),
+            (tensor_spec, torch.tensor(1.5), False),
+            (symint_spec, torch.ones(3), True),
+        ]
+        for fn, t, dynamic in cases:
+            with self.subTest(fn=fn.__name__):
+                if dynamic:
+                    torch._dynamo.mark_dynamic(t, 0)
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                with self.assertRaisesRegex(Unsupported, "format"):
+                    opt_fn(t)
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_builtin_format_non_string_result(self):
+        with self.assertRaisesRegex(TypeError, "__format__ must return a str, not int"):
+            format(_NonStringFormatResult(), "x")
 
 
 class TpStrUserDefinedTests(TestCase):
