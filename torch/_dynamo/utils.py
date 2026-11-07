@@ -4747,12 +4747,14 @@ def get_property_name(obj: property) -> tuple[Any, ...]:
     if type(obj) is property:
         # property_copy preserves prop_name without looking up the old getter.
         obj = property.getter(obj, object())
-        obj.__doc__ = None
-        # property_traverse visits get/set/del/doc/name, omitting NULL fields.
-        # The replacement getter and explicit doc are always non-NULL.
-        # https://github.com/python/cpython/blob/3.11/Objects/descrobject.c
-        offset = 2 + (obj.fset is not None) + (obj.fdel is not None)
-        return tuple(gc.get_referents(obj)[offset:])
+        if sys.version_info < (3, 13):
+            obj.__doc__ = None
+            # property_traverse visits get/set/del/doc/name, omitting NULL fields.
+            # The replacement getter and explicit doc are always non-NULL.
+            # https://github.com/python/cpython/blob/3.11/Objects/descrobject.c
+            # https://github.com/python/cpython/blob/3.12/Objects/descrobject.c
+            offset = 2 + (obj.fset is not None) + (obj.fdel is not None)
+            return tuple(gc.get_referents(obj)[offset:])
     # Distinguish a missing name from a name explicitly set to None.
     try:
         return (property.__dict__["__name__"].__get__(obj),)

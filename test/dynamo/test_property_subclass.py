@@ -258,6 +258,79 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(actual[1].__get__(x), x + 1)
         self.assertEqual(events, [])
 
+    @parametrize("hook", ("getattribute", "descriptor", "eq"))
+    def test_metadata_uses_real_mro(self, hook):
+        events = []
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if hook == "getattribute" and name == "__mro__":
+                    events.append("getattribute")
+                    return (object,)
+                return super().__getattribute__(name)
+
+            @property
+            def __mro__(cls):
+                if hook == "descriptor":
+                    events.append("descriptor")
+                    return (object,)
+                return type.__dict__["__mro__"].__get__(cls)
+
+            def __eq__(cls, other):
+                if hook == "eq" and other is property:
+                    events.append("eq")
+                return cls is other
+
+            __hash__ = type.__hash__
+
+        class SlottedProperty(property, metaclass=Meta):
+            __slots__ = ("__doc__",)
+
+        def getter(obj):
+            """Getter doc."""
+            return obj
+
+        p = SlottedProperty(getter)
+
+        def fn(x):
+            return x + 1, p.fget is getter, p.__doc__
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for value in (torch.ones(2), torch.zeros(2)):
+            expected = fn(value)
+            actual = compiled(value)
+            self.assertEqual(actual, expected)
+            self.assertEqual(events, [])
+        self.assertEqual(counter.frame_count, 1)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires Python 3.12+ construction")
+    def test_doc_slot_uses_real_mro(self):
+        class Meta(type):
+            @property
+            def __mro__(cls):
+                return (property, object)
+
+        class SlottedProperty(property, metaclass=Meta):
+            __slots__ = ("__doc__",)
+
+        def getter(obj):
+            """Getter doc."""
+            return obj
+
+        def fn(x):
+            return x + 1, SlottedProperty(getter)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for value in (torch.ones(2), torch.zeros(2)):
+            actual = compiled(value)
+            self.assertEqual(actual[0], fn(value)[0])
+            self.assertIs(type(actual[1]), SlottedProperty)
+            self.assertIs(actual[1].fget, getter)
+            self.assertEqual(actual[1].__doc__, "Getter doc.")
+        self.assertEqual(counter.frame_count, 1)
+
     def test_existing_property(self):
         def getter(obj):
             """Original doc."""
@@ -497,7 +570,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.fget is getter
 
         x = torch.ones(2)
-        with self.assertRaisesRegex(Unsupported, "property subclass initialization"):
+        with self.assertRaisesRegex(
+            Unsupported, r"^Unsupported property subclass initialization\n"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
@@ -512,7 +587,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.__get__(x, type(x))
 
         x = torch.ones(2)
-        with self.assertRaisesRegex(Unsupported, "property subclass initialization"):
+        with self.assertRaisesRegex(
+            Unsupported, r"^Unsupported property subclass initialization\n"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
         self.assertIs(p.fget, getter)
@@ -568,7 +645,7 @@ class PropertySubclassTests(TestCase):
         x = torch.ones(2)
         with torch._dynamo.config.patch(replay_side_effects=replay):
             with self.assertRaisesRegex(
-                Unsupported, "property subclass initialization"
+                Unsupported, r"^Unsupported property subclass initialization\n"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(events, [])
@@ -1136,7 +1213,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.fget is getter
 
         x = torch.ones(2)
-        with self.assertRaisesRegex(Unsupported, "Unsupported property initialization"):
+        with self.assertRaisesRegex(
+            Unsupported, r"^Unsupported property initialization\n"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertIsNone(p.fget)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
@@ -1456,7 +1535,9 @@ class PropertySubclassTests(TestCase):
             return x + 1, p.__name__, p.__dict__["__name__"], p
 
         x = torch.ones(2)
-        with self.assertRaisesRegex(Unsupported, "property.*name|Property.*name"):
+        with self.assertRaisesRegex(
+            Unsupported, r"^Mixed property name and instance dictionary mutations\n"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         expected = fn(x)
         actual = torch.compile(fn, backend="eager")(x)

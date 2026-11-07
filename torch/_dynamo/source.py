@@ -452,12 +452,17 @@ class MappingProxyMappingSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.utils", "get_type_mro_no_user_code"
+            )
+        )
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+        codegen.extend_output(create_call_function(1, False))
 
     @property
     def _name_template(self) -> str:
-        return "{0}.__mro__"
+        return "type.__dict__['__mro__'].__get__({0})"
 
 
 @dataclass_with_cached_hash(frozen=True)

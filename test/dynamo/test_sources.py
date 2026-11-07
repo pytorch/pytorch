@@ -11,6 +11,7 @@ from torch._dynamo.source import (
     GlobalSource,
     is_from_local_source,
     LocalSource,
+    TypeMROSource,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -55,6 +56,42 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         a = func(e)
         b = torch.compile(func, backend="eager", fullgraph=True)(e)
         self.assertEqual(a, b)
+
+    def test_mro_source_bypasses_metaclass_descriptor(self):
+        events = []
+
+        class Meta(type):
+            @property
+            def __mro__(cls):
+                events.append("mro")
+                return ()
+
+        class Base:
+            value = object()
+
+        class Child(Base, metaclass=Meta):
+            pass
+
+        source = TypeMROSource(LocalSource("cls"))
+        self.assertEqual(
+            source.get_value({"L": {"cls": Child}}, {}, {}), (Child, Base, object)
+        )
+        self.assertEqual(events, [])
+
+        def fn(x, cls):
+            return x + 1, cls.value
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertIs(compiled(x, Child)[1], Base.value)
+        events.clear()
+        for _ in range(2):
+            result, value = compiled(x, Child)
+            self.assertEqual(result, x + 1)
+            self.assertIs(value, Base.value)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(events, [])
 
     @parametrize("subclass", (False, True))
     def test_property_accessor_guard_and_reconstruction(self, subclass):

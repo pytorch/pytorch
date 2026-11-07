@@ -9,6 +9,7 @@ import sys
 import traceback
 import types
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -2483,6 +2484,43 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         p.__name__ = "renamed"
         self.assertEqual(compiled(x + 1, p), fn(x + 1, p))
         self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
+    @parametrize("name_state", ("missing", "stored", "none"))
+    def test_property_name_guard_without_gc(self, name_state):
+        events = []
+
+        class Getter:
+            def __call__(self, obj):
+                return obj
+
+            @property
+            def __name__(self):
+                events.append("name")
+                return "fallback"
+
+        p = property(Getter())
+        if name_state != "missing":
+            p.__name__ = None if name_state == "none" else "stored"
+
+        def fn(x):
+            return x + 1, p.__name__
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        expected_name = {"missing": "fallback", "stored": "stored", "none": None}[
+            name_state
+        ]
+        self.assertEqual(compiled(x), (x + 1, expected_name))
+        events.clear()
+        with mock.patch(
+            "torch._dynamo.utils.gc.get_referents",
+            side_effect=AssertionError("Property name guards must not traverse GC"),
+        ):
+            self.assertEqual(compiled(x + 1), (x + 2, expected_name))
+        self.assertEqual(events, ["name"] if name_state == "missing" else [])
+        self.assertEqual(counter.frame_count, 1)
 
     @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
     @parametrize("stored_name", (False, True))

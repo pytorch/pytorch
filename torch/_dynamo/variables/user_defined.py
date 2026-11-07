@@ -92,6 +92,7 @@ from ..utils import (
     frozenset_methods,
     get_custom_getattr,
     get_property_accessor,
+    get_type_mro_no_user_code,
     has_torch_function,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
@@ -5131,7 +5132,7 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
         doc_attr = inspect.getattr_static(self.python_type(), "__doc__", None)
         has_doc_slot = isinstance(doc_attr, types.MemberDescriptorType) and any(
             cls is doc_attr.__objclass__
-            for cls in type.__getattribute__(self.python_type(), "__mro__")
+            for cls in get_type_mro_no_user_code(self.python_type())
         )
         if not has_doc_slot and (
             hasattr(type(doc_attr), "__set__") or hasattr(type(doc_attr), "__delete__")
@@ -5251,9 +5252,14 @@ class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
             and descriptor.__objclass__ is property
         ):
             # The owner can move when __bases__ changes without gaining a shadow.
+            owner_index = next(
+                i
+                for i, cls in enumerate(get_type_mro_no_user_code(self.python_type()))
+                if cls is property
+            )
             owner = GetItemSource(
                 TypeMROSource(self.cls_source),
-                self.python_type().__mro__.index(property),
+                owner_index,
             )
             install_guard(owner.make_guard(GuardBuilder.BUILTIN_MATCH))
         return source
