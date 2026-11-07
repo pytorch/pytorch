@@ -1,18 +1,18 @@
 r"""Experimental FSDP2 customization APIs.
 
-FSDP copies nonzero-dimension shards through intermediate buffers by default.
-The ``with_native_copy`` functions copy directly between parameter layouts and
-collective buffers instead. Register the reduce-scatter copy-in on a fully
-sharded model::
+FSDP copies nonzero-dimension shards through intermediate buffers by default,
+except in parameter groups where some rank pads a ``Shard(i)``, ``i > 0``,
+shard. The ``with_native_copy`` functions, which those groups use by default,
+copy directly between parameter layouts and collective buffers instead.
+Register the reduce-scatter copy-in on a fully sharded model::
 
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
-The native CUDA copies write contiguous tensors without intermediate buffers and
-can improve performance for wide tensors with small ``outer_size`` (the product of
-dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
-Their CPU time, GPU time, and metadata memory grow with the total outer size of a
-parameter group, and strided collective buffers take a slower path. Benchmark
-the callbacks on the target workload before enabling them.
+Each native CUDA copy is one launch for all tensors of a parameter group, with
+metadata of a few integers per tensor, and can improve performance for tensors
+sharded on a nonzero dimension, such as ``Shard(1)`` over ``[2, F, D]``. Strided
+collective buffers take a slower path. Benchmark the callbacks on the target
+workload before enabling them.
 
 All-gather extensions can return ``AllGatherInput`` records from
 ``fsdp_pre_all_gather`` to declare each payload's concatenation dimension. FSDP
@@ -29,7 +29,8 @@ from collections.abc import Callable
 import torch
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_all_gather_output_fn,
+    _native_all_gather_output_fn,
+    _native_reduce_scatter_input_fn,
 )
 
 
@@ -52,27 +53,14 @@ def all_gather_output_fn_with_native_copy(
 ) -> None:
     r"""Copy gathered payloads directly into their final layout.
 
-    See the module documentation for the performance tradeoffs. Groups with a
-    tensor payload smaller than its cached output use the default copy-out.
+    See the module documentation for the performance tradeoffs.
     """
-    # The op copies within one dtype, so mixed-dtype groups copy bytes
-    copy_outputs = outputs
-    if all_gather_output.dtype == torch.uint8:
-        copy_outputs = [output.view(torch.uint8) for output in outputs]
-    if any(
-        output.numel() != split_size * world_size
-        for output, split_size in zip(copy_outputs, split_sizes)
-    ):
-        _default_all_gather_output_fn(
-            all_gather_output,
-            outputs,
-            split_sizes=split_sizes,
-            outer_sizes=outer_sizes,
-            world_size=world_size,
-        )
-        return
-    torch.ops.fsdp._all_gather_copy_out_(
-        copy_outputs, all_gather_output, split_sizes, outer_sizes, world_size
+    _native_all_gather_output_fn(
+        all_gather_output,
+        outputs,
+        split_sizes=split_sizes,
+        outer_sizes=outer_sizes,
+        world_size=world_size,
     )
 
 
@@ -88,28 +76,10 @@ def reduce_scatter_input_fn_with_native_copy(
     :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
     See the module documentation for the performance tradeoffs.
 
-    Contiguous nonzero-dimension shards copy directly into the collective buffer.
-    Noncontiguous gradients sharded on a nonzero dim use the existing
-    chunk-and-concatenate reorder.
+    Contiguous nonzero-dimension shards copy directly into the collective buffer,
+    which zero-pads uneven ones. Noncontiguous gradients sharded on a nonzero dim
+    take the default reorder.
     """
-    num_leading_dims = [0] * len(unsharded_grads)
-    if world_size > 1:
-        for i, shard_dim in enumerate(shard_dims):
-            if shard_dim == 0:
-                continue
-            if unsharded_grads[i].is_contiguous():
-                num_leading_dims[i] = shard_dim
-            else:
-                chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
-                unsharded_grads[i] = torch.cat(chunks, dim=0)
-
-    def copy_in(output: torch.Tensor) -> None:
-        torch.ops.fsdp.chunk_cat_mixed_dtype(
-            unsharded_grads,
-            dim=0,
-            num_chunks=world_size,
-            out=output.view(world_size, -1),
-            num_leading_dims=num_leading_dims,
-        )
-
-    return copy_in
+    return _native_reduce_scatter_input_fn(
+        unsharded_grads, shard_dims=shard_dims, world_size=world_size
+    )

@@ -25,6 +25,8 @@ from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _native_all_gather_output_fn,
+    _native_reduce_scatter_input_fn,
     _wait_all_gather,
     AllGather,
     AllGatherResult,
@@ -231,6 +233,17 @@ class FSDPParamGroup:
             )
             for param, module_info in zip(params, param_module_infos)
         ]
+        shard_world_size = (
+            mesh_info.shard_mesh_size if isinstance(mesh_info, FSDPMeshInfo) else 1
+        )
+        # Whether some rank pads a Shard(i), i > 0, shard for collectives. Such
+        # groups copy all shards into and out of collective buffers natively by
+        # default, one launch per copy (see NOTE [Padded chunk copies])
+        self._pads_nonzero_dim_shards = any(
+            (dim := fsdp_param.fsdp_placement.dim) != 0
+            and fsdp_param._orig_size[dim] % shard_world_size != 0
+            for fsdp_param in self.fsdp_params
+        )
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
@@ -491,6 +504,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                pads_nonzero_dim_shards=self._pads_nonzero_dim_shards,
             )
 
     @_disable_functorch_if_active
@@ -546,12 +560,18 @@ class FSDPParamGroup:
                         tensor.copy_(all_gather_input)
 
         else:
+            all_gather_output_fn = self._all_gather_output_fn
+            if (
+                self._pads_nonzero_dim_shards
+                and all_gather_output_fn is _default_all_gather_output_fn
+            ):
+                all_gather_output_fn = _native_all_gather_output_fn
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
                 foreach_all_gather_copy_out(
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    all_gather_output_fn=self._all_gather_output_fn,
+                    all_gather_output_fn=all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -790,6 +810,13 @@ class FSDPParamGroup:
                         partial_input = self._prepare_partial_reduce_output(
                             fsdp_params_with_grad, partial_sizes, reduce_dtype
                         )
+                prepare_reduce_scatter_inputs = self._prepare_reduce_scatter_inputs
+                if (
+                    self._pads_nonzero_dim_shards
+                    and prepare_reduce_scatter_inputs
+                    is _default_reduce_scatter_input_fn
+                ):
+                    prepare_reduce_scatter_inputs = _native_reduce_scatter_input_fn
                 (
                     reduce_scatter_input,
                     reduce_scatter_event,
@@ -822,7 +849,7 @@ class FSDPParamGroup:
                     partial_input,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
-                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
