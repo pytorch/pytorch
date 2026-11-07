@@ -100,6 +100,24 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& op_signature,
         const std::string& concrete_params_signature);
 
+    // Borrow the tuned solution of a neighbouring shape: identical except in one
+    // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
+    // can tell a measured hit from a borrow, which is expected to be validated.
+    // Unconditional: TunableOp dispatch never calls this, so calling it is the
+    // opt-in and there is no flag to consult. Nor is there a check for an
+    // existing exact entry -- a candidate equal to the query differs in no dim,
+    // so it never matches. Call Lookup first and only come here on a miss.
+    //
+    // Caller contract: benchmark the returned solution and reject it unless
+    // Call() reports OK. The match is made on the params signature, which does
+    // not carry the batched strides, so a donor can be one the backend refuses
+    // for this shape -- it returns FAIL and the caller silently runs its own
+    // non-tunable path. A caller that skipped the check would time that
+    // fallback under the borrowed key and record a solution that fails on
+    // every later call.
+    ResultEntry LookupNearest(const std::string& op_signature,
+        const std::string& params_signature);
+
     void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
@@ -108,6 +126,18 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     void Add(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best);
+
+    // Persist a compile-time decision for a shape that was never tuned: a borrowed
+    // solution, or Default when the default kernel benchmarked faster. Unlike Add()
+    // this writes while tuning is disabled.
+    //
+    // Accepted limitation: the entry is written in the ordinary format with
+    // nothing marking it as borrowed, so an entry no longer implies the tuner
+    // measured that exact shape. Writes are first-write-wins, so a later tuning
+    // run skips these shapes and a Default recorded here is permanent.
+    void RecordBorrowed(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry entry);
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
@@ -140,6 +170,14 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void CloseRealtimeAppend();  // For clean shutdown
   private:
+    // Shared body of Add() and RecordBorrowed(). force_persist writes the entry
+    // to the results file regardless of the tuning flags, so RecordBorrowed can
+    // override the write rule for itself without widening it for Add()'s callers.
+    void AddAndMaybePersist(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry best,
+        bool force_persist);
+
     std::mutex lock_;
     std::mutex realtime_file_mutex_;
     std::unique_ptr<std::ofstream> realtime_out_;
@@ -232,6 +270,17 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
+    // Policy for the compile-time reuse pass: set from Python, read back by
+    // the pass through these C++ accessors (the Python query helpers exist
+    // only for tests). Not consulted by TuningResultsManager or TunableOp
+    // dispatch. Runtime-settable because the pass and the execution that
+    // follows it share a process and need opposite values.
+    void EnableNearestMatch(bool value);
+    bool IsNearestMatchEnabled() const;
+
+    void EnableRecordBorrowed(bool value);
+    bool IsRecordBorrowedEnabled() const;
+
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
     void SetNumericalCheckConfig(bool enabled, double atol, double rtol);
@@ -287,6 +336,10 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
+    // Set once before the work they govern, not flipped underneath it. Per-call
+    // state goes through the thread-local stack; see TunableDynamicDimsGuard.
+    bool nearest_match_enable_;
+    bool record_borrowed_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
