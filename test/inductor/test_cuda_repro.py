@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIfROCm,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     IS_BIG_GPU,
@@ -2227,15 +2228,11 @@ class CudaReproTests(TestCase):
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
         self, lowp_dtype
     ):
-        if TEST_XPU and lowp_dtype is torch.float16:
-            # To be enabled once triton-xpu emits a constrained fptrunc for
-            # `arith.truncf f32 -> f16`, so the fp32 -> fp16 -> fp32 barrier
-            # survives SPIR-V/IGC lowering (currently folded to identity).
-            # Upstream triton bug: intel/intel-xpu-backend-for-triton#7491.
-            # Tracker: intel/torch-xpu-ops#4358.
+        if TEST_XPU and lowp_dtype is torch.float16 and not Xe2_Or_Later:
             raise unittest.SkipTest(
-                "XPU: to be enabled after triton-xpu fix "
-                "(intel/intel-xpu-backend-for-triton#7491)"
+                "XPU: IGC folds the fp32 -> fp16 -> fp32 cast on non-Xe2 devices "
+                "(PVC LTS driver, no fix planned; intel/intel-xpu-backend-for-triton#7491). "
+                "See https://github.com/intel/torch-xpu-ops/issues/4358"
             )
         torch.manual_seed(0)
         torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
