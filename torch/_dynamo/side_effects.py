@@ -584,32 +584,6 @@ class SideEffects:
         item_source = getattr(item, "source", None)
         return None if item_source is None else AttrSource(item_source, name)
 
-    def discard_attr_mutation(
-        self,
-        item: VariableTracker,
-        name: str,
-        mutated_source: Source | None = None,
-    ) -> None:
-        """Undo the pending mutation `store_attr` recorded for `item`.`name`."""
-        key = (id(item), name)
-        if key in self.deferred_attr_mutations:
-            # store_attr deferred this mutation's side-effect check; the pair
-            # nets out to nothing, so it needs neither the check nor validation.
-            del self.deferred_attr_mutations[key]
-        else:
-            # store_attr checked this mutation when it recorded it.
-            self.check_allowed_side_effect(item)
-        del self.store_attr_mutations[item][name]
-        del self.attr_mutation_kinds[item][name]
-        if mutated_source is None:
-            mutated_source = self._store_attr_mutation_source(item, name)
-        if mutated_source is not None:
-            self.mutated_sources.discard(mutated_source)
-        if not self.store_attr_mutations[item]:
-            del self.store_attr_mutations[item]
-            del self.attr_mutation_kinds[item]
-            self.mutation_user_stacks.pop(item, None)
-
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
@@ -736,33 +710,6 @@ class SideEffects:
         # would name a nonexistent `G.G`. Record the source readers actually
         # use, so mutated_sources intersects with traced_sources.
         self.store_attr(gvar, name, value, mutated_source=GlobalSource(name))
-
-    def record_global_delete(self, gvar: VariableTracker, name: str) -> None:
-        """Record a DELETE_GLOBAL of a name the real globals hold.
-
-        Note [global delete replay]: whether a DELETE_GLOBAL replays or cancels
-        the store it removes is decided once, while tracing. Only a name in the
-        real globals has to be deleted at replay time, so only that case is
-        recorded here; a name a STORE_GLOBAL earlier in this trace created never
-        reaches the globals, so its delete drops that store instead (see
-        `discard_global_store`). A later LOAD_GLOBAL runs after the replay, so it
-        sees the name gone and resolves against builtins, raising NameError when
-        it is not there (see `_load_builtin_if_global_deleted`).
-        """
-        if isinstance(gvar, variables.NewGlobalVariable):
-            self.store_global(gvar, name, variables.DeletedVariable())
-        else:
-            self.store_attr(gvar, name, variables.DeletedVariable())
-
-    def discard_global_store(self, gvar: VariableTracker, name: str) -> None:
-        """Drop the pending STORE_GLOBAL a later DELETE_GLOBAL cancels.
-
-        See Note [global delete replay].
-        """
-        if isinstance(gvar, variables.NewGlobalVariable):
-            self.discard_attr_mutation(gvar, name, mutated_source=gvar.source)
-        else:
-            self.discard_attr_mutation(gvar, name)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -1059,10 +1006,6 @@ class SideEffects:
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         if id(item) in self.id_to_variable:
-            # `_global_mutation_vt` builds one sentinel per global name and
-            # always pairs it with GlobalSource(name), so the saved variable
-            # matches. Reusing it also stops repeated STORE_GLOBAL to one name
-            # from orphaning a NewGlobalVariable per store.
             return self.id_to_variable[id(item)]
         variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
@@ -2086,22 +2029,26 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
         mutation_kind = side_effects.get_attr_mutation_kind(var, name)
         if isinstance(var, variables.NewGlobalVariable):
-            cg.tx.output.update_co_names(name)
             if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
                 raise AssertionError(
                     f"Expected GlobalSource for NewGlobalVariable, "
                     f"got {type(var.source)}"  # type: ignore[attr-defined]
                 )
             if isinstance(value, variables.DeletedVariable):
-                # See Note [global delete replay] in SideEffects.
                 # TODO(3.16): CPython compiles `del name` to PUSH_NULL;
                 # STORE_GLOBAL, so emit that pair once 3.16 is supported. Before
                 # 3.16, STORE_GLOBAL stores the null sentinel instead.
-                ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
+                if name in cg.tx.output.global_scope:
+                    cg.tx.output.update_co_names(name)
+                    ctx.suffixes.append(
+                        [create_instruction("DELETE_GLOBAL", argval=name)]
+                    )
+                    side_effect_occurred = True
             else:
+                cg.tx.output.update_co_names(name)
                 cg(value)
                 ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
-            side_effect_occurred = True
+                side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
             if isinstance(var, variables.CellVariable):
                 # Cells created during inlining (no local_name) are rebuilt via

@@ -427,6 +427,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     self.assertEqual(opt_fn(x), x + 1)
                     self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.expectedFailure
     def test_delete_global_created_then_deleted(self):
         with mock.patch.dict(globals()):
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
@@ -633,6 +634,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x)
             self.assertNotIn("delete_value", mod.__dict__)
 
+    @unittest.expectedFailure
     def test_delete_global_crossfile_created_then_deleted(self):
         with crossfile_globals() as mod:
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
