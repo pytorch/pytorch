@@ -1523,12 +1523,7 @@ Tensor& narrow_copy_dense_cpu_out(
   auto self_contig = self.expect_contiguous();
   const auto self_sizes = self_contig->sizes();
 
-  // wrap dim if negative and do bound check
-  if (dim < 0) {
-    dim = at::maybe_wrap_dim(dim, self_sizes.size());
-  } else {
-    TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
-  }
+  dim = at::maybe_wrap_dim(dim, self_sizes.size());
 
   // wrap start and do bound check
   const auto cur_size = self_sizes[dim];
@@ -1544,8 +1539,9 @@ Tensor& narrow_copy_dense_cpu_out(
   if (start < 0) {
     start = start + cur_size;
   }
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   TORCH_CHECK(
-      length >= 0 && start <= cur_size - length,
+      start <= cur_size - length,
       "start (",
       start,
       ") + length (",
