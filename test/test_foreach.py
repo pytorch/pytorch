@@ -1812,6 +1812,27 @@ class TestForeachDevice(TestCase):
             torch._foreach_copy_(dst, src)
             self.assertEqual(dst, ref)
 
+    @onlyCUDA
+    @parametrize("op_name", ["add", "sub"])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_binary_op_list_inplace_with_multi_dtypes(self, device, dtype, op_name):
+        foreach_op_ = ForeachFuncWrapper(getattr(torch, f"_foreach_{op_name}_"))
+        # 17 and 129 elements exercise the unaligned path.
+        sizes = ((17,), (64, 3), (5, 129))
+        for other_dtype in (torch.float32, torch.float16, torch.bfloat16, torch.float64):
+            if other_dtype == dtype:
+                continue
+            self_tensors = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
+            others = [make_tensor(s, dtype=other_dtype, device=device) for s in sizes]
+            ref = [getattr(t.clone(), f"{op_name}_")(o, alpha=0.5) for t, o in zip(self_tensors, others)]
+            foreach_op_(
+                (self_tensors, others),
+                device=device,
+                expect_fastpath=other_dtype != torch.float64,
+                alpha=0.5,
+            )
+            self.assertEqual(self_tensors, ref)
+
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
