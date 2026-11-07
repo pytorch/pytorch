@@ -1189,6 +1189,10 @@ class FSDPModule:
         fsdp_params = [
             param for group in state._fsdp_param_groups for param in group.fsdp_params
         ]
+        source_devices = {
+            fsdp_param: fsdp_param.sharded_param._local_tensor.device
+            for fsdp_param in fsdp_params
+        }
         saved_grads = {}
         for fsdp_param in fsdp_params:
             param = fsdp_param.sharded_param
@@ -1202,6 +1206,27 @@ class FSDPModule:
                 saved_grads[fsdp_param] = grad
                 param.grad = None
         ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
+        # reset_sharded_param may immediately read a CPU shard to pad or pin
+        # it. Wait for accelerator-to-CPU copies before that read; even shards
+        # that need no further CPU copy can remain asynchronous.
+        devices_to_sync = set()
+        for fsdp_param in fsdp_params:
+            source_device = source_devices[fsdp_param]
+            module_info = fsdp_param._module_info
+            new_param = getattr(module_info.module, module_info.param_name)
+            local_tensor = new_param._local_tensor
+            if (
+                source_device.type not in ("cpu", "meta")
+                and local_tensor.device.type == "cpu"
+                and local_tensor.numel() > 0
+                and (
+                    local_tensor.size() != fsdp_param.padded_sharded_param_size
+                    or (fsdp_param.pin_memory and not local_tensor.is_pinned())
+                )
+            ):
+                devices_to_sync.add(source_device)
+        for device in devices_to_sync:
+            torch.accelerator.current_stream(device).synchronize()
         with torch.no_grad():
             for fsdp_param in fsdp_params:
                 fsdp_param.reset_sharded_param()
