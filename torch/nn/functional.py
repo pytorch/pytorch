@@ -4459,6 +4459,53 @@ def margin_ranking_loss(
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
+def bpr_loss(
+    positive: Tensor,
+    negative: Tensor,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
+    reduction: str = "mean",
+) -> Tensor:
+    r"""Compute the Bayesian Personalized Ranking loss.
+
+    See :class:`~torch.nn.BPRLoss` for details.
+
+    Args:
+        positive (Tensor): Score of the preferred item.
+        negative (Tensor): Score of the other item. Broadcastable with ``positive``.
+        size_average (bool, optional): Deprecated (see :attr:`reduction`).
+        reduce (bool, optional): Deprecated (see :attr:`reduction`).
+        reduction (str, optional): Specifies the reduction to apply to the output:
+                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
+                                   'sum': the output will be summed. 'none': no reduction will be applied.
+                                   Default: 'mean'.
+
+    Returns:
+        Tensor: Bayesian Personalized Ranking loss.
+    """
+    if has_torch_function_variadic(positive, negative):
+        return handle_torch_function(
+            bpr_loss,
+            (positive, negative),
+            positive,
+            negative,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
+    if size_average is not None or reduce is not None:
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    # -log σ(positive - negative) = softplus(negative - positive)
+    loss = softplus(negative - positive)
+    if reduction == "none":
+        return loss
+    if reduction == "mean":
+        return loss.mean()
+    if reduction == "sum":
+        return loss.sum()
+    raise ValueError(f"{reduction} is not a valid value for reduction")
+
+
 def hinge_embedding_loss(
     input: Tensor,
     target: Tensor,
