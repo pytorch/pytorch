@@ -32,7 +32,6 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DISTRIBUTED_BACKEND,
     FSDPTest,
-    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -162,8 +161,13 @@ class KDAStyleTransformer(Transformer):
         return (self.output_norm(output) * decay).flatten(-2).clone()
 
 
-class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
-    world_size = min(4, torch.get_device_module(device_type).device_count())
+# fully_shard(reshard_after_forward=<int>) builds a new post-forward mesh on every
+# call, and every mesh's NCCL communicators hold /dev/shm until the workers exit,
+# so run each test in fresh processes.
+class TestFullyShardMixedPrecisionTraining(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.get_device_module(device_type).device_count())
 
     def _init_models_and_optims(
         self,
