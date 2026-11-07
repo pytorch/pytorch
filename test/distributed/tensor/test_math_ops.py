@@ -843,6 +843,34 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
+    def test_vector_norm_low_precision(self):
+        # A shard norm of 256 squares past the fp16 max of 65504.
+        device_mesh = self.build_device_mesh()
+        n = 2 * self.world_size
+        for dtype in (torch.float16, torch.bfloat16):
+            for grad in (
+                torch.tensor([256.0] + [0.0] * (n - 1), dtype=dtype),
+                torch.full((n,), 200.0, dtype=dtype),
+            ):
+                out = torch.linalg.vector_norm(grad)
+                sharded_out = torch.linalg.vector_norm(
+                    distribute_tensor(grad, device_mesh, [Shard(0)])
+                )
+                self.assertEqual(sharded_out.dtype, dtype)
+                self.assertEqual(sharded_out.full_tensor(), out)
+
+                # clip_grad_norm_ must clip like one device, not zero the grad.
+                ref = torch.nn.Parameter(torch.zeros_like(grad))
+                ref.grad = grad.clone()
+                torch.nn.utils.clip_grad_norm_([ref], max_norm=1.0)
+                param = torch.nn.Parameter(
+                    distribute_tensor(torch.zeros_like(grad), device_mesh, [Shard(0)])
+                )
+                param.grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+                torch.nn.utils.clip_grad_norm_([param], max_norm=1.0)
+                self.assertEqual(param.grad.full_tensor(), ref.grad)
+
+    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
