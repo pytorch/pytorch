@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     OpDTypes,
     onlyAccelerator,
+    skipMPS,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -445,6 +446,24 @@ class TestRefs(TestCase):
     def test_linspace_with_complex_input(self, device):
         actual = refs.linspace(2, 10 + 5j, steps=5, device=device)
         expect = torch.linspace(2, 10 + 5j, steps=5, device=device)
+        self.assertEqual(actual, expect)
+
+    # From https://github.com/pytorch/pytorch/issues/203184
+    @skipMPS  # complex128 unsupported
+    @parametrize("steps", [1, 5])
+    @parametrize("dtype", [None, torch.complex128])
+    def test_linspace_with_complex_tensor_input(self, device, steps, dtype):
+        start = torch.tensor(1.0 + 2.0j, dtype=torch.complex128, device=device)
+        actual = refs.linspace(start, 0.0, steps=steps, device=device, dtype=dtype)
+        expect = torch.linspace(start, 0.0, steps=steps, device=device, dtype=dtype)
+        self.assertEqual(actual, expect)
+
+    @skipMPS  # complex128 unsupported
+    def test_linspace_with_mixed_complex_tensor_endpoints(self, device):
+        start = torch.tensor(3.0 - 1.0j, dtype=torch.complex64, device=device)
+        end = torch.tensor(1.0 + 2.0j, dtype=torch.complex128, device=device)
+        actual = refs.linspace(start, end, steps=4, device=device)
+        expect = torch.linspace(start, end, steps=4, device=device)
         self.assertEqual(actual, expect)
 
     # From https://github.com/pytorch/pytorch/issues/109558
