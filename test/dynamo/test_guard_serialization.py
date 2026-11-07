@@ -7,6 +7,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import gc
 import io
 import itertools
 import math
@@ -1644,6 +1645,13 @@ class _ODictSlotsState(_ODictSubclass):
         return {"saved": self.saved}, {"slot": self.slot}
 
 
+class _ODictViewOwner(collections.OrderedDict):
+    __slots__ = ("slot",)
+
+    def keys(self):
+        raise AssertionError("View reconstruction must use the builtin descriptor")
+
+
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1656,6 +1664,36 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         objects = {id(obj): obj for obj in tracked}
         GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
         return load_guards_state(buf.getvalue())
+
+    @parametrize("mapping_type", [collections.OrderedDict, _ODictViewOwner])
+    @parametrize("ordered_view", [False, True])
+    @parametrize("view_first", [False, True])
+    @parametrize("empty", [False, True])
+    def test_dictionary_keys_roundtrip_preserves_owner(
+        self, mapping_type, ordered_view, view_first, empty
+    ):
+        owner = mapping_type() if empty else mapping_type(a=1, b=2)
+        if not empty:
+            owner.move_to_end("a")
+        owner.label = "saved"
+        if mapping_type is _ODictViewOwner:
+            owner.slot = 7
+        view = collections.OrderedDict.keys(owner) if ordered_view else dict.keys(owner)
+        owner.saved = view
+        value = (view, owner, vars(owner)) if view_first else (owner, view, vars(owner))
+        loaded = self._roundtrip_ordered_dict(value, owner, view, vars(owner))
+        loaded_view, loaded_owner = loaded[:2] if view_first else (loaded[1], loaded[0])
+        self.assertIs(type(loaded_view), type(view))
+        self.assertIs(type(loaded_owner), mapping_type)
+        self.assertIs(gc.get_referents(loaded_view)[0], loaded_owner)
+        self.assertIs(vars(loaded_owner), loaded[2])
+        self.assertIs(loaded_owner.saved, loaded_view)
+        self.assertEqual(list(loaded_view), list(view))
+        self.assertEqual(list(dict.items(loaded_owner)), list(dict.items(owner)))
+        self.assertEqual(list(loaded_owner), list(owner))
+        self.assertEqual(loaded_owner.label, "saved")
+        if mapping_type is _ODictViewOwner:
+            self.assertEqual(loaded_owner.slot, 7)
 
     @parametrize(
         "state",
@@ -1682,9 +1720,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             return
         loaded, saved = self._roundtrip_ordered_dict((mapping, state), mapping, state)
         self.assertEqual(vars(loaded), vars(expected))
-        self.assertEqual(tuple(saved), tuple(state)) if isinstance(
-            state, _ODictTupleState
-        ) else self.assertEqual(saved, state)
+        if isinstance(state, _ODictTupleState):
+            self.assertIs(type(saved), _ODictTupleState)
+            self.assertEqual(tuple(iter(saved)), tuple(iter(state)))
+        else:
+            self.assertEqual(saved, state)
         if type(state) is dict:
             self.assertIsNot(vars(loaded), saved)
 
@@ -3806,71 +3846,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    def test_tensor_match_current_device(self):
-        # The relative-device decision must survive a load on a rank whose current
-        # device differs from the saving one. The derivation ignores the saved
-        # tensor's index -- the one piece of the artifact that is rank-specific --
-        # and reads compile_on_one_rank off the saved graph state rather than the
-        # loading process's config, so the guard that is rebuilt is the one that
-        # was saved.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        with torch.cuda.device(0):
-            ref, _ = self._test_serialization(
-                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-            )
-
-        with mock.patch("torch.accelerator.current_device_index", return_value=1):
-            state = load_guards_state(self._cached_guards_state)
-            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
-
-        self.assertIn("device=current", "\n".join(loaded.code_parts))
-
-        with torch.cuda.device(0):
-            inputs = {"x": torch.randn(4, device="cuda:0")}
-            self._test_check_fn(ref, loaded, inputs, True)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_tensor_match_current_device_survives_config_change_on_load(self):
-        # Whether the index is pinned or relative belongs to the saved guard, not to
-        # the loading process. Rebuilding from the loader's own compile_on_one_rank
-        # would flip the guard either way: a relaxed one reloaded without CooR would
-        # be rebuilt pinned and reject the device it was saved to accept, and a
-        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
-        # was saved to reject.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        for saved_with_coor in (True, False):
-            with (
-                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
-                torch.cuda.device(0),
-            ):
-                torch._dynamo.reset()
-                self._test_serialization(
-                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-                )
-                saved_state = self._cached_guards_state
-                saved_code = self._cached_f_code
-
-            # Load under the opposite setting.
-            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
-                state = load_guards_state(saved_state)
-                loaded = load_guard_manager(state, saved_code, f.__globals__)
-
-            code = "\n".join(loaded.code_parts)
-            if saved_with_coor:
-                self.assertIn("device=current", code)
-            else:
-                self.assertNotIn("device=current", code)
-
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -3953,11 +3928,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
 
         # Check verbose_code_parts from leaf guards (they include hints)
+        checked = 0
+
         def check_leaf_guards(mgr):
+            nonlocal checked
             for guard in mgr.get_leaf_guards():
                 verbose_parts = guard.verbose_code_parts()
                 verbose_str = " ".join(verbose_parts)
-                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                if "___check_type_id(L['m']," in verbose_str:
+                    checked += 1
                     self.assertIn(
                         "HINT: type",
                         verbose_str,
@@ -3984,6 +3963,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
+        self.assertGreater(checked, 0)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -4585,6 +4565,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # which is stage, whole.
         ref, loaded = self._test_serialization(
             ("EQUALS_MATCH", "CONSTANT_MATCH"), fn, *inputs([4, 4]).values()
+        )
+        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
+        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+
+    def test_implicit_dictionary_bystander_keeps_shared_tensor_subclass_metadata(self):
+        def fn(module, x):
+            return x + len(tuple(module.mapping)) + hasattr(module, "mapping")
+
+        def inputs(blocks):
+            module = torch.nn.Module()
+            module.mapping = {"unused": blocks}
+            x = SubclassWithMeta(torch.ones(3), extra=blocks)
+            return {"module": module, "x": x}
+
+        ref, loaded = self._test_serialization(
+            ("HASATTR", "TENSOR_SUBCLASS_METADATA_MATCH", "TENSOR_MATCH"),
+            fn,
+            *inputs([4, 4]).values(),
         )
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
@@ -6187,6 +6185,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
             dist.destroy_process_group()
             tmpfile.close()
 
+    @parametrize("ordered_view", [False, True])
+    @parametrize("empty", [False, True])
+    def test_ordered_owner_keys_input_serialization(self, ordered_view, empty):
+        def fn(x, view, owner):
+            return x + owner.get("a", 0), tuple(view)
+
+        def inputs():
+            owner = (
+                collections.OrderedDict()
+                if empty
+                else collections.OrderedDict(a=1, b=2)
+            )
+            return {
+                "x": torch.ones(3),
+                "view": collections.OrderedDict.keys(owner)
+                if ordered_view
+                else dict.keys(owner),
+                "owner": owner,
+            }
+
+        ref, loaded = self._test_serialization(
+            (
+                "TYPE_MATCH",
+                "DICT_KEYS_MATCH",
+                "SEQUENCE_LENGTH",
+                "DUPLICATE_INPUT",
+                "ORDERED_DICT_ORDER_MATCH",
+            ),
+            fn,
+            *inputs().values(),
+        )
+        valid = inputs()
+        self._test_check_fn(ref, loaded, valid, True)
+        wrong_alias = {**valid, "owner": collections.OrderedDict(valid["owner"])}
+        self._test_check_fn(ref, loaded, wrong_alias, False)
+        if not empty:
+            valid["owner"].move_to_end("a")
+            self._test_check_fn(ref, loaded, valid, not ordered_view)
+            invalid = inputs()
+            invalid["owner"]["c"] = invalid["owner"].pop("b")
+            self._test_check_fn(ref, loaded, invalid, False)
+
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}
 
@@ -6498,6 +6538,76 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+@torch._dynamo.config.patch({"strict_precompile": True})
+class TestGuardSerializationCUDA(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
 
 
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):

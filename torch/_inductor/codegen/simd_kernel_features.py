@@ -204,7 +204,7 @@ class SIMDKernelFeatures:
 
     def get_mutations(self) -> OrderedSet[str]:
         mutations: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
         return mutations
