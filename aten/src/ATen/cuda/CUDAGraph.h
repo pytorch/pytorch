@@ -94,6 +94,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::vector<at::Tensor> get_rng_state_buffers() const;
   // Native callers must wait for pending replays before reset or destruction.
   void reset();
+  // C++ lifetime-owner teardown: all submitted work must be complete and the
+  // capture-owner stream must no longer be capturing. Legacy reset is unchanged.
+  void reset_after_replay_completion();
   MempoolId_t pool();
   std::vector<MempoolId_t> pools();
   void retain_pool(MempoolId_t pool);
@@ -112,6 +115,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
+  void reset_impl(bool replays_complete);
   friend struct at::CUDAGeneratorState;
 
   at::CUDAGeneratorCaptureState* get_generator_capture_state(
