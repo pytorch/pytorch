@@ -595,6 +595,12 @@ class TestUnaryUfuncs(TestCase):
         y.relu_()
         self.assertEqual(torch.signbit(y), exp)
 
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    def test_signbit_signed_nan(self, device, dtype):
+        x = torch.tensor([-nan, nan], device=device, dtype=dtype)
+        exp = torch.tensor([True, False], device=device)
+        self.assertEqual(torch.signbit(x), exp)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_clamp_signed_zero(self, device, dtype):
         x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)

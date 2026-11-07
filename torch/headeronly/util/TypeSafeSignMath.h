@@ -15,6 +15,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 namespace c10 {
 
+struct Half;
+struct BFloat16;
+
 /// Returns true if x < 0
 /// NOTE: Will fail on an unsigned custom type
 ///       For the most part it's possible to fix this if
@@ -111,6 +114,10 @@ C10_HOST_DEVICE inline bool _signbit(T x) {
 #else
     return std::signbit(x);
 #endif
+  } else if constexpr (
+      std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>) {
+    // Read the bit directly: device Half->float conversion canonicalizes NaN
+    return (x.x & 0x8000) != 0;
   } else {
     return _signbit(static_cast<float>(x));
   }
