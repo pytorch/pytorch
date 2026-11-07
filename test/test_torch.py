@@ -3976,11 +3976,8 @@ class TestTorchDeviceType(TestCase):
     # FIXME: port to test_scatter_gather_ops.py
     def scatter_allow_reduce(self, device, dtype, reduceop):
         device_type = torch.device(device).type
-        return device_type != 'cuda' or (reduceop == 'multiply' and dtype.is_floating_point)
+        return device_type == "cpu" or (reduceop == 'multiply' and dtype.is_floating_point)
 
-    # https://github.com/intel/torch-xpu-ops/issues/5376
-    @decorateIf(unittest.expectedFailure,
-                lambda params: torch.device(params["device"]).type == "xpu" and params["dtype"].is_complex)
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -4008,9 +4005,6 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
-    # https://github.com/intel/torch-xpu-ops/issues/5376
-    @decorateIf(unittest.expectedFailure,
-                lambda params: torch.device(params["device"]).type == "xpu" and params["dtype"].is_complex)
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -4050,9 +4044,6 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor([[3], [1]], device=device,
                                       dtype=torch.float32).repeat(1, width))
 
-    # https://github.com/intel/torch-xpu-ops/issues/5376
-    @decorateIf(unittest.expectedFailure,
-                lambda params: torch.device(params["device"]).type == "xpu" and params["dtype"].is_complex)
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
