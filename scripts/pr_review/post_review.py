@@ -26,9 +26,9 @@ Invariants:
   match is by position only, so the link says where, not that it is the same
   finding.
 - A `changes_requested` verdict is a COMMENT instead when a human approval
-  satisfies merge_rules.yaml for the PR's files (`binding_approvers`), and is
-  then cleared like a clean verdict. Anything that check cannot read leaves
-  the verdict blocking.
+  meets merge_rules.yaml's approval requirement for the PR's files
+  (`binding_approvers`), and is then cleared like a clean verdict. Anything
+  that check cannot read leaves the verdict blocking.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissals are a run retracting its own review because the
@@ -473,9 +473,9 @@ def _compose(
     if approved_by:
         names = ", ".join(f"`{login}`" for login in approved_by)
         lines += [
-            f"An approval from {names} satisfies merge_rules.yaml for these "
-            "files, so this review does not block merging. Please consider the "
-            "findings before you merge.",
+            f"An approval from {names} meets merge_rules.yaml's approval "
+            "requirement for these files, so this review does not block "
+            "merging. Please consider the findings before you merge.",
             "",
         ]
     elif verdict == "changes_requested":
@@ -1230,29 +1230,16 @@ def merge_rules() -> list:
     return [tm.MergeRule(**x) for x in yaml.safe_load(text)]
 
 
-def team_members(gh: GitHub, ref: str) -> set[str]:
-    """Members of an `org/team` approver, or none if GitHub will not list them
-    (the workflow token cannot read teams the org keeps private)."""
-    org, _, slug = ref.partition("/")
-    try:
-        return {
-            m["login"]
-            for m in gh.paged(f"/orgs/{org}/teams/{slug}/members?per_page=100")
-        }
-    except GitHubError as exc:
-        warn(f"could not list {ref}; its members' approvals do not count: {exc}")
-        return set()
-
-
-def binding_approvers(gh: GitHub, pr: int, rules=None) -> list[str]:
+def binding_approvers(gh: GitHub, pr: int) -> list[str]:
     """The human approvers mergebot would accept for this PR's files.
 
     trymerge.py's approval check without its CI checks: each reviewer's latest
     review that is not a comment counts, and an approval binds when one rule
-    covers every changed file and names the approver, directly or through a
-    team, or names no approvers at all. Logins match case-sensitively, as
-    there. Bots, by greenlight's test, are not human approvers. Any failure
-    yields none, so the review blocks as before.
+    covers every changed file and names the approver, or names no approvers
+    at all. Logins match case-sensitively, as there. Team approvers do not
+    count: the workflow token cannot list a team's members. Bots, by
+    greenlight's test, are not human approvers. Any failure yields none, so
+    the review blocks as before.
     """
     try:
         latest: dict[str, dict] = {}
@@ -1273,24 +1260,16 @@ def binding_approvers(gh: GitHub, pr: int, rules=None) -> list[str]:
         if not humans:
             return []
         unmatched = tm._find_non_matching_files
-        rules = merge_rules() if rules is None else rules
+        rules = merge_rules()
         files = [f["filename"] for f in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/files")]
         if not files:
             return []
-        teams: dict[str, set[str]] = {}
         for rule in rules:
             if unmatched(rule.patterns, files):
                 continue
             if not rule.approved_by:  # trymerge needs no approver for it
                 return sorted(humans)
-            accepted = set()
-            for ref in rule.approved_by:
-                if "/" not in ref:
-                    accepted.add(ref)
-                    continue
-                if ref not in teams:
-                    teams[ref] = team_members(gh, ref)
-                accepted |= teams[ref]
+            accepted = {ref for ref in rule.approved_by if "/" not in ref}
             if humans & accepted:
                 return sorted(humans & accepted)
         return []
@@ -1449,7 +1428,9 @@ def run(
             approved_by,
         )
     except GitHubError as exc:
-        if not clean:
+        # An approved PR's comment carried its findings; with it unposted,
+        # nothing may be withdrawn in its name.
+        if verdict != "ready_for_human_review":
             raise
         warn(f"automated review not posted: {exc}")
         # Without our review id, spare this commit's requests (overlapping run).
@@ -1481,7 +1462,8 @@ def clear_after_clean(
     older_than=None,
     reason=None,
 ) -> int:
-    """Dismiss earlier change requests after a clean verdict; 1 if any may remain.
+    """Dismiss earlier change requests after a clean or approved verdict; 1 if
+    any may remain.
 
     A COMMENT does not clear them, and after `ready for review` no later push
     is reviewed, so a leftover request fails the step, as does an API error.
@@ -1491,7 +1473,8 @@ def clear_after_clean(
     except GitHubError as exc:
         print(
             "::error::could not confirm that earlier automated change requests "
-            f"were withdrawn after a clean verdict; check the PR's reviews: {exc}"
+            "were withdrawn after a clean or approved verdict; check the PR's "
+            f"reviews: {exc}"
         )
         return 1
 
@@ -1520,7 +1503,7 @@ def _clear_after_clean(
     for r in left:
         print(
             f"::error::change request {r.get('html_url', r['id'])} still stands "
-            "after a clean verdict; dismiss it by hand"
+            "after a clean or approved verdict; dismiss it by hand"
         )
     return 1 if left else 0
 

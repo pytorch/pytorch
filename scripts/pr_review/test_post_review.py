@@ -7,7 +7,6 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import io
 import json
 import re
@@ -2149,20 +2148,9 @@ def approval(rid, login, state="APPROVED", type_="User"):
     }
 
 
-class Teams(FakeGitHub):
-    """Lists `org/core` as `members`, or refuses to when that is None."""
-
-    def __init__(self, members=("carol",), **kw):
+class Rules(FakeGitHub):
+    def __init__(self, **kw):
         super().__init__(files=[{"filename": "torch/x.py"}], **kw)
-        self.members = members
-
-    def request(self, method, path, body=None, idempotent=None):
-        if method == "GET" and path.startswith("/orgs/org/teams/core/members"):
-            self.calls.append((method, path, body))
-            if self.members is None:
-                raise GitHubError(403, "Resource not accessible by integration")
-            return [{"login": m} for m in self.members] if page(path) == 1 else []
-        return super().request(method, path, body)
 
 
 class TestAnApprovedPrGetsAComment(unittest.TestCase):
@@ -2172,8 +2160,13 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def event(self, *reviews, **kw):
-        gh = Teams(reviews=list(reviews), comments=[], **kw)
-        self.assertEqual(go(gh), 0)
+        gh = Rules(reviews=list(reviews), comments=[], **kw)
+        with mock.patch("post_review.warn") as warned:
+            self.assertEqual(go(gh), 0)
+        # A REQUEST_CHANGES must come from the check, not from it failing.
+        self.assertFalse(
+            [c for c in warned.call_args_list if "merge-rules" in c.args[0]]
+        )
         (body,) = gh.posted()
         return gh, body
 
@@ -2184,20 +2177,21 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         self.assertEqual(body["event"], "COMMENT")
         self.assertIn("posted as a comment because the PR is approved", body["body"])
         self.assertIn(
-            "An approval from `alice` satisfies merge_rules.yaml", body["body"]
+            "An approval from `alice` meets merge_rules.yaml's approval",
+            body["body"],
         )
         self.assertTrue(body["comments"], "findings still go on their lines")
         self.assertEqual(dismissed(gh), ["5"])
         (msg,) = [w[2]["message"] for w in gh.writes() if w[1].endswith("dismissals")]
         self.assertIn("approved under merge_rules.yaml", msg)
 
-    def test_an_approver_through_a_team_counts(self):
-        _, body = self.event(approval(6, "carol"))
-        self.assertEqual(body["event"], "COMMENT")
-
-    def test_a_team_github_will_not_list_counts_for_nobody(self):
-        _, body = self.event(approval(6, "carol"), members=None)
+    def test_a_team_approver_does_not_count(self):
+        with mock.patch(
+            "post_review.merge_rules", return_value=[Rule(["*"], ["org/core"])]
+        ):
+            gh, body = self.event(approval(6, "carol"))
         self.assertEqual(body["event"], "REQUEST_CHANGES")
+        self.assertFalse([c for c in gh.calls if "/teams/" in c[1]])
 
     def test_an_approver_no_rule_names_still_gets_a_request(self):
         _, body = self.event(approval(6, "mallory"))
@@ -2209,14 +2203,14 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_the_rule_must_cover_every_changed_file(self):
-        gh = Teams(reviews=[approval(6, "alice")], comments=[])
+        gh = Rules(reviews=[approval(6, "alice")], comments=[])
         gh.files.append({"filename": "docs/index.md"})
         go(gh)
         (body,) = gh.posted()
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_a_catch_all_rule_approver_covers_any_file(self):
-        gh = Teams(reviews=[approval(6, "root")], comments=[])
+        gh = Rules(reviews=[approval(6, "root")], comments=[])
         gh.files.append({"filename": "docs/index.md"})
         go(gh)
         (body,) = gh.posted()
@@ -2230,12 +2224,31 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
     def test_only_the_latest_non_comment_review_counts(self):
         _, body = self.event(approval(6, "alice"), approval(7, "alice", "COMMENTED"))
         self.assertEqual(body["event"], "COMMENT")
-        _, body = self.event(approval(6, "alice"), approval(7, "alice", "DISMISSED"))
-        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        _, body = self.event(
+            approval(6, "alice", "CHANGES_REQUESTED"), approval(7, "alice")
+        )
+        self.assertEqual(body["event"], "COMMENT")
         _, body = self.event(
             approval(6, "alice"), approval(7, "alice", "CHANGES_REQUESTED")
         )
         self.assertEqual(body["event"], "REQUEST_CHANGES")
+
+    def test_a_dismissed_approval_does_not_count(self):
+        _, body = self.event(approval(6, "alice", "DISMISSED"))
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+
+    def test_an_unposted_comment_withdraws_nothing(self):
+        class PostFails(Rules):
+            def request(self, method, path, body=None, idempotent=None):
+                if body and body.get("event"):
+                    raise GitHubError(500, "down")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = PostFails(reviews=[old, approval(6, "alice")], comments=[])
+        with self.assertRaises(GitHubError):
+            go(gh)
+        self.assertEqual(dismissed(gh), [])
 
     def test_a_bot_approval_is_not_a_human_one(self):
         _, body = self.event(approval(6, "alice", type_="Bot"))
@@ -2253,20 +2266,19 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_unreadable_rules_leave_the_request(self):
+        gh = Rules(reviews=[approval(6, "alice")], comments=[])
         with mock.patch("post_review.merge_rules", side_effect=OSError("missing")):
-            _, body = self.event(approval(6, "alice"))
+            go(gh)
+        (body,) = gh.posted()
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
     def test_a_clean_verdict_does_not_look_for_approvals(self):
-        gh = Teams(reviews=[approval(6, "alice")], comments=[])
+        gh = Rules(reviews=[approval(6, "alice")], comments=[])
         go(gh, row(verdict="ready_for_human_review", findings=[]))
         self.assertFalse([c for c in gh.calls if "/files" in c[1]])
 
 
 class TestTheRealMergeRules(unittest.TestCase):
-    @unittest.skipUnless(
-        importlib.util.find_spec("yaml"), "trymerge.py needs PyYAML, as in its job"
-    )
     def test_they_parse_as_trymerge_parses_them(self):
         rules = post_review.merge_rules()
         self.assertTrue(rules)
