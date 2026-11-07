@@ -1106,17 +1106,15 @@ The allocator knows nothing about NUMA, so placement depends on the setup:
   kernel can fall back to another node when the local one is full; `MPOL_BIND` does not.
 * `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
   the pages from a shared thread pool, which then decides where they go.
-* Blocks that a context allocates for its pool never come from the
-  `pinned_reserve_segment_size_mb` segment, which the first allocating thread placed for the
-  whole process.
-* Pinned allocations that a graph's own pool takes during capture, including a HostMemPool or
-  MemPool passed as `pool`, are placed like default-pool allocations (by the capturing thread,
-  or from the reserve segment).
-* On ROCm 7.2 and later, the blocks that a context allocates for its pool come from
-  `hipHostMalloc` with `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but
-  only `MPOL_BIND` and `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes
-  the pages from the node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that
-  touches the pages places them, as on CUDA.
+* A pool's new blocks never come from the `pinned_reserve_segment_size_mb` segment, which the
+  first allocating thread placed for the whole process. This includes the blocks allocated
+  during the capture of a graph whose `pool` is the pool; the capturing thread places them. A
+  MemPool counts as a pool here only from its first use with `pinned=True`.
+* On ROCm 7.2 and later, a pool's new blocks come from `hipHostMalloc` with
+  `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but only `MPOL_BIND` and
+  `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes the pages from the
+  node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that touches the pages
+  places them, as on CUDA.
 
 (cuda-memory-python-allocators)=
 ## Python-defined CUDA allocators
