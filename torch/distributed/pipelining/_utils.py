@@ -307,6 +307,13 @@ class _StageBackwardMeta:
     ]  # Stage i's input_grads → Stage i-1's output_grads
 
 
+# Transmitted between stages via send/recv_object_list (which deserialize
+# with weights_only=True by default).
+torch.serialization.add_safe_globals(
+    [_TensorMeta, _DTensorMeta, _StageForwardMeta, _StageBackwardMeta]
+)
+
+
 def _make_tensor_from_meta(
     meta: _TensorMeta,
     device: torch.device | str,

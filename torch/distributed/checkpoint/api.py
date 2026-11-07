@@ -1,10 +1,25 @@
+import builtins
 import traceback as tb
 from typing import Any
+
+import torch
 
 
 WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
 
 __all__ = ["CheckpointException"]
+
+
+def _exception_type_is_allowlisted(exc: BaseException) -> bool:
+    # An exception whose type has been registered via
+    # torch.serialization.add_safe_globals can be deserialized as-is under
+    # weights_only=True, so it need not be downcast in _wrap_exception below.
+    exc_type = type(exc)
+    for allowed in torch.serialization.get_safe_globals():
+        # get_safe_globals returns classes or (class, full_path_str) tuples.
+        if (allowed[0] if isinstance(allowed, tuple) else allowed) is exc_type:
+            return True
+    return False
 
 
 def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
@@ -16,6 +31,16 @@ def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
     for frame in summary:
         if hasattr(frame, "_code"):
             object.__setattr__(frame, "_code", None)
+    # DCP exchanges exceptions across ranks via object collectives with
+    # weights_only=True, which only deserializes allowlisted types. Downcast
+    # exception types that are neither builtins nor explicitly allowlisted to a
+    # plain Exception, preserving the original type name and message so the real
+    # error survives the exchange. Types registered via add_safe_globals are left
+    # intact so their attributes (e.g. error traits) round-trip.
+    if getattr(
+        builtins, type(exc).__name__, None
+    ) is not type(exc) and not _exception_type_is_allowlisted(exc):
+        exc = Exception(f"{type(exc).__qualname__}: {exc}")
     return (exc, summary)
 
 
@@ -48,3 +73,6 @@ class CheckpointException(BaseException):
                 str += "".join(tb.format_list(trace))
             str += "".join(tb.format_exception_only(type(exc), value=exc))
         return str
+
+
+torch.serialization.add_safe_globals([CheckpointException])
