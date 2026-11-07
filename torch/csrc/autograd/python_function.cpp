@@ -134,7 +134,23 @@ static PyObject* unpack_saved_variables(
     if (!unpacked_var.defined()) {
       value = Py_NewRef(Py_None);
     } else {
-      value = unpack_fn(unpacked_var);
+      if (GradMode::is_enabled() &&
+          i < self->saved_variable_is_intermediate.size() &&
+          self->saved_variable_is_intermediate[i] &&
+          isDifferentiableType(unpacked_var.scalar_type())) {
+        auto error_node = c10::make_intrusive<torch::autograd::Error>(
+            "A custom autograd Function saved an intermediate tensor for backward and "
+            "does not support double backward through that tensor. Either return the "
+            "intermediate as an output of the Function, or mark the Function "
+            "@once_differentiable if double backward is unsupported.",
+            edge_list(saved_for->next_edges()));
+        auto var = unpacked_var.detach();
+        create_gradient_edge(var, error_node);
+        fire_node_creation_hooks(error_node);
+        value = unpack_fn(var);
+      } else {
+        value = unpack_fn(unpacked_var);
+      }
     }
     PyTuple_SET_ITEM(saved.get(), i, value.release());
   }
@@ -370,6 +386,7 @@ auto PyNode::release_variables() -> void {
     auto* f = reinterpret_cast<THPFunction*>(pyobj());
     if (f) {
       f->saved_variables.clear();
+      f->saved_variable_is_intermediate.clear();
       f->has_freed_buffers = 1;
     }
   }
@@ -592,6 +609,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->output_info.~vector();
   self->input_info.~vector();
   self->saved_variables.~vector();
+  self->saved_variable_is_intermediate.~vector();
   self->is_variable_input.~vector();
   std::destroy_at(&self->needs_input_grad_bits);
   if (self->cdata) {
@@ -618,6 +636,7 @@ static PyObject* THPFunction_new(
   new (&self->output_info) std::vector<VariableInfo>();
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
+  new (&self->saved_variable_is_intermediate) std::vector<bool>();
   new (&self->is_variable_input) std::vector<bool>();
   new (&self->needs_input_grad_bits)
       std::optional<c10::SmallVector<bool, 24>>();
@@ -969,6 +988,7 @@ static void _get_tensors_to_save(
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     THPFunction* self,
+    at::ArrayRef<const Variable*> input_vars,
     PyObject* outputs,
     int64_t num_outputs) {
   if (tensors_to_save.empty())
@@ -976,6 +996,8 @@ static void _save_variables(
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
+  self->saved_variable_is_intermediate.clear();
+  self->saved_variable_is_intermediate.reserve(num_saved);
 
   std::unordered_set<at::TensorImpl*> output_impls{};
   output_impls.reserve(num_outputs);
@@ -987,13 +1009,25 @@ static void _save_variables(
     }
   }
 
+  std::unordered_set<at::TensorImpl*> input_impls{};
+  input_impls.reserve(input_vars.size());
+  for (const auto* var : input_vars) {
+    if (var && var->defined()) {
+      input_impls.insert(var->unsafeGetTensorImpl());
+    }
+  }
+
   for (const auto& opt_tensor : tensors_to_save) {
     if (!opt_tensor.has_value()) {
       self->saved_variables.emplace_back();
+      self->saved_variable_is_intermediate.push_back(false);
     } else {
-      bool is_output =
-          output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
+      auto* impl = opt_tensor.value().unsafeGetTensorImpl();
+      bool is_output = output_impls.count(impl) > 0;
+      bool is_input = input_impls.count(impl) > 0;
+      bool is_intermediate = !is_output && !is_input;
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
+      self->saved_variable_is_intermediate.push_back(is_intermediate);
     }
   }
 }
@@ -1321,7 +1355,12 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
+    _save_variables(
+        tensors_to_save,
+        grad_fn,
+        unpacked.input_vars,
+        outputs.get(),
+        num_outputs);
     // Fire only after saved variables are stored on the node.
     if (attached_node) {
       fire_node_creation_hooks(attached_node);
@@ -2043,6 +2082,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
 
     if (self->clear_saved_tensors_on_access) {
       self->saved_variables.clear();
+      self->saved_variable_is_intermediate.clear();
       self->saved_tensors_accessed_and_cleared = true;
     }
 
@@ -2073,6 +2113,7 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
 
   if (self->clear_saved_tensors_on_access) {
     self->saved_variables.clear();
+    self->saved_variable_is_intermediate.clear();
     self->saved_tensors_accessed_and_cleared = true;
   }
 
