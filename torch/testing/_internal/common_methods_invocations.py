@@ -5683,6 +5683,33 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
 
+def _flydsl_row_scatter_add_shapes():
+    # (M_dst, M_src, N): one partial-wave row, one multi-step row, and a
+    # 3D shape whose trailing dims coalesce into one row.
+    return ((64, 48, (128,)), (300, 200, (1024,)), (40, 32, (8, 64)))
+
+
+def sample_inputs_flydsl_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
+    # Unique destination rows keep every result a single rounding of dst + src,
+    # so comparisons do not depend on atomic order.
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    for m_dst, m_src, inner in _flydsl_row_scatter_add_shapes():
+        idx = torch.randperm(m_dst, device=device)[:m_src]
+        src = make_arg((m_src, *inner))
+        index = idx.view(m_src, *([1] * len(inner))).expand_as(src)
+        yield SampleInput(make_arg((m_dst, *inner)), args=(0, index, src))
+
+
+def sample_inputs_flydsl_index_add(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    for m_dst, m_src, inner in _flydsl_row_scatter_add_shapes():
+        for index_dtype in (torch.int64, torch.int32):
+            idx = torch.randperm(m_dst, device=device)[:m_src].to(index_dtype)
+            yield SampleInput(
+                make_arg((m_dst, *inner)), args=(0, idx, make_arg((m_src, *inner)))
+            )
+
+
 def _topk_deterministic(*args, **kwargs):
     prior = torch.are_deterministic_algorithms_enabled()
     try:
@@ -23205,6 +23232,61 @@ if "flydsl" in dsl_ops_by_dsl:
             variant_test_name="flydsl_optimized_deterministic",
             method_variant=_topk_method_deterministic,
             **_flydsl_topk_kwargs,
+        ),
+    ])
+
+    from torch._native.ops.scatter_add.flydsl_impl import (
+        _SUPPORTED_ARCHES as _flydsl_scatter_add_supported_arches,
+    )
+
+    # Row scatter-add override for scatter_add/index_add. The samples meet
+    # every layout condition but are far below the override's work floor
+    # (_MIN_SRC_BYTES), so they check its routing and the ATen fallback;
+    # test/python_native/test_scatter_add_flydsl.py lowers the floor to cover
+    # the kernel itself, duplicates, fall-through cases and backward.
+    _flydsl_row_scatter_add_kwargs = dict(
+        dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+        dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+        # Backward uses ATen's derivatives; keep it so variant/backward checks
+        # run on the eligible samples. Forward AD is not exercised here.
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        decorators=[
+            DecorateInfo(onlyCUDA),
+            DecorateInfo(skipIfNoFlyDSL),
+            DecorateInfo(
+                skipCUDAIf(
+                    not (
+                        torch.cuda.is_available()
+                        and _flydsl_utils._is_supported_arch(
+                            torch.cuda.current_device(),
+                            _flydsl_scatter_add_supported_arches,
+                        )
+                    ),
+                    "flydsl scatter_add override requires gfx942/gfx950",
+                )
+            ),
+        ],
+        skips=(
+            # The override is narrower than ATen; other dtypes fall through and
+            # look supported to the probe. XPASS means the sets can be reconciled.
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
+        ),
+    )
+    dsl_ops_by_dsl["flydsl"].extend([
+        OpInfo(
+            "scatter_add",
+            variant_test_name="flydsl",
+            inplace_variant=torch.Tensor.scatter_add_,
+            sample_inputs_func=sample_inputs_flydsl_scatter_add,
+            **_flydsl_row_scatter_add_kwargs,
+        ),
+        OpInfo(
+            "index_add",
+            variant_test_name="flydsl",
+            inplace_variant=torch.Tensor.index_add_,
+            sample_inputs_func=sample_inputs_flydsl_index_add,
+            **_flydsl_row_scatter_add_kwargs,
         ),
     ])
 
