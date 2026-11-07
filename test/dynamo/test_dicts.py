@@ -4375,6 +4375,103 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(value, x + 1)
         self.assertEqual(counter.frame_count, 1)
 
+    @parametrize("operation", ["attribute", "dict", "pop"])
+    @parametrize("first_present", [False, True])
+    @parametrize("kind", ["object", "exception", "function", "staticmethod", "module"])
+    def test_instance_dict_deletion_guards_membership(
+        self, operation, first_present, kind
+    ):
+        class Object:
+            pass
+
+        def make_object():
+            def f():
+                pass
+
+            if kind == "object":
+                return Object()
+            if kind == "exception":
+                return RuntimeError("test")
+            if kind == "function":
+                return f
+            if kind == "staticmethod":
+                return staticmethod(f)
+            return torch.nn.Module()
+
+        def fn(obj, x):
+            try:
+                if operation == "dict":
+                    del obj.__dict__["tag"]
+                elif operation == "pop":
+                    obj.__dict__.pop("tag")
+                else:
+                    del obj.tag
+            except AttributeError:
+                return x - 1
+            except KeyError:
+                return x - 2
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        eager_obj, compiled_obj = make_object(), make_object()
+        x = torch.zeros(1)
+        for present in (first_present, first_present, not first_present, False, True):
+            if present:
+                eager_obj.tag = compiled_obj.tag = 1
+            self.assertEqual(compiled(compiled_obj, x), fn(eager_obj, x))
+            self.assertNotIn("tag", compiled_obj.__dict__)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("operation", ["attribute", "dict", "pop"])
+    @parametrize("mutation", ["same_key", "other_key", "new_dict", "input_dict"])
+    def test_instance_dict_deletion_after_mutation(self, operation, mutation):
+        class Object:
+            pass
+
+        def fn(obj, replacement, x):
+            if mutation == "same_key":
+                obj.tag = 1
+            elif mutation == "other_key":
+                obj.other = 1
+            elif mutation == "new_dict":
+                obj.__dict__ = {"tag": 1}
+            else:
+                obj.__dict__ = replacement
+            try:
+                if operation == "dict":
+                    del obj.__dict__["tag"]
+                elif operation == "pop":
+                    obj.__dict__.pop("tag")
+                else:
+                    del obj.tag
+            except AttributeError:
+                return x - 1
+            except KeyError:
+                return x - 2
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        for present, replacement_present in (
+            (True, True),
+            (False, False),
+            (True, False),
+            (False, True),
+            (False, True),
+        ):
+            eager_obj, compiled_obj = Object(), Object()
+            if present:
+                eager_obj.tag = compiled_obj.tag = 1
+            replacement = {"tag": 1} if replacement_present else {}
+            expected = fn(eager_obj, replacement.copy(), x)
+            self.assertEqual(compiled(compiled_obj, replacement, x), expected)
+            self.assertEqual(compiled_obj.__dict__, eager_obj.__dict__)
+            if mutation == "input_dict":
+                self.assertIs(compiled_obj.__dict__, replacement)
+        self.assertGreater(counter.frame_count, 0)
+
     @parametrize("dict_delete", [False, True])
     def test_instance_dict_missing_deletion_is_observed(self, dict_delete):
         class Object:
@@ -5154,6 +5251,25 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
                 eager_obj.tag = compiled_obj.tag = 0
             self.assertEqual(compiled(compiled_obj, x), fn(eager_obj, x))
         self.assertEqual(counter.frame_count, 2)
+
+    def test_constant_replacement_dict_deletion(self):
+        class Object:
+            pass
+
+        @torch._dynamo.assume_constant_result
+        def replacement():
+            return {"tag": 1}
+
+        def fn(obj, x):
+            obj.__dict__ = replacement()
+            del obj.tag
+            return x + 1
+
+        x = torch.zeros(1)
+        obj = Object()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(obj, x), fn(Object(), x))
+        self.assertEqual(obj.__dict__, {})
 
     def test_constant_object_dict_membership(self):
         class Object:

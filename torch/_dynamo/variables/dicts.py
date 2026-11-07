@@ -707,6 +707,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # attribute mutation (which may be forbidden inside a HOP).
         is_proxy = isinstance(self.items, SideEffectsProxyDict)
         if is_proxy:
+            self.install_dict_keys_match_guard()
             value = self.items.get(key)
         else:
             try:
@@ -1781,6 +1782,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
                 vt, "__dict__", mutation_kind=AttrMutationKind.GENERIC_SETATTR
             )
             if isinstance(dict_vt, ConstDictVariable):
+                if dict_vt.source and not is_constant_source(dict_vt.source):
+                    dict_vt.install_dict_keys_match_guard()
                 result = {}
                 for key, value in dict_vt.items.items():
                     try:
@@ -1983,6 +1986,7 @@ class DunderDictVariable(ConstDictVariable):
         return self.items[name]
 
     def contains(self, name: str) -> bool:
+        self.install_dict_keys_match_guard()
         return name in self.items
 
     def getitem_or_default(

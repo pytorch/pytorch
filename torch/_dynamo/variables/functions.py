@@ -536,7 +536,12 @@ class BaseUserFunctionVariable(VariableTracker):
                     owner, tx, args[1] if name == "__setattr__" else None
                 )
                 return out if out is not None else ConstantVariable.create(None)
-            return self.get_dict_vt(tx).call_method(
+            dict_vt = self.get_dict_vt(tx)
+            if name == "__delattr__" and not dict_vt.contains(attr):
+                raise_attribute_error(
+                    tx, f"'{self.python_type_name()}' object has no attribute '{attr}'"
+                )
+            return dict_vt.call_method(
                 tx,
                 "__setitem__" if name == "__setattr__" else "__delitem__",
                 list(args),
