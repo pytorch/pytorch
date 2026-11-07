@@ -846,6 +846,7 @@ test_inductor_core() {
               inductor/test_cpu_select_algorithm \
               inductor/test_torchinductor_dynamic_shapes \
               inductor/test_torchinductor \
+              inductor/test_torchinductor_avoid_modular_indexing \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
               inductor/test_max_autotune_blackwell \
