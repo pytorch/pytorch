@@ -2109,6 +2109,9 @@ class TensorVariable(VariableTracker):
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for tensors (size along first dimension)."""
+        # Mirror eager Tensor.__len__: a 0-d tensor has no first dimension.
+        if self.ndim == 0:
+            raise_observed_exception(TypeError, tx, args=["len() of a 0-d tensor"])
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
