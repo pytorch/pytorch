@@ -1262,6 +1262,43 @@ user_stack=None)
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
 
+    def _check_metaclass_hook_not_called(self, hook):
+        # Instance attribute lookup reads the class's own tp_dict/tp_mro. A
+        # metaclass __dict__/__mro__ property must not run while Dynamo builds
+        # or evaluates the resulting guards.
+        from torch._dynamo.testing import CompileCounter
+
+        def raiser(cls):
+            raise RuntimeError(f"metaclass {hook} must not run")
+
+        meta = type("Meta", (type,), {hook: property(raiser)})
+
+        def run():
+            k = 1
+
+            class Helper(metaclass=meta):
+                def method(self):
+                    return k
+
+            def fn(x, h):
+                return x + h.method()
+
+            x, h = torch.tensor(0), Helper()
+            ref = fn(x, h)
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(opt_fn(x, h), ref)
+            self.assertEqual(opt_fn(x, h), ref)
+            self.assertEqual(cnt.frame_count, 1)
+
+        run()
+
+    def test_metaclass_dict_hook_not_called(self):
+        self._check_metaclass_hook_not_called("__dict__")
+
+    def test_metaclass_mro_hook_not_called(self):
+        self._check_metaclass_hook_not_called("__mro__")
+
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
