@@ -1,18 +1,19 @@
 # Owner(s): ["module: inductor"]
 import unittest
 
+import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_JETSON,
     IS_MACOS,
     skipIfWindows,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
-from torch.utils._triton import get_triton_version
+from torch.utils._triton import get_triton_version, has_triton
 
 
 skipIfRocmWithoutDebugAsserts = unittest.skipIf(
@@ -37,6 +38,10 @@ inner(torch.randn(2, 2).to("{device}"))
         # These must isolate because they crash the process
         self._run_full_test(run_code, "aot", expected_error, isolate=True)
 
+
+class MinifierIsolateTestsForCPU(MinifierIsolateTests):
+    hw_classification = HardwareClassification.CPU
+
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error")
     @skipIfWindows(
@@ -45,18 +50,27 @@ inner(torch.randn(2, 2).to("{device}"))
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", "")
 
+
+class MinifierIsolateTestsAccelerator(MinifierIsolateTests):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfRocmWithoutDebugAsserts
-    @requires_gpu
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
-    def test_after_aot_gpu_runtime_error(self):
+    def test_after_aot_gpu_runtime_error(self, device):
         # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
         # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
         expected_error = (
             "injected assert fail"
-            if GPU_TYPE == "xpu" or TEST_WITH_ROCM
+            if self.device_type == "xpu" or TEST_WITH_ROCM
             else "device-side assert"
         )
-        self._test_after_aot_runtime_error(GPU_TYPE, expected_error)
+        self._test_after_aot_runtime_error(device, expected_error)
+
+
+instantiate_device_type_tests(
+    MinifierIsolateTestsAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
