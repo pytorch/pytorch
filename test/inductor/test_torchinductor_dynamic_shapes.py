@@ -79,6 +79,8 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
+    # Same wrong argmax/argmin indices on ties as the test above
+    "test_max_min_bool_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),

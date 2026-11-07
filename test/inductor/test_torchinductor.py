@@ -14622,8 +14622,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
-        if self.device != "cuda" and not is_cpp_backend(self.device):
-            raise unittest.SkipTest("only tested on CUDA and the C++ CPU backend")
+        if (
+            self.device != "cuda"
+            and not is_mps_backend(self.device)
+            and not is_cpp_backend(self.device)
+        ):
+            raise unittest.SkipTest("only tested on CUDA, MPS and the C++ CPU backend")
 
         def fn(x):
             return (
