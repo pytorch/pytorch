@@ -59,7 +59,7 @@ void upsample_bilinear2d_out_frame(
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
     std::memcpy(
         o_p,
         i_p,
