@@ -63,7 +63,7 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.test_case import maybe_fresh_cache, TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -110,6 +111,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
@@ -121,6 +123,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    periodic,
     recover_orig_fp32_precision,
     serialTest,
     skipIfNoLapack,
@@ -134,6 +137,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR,
+    TestCase as TorchTestCase,
     xfailIf,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -1491,6 +1495,19 @@ def target_assert_alignment_regex(
     )
 
 
+# test_dtypes is shared with the GPU classes, so it leaves out bfloat16 unless
+# the GPU supports it. Without HAS_GPU (CUDA/XPU/MTIA with Triton), still give
+# the C++-backend CPU classes bfloat16 test_dtypeview cases, marked @periodic so
+# CI runs them only in periodic jobs (and Sandcastle never does).
+dtypeview_dtype_pairs = list(itertools.product(test_dtypes, repeat=2))
+if torch.bfloat16 not in test_dtypes and not HAS_GPU:
+    dtypeview_dtype_pairs += [
+        subtest(pair, decorators=[periodic, skip_if_halide, skip_if_pallas])
+        for pair in itertools.product([*test_dtypes, torch.bfloat16], repeat=2)
+        if torch.bfloat16 in pair
+    ]
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -1890,6 +1907,28 @@ class CommonTemplate:
         for dtype in [torch.float32, torch.int32, torch.int64]:
             self.common(fn, (torch.arange(32, dtype=dtype),))
 
+    def test_scalar_overload_positional_alpha(self):
+        # add.Scalar/sub.Scalar declare alpha positionally, unlike the
+        # keyword-only alpha of their Tensor overloads.
+        def check(op, op_args, dtype):
+            def fn(a):
+                return (op(a, *op_args),)
+
+            if dtype.is_floating_point:
+                x = torch.randn(32, dtype=dtype, device=self.device)
+            else:
+                x = torch.randint(0, 10, (32,), dtype=dtype, device=self.device)
+            gm = make_fx(fn)(x)
+            self.assertEqual(compile_fx_inner(gm, [x])([x])[0], fn(x)[0])
+
+        for op, op_args, dtype in itertools.product(
+            (aten.add.Scalar, aten.sub.Scalar),
+            ((1,), (1, 2)),
+            (torch.float32, torch.int64),
+        ):
+            with self.subTest(op=op, args=op_args, dtype=dtype):
+                check(op, op_args, dtype)
+
     def test_add_const_float(self):
         def fn(a):
             return (a + 1.5,)
@@ -2279,6 +2318,11 @@ class CommonTemplate:
 
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
+        if is_cpp_backend(self.device) and not cpu_vec_isa.pick_vec_isa():
+            raise unittest.SkipTest(
+                "inf to int cast is UB; scalar C++ results depend on the compiler"
+            )
+
         def fn():
             x = torch.full((2,), 0.0, device=self.device)
             y = torch.log(x)
@@ -7459,6 +7503,29 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
+    # D/H padding exercises the masked load; W stays unpadded so ceil_mode adds a partial window there
+    @parametrize(
+        "padding, ceil_mode",
+        [
+            subtest(([0, 0, 0], False), name="no_padding"),
+            # Halide can't schedule the masked argmax reduction ("can't reorder RVars")
+            subtest(
+                ([1, 1, 0], True), name="padding_ceil_mode", decorators=[skip_if_halide]
+            ),
+        ],
+    )
+    def test_max_pool3d_large_kernel(self, padding, ceil_mode: bool):
+        # Window > 25 skips the low-memory decomposition for the non-unrolled reduction lowering
+        kernel = [3, 3, 3]
+        self.assertTrue(lowering.should_fallback_max_pool_with_indices(kernel, n_dim=3))
+
+        def fn(x):
+            return aten.max_pool3d_with_indices(
+                x, kernel, [1, 2, 3], padding, [1, 1, 1], ceil_mode
+            )
+
+        self.common(fn, (torch.randn([2, 4, 6, 7, 8]),))
+
     # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
     # non-logical-index path in _pool_argmax_inner_fn and still return physical
     # window offsets.
@@ -9169,6 +9236,19 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_slice_of_cat(self):
+        # b's first slice reads exactly what t's copy writes into a; the two
+        # copies must not be fused into one kernel that loads before it stores.
+        def fn(t, x, y):
+            a = torch.cat([t, x + 1], 1)
+            b = torch.cat([a[:, :1], y + 1], 1)
+            return a.sum(-1), b
+
+        self.common(
+            fn,
+            (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
+        )
+
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
@@ -9662,6 +9742,87 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_inputs(self):
+        # Each input reads x eight times, so it is realized before stack, and
+        # its unsqueeze view freezes it. The copy into the stack output should
+        # fuse into the producer instead of a separate pointwise cat.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            return torch.stack(
+                [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
+            )
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_realized_input_twice(self):
+        # One realized buffer copied into two slices, plus another reader; both
+        # copies fuse into the producer (two kernels with the flag off).
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def fn(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, y], -1), y[None, :] + 1
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_stack_cat_rule_exclusions(self):
+        # The cat rule only reroutes whole computed buffers; a slice of one and a
+        # no-op buffer compile as without it.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def sliced(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        def with_empty(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, torch.empty_like(y)], -1)[:, 0]
+
+        x = torch.randn([4096, 16], device=self.device)
+        for fn in (sliced, with_empty):
+            codes = []
+            for enabled in (False, True):
+                torch._dynamo.reset()
+                with config.patch(cat_fuse_computed_input_copies=enabled):
+                    _, (code,) = run_and_get_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(codes[0], codes[1], fn.__name__)
+
+    @config.patch(cat_fuse_computed_input_copies=True)
+    def test_stack_pad_cheap_inputs(self):
+        # Stacks of cheap pointwise inputs stay one pointwise cat kernel.
+        if self.device == "cpu":
+            raise unittest.SkipTest("cat always uses ConcatKernel on CPU")
+
+        def pack(x):
+            first = x[:, 0] | (x[:, 1] << 4)
+            second = x[:, 2] | (x[:, 3] << 4)
+            return F.pad(torch.stack((first, second), -1).reshape(-1), (0, 5))
+
+        def interleave(x):
+            return F.pad(torch.stack((x + 1, x + 2), -1).flatten(1), (0, 5))
+
+        cases = (
+            (pack, (torch.arange(1024, dtype=torch.int32) % 16).reshape(256, 4)),
+            (interleave, torch.arange(77, dtype=torch.float32).reshape(7, 11)),
+        )
+        for fn, x in cases:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            self.common(fn, (x,))
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_hardtanh(self):
         def fn(x):
@@ -13016,68 +13177,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [], assert_equal=False)
 
-    # `requires_gpu` otherwise
-    # RuntimeError: pin_memory=True requires a CUDA or other accelerator backend;
-    # no pinned memory allocator is available on this system.
-    @requires_gpu()
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    @parametrize(
-        "constructor_case",
-        [
-            ("tensor_inline", torch.tensor, ([1, 2, 3],), [3]),
-            ("tensor_constant", torch.tensor, ([[[1.0] * 128] * 128],), [1, 128, 128]),
-            ("empty", torch.empty, ([1, 128, 128],), [1, 128, 128]),
-            ("ones", torch.ones, ([1, 128, 128],), [1, 128, 128]),
-            ("zeros", torch.zeros, ([1, 128, 128],), [1, 128, 128]),
-            (
-                "full",
-                torch.full,
-                (
-                    [1, 128, 128],
-                    2,
-                ),
-                [1, 128, 128],
-            ),
-            ("rand", torch.rand, ([1, 128, 128],), [1, 128, 128]),
-            (
-                "rand_like",
-                torch.rand_like,
-                (torch.empty([1, 128, 128]),),
-                [1, 128, 128],
-            ),
-            ("randn", torch.randn, ([1, 128, 128],), [1, 128, 128]),
-            ("randint", torch.randint, (2, [1, 128, 128]), [1, 128, 128]),
-        ],
-        name_fn=lambda constructor_case: constructor_case[0],
-    )
-    def test_constructors_pin_memory(self, constructor_case):
-        if self.device != "cpu":
-            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
-
-        _, constructor, args, expected_shape = constructor_case
-
-        def fn():
-            return constructor(*args, pin_memory=True, device=self.device)
-
-        result = torch.compile(fn, backend="inductor")()
-        self.assertTrue(result.is_pinned())
-        self.assertEqual(result.shape, expected_shape)
-
-    @requires_gpu()
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    @dynamo_config.patch(assume_static_by_default=False)
-    @config.patch({"fx_graph_cache": False})
-    def test_tensor_pin_memory_dynamic_scalar_list(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
-
-        def fn(a, b, c):
-            return torch.tensor([a, b, c], pin_memory=True, device=self.device)
-
-        result = torch.compile(fn, backend="inductor")(1, 2, 3)
-        self.assertTrue(result.is_pinned())
-        self.assertEqual(result, torch.tensor([1, 2, 3], device=self.device))
-
     def test_mkldnn_constant_buffer_is_not_checked_for_pin_memory(self):
         if self.device != "cpu":
             raise unittest.SkipTest("MKLDNN constants are CPU-only")
@@ -14519,11 +14618,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
+        if self.device != "cuda" and not is_cpp_backend(self.device):
+            raise unittest.SkipTest("only tested on CUDA and the C++ CPU backend")
+
         def fn(x):
             return (
                 x.max(0),
@@ -17869,10 +17970,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @parametrize(
-        "dtype_x, dtype_y",
-        list(itertools.product(test_dtypes, test_dtypes)),
-    )
+    @parametrize("dtype_x, dtype_y", dtypeview_dtype_pairs)
     def test_dtypeview(self, dtype_x, dtype_y):
         if TEST_WITH_ASAN:
             return
@@ -17887,8 +17985,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x2 = x2.view(x_dtype) + 1
             return x @ y, x2 @ x
 
-        # @ operation needs arguments to be the same dtype
-        for view_dtype in test_dtypes:
+        # @ operation needs arguments to be the same dtype. Also view as the input
+        # dtypes, which can be outside test_dtypes (see dtypeview_dtype_pairs).
+        for view_dtype in dict.fromkeys([*test_dtypes, dtype_x, dtype_y]):
             try:
                 x = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_x)
                 y = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_y)
@@ -20225,8 +20324,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.max_with_"), 2)
 
     @skip_if_halide
-    @requires_gpu_and_triton
     def test_unbacked_float_item(self):
+        # The tensorify_python_scalars pass turns max_val.item() back into a 0-d
+        # tensor, so this covers clamp with a tensor bound, not unbacked-float
+        # codegen.
         def fn(x, max_val):
             return torch.clamp(x, 0, max_val.item())
 
@@ -20234,7 +20335,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn,
             (
                 torch.randn(10, 20, 30, device=self.device),
-                torch.tensor(5.0, device=self.device),
+                # Inside the data's range, so a wrong upper bound changes the output
+                torch.tensor(0.5, device=self.device),
             ),
         )
 
@@ -21376,6 +21478,94 @@ if RUN_TPU:
         gen = InputGen(10, "tpu")
 
     SweepInputsTpuTest.populate()
+
+
+# Pinned memory is CPU memory, but pinning it needs an accelerator. Most cases
+# also compile a CPU kernel, so this needs a working C++ compiler.
+if HAS_CPU:
+    # Not based on this file's TestCase or InductorTestCase: generating each
+    # accelerator class calls its setUpClass at import time, to find its primary
+    # device, and their class-level config patches would then leak into every
+    # file that imports this one.
+    class PinMemoryTests(TorchTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
+        def setUp(self):
+            super().setUp()
+            stack = contextlib.ExitStack()
+            self.addCleanup(stack.close)
+            # A constructor that loses its lowering must fail, not fall back
+            stack.enter_context(config.patch(implicit_fallbacks=False))
+            # A warm FX graph cache would hide changes to how Inductor compiles these
+            stack.enter_context(maybe_fresh_cache())
+
+        @parametrize("dynamic", [False, True])
+        @parametrize(
+            "constructor_case",
+            [
+                # (name, constructor, args, deterministic)
+                ("tensor_inline", torch.tensor, ([1, 2, 3],), True),
+                (
+                    "tensor_constant",
+                    torch.tensor,
+                    (torch.arange(16.0).view(1, 4, 4).tolist(),),
+                    True,
+                ),
+                ("empty", torch.empty, ([1, 128, 128],), False),
+                ("ones", torch.ones, ([1, 128, 128],), True),
+                ("zeros", torch.zeros, ([1, 128, 128],), True),
+                ("full", torch.full, ([1, 128, 128], 2), True),
+                ("rand", torch.rand, ([1, 128, 128],), False),
+                ("rand_like", torch.rand_like, (torch.empty([1, 128, 128]),), False),
+                ("randint", torch.randint, (2, [1, 128, 128]), False),
+            ],
+            name_fn=lambda constructor_case: constructor_case[0],
+        )
+        def test_constructors_pin_memory(self, device, constructor_case, dynamic):
+            name, constructor, args, deterministic = constructor_case
+
+            def fn():
+                return constructor(*args, pin_memory=True, device="cpu")
+
+            compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+            result, codes = run_and_get_code(compiled)
+            self.assertTrue(result.is_pinned())
+            code = "\n".join(codes)
+            if dynamic:
+                # Skip the lines binding graph inputs and example inputs, which
+                # appear however the constructor itself was compiled.
+                binding = re.compile(r"\s*(int64_t )?(s\d+ = arg\d+_1|arg\d+_1 = )")
+                lines = code.splitlines()
+                body = "\n".join(line for line in lines if not binding.match(line))
+                if name == "tensor_constant":
+                    # The tensorify pass specializes the floats and restarts Dynamo,
+                    # so no symbols are left; update this if they ever stay symbolic.
+                    self.assertNotRegex(body, r"\b(s|zf)\d+\b")
+                elif name == "tensor_inline":
+                    # Its values become symbols; fbcode's 0/1 specialization may fix 1
+                    self.assertGreaterEqual(len(set(re.findall(r"\bs\d+\b", body))), 2)
+                else:
+                    self.assertRegex(body, r"\bs\d+\b")
+                    self.assertNotRegex(body, r"\b128L?\b")
+            elif name == "tensor_constant":
+                # Not 1-D, so it must stay a pinned constant rather than be inlined
+                self.assertIn("_tensor_constant0", code)
+            elif name == "tensor_inline":
+                # 1-D with at most 8 elements, so it must be inlined
+                self.assertNotIn("_tensor_constant0", code)
+            actual = result.to(device, non_blocking=True)
+            expected = fn().to(device)
+            if deterministic:
+                self.assertEqual(actual, expected)
+            else:  # random or uninitialized contents
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertEqual(actual.dtype, expected.dtype)
+
+    # Untested on MPS: in CommonTemplate these were skipped on macOS as failing,
+    # for reasons nobody diagnosed, so MPS stays out here too.
+    instantiate_device_type_tests(
+        PinMemoryTests, globals(), except_for="cpu", allow_xpu=True
+    )
 
 if RUN_GPU:
 

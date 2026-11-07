@@ -33,6 +33,7 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Min,
+    Mod,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -3173,9 +3174,58 @@ class TMACompatibilityChecker:
     ) -> bool:
         """
         Check if the block parameters are valid for TMA.
-        If force, we allow relying on symbolic hints equivalent
-        to what we check for Triton templates.
+        If force, the check is decided from size hints, and the alignment it
+        relied on is then guarded, as can_use_tma does for Triton templates.
         """
+        if not self._are_block_parameters_compatible(block_params, constant_offset):
+            return False
+        return not self.force or self._guard_forced_alignment(
+            block_params, constant_offset
+        )
+
+    def _guard_forced_alignment(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int,
+    ) -> bool:
+        """
+        A forced access can have a dynamic dim the template's can_use_tma never
+        checked, e.g. an epilogue input's outer dim, so the alignment that held
+        on the hints is guarded here. Under AOTI, which does not check guards,
+        it must be statically provable instead.
+        """
+        sizevars = V.graph.sizevars
+        # Expand precomputed sizes (ps0 for e.g. 2*s0), which have no ShapeEnv
+        # range to guard on.
+        strides = [
+            sizevars.remove_precomputed_replacements(sympy.sympify(st))
+            for st in block_params.strides
+        ]
+        offset = sizevars.remove_precomputed_replacements(
+            sympy.sympify(constant_offset)
+        )
+        # Constant requirements were already decided by the hint check. Mod
+        # requires a non-negative dividend, so the offset's alignment is checked
+        # on its magnitude; strides are required to be non-negative.
+        requirements = [sympy.Eq(strides[-1], 1)]
+        requirements += [sympy.Ge(st, 0) for st in strides[:-1] if st.free_symbols]
+        if V.graph.get_current_device_or_throw().type != "cpu":
+            element_size = self.dtype.itemsize
+            requirements += [
+                sympy.Eq(Mod(expr * element_size, 16), 0)
+                for expr in (*strides[:-1], sympy.Abs(offset))
+                if expr.free_symbols
+            ]
+        requirements = [r for r in requirements if r.free_symbols]
+        if V.graph.aot_mode:
+            return all(sizevars.statically_known_true(r) for r in requirements)
+        return all(sizevars.guard_or_false(r) for r in requirements)
+
+    def _are_block_parameters_compatible(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int = 0,
+    ) -> bool:
         device = V.graph.get_current_device_or_throw()
         device_type = device.type
         if self.force:
@@ -3237,6 +3287,18 @@ class TMACompatibilityChecker:
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
                 "%s tensor descriptors require innermost stride to be 1. Strides are: %s",
+                self.failed_debug_prefix,
+                strides,
+            )
+            return False
+
+        # Tensor descriptor strides are unsigned. A flipped view has a negative
+        # stride, which a precomputed size can hide from the checks below.
+        if self.force and not all(
+            V.graph.sizevars.statically_known_geq(stride, 0) for stride in strides[:-1]
+        ):
+            log.debug(
+                "%s tensor descriptors require non-negative strides. Strides are: %s",
                 self.failed_debug_prefix,
                 strides,
             )
@@ -5092,6 +5154,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
         # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
         if torch.version.hip:
+            return False
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
             return False
         return (
             V.graph.get_current_device_or_throw().type == "cuda"
@@ -7000,17 +7064,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             return
         half = factor // 2
-        split_shape = (*shape[:-1], half, 2)
+        # Contiguous halves help looped kernels but regress persistent kernels.
+        contiguous = not self.persistent_reduction
+        split_axes = (2, half) if contiguous else (half, 2)
+        expr = f"tl.reshape({expr}, {triton_shape_str((*shape[:-1], *split_axes))})"
+        if contiguous:
+            perm = (*range(len(shape) - 1), len(shape), len(shape) - 1)
+            expr = f"tl.permute({expr}, {perm})"
         part_shape = (*shape[:-1], half)
         split_dtype = torch.uint8 if is_float8 else dtype
-        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        self.compute.writeline(
-            f"{even}, {odd} = tl.split("
-            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
-        )
-        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
-        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+        left = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        right = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(f"{left}, {right} = tl.split({expr})")
+        left_names = names[:half] if contiguous else names[0::2]
+        right_names = names[half:] if contiguous else names[1::2]
+        self._emit_recursive_split(str(left), left_names, part_shape, dtype)
+        self._emit_recursive_split(str(right), right_names, part_shape, dtype)
 
     def emit_split_via_reshape(
         self,
@@ -7023,6 +7092,43 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if dtype is None:
             raise AssertionError("split value must have a known dtype")
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        factor = len(part_names)
+        if (
+            factor > 2
+            and factor & (factor - 1) == 0
+            and dtype in (torch.int16, torch.uint16, torch.float16, torch.bfloat16)
+        ):
+            # Move pairs in 32-bit words to avoid repeated 16-bit layout conversions.
+            half = factor // 2
+            pair_shape = (*reshape_shape[:-1], half)
+            low, high = (
+                self.cse.newvar(dtype=torch.uint16, shape=pair_shape) for _ in range(2)
+            )
+            shape = triton_shape_str((*pair_shape, 2))
+            self.compute.writeline(
+                f"{low}, {high} = tl.split(tl.reshape({expr}.to(tl.uint16, bitcast=True), {shape}))"
+            )
+            packed = self.cse.newvar(dtype=torch.uint32, shape=pair_shape)
+            self.compute.writeline(
+                f"{packed} = {low}.to(tl.uint32) | ({high}.to(tl.uint32) << 16)"
+            )
+            parts = tuple(
+                self.cse.newvar(dtype=torch.uint32, shape=reshape_shape[:-1])
+                for _ in range(half)
+            )
+            self._emit_recursive_split(
+                str(packed), tuple(map(str, parts)), pair_shape, torch.uint32
+            )
+            for part, low_name, high_name in zip(
+                parts, part_names[::2], part_names[1::2]
+            ):
+                self.compute.writeline(
+                    f"{low_name} = {part}.to(tl.uint16).to({triton_type(dtype)}, bitcast=True)"
+                )
+                self.compute.writeline(
+                    f"{high_name} = ({part} >> 16).to(tl.uint16).to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
         self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
     def emit_broadcast_via_reshape(
