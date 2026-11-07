@@ -365,30 +365,27 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 
-# Track whether USE_CUDA was explicitly set by the user (before option() is called)
-# If USE_CUDA is already defined in cache, it means user explicitly set it
-if(DEFINED CACHE{USE_CUDA})
-  set(_USE_CUDA_EXPLICITLY_SET TRUE)
-else()
-  set(_USE_CUDA_EXPLICITLY_SET FALSE)
-endif()
+# remember whether the user set USE_CUDA before the option() below
+# installs the default, cuda.cmake errors out if they asked for CUDA and
+# it is not there. CUDA is incompatible with TSAN
+pytorch_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
-# CUDA is incompatible with TSAN
-cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
-
-# If USE_XPU is already defined in cache, it means user explicitly set it
-if(DEFINED CACHE{USE_XPU})
-  set(_USE_XPU_EXPLICITLY_SET TRUE)
-else()
-  set(_USE_XPU_EXPLICITLY_SET FALSE)
-endif()
-
-option(USE_XPU "Use XPU" ON)
+pytorch_option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
+# the dependent option retypes an explicit USE_ROCM=ON to OFF on platforms
+# it does not support, so the refusal below reads the recorded request
+# instead of the value. the toolkit-not-found case is
+# cmake/public/LoadHIP.cmake's business
+pytorch_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
+if(_USE_ROCM_EXPLICITLY_SET AND NOT (LINUX OR WIN32))
+  message(FATAL_ERROR
+    "PyTorch: ROCm was explicitly requested (USE_ROCM=1) but is only "
+    "supported on Linux and Windows. "
+    "If you want to build without ROCm, please set USE_ROCM=0.")
+endif()
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 # Single source of truth for the GPU archs Composable Kernel GEMM supports. It
 # drives both the ck_gemm build arch filter (torch_filter_ck_gemm_arches in
@@ -421,10 +418,34 @@ option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
-cmake_dependent_option(USE_NCCL "Use NCCL" ON
-                       "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_XPU;UNIX;NOT APPLE" OFF)
+# same early refusal as USE_ROCM above, for the parts of the condition we
+# can already decide here: the platform and distributed parts, and whether
+# any NCCL-capable backend is even asked for. whether a CUDA or ROCm build
+# actually materializes gets checked at the fallback site in
+# cmake/Dependencies.cmake
+pytorch_dependent_option(USE_NCCL "Use NCCL" ON
+                         "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+if(_USE_NCCL_EXPLICITLY_SET)
+  if(NOT (USE_DISTRIBUTED AND UNIX AND NOT APPLE))
+    message(FATAL_ERROR
+      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires "
+      "USE_DISTRIBUTED on a non-Apple UNIX platform. "
+      "If you want to build without NCCL, please set USE_NCCL=0.")
+  elseif(NOT (USE_CUDA OR USE_ROCM))
+    message(FATAL_ERROR
+      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires a "
+      "CUDA or ROCm build. "
+      "If you want to build without NCCL, please set USE_NCCL=0.")
+  endif()
+endif()
+pytorch_dependent_option(USE_XCCL "Use XCCL" ON
+                          "USE_XPU;UNIX;NOT APPLE" OFF)
+if(_USE_XCCL_EXPLICITLY_SET AND NOT USE_XPU)
+  message(FATAL_ERROR
+    "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires an "
+    "XPU build. "
+    "If you want to build without XCCL, please set USE_XCCL=0.")
+endif()
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
