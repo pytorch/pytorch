@@ -247,8 +247,11 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
     NOTE: must not import at this point
     """
-    # Skip all checks if running on CPU-only binary
-    if not _cuda.is_built():
+    import torch
+
+    # Skip all checks if running on CPU-only binary. Both checks are build-time
+    # (`_has_cuda`/`_has_xpu`), so neither initializes a device.
+    if not _cuda.is_built() and not torch.xpu._is_compiled():
         return (False, None)
 
     deps = [
