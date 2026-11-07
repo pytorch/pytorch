@@ -12360,6 +12360,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_index_put_duplicate_indices_single_element(self):
+        def fn(x):
+            x = x * 1
+            x[[0, 0]] += x[[0, 0]]
+            x[[0, 0]] += x[[0, 0]]
+            return x
+
+        for shape in [(1,), (1, 1), (1, 1, 1)]:
+            self.common(fn, (torch.randn(shape),))
+
     @skip_if_pallas
     def test_index_put_duplicate_indices_accumulate(self):
         # accumulate=True is well-defined with duplicate indices.
