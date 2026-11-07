@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/cat.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
@@ -652,6 +653,38 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       all32BitIndexable &&
       all_same_dtype &&
       memory_format == c10::MemoryFormat::Contiguous) {
+      // The generic strided kernel reads non-contiguous inputs with a large stride, so each
+      // fetched line is reused only through L2. When one launch covers a large batch, the
+      // reuse no longer fits in L2 and the same lines are fetched many times (1.4 G-element cat:
+      // gfx1201 L2 hit 84% -> 10%, 9.7x slower; RTX 5090 1.8x slower). Split such a cat along
+      // dim 0 so each launch covers at most kCatSplitElems elements of its largest input.
+      constexpr int64_t kCatSplitElems = int64_t{32} << 20;
+      const int64_t nrows = result.size(0);
+      int64_t row_elems = 0;
+      for (const Tensor& t : materialized) {
+        if (!cat_should_skip_tensor(t) && t.size(0) > 0) {
+          row_elems = std::max(row_elems, t.numel() / t.size(0));
+        }
+      }
+      if (dim != 0 && nrows > 1 && row_elems > 0 && row_elems * nrows > kCatSplitElems &&
+          result.is_contiguous()) {
+        const int64_t rows = std::max<int64_t>(1, kCatSplitElems / row_elems);
+        std::vector<Tensor> parts;
+        parts.reserve(materialized.size());
+        for (int64_t start = 0; start < nrows; start += rows) {
+          const int64_t n = std::min(rows, nrows - start);
+          parts.clear();
+          for (const Tensor& t : materialized) {
+            if (!cat_should_skip_tensor(t)) {
+              parts.push_back(t.narrow(0, start, n));
+            }
+          }
+          Tensor out_rows = result.narrow(0, start, n);
+          // Each chunk is under kCatSplitElems or has a single row, so this does not split again.
+          at::cat_out(out_rows, parts, dim);
+        }
+        return;
+      }
       if (isBitsType(result.scalar_type())) {
         AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
           using dtype = OpaqueType<sizeof(scalar_t)>;
