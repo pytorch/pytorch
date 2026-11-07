@@ -6,6 +6,7 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
+import types
 from typing import TYPE_CHECKING
 
 import torch
@@ -13,6 +14,8 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
 from ..exc import raise_observed_exception
+from ..guards import GuardBuilder, install_guard
+from ..source import ConstDictKeySource
 from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
 
@@ -73,6 +76,25 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
+def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
+    if isinstance(vt, variables.LazyVariableTracker):
+        if not vt.is_realized() and vt.source is not None and vt.is_hashable_lazy():
+            if isinstance(vt.source, ConstDictKeySource):
+                return vt
+            from .builder import bound_builtin_method_descriptor
+
+            value = vt.original_value()
+            if (
+                type(value) is types.BuiltinMethodType
+                and bound_builtin_method_descriptor(value) is not None
+            ):
+                install_guard(vt.source.make_guard(GuardBuilder.ID_MATCH))
+                return vt
+        # Constructed keys must guard their elements, not just a trace-time hash.
+        return vt.realize()
+    return vt
+
+
 class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
@@ -104,7 +126,7 @@ class HashableTracker:
 
     def __init__(self, vt: VariableTracker) -> None:
         # We specialize SymNodes
-        vt = specialize_symnode(vt)
+        vt = specialize_symnode(_guard_lazy_key(vt))
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -126,9 +148,14 @@ class HashableTracker:
         from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()
+        if type(vt) is variables.CallMethodVariable:
+            vt = vt.as_bound_builtin_method(tx) or vt
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
         # have no python-constant value, so their key equality is identity.
-        self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
+        if isinstance(vt, variables.BoundBuiltinMethodVariable):
+            self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
+        else:
+            self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
         self.vt = vt
 
     @classmethod

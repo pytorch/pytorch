@@ -5184,6 +5184,16 @@
       ]
     }
   ],
+  "GB8756": [
+    {
+      "Gb_type": "Conversion of compile-time-only hash value",
+      "Context": "FakeIdVariable",
+      "Explanation": "An identity-dependent hash cannot be converted to a constant result.",
+      "Hints": [
+        "Compute the hash outside the compiled function."
+      ]
+    }
+  ],
   "GB9567": [
     {
       "Gb_type": "Unsupported descriptor on opaque class",
@@ -7137,6 +7147,25 @@
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB5295": [
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "Bind the method on an input or another stable object.",
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    },
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
   ]
