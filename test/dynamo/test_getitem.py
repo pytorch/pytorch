@@ -25,7 +25,13 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
-from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
+from torch._dynamo.variables.lists import (
+    BaseListVariable,
+    DequeVariable,
+    RangeVariable,
+    TupleVariable,
+)
+from torch._dynamo.variables.object_protocol import vt_identity_compare
 from torch._library.opaque_object import (
     CustomClassBase,
     MemberType,
@@ -1156,6 +1162,89 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             items = (x, x + 1)
             return tuple(items) is items
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_identity(self):
+        class EmptyTuple(tuple):
+            pass
+
+        def fn(x, empty_subclass, second_empty_subclass):
+            items = (x, x + 1)
+            distinct = (x, x + 1)
+            expanded = (*[x, x + 1],)
+            expanded_distinct = (*[x, x + 1],)
+            empty = ()
+            return (
+                items[:] is items,
+                items[::1] is items,
+                tuple(items) is items,
+                tuple.__new__(tuple, items) is items,
+                items + () is items,
+                items + empty_subclass is items,
+                distinct is items,
+                expanded[:] is expanded,
+                expanded_distinct is expanded,
+                empty[:] is empty,
+                tuple(empty) is empty,
+                tuple.__new__(tuple, empty) is empty,
+                empty + empty_subclass is empty,
+                empty_subclass[:] is empty,
+                tuple(empty_subclass) is empty,
+                tuple.__new__(tuple, empty_subclass) is empty,
+                empty_subclass + second_empty_subclass is empty,
+            )
+
+        x = torch.randn(4)
+        empty_subclass = EmptyTuple()
+        second_empty_subclass = EmptyTuple()
+        self.assertEqual(
+            fn(x, empty_subclass, second_empty_subclass),
+            self._compile(fn, x, empty_subclass, second_empty_subclass),
+        )
+
+    def test_tuple_identity_token(self):
+        token = object()
+        items = [ConstantVariable.create(1), ConstantVariable.create("value")]
+        left = TupleVariable(list(items), identity_token=token)
+        alias = TupleVariable(list(items), identity_token=token)
+        distinct = TupleVariable(list(items), identity_token=object())
+
+        shared_result = vt_identity_compare(left, alias)
+        distinct_result = vt_identity_compare(left, distinct)
+        self.assertIsNotNone(shared_result)
+        self.assertIsNotNone(distinct_result)
+        self.assertTrue(shared_result.as_python_constant())
+        self.assertFalse(distinct_result.as_python_constant())
+        self.assertIs(left.clone().identity_token, token)
+        self.assertIsNone(left.clone(items=list(items)).identity_token)
+        self.assertIsNone(TupleVariable([], identity_token=object()).identity_token)
+
+    def test_tuple_slice_calls_index_once(self):
+        class Index:
+            def __init__(self):
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return 2
+
+        def fn(x, step):
+            result = (x, x + 1, x + 2)[::step]
+            return result, step.calls
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x, Index()), self._compile(fn, x, Index()))
+
+    def test_tree_map_tuple_identity(self):
+        def fn(x):
+            items = (x, x + 1)
+            mapped = torch.utils._pytree.tree_map(lambda item: item, items)
+            mapped_with_path = torch.utils._pytree.tree_map_with_path(
+                lambda _path, item: item, items
+            )
+            return mapped is items, mapped_with_path is items
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))

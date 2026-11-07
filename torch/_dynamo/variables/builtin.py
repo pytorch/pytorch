@@ -2572,7 +2572,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             return obj
 
         items = unpack_iterable(tx, args[0])
-        return TupleVariable(items, mutation_type=ValueMutationNew())
+        return TupleVariable(
+            items,
+            identity_token=object() if items else None,
+            mutation_type=ValueMutationNew(),
+        )
 
     def call_callable(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker

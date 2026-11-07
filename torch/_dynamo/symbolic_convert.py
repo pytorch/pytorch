@@ -4098,7 +4098,9 @@ class InstructionTranslatorBase(
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(TupleVariable(items))
+        self.push(
+            TupleVariable(items, identity_token=object() if items else None)
+        )
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -4914,7 +4916,9 @@ class InstructionTranslatorBase(
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
             items = unpack_iterable(self, self.pop())
-            self.push(TupleVariable(items))
+            self.push(
+                TupleVariable(items, identity_token=object() if items else None)
+            )
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()

@@ -80,6 +80,18 @@ def vt_identity_compare(
     if left is right:
         return ConstantVariable.create(True)
 
+    from .lists import TupleVariable
+
+    if (
+        isinstance(left, TupleVariable)
+        and isinstance(right, TupleVariable)
+        and left.python_type() is tuple
+        and right.python_type() is tuple
+        and left.identity_token is not None
+        and right.identity_token is not None
+    ):
+        return ConstantVariable.create(left.identity_token is right.identity_token)
+
     left_val = left.get_real_python_backed_value()
     right_val = right.get_real_python_backed_value()
     left_known = left_val is not NO_SUCH_SUBOBJ
@@ -143,6 +155,14 @@ def vt_identity_compare(
     if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
         return ConstantVariable.create(False)
 
+    if isinstance(left, TupleVariable) and isinstance(right, TupleVariable):
+        if (
+            left.python_type() is tuple
+            and right.python_type() is tuple
+            and not left.items
+            and not right.items
+        ):
+            return ConstantVariable.create(True)
     # Different Python types can never be the same object.
     try:
         if left.python_type() is not right.python_type():
