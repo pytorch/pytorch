@@ -96,6 +96,7 @@ from torch.utils.checkpoint import (
     checkpoint_sequential,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+    register_determinism_check,
 )
 from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -8328,6 +8329,45 @@ for shape in [(1,), ()]:
             with torch.utils.checkpoint.set_checkpoint_debug_enabled(False):
                 out = checkpoint(fn, a, use_reentrant=False, debug=True)
                 out.backward()
+
+    def test_checkpoint_custom_determinism_check(self):
+        def save_2_tensors(x):
+            return x.sin().exp()
+
+        def save_2_tensors_alt_strides(x):
+            return x.t().contiguous().t().sin().exp()
+
+        def get_non_det_fn(recompute_fn):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                return save_2_tensors(x) if counter[0] == 1 else recompute_fn(x)
+
+            return fn
+
+        name = "stride"
+        checks = torch.utils.checkpoint._allowed_determinism_checks_to_fns
+        register_determinism_check(name, lambda x: (x.shape, x.stride()))
+        self.addCleanup(checks.pop, name)
+        a = torch.randn(2, 3, requires_grad=True)
+
+        # The default check only compares shapes, dtypes and devices
+        fn = get_non_det_fn(recompute_fn=save_2_tensors_alt_strides)
+        checkpoint(fn, a, use_reentrant=False).sum().backward()
+
+        fn = get_non_det_fn(recompute_fn=save_2_tensors)
+        checkpoint(fn, a, use_reentrant=False, determinism_check=name).sum().backward()
+
+        fn = get_non_det_fn(recompute_fn=save_2_tensors_alt_strides)
+        with self.assertRaisesRegex(RuntimeError, "tensors have different metadata"):
+            out = checkpoint(fn, a, use_reentrant=False, determinism_check=name)
+            out.sum().backward()
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            register_determinism_check("default", lambda x: None)
+        with self.assertRaisesRegex(TypeError, "should be callable"):
+            register_determinism_check("not_callable", None)
 
     def test_checkpoint_error_suggests_mark_dynamic(self):
         """CheckpointError messages should suggest mark_dynamic and lru config."""
