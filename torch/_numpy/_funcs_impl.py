@@ -355,15 +355,42 @@ def geomspace(
 ) -> torch.Tensor:
     if axis != 0 or not endpoint:
         raise NotImplementedError
-    base = torch.pow(stop / start, 1.0 / (num - 1))
-    logbase = torch.log(base)
-    # torch.logspace accepts tensor start/end/base at runtime.
-    return torch.logspace(  # pyrefly: ignore[no-matching-overload]
-        torch.log(start) / logbase,
-        torch.log(stop) / logbase,
-        num,
-        base=base,
+    if bool(torch.any(start == 0)) or bool(torch.any(stop == 0)):
+        raise ValueError("Geometric sequence cannot include zero")
+    # Like NumPy, compute in a floating or complex dtype and only cast to
+    # the requested dtype at the end: an integer or half-precision dtype
+    # would otherwise truncate the log10 exponents before interpolation.
+    float_dtype = _dtypes_impl.default_dtypes().float_dtype
+    start = _util.cast_int_to_float(start)
+    stop = _util.cast_int_to_float(stop)
+    comp_dtype = _dtypes_impl.result_type_impl(
+        start, stop, torch.empty((), dtype=float_dtype if dtype is None else dtype)
     )
+    if dtype is None:
+        dtype = comp_dtype
+    # Compute on the endpoint's device that is not the CPU, if any, so the
+    # result doesn't depend on the order of the arguments.
+    device = stop.device if start.device.type == "cpu" else start.device
+    start = _util.cast_if_needed(start, comp_dtype).to(device)
+    stop = _util.cast_if_needed(stop, comp_dtype).to(device)
+    out_sign = torch.sgn(start)
+    start = start / out_sign
+    stop = stop / out_sign
+    # torch.logspace accepts tensor start/end at runtime.
+    res = torch.logspace(  # pyrefly: ignore[no-matching-overload]
+        torch.log10(start),
+        torch.log10(stop),
+        num,
+        base=10.0,
+        dtype=comp_dtype,
+        device=start.device,
+    )
+    # Overwrite the endpoints to avoid log/pow round-off, as NumPy does.
+    if num > 0:
+        res[0] = start
+        if num > 1:
+            res[-1] = stop
+    return _util.cast_if_needed(res * out_sign, dtype)
 
 
 def logspace(
