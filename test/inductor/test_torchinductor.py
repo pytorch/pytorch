@@ -1112,9 +1112,10 @@ check_model_cuda = check_model_gpu
 
 
 def _run_and_assert_direct_indexing_unless_avoided(test_case, func, *args, **kwargs):
-    # avoid_modular_indexing keeps %, // and abs of an index tensor behind an
-    # indirect variable instead of folding them into the address
-    if config.avoid_modular_indexing:
+    # a backend that keeps %, // and abs of an index tensor behind an indirect
+    # variable (InductorChoices.use_modular_indexing) does not fold them into
+    # the address
+    if not V.choices.use_modular_indexing(test_case.device, kind="index"):
         return func(*args)
     return _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs)
 
@@ -2393,7 +2394,7 @@ class CommonTemplate:
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
         ):
             fn_opt = torch.compile(fn)
-            if config.avoid_modular_indexing:
+            if not V.choices.use_modular_indexing(self.device, kind="index"):
                 # the wrapping stays behind an indirect variable; the codegen
                 # checks below describe the inlined index
                 self.assertEqual(fn_opt(*inps), fn(*inps))
@@ -9795,8 +9796,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             self.common(fn, (x,))
-            if not config.avoid_modular_indexing:
-                # the merge after the stack is realized instead of inlined
+            if V.choices.use_modular_indexing(self.device, kind="view"):
+                # otherwise the merge after the stack is realized
                 assertGeneratedKernelCountEqual(self, 1)
 
     def test_hardtanh(self):
@@ -22133,7 +22134,7 @@ if RUN_GPU:
             eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
             self.assertEqual(compiled_out, eager_out)
 
-            if config.avoid_modular_indexing:
+            if not V.choices.use_modular_indexing(GPU_TYPE, kind="reindex"):
                 # the pointwise dim expansion that fuses rope indexes the
                 # expanded dim with Mod and is skipped
                 return

@@ -1754,6 +1754,23 @@ def is_affine_indexing(index: sympy.Expr) -> bool:
         return False
 
 
+# The three view kinds are decided alike on GPUs today but differ in what
+# avoiding them costs: nothing for view_linear, a copy for view_copy, a
+# possibly unfused intermediate for view; keeping them apart also makes
+# decision logs readable.
+ModularIndexingUse = Literal[
+    "view",  # dim-merging view of unrealized compute whose inlined loads need it
+    "view_linear",  # dim-merging view whose inlined loads are affine anyway
+    "view_copy",  # dim-merging view of a realized buffer or a load/cast of one
+    "reduction",  # flat split of a multi-dim reduction
+    "repeat",
+    "roll",
+    "slice_scatter",  # strided slice_scatter
+    "index",  # %, //, abs, clamp of an index tensor folded into the address
+    "reindex",  # loop reindexing and index inversion during fusion
+]
+
+
 def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
