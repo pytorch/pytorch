@@ -2472,6 +2472,69 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full_like(t, expected))
 
 
+@instantiate_parametrized_tests
+class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
+    """Without a bound device or options, single-rank groups init on first use."""
+
+    @staticmethod
+    def _comm_ptr(group: dist.ProcessGroup) -> int:
+        return group._get_backend(torch.device("cuda")).comm_ptr
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_lazy_without_device_id(self, backend: str) -> None:
+        dist.init_process_group(backend, rank=0, world_size=1, store=dist.HashStore())
+        try:
+            world = dist.group.WORLD
+            sub = dist.new_group([0])
+            # Unbound, so DeviceMesh and new_group don't treat it as eager.
+            self.assertIsNone(world.bound_device_id)
+            self.assertEqual(self._comm_ptr(world), 0)
+            self.assertEqual(self._comm_ptr(sub), 0)
+
+            t = torch.ones(1, device="cuda")
+            dist.all_reduce(t, group=sub)
+            self.assertEqual(t, torch.ones_like(t))
+            self.assertNotEqual(self._comm_ptr(sub), 0)
+            self.assertEqual(self._comm_ptr(world), 0)
+        finally:
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_eager_with_device_id(self, backend: str) -> None:
+        dist.init_process_group(
+            backend,
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            device_id=torch.device("cuda", 0),
+        )
+        try:
+            self.assertNotEqual(self._comm_ptr(dist.group.WORLD), 0)
+            self.assertNotEqual(self._comm_ptr(dist.new_group([0])), 0)
+        finally:
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_eager_with_options(self, backend: str) -> None:
+        dist.init_process_group(
+            backend,
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            pg_options=dist.ProcessGroupNCCL.Options(),
+        )
+        try:
+            self.assertNotEqual(self._comm_ptr(dist.group.WORLD), 0)
+        finally:
+            dist.destroy_process_group()
+
+
 _UNINITIALIZED_CUDA_SCRIPT = """\
 import torch
 import torch.distributed as dist
@@ -2548,7 +2611,8 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_eager_init_without_device_id(self) -> None:
-        self._run_child(device_id="None")
+        # A single-rank group without a bound device inits on first use.
+        self._run_child("dist.barrier()", device_id="None")
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
@@ -2560,7 +2624,7 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
             visible_devices.split(",")[1].strip() if visible_devices else "1"
         )
         child_env["LOCAL_RANK"] = "1"
-        self._run_child(device_id="None", child_env=child_env)
+        self._run_child("dist.barrier()", device_id="None", child_env=child_env)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
