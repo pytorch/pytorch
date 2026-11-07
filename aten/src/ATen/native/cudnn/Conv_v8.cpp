@@ -771,16 +771,21 @@ void generate_and_filter_plans(
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
   int64_t max_block_size = get_available_workspace();
   int64_t max_workspace_size = 0;
-  std::for_each(
-      plans.begin(), plans.end(), [&](cudnn_frontend::ExecutionPlan& plan) {
-        int64_t curr_workspace_size = plan.getWorkspaceSize();
-        if (curr_workspace_size <= max_block_size) {
-          if (curr_workspace_size > max_workspace_size) {
-            max_workspace_size = plan.getWorkspaceSize();
-          }
-          valid_plans.emplace_back(std::move(plan));
-        }
-      });
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
+  for (auto& plan : plans) {
+    int64_t curr_workspace_size = plan.getWorkspaceSize();
+    if (curr_workspace_size <= max_block_size) {
+      if (curr_workspace_size > max_workspace_size) {
+        max_workspace_size = curr_workspace_size;
+      }
+      valid_plans.emplace_back(std::move(plan));
+      // Do not allocate workspace for plans beyond the autotuning limit.
+      if (valid_plans.size() >= static_cast<size_t>(benchmark_limit)) {
+        break;
+      }
+    }
+  }
   TORCH_CHECK_WITH(
       OutOfMemoryError,
       max_workspace_size < 1_TiB,
