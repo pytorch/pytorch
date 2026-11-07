@@ -52,6 +52,7 @@ from typing_extensions import dataclass_transform, ParamSpec, TypeVar
 from unittest import mock
 
 import sympy
+from sympy.polys.polyerrors import BasePolynomialError
 
 import torch
 import torch.utils._pytree as pytree
@@ -227,7 +228,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
-from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config
@@ -1730,6 +1731,27 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     have the same replaced expression integer and nonnegative properties.
     """
     return _sympy_subs(expr, replacements)
+
+
+_SIZE_SYMBOL_TYPES = (SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.UNBACKED_INT)
+
+
+def is_affine_indexing(index: sympy.Expr) -> bool:
+    """
+    True if index is affine in the loop and indirect variables: coefficients
+    may involve size symbols, but there is no ModularIndexing, FloorDiv, Min,
+    Max, Abs or Where of a loop variable and no product of loop variables.
+    """
+    index = index.replace(Identity, lambda x: x)
+    loop_vars = [
+        sym for sym in index.free_symbols if not symbol_is_type(sym, _SIZE_SYMBOL_TYPES)
+    ]
+    if not loop_vars:
+        return True
+    try:
+        return sympy.Poly(index, *loop_vars).total_degree() <= 1
+    except BasePolynomialError:
+        return False
 
 
 def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:

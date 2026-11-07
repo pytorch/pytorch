@@ -991,6 +991,21 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
 
+# Keep load/store indices affine in the loop variables, as the scheduler's
+# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
+# of loop variables and no products of them (the Triton backend still splits
+# its flat block index with // and %). Views that merge dims are realized (a
+# copy, unless the producer's layout is still flexible) instead of being
+# inlined, split reductions split at a dim boundary, repeat, roll and strided
+# slice_scatter are lowered without modular arithmetic, loop reindexing during
+# fusion is skipped, and non-affine index arithmetic (%, //, abs, clamp) stays
+# a value computation behind an indirect variable. Best effort: adaptive
+# pooling with non-divisible sizes, split reductions over symbolic ranges and
+# a strided slice_scatter whose dim is not provably a multiple of the step
+# still produce modular addresses. Helps backends with restricted memory
+# addressing at the cost of extra buffers and copies.
+avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -3475,6 +3490,14 @@ class test_configs:
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
+
+    # Raise when a scheduler node's load/store index is not affine in the loop
+    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs/Where or a
+    # product of loop variables). Used together with avoid_modular_indexing to
+    # find the places that still generate such indexing.
+    raise_on_modular_indexing = (
+        os.environ.get("TORCHINDUCTOR_RAISE_ON_MODULAR_INDEXING") == "1"
+    )
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description

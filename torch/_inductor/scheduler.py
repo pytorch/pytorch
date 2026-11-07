@@ -62,7 +62,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime_nccl_estimator,
 )
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .exc import GPUTooOldForTriton, TritonMissing
+from .exc import GPUTooOldForTriton, NonAffineIndexingError, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
     assign_origin_node,
@@ -93,6 +93,7 @@ from .utils import (
     get_op_names,
     GraphPartitionMap,
     IndentedBuffer,
+    is_affine_indexing,
     is_collective,
     is_cudagraph_unsafe_op,
     is_gpu,
@@ -302,14 +303,60 @@ class MixOrderReduction:
     """
 
     @staticmethod
-    def is_split_reduction(node: BaseSchedulerNode) -> bool:
-        return node.is_reduction() and all(
-            subnode.node._split_size is not None
-            for subnode in node.get_nodes()
-            if isinstance(subnode, SchedulerNode)
-            and subnode.is_reduction()
-            and isinstance(subnode.node, ComputedBuffer)
-        )
+    def _split_origins(
+        node: BaseSchedulerNode,
+    ) -> OrderedSet[tuple[sympy.Expr, sympy.Expr]] | None:
+        """
+        The (numel, reduction numel) of the original reductions whose first
+        split stages make up node; None when node is not a reduction or one
+        of its reductions is not a split stage.
+        """
+        if not node.is_reduction():
+            return None
+        origins: OrderedSet[tuple[sympy.Expr, sympy.Expr]] = OrderedSet()
+        for subnode in node.get_nodes():
+            if not (
+                isinstance(subnode, SchedulerNode)
+                and subnode.is_reduction()
+                and isinstance(subnode.node, ComputedBuffer)
+            ):
+                continue
+            buf = subnode.node
+            if (
+                buf._split_size is None
+                or buf._original_ranges is None
+                or buf._original_reduction_ranges is None
+            ):
+                return None
+            origins.add(
+                (
+                    V.graph.sizevars.simplify(sympy_product(buf._original_ranges)),
+                    V.graph.sizevars.simplify(
+                        sympy_product(buf._original_reduction_ranges)
+                    ),
+                )
+            )
+        return origins
+
+    @classmethod
+    def is_split_reduction(cls, node: BaseSchedulerNode) -> bool:
+        """
+        Whether node is (a fusion of) the first stage of split reductions
+        that can be reverted to one original reduction.
+        """
+        origins = cls._split_origins(node)
+        return origins is not None and len(origins) == 1
+
+    @classmethod
+    def has_mixed_split_origins(cls, node: BaseSchedulerNode) -> bool:
+        """
+        First stages of reductions with different original numels fuse
+        horizontally when their split loops coincide (a per-channel and a
+        per-sample reduction both split along the spatial dims). Such a node
+        cannot be reverted to one original reduction.
+        """
+        origins = cls._split_origins(node)
+        return origins is not None and len(origins) > 1
 
     @staticmethod
     def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
@@ -323,46 +370,10 @@ class MixOrderReduction:
 
     @classmethod
     def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
-        if cls.is_split_reduction(node):
-            xnumel = None
-            rnumel = None
-            for subnode in node.get_nodes():
-                if not (
-                    isinstance(subnode, SchedulerNode)
-                    and subnode.is_reduction()
-                    and isinstance(subnode.node, ComputedBuffer)
-                ):
-                    continue
-
-                if subnode.node._original_ranges is None:
-                    raise AssertionError(
-                        "expected subnode.node._original_ranges to be set"
-                    )
-                curxnumel = V.graph.sizevars.simplify(
-                    sympy_product(subnode.node._original_ranges)
-                )
-                if subnode.node._original_reduction_ranges is None:
-                    raise AssertionError(
-                        "expected subnode.node._original_reduction_ranges to be set"
-                    )
-                currnumel = V.graph.sizevars.simplify(
-                    sympy_product(subnode.node._original_reduction_ranges)
-                )
-
-                if xnumel is None:
-                    xnumel = curxnumel
-                    rnumel = currnumel
-                else:
-                    if not V.graph.sizevars.statically_known_equals(xnumel, curxnumel):
-                        raise AssertionError(f"{xnumel} v.s. {curxnumel}")
-                    if not V.graph.sizevars.statically_known_equals(rnumel, currnumel):
-                        raise AssertionError(f"{rnumel} v.s. {currnumel}")
-
-            if xnumel is None:
-                raise AssertionError("expected xnumel to be set")
-            return (xnumel, rnumel)
-        else:
-            return node.group[1]  # type: ignore[return-value]
+        origins = cls._split_origins(node)
+        if origins is not None and len(origins) == 1:
+            return next(iter(origins))
+        return node.group[1]  # type: ignore[return-value]
 
     @classmethod
     def has_mix_reduction_orders(
@@ -471,6 +482,10 @@ class MixOrderReduction:
         if not node1.is_reduction() or not node2.is_reduction():
             return False
         if node1.has_strict_reduction() or node2.has_strict_reduction():
+            return False
+        if cls.has_mixed_split_origins(node1) or cls.has_mixed_split_origins(node2):
+            # codegen reverts the split per reduction, which only works when
+            # they all come from one original reduction
             return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
@@ -4002,6 +4017,21 @@ class SchedulerNode(BaseSchedulerNode):
                     self._body, *self._sizes, normalize=should_normalize
                 )
             )
+        self._check_affine_indexing()
+
+    def _check_affine_indexing(self) -> None:
+        if not config.test_configs.raise_on_modular_indexing:
+            return
+        node = self.node
+        if node is None:
+            raise AssertionError("expected a node")
+        for dep in self.read_writes.reads_and_writes():
+            if isinstance(dep, MemoryDep) and not is_affine_indexing(dep.index):
+                origins = ", ".join(f"{o.name}={o.target}" for o in node.get_origins())
+                raise NonAffineIndexingError(
+                    f"non-affine indexing in {self.get_name()}: {dep!r}\n"
+                    f"origins: {origins}\n{self.debug_str()}"
+                )
 
     def recompute_size_and_body(
         self,
@@ -4041,6 +4071,7 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache)
+        self._check_affine_indexing()
 
     def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
         self.clear_read_writes_dependent_caches()
@@ -4090,12 +4121,23 @@ class SchedulerNode(BaseSchedulerNode):
         # also restores cache validity.
         self._loop_state_gen += 1
 
-    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> None:
+    def _allows_loop_reindexing(self) -> bool:
+        """
+        Loop reindexing and index inversion rebuild the loop variables with
+        FloorDiv/ModularIndexing, which would undo avoid_modular_indexing
+        after every lowering kept its indices affine.
+        """
+        return not config.avoid_modular_indexing
+
+    def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> bool:
         if self._body is None:
             raise AssertionError("expected a loop body")
+        if not self._allows_loop_reindexing():
+            return False
         self._before_loop_state_mutation()
         self._body = self._body.with_indexing_exprs(replacements)
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        return True
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -4106,11 +4148,13 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
+    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> bool:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
+        if not self._allows_loop_reindexing():
+            return False
 
         self._before_loop_state_mutation()
         self._body = self._body.reindex_iter_loops(new_iter_sizes)
@@ -4121,6 +4165,7 @@ class SchedulerNode(BaseSchedulerNode):
         self.group = (device, group_fn(self._sizes))
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+        return True
 
     def swap_pw_red_dimension(self) -> None:
         num_rdims = self._body.get_original_num_rdims()
@@ -4149,11 +4194,13 @@ class SchedulerNode(BaseSchedulerNode):
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
-    ) -> None:
+    ) -> bool:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
+        if not self._allows_loop_reindexing():
+            return False
 
         self._before_loop_state_mutation()
         self._body = self._body.expand_dimension_for_pointwise_node(
@@ -4167,6 +4214,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         # Need normalize the prefix name to facilitate finding common dependencies
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        return True
 
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
@@ -9822,7 +9870,8 @@ class Scheduler:
             node1_write, node2_read, node2_write, node2, read_expr
         )
         if can_reindex:
-            node2.apply_loop_reindexing([sympy_product(node1_write.size)])
+            if not node2.apply_loop_reindexing([sympy_product(node1_write.size)]):
+                return -1
             # Re-enter with refreshed dependencies; inverse lookup uses the cache.
             return self.shared_data_after_inverting_indexing(node1, node2)
 
@@ -9872,12 +9921,13 @@ class Scheduler:
         # === Apply Inversion ===
 
         # Swap the indexing expressions using the inverse formula
-        node2.apply_indexing_exprs(
+        if not node2.apply_indexing_exprs(
             {
                 read_expr_index: body.indexing_exprs[write_expr_index],
                 write_expr_index: inverse_formula,
             }
-        )
+        ):
+            return -1
 
         # Calculate fusion score
         score = self.score_fusion_memory(node1, node2)
@@ -10223,7 +10273,9 @@ class Scheduler:
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
         for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+            if not sn.apply_loop_reindexing([red_numel, red_rnumel]):
+                rollback_snapshot.restore()
+                return False
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
@@ -11048,11 +11100,13 @@ class Scheduler:
             )
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis
-            smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
-            shared_data_score = self._score_fusion_memory_for_can_fuse(
-                node1,
-                node2,
-            )
+            if smaller_node.expand_dimension_for_pointwise_node(
+                expand_dim, expand_size
+            ):
+                shared_data_score = self._score_fusion_memory_for_can_fuse(
+                    node1,
+                    node2,
+                )
 
         if (
             plan is None

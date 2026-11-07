@@ -4,7 +4,7 @@ import logging
 import math
 import operator
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
@@ -31,13 +31,17 @@ from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
+    DimsType,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     make_contiguous_strides_for,
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs import (
+    native_layer_norm as decomp_native_layer_norm,
+    roll as decomp_roll,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -150,6 +154,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.lerp,
     aten.lerp_,
     aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
+    aten.roll.default,  # inductor re-registers to honor avoid_modular_indexing
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -177,6 +182,28 @@ def adaptive_max_pool3d(input, output_size):
         indices, make_contiguous_strides_for(indices.shape)
     )
     return values, indices
+
+
+@register_decomposition([aten.roll.default])
+def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
+    if not config.avoid_modular_indexing:
+        return decomp_roll(a, shifts, dims)
+    if not isinstance(shifts, Sequence):
+        shifts = (shifts,)
+    if not isinstance(dims, Sequence):
+        dims = (dims,)
+    if len(shifts) != 1 or len(dims) != 1 or a.numel() == 0:
+        # the reference checks the arguments, flattens for dims=() and rolls
+        # one dim at a time, which comes back here
+        return decomp_roll(a, shifts, dims)
+    # The reference gathers one dim with (iota + shift) % size, which becomes
+    # ModularIndexing. Rolling via two slices keeps the loads affine.
+    dim = utils.canonicalize_dim(a.ndim, dims[0])
+    size = a.shape[dim]
+    start = (size - shifts[0]) % size
+    if guard_or_false(start == 0):
+        return a.clone()
+    return torch.cat([a.narrow(dim, start, size - start), a.narrow(dim, 0, start)], dim)
 
 
 @register_decomposition([aten.special_log_ndtr])

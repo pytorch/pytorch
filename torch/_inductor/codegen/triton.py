@@ -2600,12 +2600,16 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             V.kernel._index_dtype = real_index_dtype
         if real_index_dtype != dtype or var.dtype != dtype:
+            index_var = var
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
+            # the cast is only valid where the index expression is, and a later
+            # indirect_indexing bounds assert needs that mask
+            var.mask_vars = index_var.mask_vars
         return var
 
     @staticmethod
