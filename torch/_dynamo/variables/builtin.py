@@ -3586,17 +3586,20 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             args[0].materialize_keys()
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_order_guard(tx)
+            else:
+                args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             storage = (
                 args[0].materialize_keys()
                 if isinstance(args[0], ConstDictVariable)
                 else args[0].items
             )
-            return ConstDictVariable(
-                dict.fromkeys(storage, value),
-                mutation_type=ValueMutationNew(),
-            )
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.items.update(dict.fromkeys(storage, value))
+            return result
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3669,12 +3672,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         user_cls: VariableTracker,
         /,
         *args: VariableTracker,
-        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.dict_fromkeys),
             [user_cls, *args],
-            kwargs,
+            {},
         )
 
 

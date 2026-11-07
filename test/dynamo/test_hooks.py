@@ -828,6 +828,62 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             module.register_forward_hook(hook)
             self.assertEqual(compiled(x, module), fn(x, module))
 
+    @parametrize("operation", [operator.eq, operator.ne])
+    def test_hook_dict_self_comparison_no_recompile(self, operation):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            return x + operation(hooks, hooks)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            module = torch.nn.Linear(2, 2)
+            module.register_forward_hook(hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "operation",
+        [
+            operator.eq,
+            operator.ne,
+            lambda a, b: dict.__eq__(a, b),
+            lambda a, b: dict.__ne__(a, b),
+        ],
+    )
+    @parametrize("initially_equal", [False, True])
+    def test_hook_dict_comparison_guards_keys(self, operation, initially_equal):
+        def hook(module, args, output):
+            return output
+
+        def fn(x, left, right):
+            return x + operation(left._forward_hooks, right._forward_hooks)
+
+        left = torch.nn.Linear(2, 2)
+        left.register_forward_hook(hook)
+        right = torch.nn.Linear(2, 2)
+        if initially_equal:
+            right._forward_hooks = left._forward_hooks.copy()
+        else:
+            right.register_forward_hook(hook)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 1)
+
+        if initially_equal:
+            right._forward_hooks.clear()
+            right.register_forward_hook(hook)
+        else:
+            right._forward_hooks = left._forward_hooks.copy()
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("view", ["keys", "items"])
     def test_hook_view_repr_observes_ids(self, view):
         def fn(x, module):
