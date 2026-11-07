@@ -15583,6 +15583,95 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("shape,dim", [((2, 3), -1), ((3, 8192), -1), ((3, 33), 0), ((4100, 7), 0)])
+    @parametrize("margin", [8.0, 18.0, 40.0])
+    @parametrize("scale", [-1.0, 0.25])
+    def test_log_softmax_backward_collapse(self, device, dtype, shape, dim, margin, scale):
+        x = torch.full(shape, -math.inf, dtype=dtype)
+        target = shape[dim] // 2
+        x.select(dim, target).fill_(0)
+        x.select(dim, 0).fill_(-margin)
+        x.select(dim, shape[dim] - 1).fill_(-margin)
+        grad = torch.zeros_like(x)
+        grad.select(dim, target).fill_(scale)
+        # Form the dominant gradient from the tail, avoiding cancellation even in float64.
+        tail_prob = math.exp(-margin) / (1 + 2 * math.exp(-margin))
+        expected = torch.zeros_like(x)
+        expected.select(dim, target).fill_(2 * scale * tail_prob)
+        expected.select(dim, 0).fill_(-scale * tail_prob)
+        expected.select(dim, shape[dim] - 1).fill_(-scale * tail_prob)
+        x = x.to(device).requires_grad_()
+        actual = torch.autograd.grad(x.log_softmax(dim), x, grad.to(device))[0]
+        rtol = {torch.float32: 2e-5, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual.cpu(), expected, atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("margin", [0.0, 0.5, 0.7, 2.0, 20.0, math.inf, math.nan])
+    @parametrize("grad_values", [(1, 0, 0), (1, 1, 1), (1, -2, 3), (math.inf, 0, 0), (math.nan, 1, 0)])
+    def test_log_softmax_backward_expm1(self, device, dtype, margin, grad_values):
+        output = torch.tensor([0, -margin, -margin], dtype=torch.float64).log_softmax(0).to(dtype)
+        grad = torch.tensor(grad_values, dtype=dtype)
+        expected = torch.ops.aten._log_softmax_backward_data(grad.double(), output.double(), 0, torch.float64)
+        actual = torch.ops.aten._log_softmax_backward_data(grad.to(device), output.to(device), 0, dtype)
+        rtol = {torch.float32: 2e-5, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual.cpu(), expected.to(dtype), atol=1e-7, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
+    @parametrize("values", [
+        (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),
+        (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
+        (0, math.inf, 0), (0, math.nan, 0),
+    ])
+    def test_log_softmax_fallback_tail(self, device, dtype, shape, dim, values):
+        # Short strided reductions and many long contiguous rows use the fallback.
+        x = torch.full(shape, -math.inf, dtype=dtype)
+        for index, value in zip((0, shape[dim] // 2, shape[dim] - 1), values):
+            x.select(dim, index).fill_(value)
+        expected = F.log_softmax(x.double(), dim=dim).to(dtype)
+        actual = F.log_softmax(x.to(device), dim=dim).cpu()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.amax(dim), expected.amax(dim), atol=0, rtol=1e-6)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("margin", [17.0, 20.0])
+    @parametrize("max_col,other_col", [(0, 256), (128, 0), (255, 256), (2047, 2048), (4095, 4094)])
+    @parametrize("layout", ["contiguous", "strided", "transposed"])
+    def test_log_softmax_split_tail(self, device, dtype, margin, max_col, other_col, layout):
+        x = torch.full((33, 4096), -math.inf, dtype=dtype)
+        x[:, max_col] = 0
+        x[:, other_col] = -margin
+        dim = -1
+        if layout != "contiguous":
+            x = x.t()
+            dim = 0
+            if layout == "strided":
+                x = x.contiguous()
+        expected = F.log_softmax(x.double(), dim=dim).to(dtype)
+        actual = F.log_softmax(x.to(device), dim=dim).cpu()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.select(dim, max_col), expected.select(dim, max_col), atol=0, rtol=1e-6)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("values", [
+        (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
+        (0, math.inf, 0), (0, math.nan, 0),
+    ])
+    @parametrize("layout", ["contiguous", "strided", "transposed"])
+    def test_softmax_split_special_values(self, device, dtype, op, values, layout):
+        x = torch.full((33, 4096), -math.inf, dtype=dtype)
+        x[:, [0, 256, 2048]] = torch.tensor(values, dtype=dtype)
+        dim = -1
+        if layout != "contiguous":
+            x = x.t()
+            dim = 0
+            if layout == "strided":
+                x = x.contiguous()
+        expected = op(x.double(), dim=dim).to(dtype)
+        self.assertEqual(op(x.to(device), dim=dim).cpu(), expected)
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):
