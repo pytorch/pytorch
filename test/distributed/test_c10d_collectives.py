@@ -2,8 +2,8 @@
 
 import itertools
 import sys
+import unittest
 import time
-
 import torch
 import torch.distributed as dist
 
@@ -19,8 +19,12 @@ from c10d_backend_common import (
     instantiate_backend_tests,
 )
 
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import parametrize, run_tests
 
 
 ASYNC_OPS = (False, True)
@@ -838,6 +842,61 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
             dist.all_to_all_single(output, input)
 
 
+class GatherComplexTest(C10dBackendTestContinuous, MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls):
+        return dist.get_default_backend_for_device(cls.device_type)
+
+    @classmethod
+    def _get_world_size(cls, device_type):
+        if device_type != "cpu":
+            device_count = torch.get_device_module(device_type).device_count()
+            if device_count < cls.world_size:
+                raise unittest.SkipTest(f"Need {cls.world_size} {device_type} devices")
+        return cls.world_size
+
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("async_op", [False, True])
+    @parametrize("destination", ["default", "dst", "group_dst", "subgroup"])
+    def test_gather_complex(self, device, dtype, async_op, destination):
+        expected = torch.tensor(
+            [[1 + 2j, 3 - 1j], [2 + 4j, 6 - 2j]], dtype=dtype, device=self.device
+        )
+        tensor = expected[self.rank].clone()
+        ranks = list(range(self.world_size))
+        dst = 0 if destination == "default" else 1
+        kwargs = {}
+        if destination == "dst":
+            kwargs["dst"] = dst
+        elif destination in ("group_dst", "subgroup"):
+            if destination == "subgroup":
+                ranks = [1]
+            kwargs["group"] = dist.new_group(ranks)
+            kwargs["group_dst"] = ranks.index(dst)
+        output = [torch.empty_like(tensor) for _ in ranks] if self.rank == dst else None
+        original_output = tuple(output) if output is not None else ()
+
+        if self.rank not in ranks:
+            with self.assertWarnsRegex(UserWarning, "does not belong"):
+                work = dist.gather(tensor, output, async_op=async_op, **kwargs)
+            self.assertIsNone(work)
+        else:
+            work = dist.gather(tensor, output, async_op=async_op, **kwargs)
+            if async_op:
+                self.assertIsNotNone(work)
+                work.wait()
+            else:
+                self.assertIsNone(work)
+
+        self.assertEqual(tensor, expected[self.rank])
+        if self.rank == dst:
+            for result, original, rank in zip(
+                output, original_output, ranks, strict=True
+            ):
+                self.assertIs(result, original)
+                self.assertEqual(result, expected[rank])
+
+
 class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
     """Tests that use another rank's device or call a collective on only some
     ranks, so they keep fresh rank processes."""
@@ -923,6 +982,9 @@ instantiate_backend_tests(
 instantiate_backend_tests(
     globals(), "IsolatedCollectives", AbstractIsolatedCollectivesTest, C10D_BACKENDS
 )
+
+
+instantiate_device_type_tests(GatherComplexTest, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":
