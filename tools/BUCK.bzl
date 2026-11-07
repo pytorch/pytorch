@@ -256,6 +256,16 @@ def define_tools_targets(
         ],
     )
 
+    python_library(
+        name = "pyi",
+        srcs = ["pyi/gen_pyi.py"],
+        base_module = "tools",
+        deps = [
+            ":autograd",
+            torchgen_deps,
+        ],
+    )
+
     python_test(
         name = "test_codegen",
         srcs = [
@@ -266,5 +276,6 @@ def define_tools_targets(
         deps = [
             torchgen_deps,
             ":autograd",
+            ":pyi",
         ],
     )
