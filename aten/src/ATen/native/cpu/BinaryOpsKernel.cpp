@@ -976,9 +976,9 @@ void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
               [kZeroVec, kOneVec, lo_vec, hi_vec](
                   Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) {
                 return Vectorized<scalar_t>::blendv(
-                    kZeroVec,
                     dy_vec / (x_vec * (kOneVec - x_vec)),
-                    (x_vec >= lo_vec) & (x_vec <= hi_vec));
+                    kZeroVec,
+                    (x_vec < lo_vec) | (x_vec > hi_vec));
               });
         }
       });
