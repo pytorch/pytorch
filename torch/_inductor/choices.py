@@ -32,17 +32,17 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend
+from .utils import _use_autotune_backend, is_gpu, ModularIndexingUse
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from functools import partial
 
     from triton import Config as TritonConfig
 
-    from .codegen.common import KernelTemplate
+    from .codegen.common import BackendFeature, KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
@@ -115,6 +115,34 @@ class FusionScore:
             other.buffer_overlap_score,
             other.proximity_score,
         )
+
+
+def _backend_features(device_type: str | None) -> OrderedSet[BackendFeature] | None:
+    """The features of device_type's Inductor backend; None without one."""
+    if device_type is None:
+        return None
+    from .codegen.common import (
+        get_backend_features,
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
+    # the graph registers the backends and caches the lookup; decompositions
+    # run before there is a graph
+    cached = getattr(V.graph, "get_backend_features", None)
+    if cached is None:
+        init_backend_registration()
+    if get_scheduling_for_device(device_type) is None:
+        return None  # no Inductor backend, e.g. meta tensors during tracing
+    return cached(device_type) if cached else get_backend_features(device_type)
+
+
+def _numel_hint(numel: int | sympy.Expr | None) -> int | None:
+    if numel is None:
+        return None
+    if isinstance(numel, sympy.Expr) and not numel.is_number:
+        return V.graph.sizevars.optimization_hint(numel)
+    return int(numel)
 
 
 class InductorChoices:
@@ -462,6 +490,80 @@ class InductorChoices:
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
         return fused_name
+
+    def use_modular_indexing(
+        self,
+        device: torch.device | str | None,
+        *,
+        numel: int | sympy.Expr | None = None,
+        kind: ModularIndexingUse | Callable[[], ModularIndexingUse],
+    ) -> bool:
+        """
+        Decide whether a load/store index may contain ModularIndexing/FloorDiv
+        of loop variables (True) or must use the affine alternative: realizing
+        a dim-merging view, splitting a reduction at a dim boundary, lowering
+        repeat/roll/strided slice_scatter without modular arithmetic, keeping
+        %, // index arithmetic behind an indirect variable, or skipping a loop
+        reindexing during fusion. numel is the number of elements the affected
+        kernel touches and kind names the construct; a callable kind
+        (View.create classifies a view by tracing its loads) is only called
+        when the answer depends on it.
+
+        config.avoid_modular_indexing forces the answer. Otherwise backends
+        that declare BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get
+        affine indices, everything that is not a Triton GPU backend
+        (including a device without an Inductor backend, such as meta tensors
+        during tracing) inlines as before, and Triton GPU backends (CUDA,
+        ROCm, XPU and out-of-tree ones) follow what benchmarks on CUDA
+        showed: splitting a reduction at a dim boundary and iterating a
+        strided slice_scatter in split space are faster at nearly every size,
+        realizing a merged view only pays off for large tensors of fresh
+        compute (a copy of an existing buffer never does), and the
+        alternatives to %, // for repeat, roll, index arithmetic and loop
+        reindexing are slower than the modular index. The one exception that
+        holds in every mode: index arithmetic on an affine-preferring backend
+        without indirect indexing (Pallas) has no affine form there and stays
+        inlined. TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores inlining on
+        every backend; with the heuristic, split reductions on Triton GPUs
+        regroup partial sums and no longer match the previous release
+        bitwise.
+        """
+        from .codegen.common import BackendFeature
+        from .ir import get_device_type, is_triton
+
+        if config.avoid_modular_indexing is not None and kind != "index":
+            return not config.avoid_modular_indexing
+        if isinstance(device, str):
+            device = torch.device(device)
+        device_type = get_device_type(device)
+        features = _backend_features(device_type)
+        if (
+            kind == "index"
+            and features is not None
+            and BackendFeature.PREFER_AFFINE_INDEXING in features
+            and BackendFeature.INDIRECT_INDEXING not in features
+        ):
+            return True  # a gather can only be expressed as a direct index here
+        if config.avoid_modular_indexing is not None:
+            return not config.avoid_modular_indexing
+        if device_type is None or features is None:
+            return True
+        if BackendFeature.PREFER_AFFINE_INDEXING in features:
+            return False
+        if not (is_gpu(device_type) and is_triton(device_type)):
+            return True
+        if callable(kind):
+            # every view kind inlines below the threshold, so skip the trace
+            hint = _numel_hint(numel)
+            if hint is not None and hint < config.realize_modular_view_min_numel:
+                return True
+            kind = kind()
+        if kind in ("reduction", "slice_scatter"):
+            return False
+        if kind == "view":
+            hint = _numel_hint(numel)
+            return hint is None or hint < config.realize_modular_view_min_numel
+        return True
 
     @staticmethod
     def should_use_cooperative_reduction(

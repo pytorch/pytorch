@@ -9590,6 +9590,15 @@ class TritonScheduling(SIMDScheduling):
         return total_ms, total_clone_ms, file_list
 
 
+class MTIATritonScheduling(TritonScheduling):
+    """Triton scheduling for MTIA, whose memory addressing wants load/store
+    indices affine in the loop variables."""
+
+    backend_features = OrderedSet(
+        [*TritonScheduling.backend_features, BackendFeature.PREFER_AFFINE_INDEXING]
+    )
+
+
 def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
     lines = []
     multi_template = node.get_template_node()

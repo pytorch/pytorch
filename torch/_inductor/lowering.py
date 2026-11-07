@@ -1563,7 +1563,9 @@ def repeat(x, repeats):
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return clone(expand(x, new_size))
-    if config.avoid_modular_indexing:
+    if not V.choices.use_modular_indexing(
+        x.get_device(), numel=sympy_product(new_size), kind="repeat"
+    ):
         # Interleave [r0, n0, r1, n1, ...] so the merge of each pair is handled
         # by View.create, which realizes the expanded copy instead of indexing
         # the input with ModularIndexing.
@@ -4331,13 +4333,16 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     src_loader = src.make_loader()
 
     if (
-        config.avoid_modular_indexing
-        and step != 1
+        step != 1
         and V.graph.sizevars.statically_known_multiple_of(dim_size, step)
+        and not V.choices.use_modular_indexing(
+            x.get_device(), numel=sympy_product(x.get_size()), kind="slice_scatter"
+        )
     ):
         # Iterate [..., dim_size // step, step, ...] so the scattered position
-        # j * step + r and the src index j are linear; View.create realizes the
-        # merge back to x's shape.
+        # j * step + r and the src index j are linear, realize that, and
+        # reinterpret the contiguous result in x's shape (inlining the merge
+        # would bring FloorDiv(i, step) back).
         first, offset = FloorDiv(start, step), ModularIndexing(start, 1, step)
 
         def split_inner_fn(idx):
@@ -4366,6 +4371,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             inner_fn=split_inner_fn,
             ranges=split_size,
         )
+        out.realize()
         return view(out, list(x.get_size()))
 
     def inner_fn(idx):
