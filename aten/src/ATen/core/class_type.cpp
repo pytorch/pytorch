@@ -426,7 +426,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
     return true;
   }
   // to improve performance, this check can be cached
-  if (auto iface = rhs.cast<InterfaceType>()) {
+  if (const auto* iface = rhs.castRaw<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
@@ -438,7 +438,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
       }
       return false;
     }
-    for (const FunctionSchema& schema : iface->methods()) {
+    for (const FunctionSchema& schema : *iface->methods_) {
       auto self_method = findMethod(schema.name());
       if (!self_method) {
         if (why_not) {
@@ -455,7 +455,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
                    << "' (1) is not compatible with interface '"
                    << rhs.repr_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << '\n'
-                   << "  (2) " << schema << '\n';
+                   << "  (2) " << iface->schemaForDiagnostic(schema) << '\n';
         }
         return false;
       }

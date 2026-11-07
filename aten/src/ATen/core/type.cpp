@@ -968,8 +968,8 @@ bool InterfaceType::isSubTypeImpl(
     return false;
   }
     for (const FunctionSchema& schema : *rhs.methods_) {
-      auto self_schema = lhs.getMethod(schema.name());
-      if (!self_schema) {
+      const auto self_schema = lhs.findMethodSchema(schema.name());
+      if (self_schema == lhs.methods_->cend()) {
         if (why_not) {
           *why_not << "Interface '" << lhs.repr_str()
                    << "' does not have method '" << schema.name() << "' but interface '"
@@ -982,8 +982,8 @@ bool InterfaceType::isSubTypeImpl(
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
                    << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << *self_schema << '\n'
-                   << "  (2) " << schema << '\n';
+                   << "  (1) " << lhs.schemaForDiagnostic(*self_schema) << '\n'
+                   << "  (2) " << rhs.schemaForDiagnostic(schema) << '\n';
           return false;
         }
         return false;
@@ -1000,16 +1000,87 @@ bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
-  for (const FunctionSchema& method : *methods_) {
-    if (method.name() == name) {
-      return &method;
+static FunctionSchema withInterfaceReceiver(
+    const FunctionSchema& schema,
+    const TypePtr& receiver) {
+  auto arguments = schema.arguments();
+  TORCH_INTERNAL_ASSERT(!arguments.empty());
+  arguments.front() = arguments.front().cloneWithType(receiver);
+  auto result = schema.cloneWithArguments(std::move(arguments));
+  if (!schema.isDefaultAliasAnalysisKind()) {
+    result.setAliasAnalysis(schema.aliasAnalysis());
+  }
+  return result;
+}
+
+FunctionSchema InterfaceType::schemaWithSelf(
+    const FunctionSchema& schema) const {
+  const auto self = std::const_pointer_cast<InterfaceType>(
+      std::static_pointer_cast<const InterfaceType>(weak_from_this().lock()));
+  TORCH_CHECK(
+      self,
+      "InterfaceType schema access requires shared ownership of the interface.");
+  return withInterfaceReceiver(schema, self);
+}
+
+FunctionSchema InterfaceType::schemaForDiagnostic(
+    const FunctionSchema& schema) const {
+  return withInterfaceReceiver(schema, std::make_shared<InterfaceType>(*this));
+}
+
+std::vector<FunctionSchema>::const_iterator InterfaceType::findMethodSchema(
+    const std::string& name) const {
+  auto it = methods_->cbegin();
+  for (; it != methods_->cend(); ++it) {
+    if (it->name() == name) {
+      break;
     }
   }
-  return nullptr;
+  return it;
 }
-void InterfaceType::addMethod(FunctionSchema schema) {
-  methods_->emplace_back(std::move(schema));
+
+bool InterfaceType::hasMethod(const std::string& name) const {
+  return findMethodSchema(name) != methods_->cend();
+}
+
+std::vector<std::string> InterfaceType::getMethodNames() const {
+  std::vector<std::string> names;
+  names.reserve(methods_->size());
+  for (const FunctionSchema& method : *methods_) {
+    names.emplace_back(method.name());
+  }
+  return names;
+}
+
+std::unique_ptr<FunctionSchema> InterfaceType::getMethodSchema(
+    const std::string& name) const {
+  const auto method = findMethodSchema(name);
+  if (method == methods_->cend()) {
+    return nullptr;
+  }
+  return std::make_unique<FunctionSchema>(schemaWithSelf(*method));
+}
+
+std::vector<FunctionSchema> InterfaceType::methodSchemas() const {
+  std::vector<FunctionSchema> schemas;
+  schemas.reserve(methods_->size());
+  for (const FunctionSchema& method : *methods_) {
+    schemas.emplace_back(schemaWithSelf(method));
+  }
+  return schemas;
+}
+
+void InterfaceType::addMethod(const FunctionSchema& schema) {
+  const auto& arguments = schema.arguments();
+  TORCH_CHECK(
+      !arguments.empty(),
+      "InterfaceType::addMethod() requires a self argument.");
+  TORCH_CHECK(
+      arguments.front().type().get() == this &&
+          arguments.front().real_type().get() == this,
+      "InterfaceType::addMethod() requires the self argument's type and "
+      "real_type to be this interface.");
+  methods_->emplace_back(withInterfaceReceiver(schema, AnyType::get()));
 }
 InterfaceType::InterfaceType(QualifiedName name, bool is_module)
     : NamedType(InterfaceType::Kind, std::move(name)),

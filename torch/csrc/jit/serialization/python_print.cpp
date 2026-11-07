@@ -1561,7 +1561,7 @@ struct PythonPrintImpl {
       }
       {
         auto guard = WithIndented();
-        for (const FunctionSchema& method : interfaceType->methods()) {
+        for (const FunctionSchema& method : interfaceType->methodSchemas()) {
           indent();
           body_ << "def " << method.name() << "(self";
           TORCH_INTERNAL_ASSERT(
