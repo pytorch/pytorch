@@ -17,7 +17,9 @@ from .bucket_runtime import (
     _EAGER_COMM_CONTEXTS_ATTR,
     _in_backward,
     _install_bucket_unshard_hooks,
+    _KEEP_PREFETCHES_UNTIL_USED_ATTR,
     _MAX_PENDING_REDUCE_GRADS_ATTR,
+    _POST_BACKWARD_PER_CALL_ATTR,
     GradientReductionHandle,
     ModuleUnshardHandle,
     ParamOwnerRef,
@@ -342,20 +344,73 @@ class FlexShardModule:
         *,
         recurse: bool = True,
     ) -> None:
-        """Set whether a backward without gradient sync reshards, like FSDP2's.
+        """Set whether backward reshards, like FSDP2's.
 
-        With ``False``, buckets stay unsharded after a backward that skips the
-        reduce-scatter, so the next forward skips the all-gather: with sync
-        off for all but the last microbatch and without
-        reshard-after-forward, each bucket all-gathers and reduce-scatters
-        once per optimizer step. Until then,
-        ``module.parameters()`` returns their unsharded params. Unlike FSDP2, a
-        syncing backward always reshards, since the optimizer step then
-        changes the local shards. Entries of ``sharded_bucket_storages`` take
-        the same setting per bucket.
+        With ``False``, buckets stay unsharded after backward, so the next
+        forward skips the all-gather: with sync off for all but the last
+        microbatch and without reshard-after-forward, each bucket all-gathers
+        and reduce-scatters once per optimizer step. Until they reshard,
+        ``module.parameters()`` returns their unsharded params. As in FSDP2,
+        this also holds in backwards with gradient sync: set ``True`` before the
+        last microbatch's backward, or call ``reshard()``, before the optimizer
+        step changes the local shards, or the next forward uses the stale
+        unsharded params. Entries of ``sharded_bucket_storages`` take the same
+        setting per bucket.
         """
         for bucket_storage in self._bucket_storages(recurse):
             bucket_storage.set_reshard_after_backward(reshard_after_backward)
+
+    def set_reduce_scatter_unused_params(
+        self,
+        reduce_scatter_unused_params: bool,
+        *,
+        recurse: bool = True,
+    ) -> None:
+        """Reduce-scatter zeros for params without grads, like FSDP2's
+        ``set_reduce_scatter_unused_params``.
+
+        By default, as in FSDP2, a bucket whose forward did not run since its
+        last reduction contributes no grads. A bucket whose forward ran
+        reduces every trainable param, with zeros for missing grads, even if
+        this rank's backward did not use its outputs, so that every rank issues
+        the same collective; a ``fsdp2_compatible`` bucket reduces only the
+        params that have grads, as FSDP2. If ranks can skip a module's forward
+        entirely, set ``True`` so that every rank reduce-scatters every bucket,
+        with zeros for missing grads. Entries of ``sharded_bucket_storages``
+        take the same setting per bucket.
+        """
+        for bucket_storage in self._bucket_storages(recurse):
+            bucket_storage.set_reduce_scatter_unused_params(
+                reduce_scatter_unused_params
+            )
+
+    def set_post_backward_per_call(self, enabled: bool) -> None:
+        """Reduce and reshard after the backward of each forward call, as FSDP2
+        does, for buckets called several times in a forward.
+
+        By default, such a bucket keeps its unsharded params until the last
+        call's backward and then reduces once. Per call frees the unsharded
+        params between the calls' backwards, at the cost of a re-gather and a
+        reduce-scatter per call. Call it on the module ``flex_shard`` returned.
+        """
+        setattr(self, _POST_BACKWARD_PER_CALL_ATTR, enabled)
+        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
+            context.post_backward_per_call = enabled
+
+    def set_keep_prefetches_until_used(self, enabled: bool) -> None:
+        """Keep learned-order prefetches until their buckets use them, as FSDP2
+        does.
+
+        Backward then prefetches the previous bucket in post-forward order, and
+        several prefetches may be in flight. By default, one learned-order
+        prefetch runs at a time, to the nearest bucket that still needs a
+        gather, and is released when execution diverges from the learned
+        order, which bounds the memory prefetches hold. Call it on the module
+        ``flex_shard`` returned.
+        """
+        setattr(self, _KEEP_PREFETCHES_UNTIL_USED_ATTR, enabled)
+        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
+            context.keep_prefetches_until_used = enabled
 
     def set_max_pending_reduce_grads(
         self,

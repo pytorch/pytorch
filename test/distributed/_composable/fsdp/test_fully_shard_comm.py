@@ -26,28 +26,31 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import FSDPModule, fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+from torch.distributed.fsdp._flex_shard.all_gather_layout import (
+    _default_all_gather_output_fn,
     AllGatherFinalizeMetadata,
     AllGatherLayout,
     AllGatherOutputs,
     AllGatherParamMetadata,
+    AllGatherResult,
+    foreach_all_gather_copy_out,
+)
+from torch.distributed.fsdp._flex_shard.placements.param_driven_shard import (
+    ParamAllGather,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _get_gradient_divide_factors,
-    AllGatherResult,
     DefaultAllGather,
     DefaultReduceScatter,
-    foreach_all_gather_copy_out,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
     ShardPlacementResult,
     TrainingState,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     DefaultAllGatherLayout,
@@ -2799,10 +2802,7 @@ class TestAllGatherLayouts(TestCase):
         test, world_size = self, 2
         params = []
         for fqn in ("lin.weight", "lin.bias"):
-            param = FSDPParam.__new__(FSDPParam)
-            param.all_gather_outputs = []
-            param._param_fqn = fqn
-            params.append(param)
+            params.append(ParamAllGather(fqn))
         returned_buffers = []
 
         class Layout(AllGatherLayout):
@@ -2877,7 +2877,7 @@ class TestAllGatherLayouts(TestCase):
             # FSDP checks every output before adopting any
             for param in params:
                 self.assertEqual(param.all_gather_outputs, [])
-                self.assertFalse(param._keep_all_gather_output_storage)
+                self.assertFalse(param.outputs_view_layout_buffers)
             return
         persistent = finalize(source.clone(), None)
         outputs = [param.all_gather_outputs for param in params]
@@ -2888,8 +2888,8 @@ class TestAllGatherLayouts(TestCase):
         storage_nbytes = source.nbytes + (32 if case == "offset_buffer" else 0)
         self.assertEqual(persistent.nbytes, [storage_nbytes])
         for param in params:
-            # The group owns the shared storage, not the parameter
-            self.assertTrue(param._keep_all_gather_output_storage)
+            # The bucket owns the shared storage, not the parameter
+            self.assertTrue(param.outputs_view_layout_buffers)
             param.free_all_gather_outputs()
         self.assertEqual(storage.size(), storage_nbytes)
         # Reshard frees the group's buffer
@@ -3084,8 +3084,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             model(inp)
             with self.assertRaisesRegex(ValueError, "did not refill"):
                 model(inp)
-            fsdp_params = model._get_fsdp_state()._fsdp_param_group.fsdp_params
-            outputs = [t for p in fsdp_params for t in p.all_gather_outputs]
+            group = model._get_fsdp_state()._fsdp_param_group
+            outputs = [t for p in group.all_gather.params for t in p.all_gather_outputs]
             self.assertEqual([t.untyped_storage().size() for t in outputs], [0, 0])
 
     def test_shared_buffer_extension(self):
@@ -3212,8 +3212,8 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
                 # One FSDP-owned buffer backs all of the group's parameters
                 (buffer,) = group._all_gather_buffers.tensors
                 storage = buffer.untyped_storage()
-                for param in group.fsdp_params:
-                    test.assertTrue(param._keep_all_gather_output_storage)
+                for param in group.all_gather.params:
+                    test.assertTrue(param.outputs_view_layout_buffers)
                     output_storage = param.all_gather_outputs[0].untyped_storage()
                     test.assertEqual(output_storage._cdata, storage._cdata)
                 resident = keep or not sync

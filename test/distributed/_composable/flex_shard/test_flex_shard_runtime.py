@@ -421,6 +421,68 @@ class TestFlexShardEagerRuntime(TestCase):
                 optim.step()
                 ref_optim.step()
 
+    def test_bucket_without_forward_contributes_no_grads(self):
+        # A bucket whose forward did not run since its last reduction
+        # contributes no grads, as in FSDP2, unless reduce_scatter_unused_params
+        # asks for zeros
+        class Net(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.used = nn.Linear(8, 8)
+                self.skipped = nn.Linear(8, 8)
+                self.use_skipped = True
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.used(x)
+                return self.skipped(x) if self.use_skipped else x
+
+        for reduce_scatter_unused_params in (False, True):
+            with (
+                self.subTest(reduce_scatter_unused_params=reduce_scatter_unused_params),
+                single_rank_cuda_mesh() as mesh,
+            ):
+                model = Net()
+                flex_shard(
+                    model,
+                    buckets=[
+                        _bucket(["used"], mesh, reshard_after_forward=True),
+                        _bucket(["skipped"], mesh, reshard_after_forward=True),
+                    ],
+                )
+                model.set_reduce_scatter_unused_params(reduce_scatter_unused_params)
+                x = torch.randn(4, 8, device="cuda")
+                model(x).sum().backward()
+                model.zero_grad(set_to_none=True)
+                model.use_skipped = False
+                model(x).sum().backward()
+                for param in model.skipped.parameters():
+                    if reduce_scatter_unused_params:
+                        self.assertEqual(param.grad, torch.zeros_like(param))
+                    else:
+                        self.assertIsNone(param.grad)
+                for param in model.used.parameters():
+                    self.assertIsNotNone(param.grad)
+
+    def test_forward_without_backward_reshards_as_reshard_after_forward(self):
+        # As in FSDP2, a forward with no backward after it reshards only the
+        # buckets with reshard_after_forward
+        with single_rank_cuda_mesh() as mesh:
+            model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
+            flex_shard(
+                model,
+                buckets=[
+                    _bucket(["0"], mesh, reshard_after_forward=True),
+                    _bucket(["1"], mesh, reshard_after_forward=False),
+                ],
+            )
+            with torch.no_grad():
+                model(torch.randn(4, 8, device="cuda"))
+            self.assertEqual(
+                [bucket.is_unsharded for bucket in _buckets(model)], [False, True]
+            )
+            model.reshard()
+            self.assertFalse(any(bucket.is_unsharded for bucket in _buckets(model)))
+
     def test_persistent_unsharded_params(self):
         for reshard_after_forward in (False, True):
             with (
@@ -487,6 +549,10 @@ class TestFlexShardEagerRuntime(TestCase):
         x = torch.randn(4, 8, device="cuda")
         with torch.inference_mode():  # the first unshard runs in inference mode
             model(x)
+        # A forward without backward keeps the buckets without
+        # reshard_after_forward unsharded, as in FSDP2, and parameters() would
+        # return their unsharded params to the optimizer
+        model.reshard()
         persistent = [param for bucket in buckets for param in bucket.unsharded_params]
         buffers = [buffer for bucket in buckets for buffer in bucket.persistent_buffers]
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
@@ -832,12 +898,14 @@ class TestFlexShardEagerRuntime(TestCase):
                     )
                     _chunked_loss_backward(reference, x, targets, num_chunks)
                     # The layer stays gathered through the chunk backwards. The
-                    # head reduce-scatters its grads alone at the last chunk;
-                    # the norm's come with the final backward.
+                    # head reduce-scatters its grads alone at the last chunk and,
+                    # without reshard_after_backward, stays gathered until the
+                    # explicit reshard, as in FSDP2; the norm's grads come with
+                    # the final backward.
                     self.assertEqual(
                         observed,
                         [(True, True, False, False)] * (num_chunks - 1)
-                        + [(True, False, True, False)],
+                        + [(True, True, True, False)],
                     )
                     self.assertFalse(layer_bucket.is_unsharded)
                     self.assertFalse(head_bucket.is_unsharded)

@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
+from .._flex_shard.all_gather_layout import AllGatherLayout
 from . import _fsdp_engine
-from ._all_gather_layout import AllGatherLayout
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,

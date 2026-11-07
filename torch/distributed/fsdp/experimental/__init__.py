@@ -30,12 +30,10 @@ parameter. Existing hooks returning tensors remain supported.
 from collections.abc import Callable
 
 import torch
-from torch.distributed.fsdp._fully_shard._all_gather_layout import (
-    DefaultAllGatherLayout,
-)
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+from torch.distributed.fsdp._flex_shard.all_gather_layout import (
     _default_all_gather_output_fn,
+    AllGatherInput,
+    DefaultAllGatherLayout,
 )
 
 

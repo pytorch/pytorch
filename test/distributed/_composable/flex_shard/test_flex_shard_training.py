@@ -1103,6 +1103,7 @@ class TestFlexShardTraining(FSDPTest):
                     model(x).sum().backward()
                     reference(x).sum().backward()
                 model.set_requires_gradient_sync(True)
+                model.set_reshard_after_backward(True)
                 handle = model.finalize_backward(async_op=async_op)
                 if async_op:
                     with self.assertRaisesRegex(RuntimeError, "wait on the previous"):
@@ -1223,7 +1224,8 @@ class TestFlexShardTraining(FSDPTest):
         # forward hooks that gather its bucket, unshards every bucket first, as
         # Megatron-LM's EP overlap schedule does. It also splits each backward
         # into two calls, so backward finalization is manual: the buckets keep
-        # their grads until finalize_backward after the last microbatch. Two
+        # their grads until finalize_backward after the last microbatch, and,
+        # without reshard_after_backward, their params, as with FSDP2. Two
         # steps, so the second unshard gathers the updated shards, which its
         # outputs check. With async_op, the schedule waits on the unshard's
         # handle before it uses the params.
@@ -1261,6 +1263,7 @@ class TestFlexShardTraining(FSDPTest):
                 for _ in range(2):
                     optimizer.zero_grad(set_to_none=True)
                     reference_optimizer.zero_grad(set_to_none=True)
+                    model.set_reshard_after_backward(False)
                     handle = model.unshard(async_op=async_op)
                     if async_op:
                         handle.wait()
@@ -1280,6 +1283,7 @@ class TestFlexShardTraining(FSDPTest):
                         output.sum().backward()
                         hidden.backward(detached.grad)
                         reference_output.sum().backward()
+                    model.set_reshard_after_backward(True)
                     model.finalize_backward()
                     _average_reference_grads(reference)
                     optimizer.step()
@@ -1618,6 +1622,9 @@ class TestFlexShardTraining(FSDPTest):
                             storage.set_requires_gradient_sync(last or storage is layer)
                     if mode == "keep":
                         model.set_requires_gradient_sync(last)
+                        if last:
+                            # As with FSDP2: reshard before the optimizer step
+                            model.set_reshard_after_backward(True)
                     loss = microbatch_loss(model, idx)
                     ref_loss = microbatch_loss(reference, idx)
                     self.assertEqual(loss, ref_loss)
@@ -1692,6 +1699,7 @@ class TestFlexShardTraining(FSDPTest):
         model.set_requires_gradient_sync(False)
         model.tok_embeddings(x).float().sum().backward()
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         reference.tok_embeddings(x).float().sum().backward()
         unsharded_param = model.tok_embeddings.weight
         self.assertEqual(unsharded_param.dtype, torch.bfloat16)
@@ -2030,6 +2038,7 @@ class TestFlexShardTraining(FSDPTest):
         # bucket's fp32 reduce dtype promoted by b's grad_dtype.
         self.assertEqual(model.a._parameters["weight"].grad.dtype, torch.bfloat16)
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         model(x).backward()
         # As in FSDP2, b's first backward, without sync, starts its grad and
         # keeps the upcast, so its two uses sum to 257 in fp32; the syncing
@@ -2089,6 +2098,7 @@ class TestFlexShardTraining(FSDPTest):
         model.set_requires_gradient_sync(False)
         model(x).sum().backward()
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         reference(x).sum().backward()
         loss = model(x).sum()
         ref_loss = reference(x).sum()

@@ -411,9 +411,7 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
         model.set_keep_unsharded_storage(keep=True, recurse=True)
         param_group = model[0]._get_fsdp_state()._fsdp_param_group
         self.assertIsNotNone(param_group)
-        self.assertTrue(
-            all(param.keep_unsharded_storage for param in param_group.fsdp_params)
-        )
+        self.assertTrue(param_group.bucket.keep_persistent_storage)
 
         def get_data_ptrs() -> list[int]:
             return [

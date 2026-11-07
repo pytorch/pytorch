@@ -1,4 +1,8 @@
-"""Experimental contract for FSDP all-gather input packing and output handling.
+"""Experimental contract for all-gather input packing and output handling.
+
+It applies to buckets whose parameters define their own all-gather inputs
+(``ParamDrivenShard``), such as ``fully_shard`` groups with all-gather
+extensions or a custom layout.
 
 A layout prepares each all-gather before its output is allocated, packs the
 collective input, and finalizes the collective output into the parameters'
@@ -32,18 +36,52 @@ out-of-tree backends must target a matching revision of them.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from itertools import chain
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
+import torch.distributed as dist
+from torch.distributed.device_mesh import _get_device_handle
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ._fsdp_api import AllGather
-    from ._fsdp_collectives import AllGatherResult
-    from ._fsdp_param import FSDPParam
+    from .placements.param_driven_shard import ParamAllGather
+
+
+@dataclass(eq=False, slots=True)
+class AllGatherInput:
+    r"""Describe one payload returned by an FSDP all-gather extension.
+
+    Return these among the all-gather inputs of ``fsdp_pre_all_gather``. FSDP
+    concatenates each rank's ``tensor`` along ``dim`` and passes the result to
+    ``fsdp_post_all_gather``, e.g. ``(2, F, D)`` with ``dim=1`` gathers to
+    ``(2, N * F, D)`` over ``N`` ranks. Plain tensor inputs are instead read as rows
+    of the padded sharded parameter, concatenated along its shard dim, and passed
+    viewed as ``(-1, *tensor.shape[1:])``. With several shard ranks and rows, nonempty
+    ones need the padded sharded parameter's element count or dims before its shard dim.
+
+    Every rank must return the same shapes and dtypes, and the number of inputs
+    and each input's element count and dtype must stay fixed across calls, except
+    that plain tensors may become uint8 byte views of their whole outputs, which
+    are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
+    and nonzero trailing dims, shrink, leaving unspecified data after the gathered
+    prefix. Extensions own any padding: the local shard is unpadded on ranks with
+    a smaller shard, so per-row payloads such as scales need padding too. When
+    ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
+    of an unevenly sharded parameter to have the padded sharded size, so return
+    payloads of other shapes, such as scales, as records.
+
+    Attributes:
+        tensor (Tensor): Local payload, flattened with ``view(-1)``. Scalars count
+            as shape ``(1,)``.
+        dim (int): Dimension to concatenate along; may be negative.
+    """
+
+    tensor: torch.Tensor
+    dim: int = field(kw_only=True)
 
 
 @dataclass(kw_only=True)
@@ -165,7 +203,7 @@ class AllGatherLayout(ABC):
     which allocates the buffers.
     """
 
-    comm_type: type[AllGather] | None = None
+    comm_type: type | None = None
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
@@ -283,14 +321,13 @@ class DefaultAllGatherLayout(AllGatherLayout):
     def finalize_outputs(self, metadata: AllGatherFinalizeMetadata) -> AllGatherOutputs:
         """Copy the rank-major output into per-parameter outputs for a custom layout
         that delegates to this one; FSDP's own all-gathers with it do not call it."""
-        # _fsdp_collectives imports this module
-        from ._fsdp_collectives import _default_all_gather_output_fn as default_fn
-
         all_gather_output, world_size = metadata.all_gather_output, metadata.world_size
         plan, new_buffers = _plan_rank_major_outputs(
             all_gather_output, metadata.param_metadata, world_size
         )
-        self._copy_out(all_gather_output, plan, world_size, default_fn)
+        self._copy_out(
+            all_gather_output, plan, world_size, _default_all_gather_output_fn
+        )
         buffers = metadata.buffers or new_buffers
         return AllGatherOutputs(tensors=plan.outputs, buffers=buffers)
 
@@ -349,17 +386,17 @@ def _plan_rank_major_outputs(
 
 
 def _adopt_layout_outputs(
-    fsdp_params: list[FSDPParam],
+    params: list[ParamAllGather],
     result: AllGatherOutputs,
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> _PersistentBuffers:
-    """Adopts a group's first finalized outputs and returns the FSDP-owned
+    """Adopts a bucket's first finalized outputs and returns the persistent
     buffers behind them, checking every output before adopting any."""
-    if len(fsdp_params) != len(result.tensors):
+    if len(params) != len(result.tensors):
         raise ValueError(
             f"all-gather layout returned {len(result.tensors)} parameter outputs "
-            f"for {len(fsdp_params)} parameters"
+            f"for {len(params)} parameters"
         )
     output = all_gather_result.all_gather_output
     tensors = (output, all_gather_result.all_gather_input)
@@ -375,13 +412,13 @@ def _adopt_layout_outputs(
                 "collective's input or output"
             )
     buffer_storages = {buffer.untyped_storage().data_ptr() for buffer in result.buffers}
-    for fsdp_param, numels, dtypes, outputs in zip(
-        fsdp_params,
+    for param, numels, dtypes, outputs in zip(
+        params,
         all_gather_result.param_all_gather_input_numels,
         all_gather_result.param_all_gather_input_dtypes,
         result.tensors,
     ):
-        name = fsdp_param._display_name
+        name = param.name
         if len(outputs) != len(numels):
             raise ValueError(
                 f"all-gather layout returned {len(outputs)} outputs for the "
@@ -405,10 +442,10 @@ def _adopt_layout_outputs(
                     f"all-gather output of {name} does not view the persistent "
                     "buffers its layout returned, so refills would not reach it"
                 )
-    for fsdp_param, outputs in zip(fsdp_params, result.tensors):
-        fsdp_param.all_gather_outputs = list(outputs)  # the layout may keep its list
-        # The group allocates and frees the buffers the outputs view
-        fsdp_param._keep_all_gather_output_storage = True
+    for param, outputs in zip(params, result.tensors):
+        param.all_gather_outputs = list(outputs)  # the layout may keep its list
+        # The bucket allocates and frees the buffers the outputs view
+        param.outputs_view_layout_buffers = True
     if output.device.type in ("cuda", "xpu"):
         # Reshard frees the buffers on the current stream, so one allocated on
         # another stream waits for its work; a no-op for buffers from finalize
@@ -422,19 +459,218 @@ def _adopt_layout_outputs(
 
 
 def _check_layout_refill(
-    fsdp_params: list[FSDPParam], result: AllGatherOutputs
+    params: list[ParamAllGather], result: AllGatherOutputs
 ) -> None:
-    if len(fsdp_params) != len(result.tensors):
+    if len(params) != len(result.tensors):
         raise ValueError(
             f"all-gather layout returned {len(result.tensors)} parameter outputs "
-            f"for {len(fsdp_params)} parameters"
+            f"for {len(params)} parameters"
         )
-    for fsdp_param, outputs in zip(fsdp_params, result.tensors):
-        previous = fsdp_param.all_gather_outputs
+    for param, outputs in zip(params, result.tensors):
+        previous = param.all_gather_outputs
         if len(previous) != len(outputs) or any(
             a is not b for a, b in zip(outputs, previous)
         ):
             raise ValueError(
-                "all-gather layout did not refill the outputs of "
-                f"{fsdp_param._display_name} in place"
+                f"all-gather layout did not refill the outputs of {param.name} in place"
             )
+
+
+class AllGatherResult(NamedTuple):
+    all_gather_output: torch.Tensor
+    all_gather_event: torch.Event | None
+    all_gather_work: dist.distributed_c10d.Work | None
+    # For each parameter, the all-gather input dtype for each input
+    param_all_gather_input_dtypes: list[list[torch.dtype]]
+    # For each parameter, the all-gather input numel for each input
+    param_all_gather_input_numels: list[list[int]]
+    # 1D flattened version of `param_all_gather_input_numels` saved to avoid
+    # CPU overhead from recomputing
+    all_gather_input_split_sizes: list[int]
+    # Per input, the product of the dims before the dim that ranks are
+    # concatenated along (see _AllGatherOutputLayout)
+    all_gather_input_outer_sizes: list[int]
+    layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+    output_metadata: object | None = None
+    # Kept until the collective completes, since a custom layout may pack it
+    # into storage independent of the output
+    all_gather_input: torch.Tensor | None = None
+
+
+def _get_all_gather_input_metadatas(
+    param_all_gather_inputs: list[list[torch.Tensor]],
+) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype]:
+    param_all_gather_input_dtypes: list[list[torch.dtype]] = []
+    param_all_gather_input_numels: list[list[int]] = []
+    first_input = next(chain.from_iterable(param_all_gather_inputs), None)
+    if first_input is None:
+        raise ValueError("cannot all-gather a parameter group without any payloads")
+    all_gather_dtype = first_input.dtype
+    for all_gather_inputs in param_all_gather_inputs:
+        input_dtypes: list[torch.dtype] = []
+        input_numels: list[int] = []
+        for all_gather_input in all_gather_inputs:
+            if all_gather_input.dtype != all_gather_dtype:
+                all_gather_dtype = torch.uint8
+            input_dtypes.append(all_gather_input.dtype)
+            input_numels.append(all_gather_input.numel())
+        param_all_gather_input_dtypes.append(input_dtypes)
+        param_all_gather_input_numels.append(input_numels)
+    return (
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_dtype,
+    )
+
+
+def _prepare_default_all_gather_outputs(
+    params: list[ParamAllGather],
+    all_gather_result: AllGatherResult,
+    world_size: int,
+) -> _DefaultAllGatherCopyPlan:
+    device = all_gather_result.all_gather_output.device
+    plan = _DefaultAllGatherCopyPlan(
+        [],
+        all_gather_result.all_gather_input_split_sizes,
+        all_gather_result.all_gather_input_outer_sizes,
+    )
+    for param, numels, dtypes in zip(
+        params,
+        all_gather_result.param_all_gather_input_numels,
+        all_gather_result.param_all_gather_input_dtypes,
+    ):
+        param.init_all_gather_outputs(numels, dtypes, world_size, device)
+        # Skips outputs that view the bucket's layout buffers, which it
+        # re-allocated
+        param.alloc_all_gather_outputs()
+        plan.outputs.append(param.all_gather_outputs)
+    return plan
+
+
+# Note [All-gather output fn]
+# fn(all_gather_output, outputs, split_sizes=..., outer_sizes=..., world_size=...)
+# runs under no_grad on the current stream and copies the flat rank-major
+# all_gather_output into outputs, flat buffers that FSDP allocates. Each rank's
+# chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
+# as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
+# same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
+# prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
+# their dtypes. Of its arguments, fn may only write outputs, whose version
+# counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
+# an empty all-gather.
+def _default_all_gather_output_fn(
+    all_gather_output: torch.Tensor,
+    outputs: list[torch.Tensor],
+    *,
+    split_sizes: list[int],
+    outer_sizes: list[int],
+    world_size: int,
+) -> None:
+    """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
+    byte_views = all_gather_output.dtype == torch.uint8
+    split_outputs: list[torch.Tensor] = []
+    reassembled: list[tuple[torch.Tensor, torch.Tensor, int]] = []
+    for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
+        copy_output = output
+        if outer_size > 1:
+            copy_output = torch.empty_like(output)
+            reassembled.append((copy_output, output, outer_size))
+        if byte_views and copy_output.nbytes == world_size * split_size:
+            # View as bytes last: a view of a byte view keeps the byte view alive
+            split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
+            continue
+        split_output = copy_output.view(torch.uint8) if byte_views else copy_output
+        if split_output.numel() != world_size * split_size:  # a smaller payload
+            split_output = split_output[: world_size * split_size]
+        split_outputs.append(split_output.view(world_size, split_size))
+    torch.ops.fsdp.split_with_sizes_copy(
+        all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
+    )
+    for copy_output, output, outer_size in reassembled:
+        chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
+        torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
+
+
+def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
+    device_handle = _get_device_handle(device.type)
+    if (all_gather_event := all_gather_result.all_gather_event) is not None:
+        device_handle.current_stream().wait_event(all_gather_event)
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
+        all_gather_work.wait()
+
+
+@torch.no_grad()
+def foreach_all_gather_copy_out(
+    all_gather_result: AllGatherResult,
+    params: list[ParamAllGather],
+    group: Any,
+    persistent_buffers: _PersistentBuffers | None = None,
+) -> _PersistentBuffers | None:
+    """Finalizes the all-gather with the layout that prepared it and returns the
+    bucket's persistent layout buffers: those a custom layout returns on the
+    bucket's first unshard, else ``persistent_buffers`` (None if the default
+    layout allocated each output)."""
+    _wait_all_gather(all_gather_result)
+    world_size = group.size()
+    layout = all_gather_result.layout
+    all_gather_output = all_gather_result.all_gather_output
+    if persistent_buffers is not None:
+        persistent_buffers.alloc()
+    if isinstance(layout, DefaultAllGatherLayout):
+        # Rank-major output, from the default layout or a custom layout's fallback
+        plan = _prepare_default_all_gather_outputs(
+            params, all_gather_result, world_size
+        )
+        layout._copy_out(
+            all_gather_output, plan, world_size, _default_all_gather_output_fn
+        )
+        return persistent_buffers
+    first_unshard = not any(p.all_gather_outputs for p in params)
+    buffers: list[torch.Tensor] = []
+    if not first_unshard:
+        for param in params:
+            param.alloc_all_gather_outputs()
+        if persistent_buffers is not None:
+            buffers = list(persistent_buffers.tensors)
+        else:
+            # Outputs that the default layout created are their own buffers
+            buffers = [t for p in params for t in p.all_gather_outputs]
+    outer_sizes = iter(all_gather_result.all_gather_input_outer_sizes)
+    # Copies, so that a layout cannot change the engine's lists behind the
+    # checks below
+    param_metadata = [
+        AllGatherParamMetadata(
+            input_numels=list(numels),
+            input_dtypes=list(dtypes),
+            outer_sizes=[next(outer_sizes) for _ in numels],
+            outputs=list(param.all_gather_outputs),
+        )
+        for param, numels, dtypes in zip(
+            params,
+            all_gather_result.param_all_gather_input_numels,
+            all_gather_result.param_all_gather_input_dtypes,
+        )
+    ]
+    # Refills write into outputs that saved parameters may alias
+    preserved_outputs = tuple(
+        output
+        for param in param_metadata
+        for output in param.outputs
+        if not output.is_inference()
+    )
+    with torch.autograd._unsafe_preserve_version_counter(preserved_outputs):
+        outputs = layout.finalize_outputs(
+            AllGatherFinalizeMetadata(
+                all_gather_output=all_gather_output,
+                param_metadata=param_metadata,
+                world_size=world_size,
+                output_metadata=all_gather_result.output_metadata,
+                buffers=buffers,
+            )
+        )
+    if first_unshard:
+        return _adopt_layout_outputs(params, outputs, all_gather_result, world_size)
+    _check_layout_refill(params, outputs)
+    return persistent_buffers

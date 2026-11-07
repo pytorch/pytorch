@@ -239,12 +239,11 @@ class FSDPState(_State):
     def _lazy_init_engine(self) -> None:
         """Join every state's engine buckets to one engine context, as FSDP2
         shares the root's comm context."""
-        from .._flex_shard.bucket_runtime import BucketCommContext
+        from ._fsdp_engine import new_engine_context
 
         context = self._shared_engine_context
         if context is None:
-            context = BucketCommContext.for_device(self._device)
-            context.fsdp2_prefetch_release = True
+            context = new_engine_context(self._device)
         context.backward_start_callbacks.append(self._engine_backward_start)
         context.backward_end_callbacks.append(self._engine_backward_end)
         for state in self._state_ctx.all_states:

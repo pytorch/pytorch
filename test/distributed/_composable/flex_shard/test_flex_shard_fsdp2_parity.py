@@ -181,6 +181,7 @@ def _apply_flex_shard(
     divide_factor: float | None,
     fsdp2_compatible: bool = False,
     head_reshard_after_forward: bool = False,
+    fsdp2_scheduling: bool = False,
 ) -> None:
     def placement_fn(named_params, mesh):
         del mesh
@@ -207,6 +208,9 @@ def _apply_flex_shard(
             bucket(["norm", "lm_head"], head_reshard_after_forward),
         ],
     )
+    if fsdp2_scheduling:
+        model.set_post_backward_per_call(True)
+        model.set_keep_prefetches_until_used(True)
 
 
 @contextlib.contextmanager
@@ -505,11 +509,16 @@ class TestFlexShardFSDP2Parity(_FullyShardParity):
         return 4
 
     def _check_matches_fully_shard(
-        self, reference: _Decoder, collectives: tuple[str, ...]
+        self,
+        reference: _Decoder,
+        collectives: tuple[str, ...],
+        fsdp2_scheduling: bool = False,
     ) -> None:
         mesh = init_device_mesh(device_type.type, (self.world_size,))
         apply_fsdp2_compatible = functools.partial(
-            _apply_flex_shard, fsdp2_compatible=True
+            _apply_flex_shard,
+            fsdp2_compatible=True,
+            fsdp2_scheduling=fsdp2_scheduling,
         )
         for config, context in _configs():
             with _record_collective_inputs() as fsdp2_recorded:
@@ -534,16 +543,16 @@ class TestFlexShardFSDP2Parity(_FullyShardParity):
 
     @skip_if_lt_x_gpu(4)
     def test_matches_fully_shard_with_head_called_twice(self):
-        # FSDP2 runs a post-backward per call, and the first fires before
-        # autograd sums the two calls' grads, so a syncing backward after
-        # backwards without sync reduce-scatters the kept grads alone, then
-        # this backward's. That post-backward also reshards the group, which
-        # FSDP2 then gathers again for the other call: only the reduce-scatters
-        # match.
+        # FSDP2 runs a post-backward per call: each call's backward
+        # reduce-scatters its grads and reshards the group, which the other
+        # call's backward gathers again. With FSDP2's scheduling options, the
+        # buckets issue the same collectives.
         torch.manual_seed(0)
         reference = _Decoder()
         reference.second_head_call = True
-        self._check_matches_fully_shard(reference, ("reduce_scatter",))
+        self._check_matches_fully_shard(
+            reference, ("all_gather", "reduce_scatter"), fsdp2_scheduling=True
+        )
 
 
 class TestFlexShardChunkedLossFSDP2Parity(_FullyShardParity):

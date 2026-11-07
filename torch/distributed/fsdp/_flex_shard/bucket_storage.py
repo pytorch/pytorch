@@ -203,8 +203,12 @@ class BucketSpec:
             receives them as a ``GradientReduction``.
         reshard_after_forward: Whether to free this bucket's unsharded
             parameters after forward and re-gather them before backward. This
-            defaults to True. Under ``torch.compile`` the traced graph owns
-            buffer lifetimes instead.
+            defaults to True. As in FSDP2, it also decides whether a forward
+            that no backward follows (e.g. under ``torch.no_grad()``) frees
+            them; with False, ``module.parameters()`` returns the unsharded
+            params until the bucket reshards (``FlexShardModule.reshard()``).
+            Under ``torch.compile`` the traced graph owns buffer lifetimes
+            instead.
         pre_backward_hook: Optional callable run with this bucket's
             ``(fqn, unsharded param)`` pairs once they are unsharded and before
             its backward runs: in its pre-backward hook, and when activation
@@ -413,11 +417,6 @@ class ShardedBucketStorage:
         # FSDP2's set_unshard_in_backward and set_reduce_scatter_unused_params.
         self._unshard_in_backward = True
         self._reduce_scatter_unused_params = False
-        # FSDP2's resharding rules (fully_shard): set_reshard_after_backward
-        # also applies to backwards with gradient sync, a forward without a
-        # backward reshards only as reshard_after_forward says, and each forward
-        # call's backward runs a post-backward
-        self._fsdp2_semantics = False
         # FSDP2's _set_unshard_async_op: unshards run as asynchronous
         # collectives on the current stream instead of on the unshard stream
         self._unshard_async_op = False
@@ -904,7 +903,7 @@ class ShardedBucketStorage:
         self._requires_gradient_sync = requires_gradient_sync
 
     def set_reshard_after_backward(self, reshard_after_backward: bool) -> None:
-        """Set whether a backward without gradient sync reshards this bucket.
+        """Set whether backward reshards this bucket.
 
         ``FlexShardModule.set_reshard_after_backward`` documents the behavior
         and sets every bucket.
@@ -913,9 +912,20 @@ class ShardedBucketStorage:
 
     @property
     def reshard_after_backward(self) -> bool:
-        """Whether a backward without gradient sync reshards this bucket; see
+        """Whether backward reshards this bucket; see
         ``set_reshard_after_backward``."""
         return self._reshard_after_backward
+
+    def set_reduce_scatter_unused_params(
+        self, reduce_scatter_unused_params: bool
+    ) -> None:
+        """Set whether this bucket reduce-scatters zeros for params without
+        grads.
+
+        ``FlexShardModule.set_reduce_scatter_unused_params`` documents the
+        behavior and sets every bucket.
+        """
+        self._reduce_scatter_unused_params = reduce_scatter_unused_params
 
     @property
     def reshard_after_forward(self) -> bool:

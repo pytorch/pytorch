@@ -17,9 +17,7 @@ root's runtime at lazy init.
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -27,6 +25,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.tensor import DTensor
 
+from .._flex_shard.all_gather_layout import AllGatherLayout, DefaultAllGatherLayout
 from .._flex_shard.bucket_runtime import (
     BucketCommContext,
     BucketParam,
@@ -35,30 +34,24 @@ from .._flex_shard.bucket_runtime import (
     ParamRepresentation,
 )
 from .._flex_shard.bucket_storage import ParamInfo, ShardedBucketStorage
-from .._flex_shard.placement_contract import (
-    PlacementPreparedUnshard,
-    PlacementUnshardResult,
+from .._flex_shard.placements.param_driven_shard import (
+    ParamAllGatherInputs,
+    ParamDrivenAllGather,
+    ParamDrivenShard,
 )
 from .._flex_shard.placements.shard import Shard as EngineShard
-from ._all_gather_layout import (
-    AllGatherInputMetadata,
-    AllGatherLayout,
-    DEFAULT_ALL_GATHER_LAYOUT,
-    DefaultAllGatherLayout,
-)
 from ._fsdp_api import CPUOffloadPolicy
 from ._fsdp_common import _from_local_no_grad, DDPMeshInfo, FSDPMeshInfo, TrainingState
 from ._fsdp_param import (
     _get_dtensor_spec_with_dtype,
     _get_param_module_infos,
-    alloc_storage,
     FSDPParam,
     ShardedState,
 )
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
     from ._fsdp_common import DataParallelMeshInfo, ShardPlacementFnResult
@@ -109,7 +102,6 @@ class FSDPParamRepresentation(ParamRepresentation):
         fsdp_param = self.fsdp_params[index]
         spec = fsdp_param._unsharded_dtensor_spec
         if fsdp_param.is_spmd_types or spec is None or isinstance(full_param, DTensor):
-            # FSDPParamShard's full params are FSDPParam's unsharded params
             return full_param
         return _from_local_no_grad(
             full_param, _get_dtensor_spec_with_dtype(spec, full_param.dtype)
@@ -128,9 +120,11 @@ class FSDPParamRepresentation(ParamRepresentation):
     def check_post_forward_reshard(self) -> None:
         # FSDP2's limits for resharding to a smaller mesh after forward
         param_driven = self.bucket.param_driven_unshard()
-        for fsdp_param in self.fsdp_params:
-            if param_driven:  # FSDPParamShard's
-                fsdp_param.check_post_forward_reshard()
+        for fsdp_param, all_gather in zip(
+            self.fsdp_params, self.bucket.all_gather.params, strict=True
+        ):
+            if param_driven:
+                fsdp_param.check_post_forward_reshard(all_gather)
                 continue
             if fsdp_param.is_dtensor:
                 raise NotImplementedError(
@@ -183,6 +177,20 @@ class FSDPParamRepresentation(ParamRepresentation):
 
     def before_unshard(self) -> None:
         self.bucket.sync_aliases()
+
+    def all_gather_inputs(self, index: int) -> ParamAllGatherInputs:
+        return self.fsdp_params[index].all_gather_inputs
+
+    def post_all_gather(
+        self,
+        index: int,
+        outputs: tuple[torch.Tensor, ...],
+        out: nn.Parameter | None,
+    ) -> tuple[torch.Tensor, Sequence[torch.Tensor]] | None:
+        return self.fsdp_params[index].post_all_gather(outputs, out)
+
+    def releases_all_gather_outputs(self, index: int) -> bool:
+        return self.fsdp_params[index]._release_all_gather_outputs_after_post_all_gather
 
     def check_post_forward_unshard(self) -> None:
         for fsdp_param in self.fsdp_params:
@@ -284,252 +292,6 @@ def _cast_grad_runs(
     return out
 
 
-@dataclass
-class _ParamDrivenUnshardState:
-    # On one rank, FSDP2 copies each parameter's all-gather inputs instead
-    single_rank_inputs: list[list[torch.Tensor]] | None
-    split_sizes: list[int]
-    outer_sizes: list[int]
-    param_numels: list[list[int]]
-    param_dtypes: list[list[torch.dtype]]
-    layout: AllGatherLayout
-    output_metadata: object | None
-    comm: Any
-    group: dist.ProcessGroup | None
-
-
-class FSDPParamShard(EngineShard):
-    """The engine's ``Shard`` placement for buckets whose all-gather inputs and
-    outputs ``FSDPParam`` defines: all-gather extensions
-    (``fsdp_pre_all_gather``/``fsdp_post_all_gather``), tensor subclass
-    parameters, and custom ``AllGatherLayout``s. The all-gather packs each
-    parameter's ``all_gather_inputs``, and finish fills its all-gather outputs
-    and unsharded parameter, as FSDP2 does; the gradient reduction is
-    ``Shard``'s."""
-
-    refills_persistent_buffers_in_finish = True
-
-    def __init__(self, dim: int, bucket: FullyShardBucket) -> None:
-        super().__init__(dim)
-        self._bucket = bucket
-
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, FSDPParamShard)
-            and other._bucket is self._bucket
-            and other.dim == self.dim
-        )
-
-    def __hash__(self) -> int:
-        return hash((type(self), id(self._bucket), self.dim))
-
-    def bucket_compatibility_key(self) -> object:
-        return (type(self), id(self._bucket))
-
-    def prepare_unshard_bucket(
-        self,
-        tensors: list[torch.Tensor],
-        infos: list[ParamInfo],
-        mesh: Any,
-        debug_fqn: str | None,
-        *,
-        comm: Any = None,
-        device: torch.device | None = None,
-    ) -> PlacementPreparedUnshard:
-        from ._fsdp_collectives import _get_all_gather_input_metadatas
-
-        bucket = self._bucket
-        world_size, rank = mesh.size(), mesh.get_local_rank()
-        param_inputs = [
-            fsdp_param.all_gather_inputs for fsdp_param in bucket.fsdp_params
-        ]
-        if world_size == 1:
-            return PlacementPreparedUnshard(
-                placement=self,
-                buffers=[],
-                placement_state=_ParamDrivenUnshardState(
-                    single_rank_inputs=param_inputs,
-                    split_sizes=[],
-                    outer_sizes=[],
-                    param_numels=[],
-                    param_dtypes=[],
-                    layout=bucket.all_gather_layout,
-                    output_metadata=None,
-                    comm=comm,
-                    group=mesh.get_group(),
-                ),
-            )
-        # Extension layouts are set by the all_gather_inputs calls above
-        outer_sizes = [
-            layout.outer_size
-            for fsdp_param in bucket.fsdp_params
-            for layout in fsdp_param.all_gather_output_layouts
-        ]
-        param_dtypes, param_numels, dtype = _get_all_gather_input_metadatas(
-            param_inputs
-        )
-        inputs = [
-            t.view(torch.uint8) if dtype == torch.uint8 else t
-            for ts in param_inputs
-            for t in ts
-        ]
-        split_sizes = [t.numel() for t in inputs]
-        numel = sum(split_sizes)
-        layout = bucket.all_gather_layout
-        if isinstance(layout, DefaultAllGatherLayout):
-            copy_in, call_layout, output_metadata = layout.copy_in, layout, None
-        else:
-            copy_in, call_layout, output_metadata = layout.prepare(
-                AllGatherInputMetadata(
-                    input_split_sizes=list(split_sizes),
-                    input_outer_sizes=list(outer_sizes),
-                    input_numel=numel,
-                    world_size=world_size,
-                    dtype=dtype,
-                    device=bucket.device,
-                )
-            )
-        size = (numel * world_size,)
-        output = (
-            torch.empty(size, dtype=dtype, device=bucket.device)
-            if comm is None
-            else comm.allocate(size, dtype=dtype, device=bucket.device)
-        )
-        all_gather_input, output = copy_in(inputs, output, split_sizes, numel, rank)
-        return PlacementPreparedUnshard(
-            placement=self,
-            buffers=[all_gather_input, output],
-            placement_state=_ParamDrivenUnshardState(
-                single_rank_inputs=None,
-                split_sizes=split_sizes,
-                outer_sizes=outer_sizes,
-                param_numels=param_numels,
-                param_dtypes=param_dtypes,
-                layout=call_layout,
-                output_metadata=output_metadata,
-                comm=comm,
-                group=mesh.get_group(),
-            ),
-        )
-
-    def run_prepared_unshard(
-        self, prepared: PlacementPreparedUnshard, *, async_op: bool = False
-    ) -> dist.Work | None:
-        state = cast(_ParamDrivenUnshardState, prepared.placement_state)
-        if state.single_rank_inputs is not None:
-            return None
-        all_gather_input, output = prepared.buffers
-        if state.comm is None:
-            return dist.all_gather_single(
-                output, all_gather_input, group=state.group, async_op=async_op
-            )
-        kwargs = {}
-        if state.layout.comm_type is not None:
-            kwargs["output_metadata"] = state.output_metadata
-        return state.comm(
-            output_tensor=output,
-            input_tensor=all_gather_input,
-            group=state.group,
-            async_op=async_op,
-            **kwargs,
-        )
-
-    def finish_prepared_unshard(
-        self, prepared: PlacementPreparedUnshard
-    ) -> PlacementUnshardResult:
-        from ._fsdp_collectives import AllGatherResult, foreach_all_gather_copy_out
-
-        state = cast(_ParamDrivenUnshardState, prepared.placement_state)
-        bucket = self._bucket
-        fsdp_params = bucket.fsdp_params
-        if state.single_rank_inputs is not None:
-            self._copy_single_rank_inputs(state.single_rank_inputs)
-            return self._finish_unsharded_params(prepared)
-        result = AllGatherResult(
-            prepared.buffers[1],
-            None,
-            None,
-            state.param_dtypes,
-            state.param_numels,
-            state.split_sizes,
-            state.outer_sizes,
-            state.layout,
-            state.output_metadata,
-            prepared.buffers[0],
-        )
-        try:
-            bucket.layout_buffers = foreach_all_gather_copy_out(
-                result,
-                fsdp_params,
-                # pyrefly: ignore [bad-argument-type]
-                state.group,
-                bucket.layout_buffers,
-            )
-        except ValueError:
-            # As FSDP2: free what a rejected refill re-allocated
-            if (
-                bucket.layout_buffers is not None
-                and not bucket.bucket.keep_persistent_storage
-            ):
-                bucket.layout_buffers.free()
-            for fsdp_param in fsdp_params:
-                if not fsdp_param.keep_unsharded_storage:
-                    fsdp_param.free_all_gather_outputs()
-            raise
-        return self._finish_unsharded_params(prepared)
-
-    def _copy_single_rank_inputs(self, param_inputs: list[list[torch.Tensor]]) -> None:
-        """As FSDP2's ``wait_for_unshard`` on one rank: copy the all-gather
-        inputs into the all-gather outputs."""
-        bucket = self._bucket
-        for fsdp_param, inputs in zip(bucket.fsdp_params, param_inputs, strict=True):
-            if not fsdp_param.all_gather_outputs:
-                fsdp_param.init_all_gather_outputs(
-                    [t.numel() for t in inputs],
-                    [t.dtype for t in inputs],
-                    1,
-                    bucket.device,
-                )
-            for tensor, inp in zip(fsdp_param.all_gather_outputs, inputs, strict=True):
-                alloc_storage(tensor)
-                with (
-                    torch.autograd._unsafe_preserve_version_counter(tensor)
-                    if not tensor.is_inference()
-                    else contextlib.nullcontext()
-                ):
-                    if tensor.dtype == inp.dtype and tensor.numel() != inp.numel():
-                        tensor = tensor[: inp.numel()]
-                    elif inp.dtype == torch.uint8:
-                        tensor = tensor.view(torch.uint8)
-                    tensor.copy_(inp)
-
-    def _finish_unsharded_params(
-        self, prepared: PlacementPreparedUnshard
-    ) -> PlacementUnshardResult:
-        bucket = self._bucket
-        fsdp_params = bucket.fsdp_params
-        for fsdp_param in fsdp_params:
-            fsdp_param.init_unsharded_param()
-        if prepared.persistent_buffers is not None:
-            return PlacementUnshardResult(
-                full_params=[], persistent_buffers=prepared.persistent_buffers
-            )
-        persistent: dict[int, torch.Tensor] = {}
-        for fsdp_param in fsdp_params:
-            for tensor in (
-                *fsdp_param.all_gather_outputs,
-                *fsdp_param._unsharded_inner_tensors,
-            ):
-                persistent.setdefault(id(tensor), tensor)
-        if bucket.layout_buffers is not None:
-            for tensor in bucket.layout_buffers.tensors:
-                persistent.setdefault(id(tensor), tensor)
-        return PlacementUnshardResult(
-            full_params=[fsdp_param._unsharded_param for fsdp_param in fsdp_params],
-            persistent_buffers=list(persistent.values()) if prepared.persistent else [],
-        )
-
-
 def _aligned_offsets(tensors: list[torch.Tensor]) -> list[int]:
     """Byte offsets of ``tensors`` packed in one buffer, each aligned to its
     element size so that it can be viewed in its dtype."""
@@ -594,7 +356,6 @@ class FullyShardBucket:
             modules[0],
             fsdp2_compatible=True,
         )
-        self.storage._fsdp2_semantics = True
         self.set_post_forward_mesh_info(post_forward_mesh_info)
         if isinstance(mesh_info, DDPMeshInfo):  # HSDP or replicate()
             self.storage.set_replicate_group(mesh_info.replicate_process_group)
@@ -607,16 +368,18 @@ class FullyShardBucket:
         self.aliases: list[tuple[int, int]] = []
         self.module_fqn: str | None = None
         self._lazy_initialized = False
-        # FSDPModule.set_all_gather_layout, and the persistent buffers a custom
-        # layout chose (see FSDPParamShard)
-        self.all_gather_layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
-        self.layout_buffers: Any = None
+        representation = FSDPParamRepresentation(self)
+        # The all-gather of parameters that define their own inputs, or of a
+        # custom layout (see param_driven_unshard)
+        self.all_gather = ParamDrivenAllGather(
+            representation, len(self.fsdp_params), device
+        )
         from ._fsdp_collectives import DefaultAllGather, DefaultReduceScatter
 
         self._default_all_gather_comm = DefaultAllGather()
         self._default_reduce_scatter_comm = DefaultReduceScatter()
         # Parameters whose all-gather FSDPParam defines stay in their own
-        # storage (see FSDPParamShard)
+        # storage (see param_driven_unshard)
         self.own_storage = any(
             hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
             or type(fsdp_param._sharded_param_data) is not torch.Tensor
@@ -632,9 +395,9 @@ class FullyShardBucket:
         self.bucket = BucketRuntime(
             bucket_storage=self.storage,
             bucket_params=self._bucket_params(),
-            context=BucketCommContext.for_device(device),
+            context=new_engine_context(device),
             debug_fqn=None,
-            representation=FSDPParamRepresentation(self),
+            representation=representation,
             logger=logging.getLogger("torch.distributed.fsdp.fully_shard"),
             log_name="FSDP",
         )
@@ -729,8 +492,13 @@ class FullyShardBucket:
         return self.bucket.post_forward_storage is not None
 
     @property
+    def all_gather_layout(self) -> AllGatherLayout:
+        """``FSDPModule.set_all_gather_layout``'s layout."""
+        return self.all_gather.layout
+
+    @property
     def _all_gather_layout(self) -> AllGatherLayout:
-        return self.all_gather_layout
+        return self.all_gather.layout
 
     @property
     def _all_gather_comm(self) -> Any:
@@ -742,7 +510,7 @@ class FullyShardBucket:
 
     @property
     def _all_gather_buffers(self) -> Any:
-        return self.layout_buffers
+        return self.all_gather.layout_buffers
 
     @property
     def _all_gather_output_fn(self) -> Any:
@@ -787,7 +555,7 @@ class FullyShardBucket:
         return self.mesh.get_group()
 
     def param_driven_unshard(self) -> bool:
-        """Whether the all-gather needs ``FSDPParamShard``: parameters with
+        """Whether the all-gather needs ``ParamDrivenShard``: parameters with
         their own all-gather, or a layout other than the native rank-major
         one."""
         from ..experimental import all_gather_output_fn_with_native_copy
@@ -909,7 +677,7 @@ class FullyShardBucket:
                 dtype=data.dtype,
                 requires_grad=fsdp_param.sharded_param.requires_grad,
                 placements=(
-                    FSDPParamShard(fsdp_param.fsdp_placement.dim, self)
+                    ParamDrivenShard(fsdp_param.fsdp_placement.dim, self.all_gather)
                     if self.param_driven_unshard()
                     else EngineShard(fsdp_param.fsdp_placement.dim),
                 ),
@@ -1128,8 +896,7 @@ def set_reshard_after_backward(state: Any, reshard_after_backward: bool) -> None
 def set_keep_unsharded_storage(state: Any, keep: bool) -> None:
     for bucket in _buckets(state):
         bucket.bucket.keep_persistent_storage = keep
-        for fsdp_param in bucket.fsdp_params:
-            fsdp_param.keep_unsharded_storage = keep
+        bucket.all_gather.keep_storage = keep
 
 
 def set_modules_to_prefetch(
@@ -1430,6 +1197,7 @@ def reset_iter_state(state: Any) -> None:
             runtime.partial_reduce_output = None
             runtime.partial_reduce_indices = frozenset()
             runtime.needs_sync = False
+            runtime.forward_since_reduce = False
             for param in runtime.unsharded_params or []:
                 param.grad = None
             runtime.reset_backward_state()
@@ -1444,6 +1212,15 @@ def reset_iter_state(state: Any) -> None:
     state_ctx.gradient_reduction_pending = False
 
 
+def new_engine_context(device: torch.device) -> BucketCommContext:
+    """A comm context that schedules buckets as FSDP2 does: a post-backward
+    per forward call, and prefetches kept until used."""
+    context = BucketCommContext.for_device(device)
+    context.post_backward_per_call = True
+    context.keep_prefetches_until_used = True
+    return context
+
+
 def share_context(states: list[Any]) -> None:
     """``share_comm_ctx`` on the engine: the roots share one engine context
     (streams, prefetches, pending reductions), as FSDP2's share one comm
@@ -1451,8 +1228,7 @@ def share_context(states: list[Any]) -> None:
     first = states[0]
     context = first._engine_context or first._shared_engine_context
     if context is None:
-        context = BucketCommContext.for_device(first._device)
-        context.fsdp2_prefetch_release = True
+        context = new_engine_context(first._device)
     for state in states:
         old = state._engine_context
         if old is not None and old is not context:
@@ -1484,22 +1260,21 @@ def set_all_gather_layout(states: list[Any], layout: AllGatherLayout) -> None:
                 "pending or parameters are unsharded; reshard, or call "
                 "reset_iter_state() after a failed unshard"
             )
-        if any(p._keep_all_gather_output_storage for p in bucket.fsdp_params):
+        if any(p.outputs_view_layout_buffers for p in bucket.all_gather.params):
             raise RuntimeError(
                 "cannot replace the all-gather layout after parameters adopted "
                 "outputs from the installed custom layout"
             )
     for bucket in buckets:
         was_param_driven = bucket.param_driven_unshard()
-        bucket.all_gather_layout = layout
+        bucket.all_gather.layout = layout
         if bucket.param_driven_unshard() != was_param_driven:
             # The new placement creates its own persistent buffers
             bucket.bucket.unsharded_params = None
             bucket.bucket.persistent_buffers = []
             bucket.bucket.persistent_buffer_nbytes = []
-            bucket.layout_buffers = None
+            bucket.all_gather.reset()
             for fsdp_param in bucket.fsdp_params:
-                fsdp_param.all_gather_outputs = []
                 if hasattr(fsdp_param, "_unsharded_param"):
                     del fsdp_param._unsharded_param
         bucket.refresh()
