@@ -2,6 +2,9 @@
 import itertools
 import math
 import os
+import subprocess
+import sys
+import tempfile
 import unittest
 import warnings
 from itertools import product
@@ -4702,6 +4705,37 @@ class TestConvolutionNNCUDA(NNTestCase):
         self.assertEqual(yref, y)
         atol = 5e-3 if dtype == torch.half else 5e-2
         self.assertEqual(gradref, x.grad, atol=atol, rtol=1e-3)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "MIOpen-specific")
+    def test_miopen_graph_capture_after_find(self, device):
+        # See Note [MIOpen calls during HIP graph capture]. Runs in a subprocess
+        # so that MIOpen starts with an empty user find-db and evaluates naive
+        # solvers; a factor of 1% makes every such evaluation time out.
+        script = """\
+import torch
+import torch.nn.functional as F
+
+x3 = torch.randn(16, 46, 8, 8, device="cuda")
+w3 = torch.randn(640, 46, 3, 3, device="cuda")
+x1 = torch.randn(16, 640, 8, 8, device="cuda")
+w1 = torch.randn(640, 640, 1, 1, device="cuda")
+F.conv2d(x3, w3, padding=1)
+F.conv2d(x1, w1)
+torch.cuda.synchronize()
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g, capture_error_mode="thread_local"):
+    out = F.conv2d(x3, w3, padding=1)
+g.replay()
+torch.testing.assert_close(out, F.conv2d(x3, w3, padding=1))
+"""
+        with tempfile.TemporaryDirectory() as user_db:
+            env = os.environ.copy()
+            env["MIOPEN_USER_DB_PATH"] = user_db
+            env["MIOPEN_NAIVE_TIMEOUT_FACTOR"] = "1"
+            result = subprocess.run(
+                [sys.executable, "-c", script], env=env, capture_output=True, text=True
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 instantiate_device_type_tests(
