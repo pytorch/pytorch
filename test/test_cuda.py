@@ -9500,6 +9500,27 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
+    @unittest.skipIf(torch.version.hip, "usedGpuMemory is specific to NVML")
+    def test_list_gpu_processes_unknown_memory(self):
+        pynvml = unittest.mock.MagicMock()
+        pynvml.nvmlDeviceGetComputeRunningProcesses.return_value = [
+            unittest.mock.MagicMock(pid=1, usedGpuMemory=None),
+            unittest.mock.MagicMock(pid=2, usedGpuMemory=1024 * 1024),
+        ]
+        with (
+            patch.dict(sys.modules, {"pynvml": pynvml}),
+            patch("torch.cuda.memory._get_nvml_device_index", return_value=0),
+        ):
+            printout = torch.cuda.list_gpu_processes(0)
+        self.assertEqual(
+            printout.splitlines(),
+            [
+                "GPU:0",
+                "process          1 uses          N/A MB GPU memory",
+                "process          2 uses        1.000 MB GPU memory",
+            ],
+        )
+
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfNonPrimaryRocmPartition
     def test_temperature(self):
