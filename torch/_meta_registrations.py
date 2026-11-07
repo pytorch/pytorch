@@ -196,11 +196,11 @@ def meta__standard_gamma(self, generator=None):
 
 
 # The C++ meta kernel uses TensorIterator, which does not support symbolic
-# shapes. The checks mirror check_round_to in
+# shapes. The checks mirror check_to_dtype_rounded in
 # aten/src/ATen/native/RoundedConversion.cpp, in the same order.
-@register_meta([aten.round_to.default, aten.round_to.out])
+@register_meta([aten._to_dtype_rounded.default, aten._to_dtype_rounded.out])
 @out_wrapper(exact_dtype=True)
-def meta_round_to(self, dtype, mode, *, memory_format=None):
+def meta__to_dtype_rounded(self, dtype, round, *, memory_format=None):
     torch._check(
         self.layout == torch.strided,
         lambda: f"rounding is only supported for strided tensors, but got {self.layout}",
@@ -228,9 +228,9 @@ def meta_round_to(self, dtype, mode, *, memory_format=None):
     )
     modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
     torch._check_value(
-        mode in modes,
+        round in modes,
         lambda: "the rounding mode must be one of 'to_nearest_even', 'toward_zero', "
-        f"'toward_positive' or 'toward_negative', but got '{mode}'",
+        f"'toward_positive' or 'toward_negative', but got '{round}'",
     )
     return torch.empty_like(
         self, dtype=dtype, memory_format=memory_format or torch.preserve_format

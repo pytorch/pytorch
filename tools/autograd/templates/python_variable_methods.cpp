@@ -51,6 +51,7 @@
 #else
 $ops_headers
 #include <ATen/ops/_local_scalar_dense.h>
+#include <ATen/ops/_to_dtype_rounded.h>
 #endif
 
 using at::device_of;
@@ -418,17 +419,17 @@ static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, 
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
-// Tensor.to(..., round=...): round_to converts, and a device change is a separate
-// transfer. The conversion runs on a device with a round_to kernel, preferring
+// Tensor.to(..., round=...): _to_dtype_rounded converts, and a device change is a
+// separate transfer. The conversion runs on a device with a kernel, preferring
 // an accelerator and, between two, the source, so that less data is
 // transferred.
 static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> device, std::optional<ScalarType> dtype, bool non_blocking, std::optional<c10::MemoryFormat> optional_memory_format, std::string_view mode) {
   pybind11::gil_scoped_release no_gil;
   const auto target_dtype = dtype.value_or(self.scalar_type());
   // Fail before any transfer.
-  at::native::check_round_to(self, target_dtype, mode);
+  at::native::check_to_dtype_rounded(self, target_dtype, mode);
   const auto convert = [&](const Tensor& t) {
-    return t.round_to(target_dtype, mode, optional_memory_format);
+    return at::_to_dtype_rounded(t, target_dtype, mode, optional_memory_format);
   };
   if (!device.has_value()) {
     return convert(self);
@@ -436,7 +437,7 @@ static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> dev
   const auto move = [&](const Tensor& t) {
     return t.to(t.options().device(*device), non_blocking);
   };
-  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::round_to", "out");
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_to_dtype_rounded", "out");
   const auto has_kernel = [](Device d) {
     return op.hasKernelForDispatchKey(c10::computeDispatchKey(std::nullopt, std::nullopt, d));
   };

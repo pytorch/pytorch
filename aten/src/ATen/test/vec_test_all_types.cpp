@@ -1935,15 +1935,21 @@ namespace {
           0.0, -0.0, inf, -inf, std::numeric_limits<double>::quiet_NaN(),
           flt_max, -flt_max, std::nextafter(flt_max, inf), 1e39, -1e39,
           0x1p-140, -0x1.8p-140, 0x1p-149, 0x1.0000001p-130};
-      // Every finite value, the midpoints to the next encoding, and their
-      // neighbours.
+      // Every finite value, the midpoints to the next encoding (past the
+      // largest value, to the next one were the exponent range wider), and
+      // their neighbours.
+      const auto value = [](int bits) {
+        return static_cast<double>(
+            static_cast<float>(T(static_cast<uint16_t>(bits), T::from_bits())));
+      };
       for (const auto i : c10::irange(0xFFFF)) {
-        const auto bits = static_cast<uint16_t>(i);
-        const double v = static_cast<float>(T(bits, T::from_bits()));
-        const double next =
-            static_cast<float>(T(static_cast<uint16_t>(bits + 1), T::from_bits()));
-        if (!std::isfinite(v) || !std::isfinite(next)) {
+        const double v = value(i);
+        if (!std::isfinite(v)) {
           continue;
+        }
+        double next = value(i + 1);
+        if (!std::isfinite(next)) {
+          next = 2 * v - value(i - 1);
         }
         const double mid = (v + next) / 2;
         xs.insert(
