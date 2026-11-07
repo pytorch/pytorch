@@ -5921,8 +5921,8 @@ class TestSparseAny(TestCase):
                 self.assertEqual(res.to_dense(), torch.view_as_complex(xs.to_dense()))
             self.assertEqual(torch.view_as_real(torch.view_as_complex(xs)), xs)
 
-# e.g., TestSparseUnaryUfuncsCPU, TestSparseUnaryUfuncsCUDA, and TestSparseUnaryUfuncsXPU
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True, except_for='meta')
+# e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_xpu=True, allow_mps=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), allow_xpu=True, except_for='meta')
 

@@ -2322,7 +2322,7 @@ class TestMakeTensor(TestCase):
         torch.testing.assert_close(actual, expected)
 
 
-instantiate_device_type_tests(TestMakeTensor, globals())
+instantiate_device_type_tests(TestMakeTensor, globals(), allow_xpu=True)
 
 
 def _get_test_names_for_test_class(test_cls):
@@ -3611,7 +3611,7 @@ class TestHardwareClassifications(TestCase):
                 self.assertEqual(ran, {"test_cuda", "test_unclassified"}, output)
 
 
-instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestImports)
 
 
