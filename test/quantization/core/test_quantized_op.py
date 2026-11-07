@@ -2365,6 +2365,30 @@ class TestQuantizedOps(TestCase):
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
             torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
+    def test_qtopk_large_dim(self):
+        # test_qtopk stays at side <= 5, so it never reaches the
+        # k * 64 <= dim_size selection path in TopKImpl.h, which QuantizedCPU
+        # shares with the float kernels.
+        dim_size = 4096
+        dtypes = [torch.qint8, torch.quint8]
+        for k, dtype, large, sort in itertools.product(
+            [1, 64, 65], dtypes, [False, True], [False, True]
+        ):
+            X, scale, zp = _get_random_tensor_and_q_params([dim_size], 1.0, dtype)
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
+
+            quantized_out = torch.topk(qX, k, largest=large, sorted=sort)
+            unquantized_out = torch.topk(
+                qX.dequantize(), k, largest=large, sorted=sort
+            )
+            torch.testing.assert_close(
+                quantized_out[0].dequantize(), unquantized_out[0]
+            )
+            # heavy ties after quantization, so indices may legitimately differ
+            torch.testing.assert_close(
+                qX.dequantize()[quantized_out[1]], quantized_out[0].dequantize()
+            )
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),

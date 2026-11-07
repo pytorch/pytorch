@@ -406,6 +406,102 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
+    # The two tests below exercise both selection strategies in
+    # aten/src/ATen/native/TopKImpl.h: a bounded size-k heap when
+    # k * 64 <= dim_size, and a copy-then-nth_element fallback otherwise. The
+    # existing topk tests stay under that threshold, so they only reach the
+    # fallback. CPU-only: CUDA topk uses a separate kernel. The dtypes are the
+    # three comparator instantiations -- bfloat16 accumulates in float, and
+    # integral types compile the NaN handling away entirely.
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16, torch.int64)
+    def test_topk_selection_paths(self, device, dtype):
+        dim_size = 4096
+
+        def make(*shape):
+            if dtype.is_floating_point:
+                return torch.randn(*shape, device=device, dtype=dtype)
+            return torch.randint(-1000, 1000, shape, device=device, dtype=dtype)
+
+        # few distinct values, so ties are the common case rather than the rare one
+        ties = (torch.arange(dim_size, device=device) % 7).to(dtype)
+        # monotonic input admits every element into the heap, so it is the only
+        # case that exercises the sift-down on the majority of the row
+        ascending = torch.arange(dim_size, device=device).to(dtype)
+        cases = [
+            (make(dim_size), 0),  # contiguous
+            (ties, 0),
+            (ascending, 0),
+            (ascending.flip(0), 0),
+            (make(dim_size, 4), 0),  # non-unit stride along the reduced dim
+            (make(4, dim_size), 1),  # several rows share one selection buffer
+        ]
+        for t, dim in cases:
+            for k in (1, 63, 64, 65, dim_size):
+                for largest in (True, False):
+                    values, indices = t.topk(k, dim=dim, largest=largest)
+                    ref, _ = t.sort(dim=dim, descending=largest, stable=True)
+                    self.assertEqual(values, ref.narrow(dim, 0, k), atol=0, rtol=0)
+                    # ties may select a different index, so verify by gathering
+                    self.assertEqual(t.gather(dim, indices), values, atol=0, rtol=0)
+                    if t.dim() == 1:
+                        self.assertEqual(indices.unique().numel(), k)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_topk_nan_selection_paths(self, device, dtype):
+        # NaN sorts as top for numpy compatibility. test_topk_nonfinite covers
+        # this for the fallback; the heap admits candidates on a cheap compare
+        # that any NaN passes, then confirms with the ordering comparator.
+        dim_size = 2048
+        for k in (1, 32, 64, dim_size):
+            for placement in ("scattered", "leading", "all"):
+                t = torch.randn(dim_size, device=device, dtype=dtype)
+                if placement == "scattered":
+                    idx = torch.randperm(dim_size, device=device)[: dim_size // 20]
+                    t[idx] = float("nan")
+                elif placement == "leading":
+                    # fills the heap with NaN before the scan starts, the one
+                    # case where a naive admission compare lets a non-NaN
+                    # displace a NaN
+                    t[:k] = float("nan")
+                else:
+                    t.fill_(float("nan"))
+                for largest in (True, False):
+                    values, indices = t.topk(k, largest=largest)
+                    ref, _ = t.sort(descending=largest, stable=True)
+                    self.assertEqual(values, ref[:k], atol=0, rtol=0, equal_nan=True)
+                    self.assertEqual(
+                        t.gather(0, indices), values, atol=0, rtol=0, equal_nan=True
+                    )
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_topk_out_aliases_self(self, device, dtype):
+        # A non-dense `out=` view of self reports MemOverlapStatus::TooHard,
+        # which compute_mem_overlaps accepts, so the kernel has to be safe on
+        # its own: every input read must finish before any output write.
+        # The selected elements sit exactly on the positions the output writes
+        # to, in reverse order, so reading the input while writing the output
+        # is guaranteed to read back an already-clobbered value.
+        dim_size = 4096
+        k = 32  # k * 64 = 2048 <= 4096: heap path
+        for largest in (True, False):
+            sign = 1 if largest else -1
+            t = torch.full((dim_size,), -sign * 1e9, device=device, dtype=dtype)
+            t[0 : 2 * k : 2] = sign * torch.arange(k, device=device, dtype=dtype)
+            expected = t.topk(k, largest=largest).values
+            aliased = t.clone()
+            indices = torch.empty(k, device=device, dtype=torch.long)
+            torch.topk(
+                aliased,
+                k,
+                largest=largest,
+                out=(aliased[0 : 2 * k : 2], indices),
+            )
+            self.assertEqual(aliased[0 : 2 * k : 2], expected, atol=0, rtol=0)
+
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
