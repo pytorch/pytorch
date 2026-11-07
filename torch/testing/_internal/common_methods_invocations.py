@@ -24898,7 +24898,7 @@ python_ref_db = [
         skips=(
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type=("cuda", "xpu")
             ),
         ),
     ),
