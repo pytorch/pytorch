@@ -1,5 +1,6 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
+#include <array>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -1144,6 +1145,62 @@ namespace {
             },
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(RealTests, FmaddSingleRounding) {
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || \
+    defined(CPU_CAPABILITY_ZVECTOR) || defined(__aarch64__)
+        constexpr bool has_fused_specialization = true;
+#elif defined(__VSX__) || defined(CPU_CAPABILITY_VSX)
+        constexpr bool has_fused_specialization = std::is_same_v<VT, double>;
+#else
+        constexpr bool has_fused_specialization = false;
+#endif
+        if constexpr (has_fused_specialization) {
+            // Separate rounding loses the product's -delta^2 residual.
+            constexpr VT delta = std::is_same_v<VT, float> ? VT(0x1p-13) : VT(0x1p-27);
+            constexpr VT a = VT(1) + delta;
+            constexpr VT b = VT(1) - delta;
+            constexpr VT c = VT(-1);
+            constexpr VT expected = -delta * delta;
+            EXPECT_EQ(local_fmadd(a, b, c), expected);
+
+            const auto result = at::vec::fmadd(vec(a), vec(b), vec(c));
+            CACHE_ALIGN std::array<VT, vec::size()> actual;
+            result.store(actual.data());
+            for (const auto i : c10::irange(actual.size())) {
+                EXPECT_EQ(actual[i], expected) << "lane=" << i;
+            }
+        } else {
+            GTEST_SKIP() << "No explicitly fused fmadd specialization for this type";
+        }
+    }
+    TYPED_TEST(RealTests, FmsubSingleRounding) {
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(__aarch64__)
+        constexpr bool has_fused_specialization = true;
+#else
+        constexpr bool has_fused_specialization = false;
+#endif
+        if constexpr (has_fused_specialization) {
+            constexpr VT delta = std::is_same_v<VT, float> ? VT(0x1p-13) : VT(0x1p-27);
+            constexpr VT a = VT(1) + delta;
+            constexpr VT b = VT(1) - delta;
+            constexpr VT c = VT(1);
+            constexpr VT expected = -delta * delta;
+            EXPECT_EQ(local_fmsub(a, b, c), expected);
+
+            const auto result = at::vec::fmsub(vec(a), vec(b), vec(c));
+            CACHE_ALIGN std::array<VT, vec::size()> actual;
+            result.store(actual.data());
+            for (const auto i : c10::irange(actual.size())) {
+                EXPECT_EQ(actual[i], expected) << "lane=" << i;
+            }
+        } else {
+            GTEST_SKIP() << "No explicitly fused fmsub specialization for this type";
+        }
     }
     TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
         using vec = TypeParam;
