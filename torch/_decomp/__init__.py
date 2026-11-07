@@ -378,6 +378,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.glu,
             aten.glu_backward,
             aten.hardshrink,
+            aten.hardshrink_backward,
             aten.hardsigmoid,
             aten.hardsigmoid_,
             aten.hardsigmoid_backward,
