@@ -921,13 +921,13 @@ static void upsample_bilinear2d_out_cuda_template(
 int64_t nhwc_gather_min_contributions() {
   const auto& hooks = at::detail::getCUDAHooks();
   if (hooks.isGPUArch({"gfx950"})) {
-    return 7;
+    return 6;
   }
   if (hooks.isGPUArch({"gfx942"})) {
-    return 6;
+    return 4;
   }
   if (hooks.isGPUArch({"gfx1250"})) {
-    return 6;
+    return 2;
   }
   return 0;
 }
