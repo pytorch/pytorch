@@ -17,7 +17,7 @@ from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import CompiledArtifact, config, load_from_python
 from torch._inductor.async_compile import AsyncCompile
-from torch._inductor.codecache import PyCodeCache
+from torch._inductor.codecache import exec_from_cache_file, PyCodeCache
 from torch._inductor.codegen.wrapper import (
     _rename_kernel_module_globals,
     PythonWrapperCodegen,
@@ -165,6 +165,98 @@ def _compiled_in_this_process(*args, **kwargs):
 
 
 class TestRenameKernelModuleGlobals(TestCase):
+    def test_aggregate_method_default_uses_enclosing_scope(self):
+        src = """\
+import triton
+import triton.language as tl
+
+SCALE = 2
+
+@triton.jit
+def k(x):
+    return Config(x).get_size()
+
+@triton.aggregate
+class Config:
+    size: tl.constexpr
+
+    @triton.jit
+    def get_size(self, SCALE: tl.constexpr = SCALE):
+        return self.size * SCALE
+"""
+        expected = (
+            src.replace("def k(", "def k_0(")
+            .replace("Config", "Config_k_0")
+            .replace("SCALE = 2", "SCALE_k_0 = 2")
+            .replace("= SCALE):", "= SCALE_k_0):")
+        )
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
+
+    def test_aggregate_classes_and_method_scopes(self):
+        src = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def k(x):
+    return Config(x).value()
+
+@triton.aggregate
+class Config:
+    SCALE: tl.constexpr
+
+    @triton.jit
+    def value(self):
+        SCALE = self.SCALE
+        return helper(SCALE)
+
+@triton.jit
+def helper(x):
+    return x + SCALE
+
+SCALE = 1
+"""
+        expected = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def k_0(x):
+    return Config_k_0(x).value()
+
+@triton.aggregate
+class Config_k_0:
+    SCALE: tl.constexpr
+
+    @triton.jit
+    def value(self):
+        SCALE = self.SCALE
+        return helper_k_0(SCALE)
+
+@triton.jit
+def helper_k_0(x):
+    return x + SCALE_k_0
+
+SCALE_k_0 = 1
+"""
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
+
+    def test_aggregate_class_disables_single_function_fast_path(self):
+        src = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def k(x):
+    return Config(x)
+
+@triton.aggregate
+class Config:
+    size: tl.constexpr
+"""
+        expected = src.replace("def k(", "def k_0(").replace("Config", "Config_k_0")
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
+
     def test_renames_only_what_refers_to_a_kernel_global(self):
         # Parameters and locals that shadow a global keep their names, as do the
         # header imports above the first def; the non-ASCII text checks byte offsets.
@@ -247,6 +339,23 @@ def k_0(a):
 
 
 class TestModuleLevelKernels(TestCase):
+    def test_exec_from_cache_file_preserves_annotations(self):
+        source = """\
+from typing import get_type_hints
+
+class Field:
+    pass
+
+class Config:
+    field: Field
+
+hints = get_type_hints(Config)
+"""
+        with fresh_cache():
+            namespace = exec_from_cache_file(source, "_test_cached_annotations")
+        self.assertIs(namespace["Config"].__annotations__["field"], namespace["Field"])
+        self.assertIs(namespace["hints"]["field"], namespace["Field"])
+
     @requires_gpu_and_triton
     @parametrize("fn", [_softmax, _cond_softmax])
     def test_kernels_are_defined_at_module_level(self, fn):
