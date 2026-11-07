@@ -178,9 +178,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
 // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs (default 8); past that, new
 // layouts run eagerly. A failed capture fails the call. Replayed outputs are
 // copies; eager calls return the model's own outputs. Once a graph is
-// captured, the container's active constants can't change. The stream must
-// not be capturing. Requires a CUDA model compiled with
-// aot_inductor.cudagraphs=True, which ROCm doesn't support yet, see
+// captured, the container's active constants can't change. That check
+// doesn't cover an active update racing the first capture, so don't update
+// the active constants while calls run. The stream must not be capturing.
+// Requires a CUDA model compiled with aot_inductor.cudagraphs=True, which
+// ROCm doesn't support yet, see
 // https://github.com/ROCm/rocm-systems/issues/12677, and PyTorch's native
 // CUDA caching allocator: under backend:cudaMallocAsync every capture fails.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
@@ -283,6 +285,7 @@ AOTInductorModelContainerUpdateUserManagedConstantBuffer(
 
 // Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
 // but no std::unordered_map crosses DLL boundaries for cross-compilation.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
     AOTInductorModelContainerHandle container_handle,
@@ -304,6 +307,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     bool validate_full_update);
 
 // C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
     AOTInductorModelContainerHandle container_handle,
     const AOTInductorConstantMapEntry* pairs,
@@ -314,6 +318,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
 // Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
 // allowed to pass CPU tensors even when the model lives on a non-CPU device.
 // CPU tensors are silently copied to the model's device.
+// Fails on the active buffer once CUDA graphs were captured.
 //
 // DEPRECATED: V1 API; see
 // AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
@@ -324,6 +329,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
     bool validate_full_update);
 
 // C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
     AOTInductorModelContainerHandle container_handle,

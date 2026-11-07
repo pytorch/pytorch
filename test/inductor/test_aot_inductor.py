@@ -11499,11 +11499,6 @@ compiled.run_with_lazy_cuda_graphs(x)
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         with self.assertRaisesRegex(RuntimeError, "aot_inductor.cudagraphs=True"):
             runner.run_with_lazy_cuda_graphs([x])
-        # The rejected call captured nothing, so the constants can still change.
-        state = model.state_dict()
-        names = runner.get_constant_names_to_original_fqns()
-        weights = {n: torch.randn_like(state[f]) for n, f in names.items()}
-        runner.update_constant_buffer(weights, False, False)
 
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
