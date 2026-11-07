@@ -1914,6 +1914,11 @@ class FakeTensorMode(TorchDispatchMode):
     _stack: str | None
     allow_meta: bool
 
+    # Device type -> whether a usable real backend exists on this machine.
+    # Scoped to the mode: backends can be registered after the mode is created
+    # (PrivateUse1 plugins, tests), so a process-wide cache would go stale.
+    _device_availability: dict[str, bool]
+
     # NestedTensor uses a tensor_id_counter to uniquely identify offsets.
     # This counter is incremented when an offsets is used to create an NJT
     # for the first time. To avoid mutating eager state if we construct NJT
@@ -2017,6 +2022,8 @@ class FakeTensorMode(TorchDispatchMode):
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
+        self._device_availability = {}
+
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
@@ -2059,6 +2066,42 @@ class FakeTensorMode(TorchDispatchMode):
             torch.cuda.is_available()
             or (hasattr(torch, "hpu") and torch.hpu.is_available())
             or _is_privateuse1_backend_available()
+        )
+
+    def _is_device_available(self, device_type: str) -> bool:
+        """Whether `device_type` has a usable real backend on this machine."""
+        # "cpu" and "meta" have no device module and need no initialization.
+        if device_type in ("cpu", "meta"):
+            return True
+        if device_type not in self._device_availability:
+            try:
+                module = torch.get_device_module(device_type)
+                self._device_availability[device_type] = module.is_available()
+            except (RuntimeError, AttributeError):
+                # A PrivateUse1 device module is not required to implement
+                # is_available(); an unknown backend is treated as unavailable.
+                self._device_availability[device_type] = False
+        return self._device_availability[device_type]
+
+    def _targets_unavailable_device(
+        self, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> bool:
+        """True if the op targets a device with no usable backend on this machine.
+
+        Covers both a ``device`` keyword argument and a positional device
+        operand, so ops synthesized inside fake computation (e.g. empty_strided
+        from prim meta impls) are caught too. Running them for real would raise
+        NotImplementedError.
+        """
+        device: torch.device | None = None
+        raw_device = kwargs.get("device")
+        if isinstance(raw_device, torch.device):
+            device = raw_device
+        if device is not None and not self._is_device_available(device.type):
+            return True
+        return any(
+            isinstance(arg, torch.device) and not self._is_device_available(arg.type)
+            for arg in args
         )
 
     @property
@@ -3197,6 +3240,15 @@ class FakeTensorMode(TorchDispatchMode):
             if func is torch.ops.prims.device_put.default:
                 avoiding_device_init = True
 
+        # The destination device can be unavailable even when this machine has
+        # some other accelerator, in which case avoid_device_init is False.
+        # Keep this separate from avoid_device_init: that flag is a machine-level
+        # proxy that does not model every backend (e.g. MPS), so only this value
+        # gates real execution below.
+        device_unavailable = self._targets_unavailable_device(args, kwargs)
+        if device_unavailable:
+            avoiding_device_init = True
+
         # skip const prop for aten._to_copy if
         # 1. input tensor is on "meta" device
         # 2. destination device is unavailable, captured by `avoiding_device_init`
@@ -3336,7 +3388,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         real = (
             run_real_op(self, func, args, kwargs)
-            if self.propagate_real_tensors
+            if self.propagate_real_tensors and not device_unavailable
             else None
         )
 
