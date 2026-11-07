@@ -2744,7 +2744,8 @@ class aot_inductor:
     use_runtime_constant_folding: bool = False
 
     # Fail the compile unless AOTI's CUDA graph runtime can capture and correctly
-    # replay the whole model. Only checks; the generated code doesn't change.
+    # replay the whole model, so it can run through
+    # AOTInductorModelContainerRunWithLazyCudaGraphs.
     cudagraphs: bool = False
 
     # flag to force weight to be appended to the shared library and mapped by the runtime

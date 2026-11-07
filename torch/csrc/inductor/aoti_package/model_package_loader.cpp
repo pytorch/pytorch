@@ -995,6 +995,12 @@ std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
   return runner_->boxed_run(std::move(inputs), stream_handle);
 }
 
+std::vector<at::Tensor> AOTIModelPackageLoader::run_with_lazy_cuda_graphs(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  return runner_->run_with_lazy_cuda_graphs(inputs, stream_handle);
+}
+
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     get_metadata() {
   return metadata_;
