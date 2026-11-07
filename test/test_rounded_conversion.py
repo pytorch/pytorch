@@ -160,10 +160,17 @@ def _boundary_inputs(src, dst):
             .double()
         )
         mags = mags.sort().values
+        top = torch.tensor([torch.finfo(dst).max, 2.0**128], dtype=torch.float64)
     else:
         mags = _finite_magnitudes(dst)
+        no_mantissa = dst is torch.float8_e8m0fnu
+        top = torch.stack(
+            [mags[-1], mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]]
+        )
+    # Includes the midpoint between the largest value and the next one, were
+    # the exponent range wider.
     centers = torch.cat(
-        [mags, (mags[1:] + mags[:-1]) / 2, mags[-1:] * 1.5, mags[-1:] * 4]
+        [mags, (mags[1:] + mags[:-1]) / 2, top.mean(0, keepdim=True), mags[-1:] * 4]
     )
     centers = torch.cat([centers, -centers]).to(src)
     inputs = [centers]
@@ -265,6 +272,8 @@ class TestRoundedConversion(TestCase):
         x = torch.tensor([v], dtype=torch.float64, device=device)
         w = x.to(torch.complex32).to(torch.complex128)
         self.assertEqual(w.item(), complex(1 + 2**-10, 0))
+        w = torch.tensor([complex(v, -v)], dtype=torch.complex32, device=device)
+        self.assertEqual(w.to(torch.complex128).item(), expected)
         for n in (1, 2):
             w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
