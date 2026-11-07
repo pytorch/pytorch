@@ -495,7 +495,6 @@
   "test/inductor/test_split_cat_fx_passes.py",
   "test/inductor/test_static_triton_launcher.py",
   "test/inductor/test_strict_numerics.py",
-  "test/inductor/test_subgraph_choice.py",
   "test/inductor/test_symmetric_mm.py",
   "test/inductor/test_template_heuristics_registry.py",
   "test/inductor/test_template_registration.py",
