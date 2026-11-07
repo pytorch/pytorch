@@ -959,6 +959,23 @@ class FSDPParam:
                 self.param_dtype or self.orig_dtype,
             )
             self._all_gather_metadata = None
+            shard_dim = self.fsdp_placement.dim
+            if (
+                shard_dim != 0
+                and isinstance(self.mesh_info, FSDPMeshInfo)
+                and self._orig_size[shard_dim] % self.mesh_info.shard_mesh_size
+                and unsharded_tensor.numel() != self._orig_size.numel()
+            ):
+                # Unlike Shard(0) padding, which a prefix of the output drops,
+                # padding inside the rows must be dropped by the extension. Every
+                # rank gets the same output, so every rank raises.
+                raise ValueError(
+                    f"{self._display_name} is unevenly sharded on dim {shard_dim}, "
+                    "so fsdp_post_all_gather must drop the padding in each row of "
+                    "the all-gather outputs and return the "
+                    f"{tuple(self._orig_size)} parameter, but it returned a tensor "
+                    f"of size {tuple(unsharded_tensor.size())}"
+                )
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
@@ -1517,6 +1534,15 @@ class FSDPParam:
                     f"Shard({shard_dim}) expects local tensor size {self.sharded_size}: "
                     f"{local_tensor.size()=}"
                 )
+            if (
+                local_tensor.numel() == 0
+                and local_tensor.stride() != self.contiguous_sharded_stride
+            ):
+                # An empty shard, e.g. from distribute_tensor, can keep the strides
+                # of the tensor it views, but fused optimizers require the
+                # contiguous strides of its gradient
+                local_tensor = local_tensor.new_empty(self.sharded_size)
+                updated_local_tensor = True
         elif local_tensor.size() != padded_sharded_size and not same_local_tensor:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(

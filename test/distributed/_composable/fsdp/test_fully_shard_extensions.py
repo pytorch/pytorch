@@ -818,6 +818,32 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                 check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_uneven_shard_dim1_keeps_padding(self):
+        # Rows of the gathered (2, 9) weight hold padding on 8 ranks, which a
+        # prefix of the output can't drop, so every rank raises
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            padded = local_tensor.new_zeros(2, 2)
+            padded[:, : local_tensor.size(1)] = local_tensor
+            return (padded,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            (gathered,) = all_gather_outputs
+            return _finish_post_all_gather(gathered.contiguous(), out)
+
+        model = nn.Linear(9, 2, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        with self.assertRaisesRegex(
+            ValueError, "must drop the padding in each row of the all-gather outputs"
+        ):
+            model(torch.randn((2, 9), device=device_type))
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_legacy_uneven_shard_dim1(self):
         def shard_dim1(in_features: int) -> None:
             model = nn.Linear(in_features, 2, bias=False, device=device_type)
