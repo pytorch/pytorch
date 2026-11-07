@@ -423,6 +423,27 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_enum_call_invalid_value(self):
+        class Color(enum.Enum):
+            RED = 1
+
+        def fn(x):
+            try:
+                Color(2)
+            except ValueError:
+                return x - 1
+            return x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+        def fn_uncaught(x):
+            return x + Color(2).value
+
+        with self.assertRaisesRegex(ValueError, "2 is not a valid"):
+            torch.compile(fn_uncaught, backend="eager")(x)
+
     def test_enum_name_value_properties(self):
         """Test accessing .name and .value properties of enum members."""
 

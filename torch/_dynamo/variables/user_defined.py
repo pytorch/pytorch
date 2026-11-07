@@ -1571,13 +1571,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
-            return VariableTracker.build(
-                tx,
-                self.as_python_constant()(  # type: ignore[operator]
+            try:
+                value = self.as_python_constant()(  # type: ignore[operator]
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return VariableTracker.build(tx, value)
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
