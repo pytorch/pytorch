@@ -1073,6 +1073,7 @@ def _assign_new_node_names(
             if node.name not in name_map:
                 raise AssertionError(f"placeholder node {node.name!r} not in name_map")
             node.name = node.target = name_map[node.name]
+            gm.graph._graph_namespace._rename_object(node, node.name)
             if node.name in custom_meta:
                 if node.meta.get("custom") is None:
                     empty_custom: dict[str, Any] = {}
@@ -1095,6 +1096,7 @@ def _assign_new_node_names(
                 node.meta["val"].name = node.name
         elif node.name in name_map:
             node.name = name_map[node.name]
+            gm.graph._graph_namespace._rename_object(node, node.name)
 
 
 def placeholder_naming_pass(

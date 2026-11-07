@@ -16211,6 +16211,31 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
+    def test_placeholder_naming_records_renamed_nodes_in_namespace(self):
+        # See https://github.com/pytorch/pytorch/issues/202927
+        class Foo(torch.nn.Module):
+            def forward(self, q, mul):
+                return q * 2 + mul
+
+        ep = export(Foo(), (torch.randn(2), torch.randn(2)))
+        g = ep.graph
+        # every name export assigns must be recorded in the graph namespace,
+        # or a later pass can create a node with a name that is already used
+        self.assertEqual(
+            [n.name for n in g.nodes if n.name not in g._graph_namespace._used_names],
+            [],
+        )
+
+        out = [n for n in g.nodes if n.op == "output"][0]
+        q = [n for n in g.nodes if n.op == "placeholder"][0]
+        with g.inserting_before(out):
+            n = g.create_node(
+                "call_function", torch.ops.aten.mul.Tensor, (q, 2.0), name="mul"
+            )
+        # the new node must not collide with the renamed `mul_1`
+        self.assertEqual(n.name, "mul_2")
+        g.lint()
+
     @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
     @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
