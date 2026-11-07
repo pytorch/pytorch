@@ -2454,6 +2454,40 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_SORT_OPS", "0") == "1"
     )
 
+    # Unroll factor for the innermost loop of non-persistent CUDA reductions
+    # whose static size is not a multiple of that loop's block size, applied to
+    # configs with at most 1024 elements per loop iteration and at least
+    # `factor` full blocks. Not used on HIP, for cooperative reductions, for
+    # loops above reduction_loop_unroll_max_loads, or with Triton < 3.3.
+    # Values <= 1 disable it. Unrelated to unroll_reductions_threshold, which
+    # expands small reductions into pointwise code.
+    reduction_loop_unroll_factor: int = int(
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_FACTOR", "8")
+    )
+
+    # Also autotune each config whose unroll hint applies against an otherwise
+    # identical config without the hint (LOOP_UNROLL=0), so that loops that
+    # unrolling slows down, such as ones with heavy arithmetic, keep the rolled
+    # loop. Kernels with such configs are timed with a cold-L2 CUDA graph, so
+    # that host launch overhead does not decide the choice. Not used for
+    # reductions whose configs are filtered for deterministic numerics.
+    reduction_loop_unroll_autotune: bool = (
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_AUTOTUNE", "1") == "1"
+    )
+
+    # Reduction loops that issue more distinct loads per iteration than this,
+    # including masked and indirect ones, get no unroll hint.
+    reduction_loop_unroll_max_loads: int = int(
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_MAX_LOADS", "3")
+    )
+
+    # Upper bound on the unroll factor for reduction loops that update welford
+    # accumulators (var_mean, layer_norm statistics). Values <= 1 disable the
+    # hint for those loops.
+    reduction_loop_unroll_welford_factor: int = int(
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_WELFORD_FACTOR", "4")
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"

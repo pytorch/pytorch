@@ -18,6 +18,7 @@ import operator
 import os
 import os.path
 import re
+import statistics
 import sys
 import threading
 import time
@@ -59,7 +60,7 @@ from ..utils import (
 )
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
-from .benchmarking import benchmarker
+from .benchmarking import benchmarker, gpu_benchmark_lock
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     AutotuneHint,
@@ -729,6 +730,16 @@ class CachingAutotuner(KernelInterface):
             size_hints, fn, self.inductor_meta, heuristic_type
         )
         self.configs = [cached_config] if cached_config else configs
+        # A lookup-table config written without LOOP_UNROLL keeps the hint on.
+        if cached_config is not None and self.inductor_meta.get(
+            "reduction_loop_unroll"
+        ):
+            cached_config.kwargs.setdefault("LOOP_UNROLL", 1)
+        # Kernels that autotune whether to unroll a reduction loop time their
+        # configs with a cold-L2 CUDA graph (_benchmark_cold_cuda_graph).
+        self.cold_graph_benchmark = any(
+            cfg.kwargs.get("LOOP_UNROLL") == 0 for cfg in configs
+        )
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -1728,6 +1739,19 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
+        if self.cold_graph_benchmark and self.device_props.type == "cuda":
+            try:
+                return _benchmark_cold_cuda_graph(kernel_call)
+            except RuntimeError:
+                # Capture failures come from the kernel call, which is the same
+                # for every config, so later configs would fail too: time the
+                # rest of this kernel's configs eagerly.
+                self.cold_graph_benchmark = False
+                log.warning(
+                    "Cold-L2 CUDA graph benchmark failed for %s; using eager timing",
+                    self.inductor_meta.get("kernel_name"),
+                    exc_info=True,
+                )
         benchmark_kwargs = (
             {}
             if self.device_props.type == "cpu"
@@ -3879,6 +3903,99 @@ _RETUNING_META = (
 )
 
 
+def _loop_unroll_hint_applies(
+    hints: list[tuple[int, int, str]], kwargs: dict[str, Any]
+) -> bool:
+    """Whether the reduction unroll hint condition holds for some hinted loop
+    under these config kwargs (mirrors the generated loop header)."""
+    tile = math.prod(v for k, v in kwargs.items() if k.endswith("BLOCK"))
+    if tile > 1024:
+        return False
+    for numel, factor, block_name in hints:
+        block = kwargs.get(block_name)
+        if block and numel % block and numel >= factor * block:
+            return True
+    return False
+
+
+def _add_loop_unroll_configs(
+    configs: list[Config], inductor_meta: InductorMeta, add_twins: bool
+) -> list[Config]:
+    """Set LOOP_UNROLL=1 on every config of a kernel with hinted reduction
+    loops and, if add_twins, follow each config whose hint applies with a
+    LOOP_UNROLL=0 twin that compiles to the loop without the hint."""
+    hints = inductor_meta.get("reduction_loop_unroll")
+    if not hints:
+        return configs
+    result = []
+    for cfg in configs:
+        cfg = copy.deepcopy(cfg)
+        cfg.kwargs["LOOP_UNROLL"] = 1
+        result.append(cfg)
+        if add_twins and _loop_unroll_hint_applies(hints, cfg.kwargs):
+            twin = copy.deepcopy(cfg)
+            twin.kwargs["LOOP_UNROLL"] = 0
+            result.append(twin)
+    return result
+
+
+@gpu_benchmark_lock
+def _benchmark_cold_cuda_graph(
+    fn: Callable[[], Any], n: int = 8, samples: int = 10
+) -> float:
+    """Device time of fn in milliseconds, each call starting with a cold L2 and
+    without host launch gaps: replay a CUDA graph of n x (L2 flush, fn) and one
+    of n x (L2 flush), and divide the difference of their medians by n. On hosts
+    whose launch overhead exceeds the kernel time, event timing of eager
+    launches measures the host rather than the kernel."""
+    torch.cuda.synchronize()
+    fn()
+    torch.cuda.synchronize()
+    l2 = torch.cuda.get_device_properties(torch.cuda.current_device()).L2_cache_size
+    flush = torch.empty(2 * l2 // 4, dtype=torch.int, device="cuda")
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        flush.zero_()
+        fn()
+    stream.synchronize()
+
+    # capture_begin/end directly: the torch.cuda.graph context manager would
+    # empty the device and pinned host caches for every capture.
+    def capture(graph, with_fn):
+        with torch.cuda.stream(stream):
+            graph.capture_begin(capture_error_mode="thread_local")
+            try:
+                for _ in range(n):
+                    flush.zero_()
+                    if with_fn:
+                        fn()
+            finally:
+                graph.capture_end()
+
+    run_graph, flush_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
+    capture(run_graph, True)
+    capture(flush_graph, False)
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+
+    def replay(graph):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        graph.replay()
+        end.record()
+        return start, end
+
+    run_graph.replay()
+    flush_graph.replay()
+    pairs = [(replay(run_graph), replay(flush_graph)) for _ in range(samples)]
+    torch.cuda.synchronize()
+    run = statistics.median(s.elapsed_time(e) for (s, e), _ in pairs)
+    flush_only = statistics.median(s.elapsed_time(e) for _, (s, e) in pairs)
+    return max(run - flush_only, 1e-6) / n
+
+
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
@@ -3923,6 +4040,18 @@ def cached_autotune(
             configs, size_hints, inductor_meta
         )
     configs = unique_configs(configs)
+    # Twins only for reductions whose configs were not filtered for
+    # deterministic numerics, so that those keep a single config.
+    configs = _add_loop_unroll_configs(
+        configs,
+        inductor_meta,
+        add_twins=heuristic_type == HeuristicType.REDUCTION
+        and not (
+            inductor_meta.get("deterministic", False)
+            or inductor_meta.get("force_filter_reduction_configs", False)
+            or inductor_meta.get("are_deterministic_algorithms_enabled", False)
+        ),
+    )
     shared = {
         "filename": filename,
         "custom_kernel": custom_kernel,
@@ -3950,6 +4079,8 @@ def cached_autotune(
         if pinned is None:
             return unpinned()(fn)
         config = config_from_dict(pinned)
+        if inductor_meta.get("reduction_loop_unroll"):
+            config.kwargs.setdefault("LOOP_UNROLL", 1)
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
         # A copy of triton_meta, which _cached_autotune pops from and the fallback reuses.
         kernel = _cached_autotune(

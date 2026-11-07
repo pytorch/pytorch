@@ -383,6 +383,9 @@ class InductorMeta(typing.TypedDict, total=False):
     add_persistent_rblock: bool
     max_persistent_rblock: int
     strict_reduction_rblock: int
+    # (reduction size, unroll factor, block size name) of each loop with the
+    # unroll hint
+    reduction_loop_unroll: list[tuple[int, int, str]]
     kernel_num_gb: float
     kernel_flop: int
 
