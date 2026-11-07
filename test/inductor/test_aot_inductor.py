@@ -7030,7 +7030,6 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
-    @skipIfXpu(msg="Total size of kernel arguments exceeds driver limit on XPU")
     def test_runtime_checks_large(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -11017,10 +11016,15 @@ class AOTInductorTestsTemplate:
         self.check_model(m, example_inputs)
 
     def test_with_cudagraphs(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("requires CUDA or XPU")
 
-        # define CUDAGraph handling wrapper (only works with kwargs for simplicity)
+        device_module = torch.get_device_module(self.device)
+        graph_cls = (
+            device_module.CUDAGraph if self.device == "cuda" else device_module.XPUGraph
+        )
+
+        # define graph handling wrapper (only works with kwargs for simplicity)
         def cudagraph(f):
             _graphs = {}
 
@@ -11035,13 +11039,13 @@ class AOTInductorTestsTemplate:
                 if key in _graphs:
                     wrapped, *_ = _graphs[key]
                     return wrapped(**kwargs)
-                g = torch.cuda.CUDAGraph()
+                g = graph_cls()
                 in_tensors = {
                     k: v.clone() if isinstance(v, torch.Tensor) else v
                     for k, v in kwargs.items()
                 }
                 f(**in_tensors)  # stream warmup
-                with torch.cuda.graph(g):
+                with device_module.graph(g):
                     out_tensors = f(**in_tensors)
 
                 def wrapped(**kwargs):
