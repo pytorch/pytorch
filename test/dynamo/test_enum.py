@@ -804,6 +804,35 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_enum_member_delete_raises(self):
+        def make_cls():
+            class Color(enum.Enum):
+                RED = 1
+
+                def helper(self):
+                    return 0
+
+            return Color
+
+        def fn(cls, x):
+            msgs = []
+            for name in ("RED", "MISSING"):
+                try:
+                    delattr(cls, name)
+                except AttributeError as e:
+                    msgs.append(str(e))
+            del cls.helper
+            return x + cls.RED.value, msgs
+
+        x = torch.ones(2)
+        ref_cls, res_cls = make_cls(), make_cls()
+        ref = fn(ref_cls, x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(res_cls, x)
+        self.assertEqual(res, ref)
+        self.assertEqual(len(ref[1]), 2)
+        self.assertNotIn("helper", res_cls.__dict__)
+        self.assertIs(res_cls.RED, res_cls["RED"])
+
 
 instantiate_parametrized_tests(EnumTests)
 

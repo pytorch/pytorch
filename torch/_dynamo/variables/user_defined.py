@@ -74,6 +74,7 @@ from ..source import (
     DictGetItemSource,
     GetItemSource,
     RandomValueSource,
+    TypeDictSource,
     TypeMROSource,
     TypeSource,
     UnspecializedParamBufferSource,
@@ -122,6 +123,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     REPR_ADDRESS_PLACEHOLDER,
+    type_qualified_name,
     ValueMutationNew,
     VariableTracker,
 )
@@ -682,6 +684,67 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(descr_get, types.FunctionType):
             return True
         return self.pending_setattr_owner(tx, name) is not None
+
+    def type_delattr(
+        self, tx: "InstructionTranslatorBase", name_var: VariableTracker
+    ) -> VariableTracker:
+        """``type.__delattr__(cls, name)``, i.e. CPython's type_setattro with a
+        NULL value: remove *name* from ``cls.__dict__`` itself."""
+        if not issubclass(name_var.python_type(), str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{name_var.python_type_name()}'",
+            )
+        name = name_var.as_python_constant()
+        if self.value.__flags__ & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            raise_type_error(
+                tx,
+                f"cannot set {name!r} attribute of immutable type "
+                f"'{type_qualified_name(self.value)}'",
+            )
+        meta_attr = self.lookup_metaclass_attr(name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            unimplemented(
+                gb_type="Class attribute deletion through a metaclass data descriptor",
+                context=f"delattr({self.value}, {name!r})",
+                explanation="Deleting an attribute such as __doc__ or __name__ "
+                "runs the setter of a metaclass data descriptor, which Dynamo "
+                "does not model.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        side_effects = tx.output.side_effects
+        if not side_effects.is_attribute_mutation(self):
+            if self.source is None or self.get_value_for_setattr() is None:
+                unimplemented(
+                    gb_type="Class attribute deletion on an untracked class",
+                    context=f"delattr({self.value}, {name!r})",
+                    explanation="Dynamo can only replay the deletion on a class "
+                    "that existed before tracing and is not owned by torch.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            side_effects.track_object_existing(self.value, self)
+        if side_effects.has_pending_mutation_of_attr(self, name):
+            pending = side_effects.load_attr(self, name, deleted_ok=True)
+            present = not isinstance(pending, variables.DeletedVariable)
+        else:
+            present = name in self.value.__dict__
+            if self.source is not None:
+                guard = (
+                    GuardBuilder.DICT_CONTAINS
+                    if present
+                    else GuardBuilder.DICT_NOT_CONTAINS
+                )
+                install_guard(
+                    TypeDictSource(self.source).make_guard(
+                        functools.partial(guard, key=name)
+                    )
+                )
+        if not present:
+            raise_attribute_error(
+                tx, f"type object '{self.value.__name__}' has no attribute '{name}'"
+            )
+        side_effects.store_attr(self, name, variables.DeletedVariable())
+        return variables.ConstantVariable.create(None)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2169,9 +2232,38 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 "or the metaclass __getattribute__.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return variables.ConstantVariable.create(
-            not isinstance(value, variables.DeletedVariable)
-        )
+        if not isinstance(value, variables.DeletedVariable):
+            return variables.ConstantVariable.create(True)
+        # The lookup skips the deleted entry and goes on along the MRO, then to
+        # the metaclass. Answer only when nothing there defines the name.
+        side_effects = tx.output.side_effects
+        mro = list(iter_mro_static_dicts(self.value))
+        start = [klass for klass, _ in mro].index(owner.as_python_constant()) + 1
+        if (
+            meta_attr is not NO_SUCH_SUBOBJ
+            or self.lookup_metaclass_attr("__getattr__") is not NO_SUCH_SUBOBJ
+            or any(
+                name in namespace
+                or (
+                    klass in side_effects
+                    and side_effects.has_pending_mutation_of_attr(
+                        side_effects[klass], name
+                    )
+                )
+                for klass, namespace in mro[start:]
+            )
+        ):
+            unimplemented(
+                gb_type="hasattr on a class attribute deleted earlier in the frame",
+                context=f"hasattr({self.value}, {name!r})",
+                explanation="The deleted attribute is also defined further along "
+                "the MRO or on the metaclass, and Dynamo does not model the rest "
+                "of that lookup.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.source is not None:
+            guard_mro_absent(tx, self.value, self.source, name, len(mro), start)
+        return variables.ConstantVariable.create(False)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str

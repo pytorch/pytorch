@@ -6967,6 +6967,36 @@
       ]
     }
   ],
+  "GB4418": [
+    {
+      "Gb_type": "Class attribute deletion through a metaclass data descriptor",
+      "Context": "delattr({self.value}, {name})",
+      "Explanation": "Deleting an attribute such as __doc__ or __name__ runs the setter of a metaclass data descriptor, which Dynamo does not model.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4128": [
+    {
+      "Gb_type": "hasattr on a class attribute deleted earlier in the frame",
+      "Context": "hasattr({self.value}, {name})",
+      "Explanation": "The deleted attribute is also defined further along the MRO or on the metaclass, and Dynamo does not model the rest of that lookup.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3494": [
+    {
+      "Gb_type": "Class attribute deletion on an untracked class",
+      "Context": "delattr({self.value}, {name})",
+      "Explanation": "Dynamo can only replay the deletion on a class that existed before tracing and is not owned by torch.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB2544": [
     {
       "Gb_type": "missing sq_inplace_concat",
