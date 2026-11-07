@@ -96,6 +96,14 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    def test_scatter_expanded_index_smaller_than_self(self):
+        # index may be smaller than self on the non-scatter dims
+        self_ = torch.zeros(4, 32)
+        idx = torch.tensor([0, 2, 3]).unsqueeze(1).expand(3, 16)
+        src = torch.randn(3, 16)
+        expected = self_.scatter_add(0, idx.contiguous(), src)
+        self.assertEqual(self_.scatter_add(0, idx, src), expected)
+
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
     def test_gather_expanded_index(self, dtype):
         device = "cpu"

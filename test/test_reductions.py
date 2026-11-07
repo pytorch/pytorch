@@ -2769,6 +2769,14 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    def test_median_dim_expanded(self, device):
+        # The reduced dim has stride 0
+        t = torch.tensor([[1.0], [2.0], [3.0]], device=device).expand(3, 5)
+        for op in (torch.median, torch.nanmedian):
+            values, indices = op(t, dim=1)
+            self.assertEqual(values, torch.tensor([1.0, 2.0, 3.0], device=device))
+            self.assertTrue(((indices >= 0) & (indices < 5)).all())
+
     # CUDA median with dim returns the first occurrence of the median value
     @onlyCUDA
     @dtypes(torch.int8, torch.int32, torch.half, torch.float)
