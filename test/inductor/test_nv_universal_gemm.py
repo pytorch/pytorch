@@ -2175,6 +2175,76 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
+@unittest.skipIf(
+    not ensure_nv_universal_gemm_available(), "cutlass.operators not available"
+)
+@instantiate_parametrized_tests
+class TestNVUniversalGemmDiscovery(TestCase):
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    @parametrize("padded_a", (False, True))
+    @parametrize("column_major_b", (False, True))
+    @parametrize(
+        "g,m,n,k",
+        (
+            (2, 16, 64, 64),
+            (8, 512, 4096, 14336),
+            (256, 2048, 4096, 7168),
+            (2, 32, 64, 7),
+        ),
+    )
+    def test_grouped_query_matches_provider(
+        self, dtype, padded_a, column_major_b, g, m, n, k
+    ):
+        import cutlass.operators
+        from cutlass.operators.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm import (
+            ContiguousOffset2D3DGemmDenseOperator,
+        )
+
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        a = torch.empty_strided(
+            (m, k), (k + 8 if padded_a else k, 1), device="meta", dtype=dtype
+        )
+        b_stride = (k * n, 1, k) if column_major_b else (k * n, n, 1)
+        b = torch.empty_strided((g, k, n), b_stride, device="meta", dtype=dtype)
+        out = torch.empty((m, n), device="meta", dtype=dtype)
+        offsets = torch.empty(g, device="meta", dtype=torch.int32)
+        args = cutlass.operators.GroupedGemmArguments(
+            a, b, out, accumulator_type=torch.float32, offsets=offsets
+        )
+        reference = kernel_cache._filter_supported(
+            ContiguousOffset2D3DGemmDenseOperator.generate_operators(lambda md: True),
+            args,
+            100,
+        )
+        with (
+            patch.object(kernel_cache, "_partition_cache", {}),
+            patch.object(kernel_cache, "_ops_by_name", {}),
+            patch.object(
+                kernel_cache,
+                "_get_kernel_cache",
+                side_effect=AssertionError("manifest used"),
+            ),
+        ):
+            (queried,) = kernel_cache.partition_compatible_kernels(
+                args,
+                100,
+                lambda md: 0,
+                1,
+                candidate_source="args",
+                classifier_key="grouped_query_test",
+            )
+            self.assertEqual(
+                {op.metadata.operator_name for op in queried},
+                {op.metadata.operator_name for op in reference},
+            )
+            self.assertEqual(bool(queried), column_major_b and k % 8 == 0)
+            for op in queried:
+                self.assertIs(
+                    kernel_cache.get_kernel_by_name(op.metadata.operator_name), op
+                )
+
+
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 class TestNVUniversalGemmScheduling(TestCase):
     def setUp(self):
@@ -3055,6 +3125,229 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 request.cudagraph_cold_cache_input_indices,
                 (1, 3) if cold_cache else (),
             )
+
+    @parametrize(
+        "variant,source,input_count",
+        (
+            (GemmVariant.GEMM, "args", 2),
+            (GemmVariant.GROUPED_GEMM, "args", 3),
+            (GemmVariant.SCALED_GEMM, "scaled", 4),
+        ),
+    )
+    def test_gemm_candidate_discovery_source(self, variant, source, input_count):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            kernel_cache,
+            nv_universal_gemm as nvgemm,
+        )
+
+        args = object()
+        with (
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+            patch.object(
+                nvgemm, "_create_dummy_tensor_from_layout", return_value=torch.empty(1)
+            ),
+            patch.object(nvgemm, "_create_gemm_arguments", return_value=args),
+            patch.object(nvgemm, "_get_scaled_gemm_modes", return_value=(None,) * 4),
+            patch.object(nvgemm, "get_cuda_arch", return_value=100),
+            patch.object(
+                kernel_cache, "partition_compatible_kernels", return_value=([], [])
+            ) as query,
+        ):
+            nvgemm._add_nv_gemm_choices_impl(
+                [],
+                SimpleNamespace(size=(32, 128)),
+                [MagicMock() for _ in range(input_count)],
+                variant,
+                torch.float32,
+            )
+        query.assert_called_once()
+        self.assertIs(query.call_args.args[0], args)
+        self.assertEqual(query.call_args.kwargs["candidate_source"], source)
+
+    def test_grouped_gemm_candidates_sample_tile_shapes(self):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm as nvgemm,
+        )
+
+        def kernel(tile_shape, cluster_shape, use_2cta_mma):
+            return SimpleNamespace(
+                metadata=SimpleNamespace(
+                    design=SimpleNamespace(
+                        tile_shape=tile_shape,
+                        cluster_shape=cluster_shape,
+                        use_2cta_mma=use_2cta_mma,
+                    )
+                ),
+                get_workspace_size=lambda _args: SimpleNamespace(size_bytes=0),
+            )
+
+        tile_shapes = ((128, 128, 64), (256, 128, 64), (256, 256, 64))
+        cluster_shapes = (
+            (2, 1, 1),
+            (2, 2, 1),
+            (2, 4, 1),
+            (4, 1, 1),
+            (4, 2, 1),
+            (4, 4, 1),
+        )
+        kernels = [
+            kernel(tile_shape, cluster_shape, True)
+            for tile_shape in tile_shapes
+            for cluster_shape in cluster_shapes
+        ]
+        kernels.extend(
+            kernel(tile_shape, (1, 1, 1), False)
+            for tile_shape in ((64, 128, 64), (128, 128, 64))
+        )
+
+        selected = nvgemm._select_grouped_gemm_kernels(kernels, 10)
+
+        self.assertEqual(nvgemm._select_grouped_gemm_kernels(kernels, 0), [])
+        self.assertEqual(len(selected), 10)
+        self.assertEqual(
+            sum(kernel.metadata.design.use_2cta_mma for kernel in selected), 8
+        )
+        self.assertEqual(
+            {
+                kernel.metadata.design.tile_shape
+                for kernel in selected
+                if kernel.metadata.design.use_2cta_mma
+            },
+            set(tile_shapes),
+        )
+        for tile_shape in tile_shapes:
+            selected_clusters = {
+                kernel.metadata.design.cluster_shape
+                for kernel in selected
+                if kernel.metadata.design.tile_shape == tile_shape
+            }
+            self.assertIn((2, 1, 1), selected_clusters)
+            self.assertIn((4, 1, 1), selected_clusters)
+
+        choices = []
+        input_nodes = [MagicMock() for _ in range(3)]
+        for node in input_nodes:
+            node.get_layout.return_value = MagicMock()
+            node.get_dtype.return_value = torch.bfloat16
+        with (
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+            patch.object(
+                nvgemm,
+                "_create_dummy_tensor_from_layout",
+                return_value=torch.empty(1),
+            ),
+            patch.object(nvgemm, "_create_gemm_arguments", return_value=object()),
+            patch.object(nvgemm, "get_cuda_arch", return_value=100),
+            patch.object(nvgemm, "nvgemm_max_configs", return_value=10),
+            patch.object(
+                nvgemm,
+                "prefer_pdl_kernels",
+                side_effect=lambda non_efc, efc, _use_pdl: (non_efc, efc),
+            ),
+            patch.object(
+                nvgemm,
+                "NVUniversalGemmCaller",
+                side_effect=lambda **kwargs: SimpleNamespace(kernel=kwargs["kernel"]),
+            ),
+            patch(
+                "torch._inductor.codegen.nv_universal_gemm.kernel_cache.partition_compatible_kernels",
+                return_value=(kernels, []),
+            ),
+        ):
+            nvgemm._add_nv_gemm_choices_impl(
+                choices,
+                SimpleNamespace(size=(32, 8)),
+                input_nodes,
+                nvgemm.GemmVariant.GROUPED_GEMM,
+                torch.float32,
+            )
+
+        self.assertEqual(
+            [id(choice.kernel) for choice in choices],
+            [id(selected_kernel) for selected_kernel in selected],
+        )
+
+    def test_grouped_benchmark_generates_valid_offsets(self):
+        from torch._inductor.autotune_process import TensorMeta
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmBenchmarkRequest,
+        )
+        from torch._inductor.kernel.mm_grouped import (
+            _create_balanced_grouped_mm_offsets,
+        )
+
+        def tensor_meta(dtype, sizes, strides):
+            return TensorMeta(
+                device=torch.device("cpu"),
+                dtype=dtype,
+                sizes=sizes,
+                strides=strides,
+                offset=0,
+            )
+
+        request = NVUniversalGemmBenchmarkRequest(
+            "kernel",
+            [
+                tensor_meta(torch.bfloat16, (32, 16), (16, 1)),
+                tensor_meta(torch.bfloat16, (4, 16, 8), (128, 1, 16)),
+                tensor_meta(torch.int32, (4,), (1,)),
+            ],
+            tensor_meta(torch.bfloat16, (32, 8), (8, 1)),
+            MagicMock(),
+            torch.float32,
+            GemmVariant.GROUPED_GEMM,
+        )
+        a = torch.randn(32, 16, dtype=torch.bfloat16)
+        b = torch.randn(4, 16, 8, dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 8, 24, 32], dtype=torch.int32)
+        out = torch.empty(32, 8, dtype=torch.bfloat16)
+        device_interface = MagicMock()
+        request._benchmark_on_current_device = MagicMock(return_value=1.25)
+
+        with patch(
+            "torch._dynamo.device_interface.get_interface_for_device",
+            return_value=device_interface,
+        ):
+            self.assertEqual(request.benchmark(a, b, offsets, out=out), 1.25)
+            passed_inputs, passed_out = (
+                request._benchmark_on_current_device.call_args.args
+            )
+            self.assertIsNot(passed_inputs[0], a)
+            self.assertIsNot(passed_inputs[1], b)
+            self.assertIsNot(passed_inputs[2], offsets)
+            self.assertEqual(
+                passed_inputs[2], torch.tensor([8, 16, 24, 32], dtype=torch.int32)
+            )
+            self.assertIs(passed_out, out)
+
+            request.input_tensor_meta = [
+                tensor_meta(torch.bfloat16, (13, 16), (16, 1)),
+                tensor_meta(torch.bfloat16, (20, 16, 8), (128, 1, 16)),
+                tensor_meta(torch.int32, (20,), (1,)),
+            ]
+            request.output_tensor_meta = tensor_meta(torch.bfloat16, (13, 8), (8, 1))
+            request._benchmark_on_current_device.reset_mock()
+            self.assertEqual(request.benchmark(), 1.25)
+            generated_inputs, _ = request._benchmark_on_current_device.call_args.args
+            generated_offsets = generated_inputs[2]
+            self.assertEqual(generated_offsets, generated_offsets.cummax(0).values)
+            self.assertEqual(
+                generated_offsets[:-1] % 8, torch.zeros(19, dtype=torch.int32)
+            )
+            self.assertEqual(generated_offsets[-1], 13)
+
+        large_total = 2**24 + 3
+        large_offsets = _create_balanced_grouped_mm_offsets(
+            large_total, 3, 8, torch.int32, torch.device("cpu")
+        )
+        self.assertEqual(large_offsets[-1], large_total)
+        self.assertEqual(large_offsets, large_offsets.cummax(0).values)
+        self.assertEqual(
+            _create_balanced_grouped_mm_offsets(
+                31, 4, 8, torch.int32, torch.device("cpu")
+            ),
+            torch.tensor([8, 16, 24, 31], dtype=torch.int32),
+        )
 
     def test_worker_precompile_preserves_logical_m_for_swap_ab(self):
         from torch._inductor.autotune_process import TensorMeta
