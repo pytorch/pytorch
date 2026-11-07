@@ -8,9 +8,14 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
+@instantiate_parametrized_tests
 class IdTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -94,6 +99,21 @@ class IdTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, id(False))
+
+    @parametrize("factory", [lambda x: ..., lambda x: x.dtype, lambda x: x.layout])
+    def test_sourceless_singleton_id_remains_internal(self, factory):
+        def fn(x):
+            return x + 1, id(factory(x))
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "Reconstruction of FakeIdVariable"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "Reconstruction of FakeIdVariable"):
+            torch.compile(fn, backend="eager", fullgraph=True).aot_compile(((x,), {}))
+
+    def test_id_sourceful_memory_format(self):
+        self._assert_id_equals(torch.contiguous_format)
 
     def test_id_functools_partial(self):
         p = functools.partial(lambda x, y: x + y, 1)
