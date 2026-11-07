@@ -62,6 +62,71 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/pytorch/smoke_test/
           show-progress: false
+      - name: Probe MPS timestamp sampling on paravirtual GPU
+        if: ${{ inputs.desired_python == '3.14' }}
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          swift - <<'SWIFT'
+          import Foundation
+          import Metal
+
+          let devices = MTLCopyAllDevices()
+          print("Metal devices: \(devices.count)")
+          for device in devices {
+              print("device: \(device.name)")
+              let stageSampling = device.supportsCounterSampling(.atStageBoundary)
+              print("stage-boundary sampling: \(stageSampling)")
+              let sets = device.counterSets ?? []
+              print("counter sets: \(sets.map { $0.name })")
+              guard stageSampling,
+                    let timestamps = sets.first(where: { $0.name == MTLCommonCounterSet.timestamp.rawValue }) else {
+                  print("stage timestamp path unavailable")
+                  continue
+              }
+              do {
+                  let descriptor = MTLCounterSampleBufferDescriptor()
+                  descriptor.counterSet = timestamps
+                  descriptor.storageMode = .shared
+                  descriptor.sampleCount = 4096
+                  let samples = try device.makeCounterSampleBuffer(descriptor: descriptor)
+                  let shader = "kernel void timestamp_noop(device uint* out [[buffer(0)]]) { out[0] = 0; }"
+                  let library = try device.makeLibrary(source: shader, options: nil)
+                  guard let function = library.makeFunction(name: "timestamp_noop"),
+                        let queue = device.makeCommandQueue(),
+                        let command = queue.makeCommandBuffer(),
+                        let buffer = device.makeBuffer(length: 4, options: [.storageModePrivate, .hazardTrackingModeUntracked]) else {
+                      print("could not create timestamp commands")
+                      continue
+                  }
+                  let pipeline = try device.makeComputePipelineState(function: function)
+                  let pass = MTLComputePassDescriptor()
+                  pass.sampleBufferAttachments[0].sampleBuffer = samples
+                  pass.sampleBufferAttachments[0].startOfEncoderSampleIndex = 0
+                  pass.sampleBufferAttachments[0].endOfEncoderSampleIndex = MTLCounterDontSample
+                  guard let encoder = command.makeComputeCommandEncoder(descriptor: pass) else {
+                      print("could not create sampling encoder")
+                      continue
+                  }
+                  encoder.setComputePipelineState(pipeline)
+                  encoder.setBuffer(buffer, offset: 0, index: 0)
+                  encoder.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1),
+                                          threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+                  encoder.endEncoding()
+                  command.commit()
+                  command.waitUntilCompleted()
+                  print("command status: \(command.status.rawValue); error: \(String(describing: command.error))")
+                  if let data = try samples.resolveCounterRange(0..<1), data.count >= MemoryLayout<MTLCounterResultTimestamp>.size {
+                      let ticks = data.withUnsafeBytes { $0.loadUnaligned(as: MTLCounterResultTimestamp.self).timestamp }
+                      print("GPU timestamp: \(ticks); valid: \(ticks != 0 && ticks != MTLCounterErrorValue)")
+                  } else {
+                      print("could not resolve GPU timestamp")
+                  }
+              } catch {
+                  print("timestamp setup failed: \(error)")
+              }
+          }
+          SWIFT
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
