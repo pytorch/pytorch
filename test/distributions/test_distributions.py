@@ -3388,9 +3388,9 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @skipMPS  # flaky failure
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @set_default_dtype_if_supported(torch.double)
     def test_wishart_stable_with_precision_matrix(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(9)  # see Note [Randomized statistical tests]
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel
