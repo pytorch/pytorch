@@ -10715,6 +10715,9 @@ class TestHostMemPool(TestCase):
             self.assertEqual(hp.use_count(), 2)
         self.assertEqual(hp.use_count(), 1)
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_reserve_segment_not_used(self):
         script = """
 import torch
@@ -10724,13 +10727,15 @@ start = first.data_ptr()
 pool = torch.cuda.HostMemPool()
 with torch.cuda.use_mem_pool(pool):
     in_pool = torch.empty(1000, pin_memory=True)
+with torch.cuda.graph(torch.cuda.CUDAGraph(), pool=pool):
+    captured = torch.empty(1000, pin_memory=True)
 default = torch.empty(1000, pin_memory=True)
-print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < start + size)
+print(*(start <= t.data_ptr() < start + size for t in (default, in_pool, captured)))
 """
         env = os.environ.copy()
         env["PYTORCH_CUDA_ALLOC_CONF"] = "pinned_reserve_segment_size_mb:16"
         out = subprocess.check_output([sys.executable, "-c", script], env=env)
-        self.assertEqual(out.decode().strip().splitlines()[-1], "True False")
+        self.assertEqual(out.decode().strip().splitlines()[-1], "True False False")
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -10956,6 +10961,19 @@ class TestMemPool(TestCase):
                 x = torch.empty(1024, device="cuda")
         self.assertEqual(x.device.index, 1)
         self.assertEqual([s["device"] for s in pool.snapshot()], [1])
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_use_mem_pool_reentered_on_other_device(self):
+        pool = torch.cuda.MemPool()
+        ctx = torch.cuda.use_mem_pool(pool)
+        with torch.cuda.device(0), ctx:
+            with torch.cuda.device(1), ctx:
+                pass
+        # Both routes ended, so these go to the default pool.
+        torch.empty(1024, device="cuda:0")
+        torch.empty(1024, device="cuda:1")
+        self.assertEqual(pool.snapshot(), [])
 
     def test_memory_snapshot_preserves_argument_references(self):
         # Run in a subprocess since a refcount underflow can corrupt the interpreter.

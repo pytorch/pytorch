@@ -1943,8 +1943,9 @@ class use_mem_pool(contextlib.ContextDecorator):
     ) -> None:
         self._args = (pool, device, pinned)
         self._pool = pool
-        # Set on entry for a MemPool.
-        self._device_index: int | None = None
+        # The device of each open entry, for a MemPool: the same context can be
+        # re-entered on another device.
+        self._device_indices: list[int] = []
         if isinstance(pool, HostMemPool):
             if pinned is False:
                 raise ValueError("pinned=False does not apply to a HostMemPool")
@@ -1967,8 +1968,9 @@ class use_mem_pool(contextlib.ContextDecorator):
             device = self._args[1]
             if device is None:
                 device = torch.cuda.current_device()
-            self._device_index = _get_device_index(device)
-            _cuda_beginAllocateCurrentThreadToPool(self._device_index, self._pool.id)
+            device_index = _get_device_index(device)
+            _cuda_beginAllocateCurrentThreadToPool(device_index, self._pool.id)
+            self._device_indices.append(device_index)
         if self._pinned:
             try:
                 _host_beginAllocateCurrentThreadToPool(self._pool.id)
@@ -1995,9 +1997,10 @@ class use_mem_pool(contextlib.ContextDecorator):
         self._end_device()
 
     def _end_device(self) -> None:
-        if self._device_index is not None:
-            _cuda_endAllocateToPool(self._device_index, self._pool.id)
-            _cuda_releasePool(self._device_index, self._pool.id)
+        if self._device_indices:
+            device_index = self._device_indices.pop()
+            _cuda_endAllocateToPool(device_index, self._pool.id)
+            _cuda_releasePool(device_index, self._pool.id)
 
 
 def _make_uvm_pool():
