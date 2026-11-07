@@ -4311,12 +4311,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     fn_vt, self, source=source
                 )
             # Function on the type MRO + not in instance dict → bound method.
+            # An instance created during tracing has no source, but its class
+            # may have one. Without a source, bind_args copies the method's
+            # closure contents and mutations to them are lost.
             var_source = None
-            if can_use_mro_source:
+            if self.cls_source is not None:
                 var_source = self.get_source_by_walking_mro(tx, name)
-            # The MRO walk is not always available: can_use_mro_source also
-            # requires cls_source, and a torch function mode reaches here with
-            # self.source set but cls_source None, for __torch_function__. Do
+            # The MRO walk is not always available: it requires cls_source, and
+            # a torch function mode reaches here with self.source set but
+            # cls_source None, for __torch_function__. Do
             # not drop this fallback - without a source here, bind_args builds
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,

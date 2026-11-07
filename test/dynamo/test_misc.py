@@ -6632,6 +6632,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(3, z)
         self.assertEqual(3, k)
 
+    @parametrize("fullgraph", [True, False])
+    def test_local_class_method_mutates_closure_containers(self, fullgraph):
+        def make():
+            lst, dct, buf = [0], {}, bytearray(b"a")
+
+            class Store:
+                def store(self):
+                    lst.append(1)
+                    dct["k"] = 1
+                    buf.append(ord("b"))
+
+            return Store, lst, dct, buf
+
+        def run(compiled):
+            Store, lst, dct, buf = make()
+
+            def fn(x):
+                Store().store()
+                return x + 1
+
+            if compiled:
+                fn = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+            return fn(torch.ones(1)), lst, dct, buf
+
+        self.assertEqual(run(compiled=True), run(compiled=False))
+
     def test_free_var_and_local_name_collision(self):
         x = 10
 
@@ -17534,12 +17560,11 @@ fn
         with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(
-            ctx.exception.gb_type,
-            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+            ctx.exception.gb_type, "Attempted to call function marked as skipped"
         )
 
     @parametrize("mode", [True, False])
-    def test_sourceless_bound_method_in_closure_inference_mode_graph_breaks(self, mode):
+    def test_sourceless_bound_method_in_closure_inference_mode(self, mode):
         # inference_mode.clone() needs a source to guard self.mode.
         class A:
             @torch.inference_mode(mode)
@@ -17552,18 +17577,10 @@ fn
         x = torch.tensor(1.0, requires_grad=True)
         ref = fn(x)
         torch._dynamo.reset()
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(torch.is_inference(ref), torch.is_inference(res))
-
-        torch._dynamo.reset()
-        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(
-            ctx.exception.gb_type,
-            "Sourceless _DecoratorContextManager method reconstruction unsupported",
-        )
 
     def test_sourced_inference_mode_clone_guards_on_mode(self):
         im = torch.inference_mode(True)
@@ -17583,7 +17600,7 @@ fn
         res2 = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.is_inference(res2), False)
 
-    def test_sourceless_generic_ctx_manager_with_usage_graph_breaks(self):
+    def test_sourceless_generic_ctx_manager_with_usage(self):
         class MyCM:
             def __init__(self):
                 self.entered = 0
@@ -17607,7 +17624,7 @@ fn
             return method
 
         class A:
-            method = make_method(MyCM())
+            method = __call__ = make_method(MyCM())
 
         def fn(x):
             return A().method(x)
@@ -17618,19 +17635,20 @@ fn
         self.assertEqual((cm.entered, cm.exited), (1, 1))
 
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
         self.assertEqual((cm.entered, cm.exited), (2, 2))
 
+        # __call__ still reaches the closure without a source.
         torch._dynamo.reset()
         with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch.compile(lambda x: A()(x), backend="eager", fullgraph=True)(x)
         self.assertEqual(
             ctx.exception.gb_type,
             "Sourceless context manager without mutation support",
         )
 
-    def test_sourceless_generic_ctx_manager_method_call_graph_breaks(self):
+    def test_sourceless_generic_ctx_manager_method_call(self):
         class Counter:
             def __init__(self):
                 self.log = []
@@ -17665,18 +17683,10 @@ fn
         self.assertEqual((ref.item(), counter.log), (2.0, [1]))
 
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual((res.item(), counter.log), (3.0, [1, 1]))
 
-        torch._dynamo.reset()
-        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(
-            ctx.exception.gb_type,
-            "Sourceless context manager without mutation support",
-        )
-
-    def test_sourceless_decorator_ctx_manager_other_method_graph_breaks(self):
+    def test_sourceless_decorator_ctx_manager_other_method(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
             def __init__(self):
                 self.log = []
@@ -17711,18 +17721,10 @@ fn
         self.assertEqual((ref.item(), cm.log), (2.0, [1]))
 
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual((res.item(), cm.log), (3.0, [1, 1]))
 
-        torch._dynamo.reset()
-        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(
-            ctx.exception.gb_type,
-            "Sourceless _DecoratorContextManager method reconstruction unsupported",
-        )
-
-    def test_sourceless_decorator_ctx_manager_inherited_clone_graph_breaks(self):
+    def test_sourceless_decorator_ctx_manager_inherited_clone(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
             def __enter__(self):
                 return self
@@ -17748,18 +17750,10 @@ fn
         x = torch.tensor(1.0)
         ref = fn(x)
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
 
-        torch._dynamo.reset()
-        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(
-            ctx.exception.gb_type,
-            "Sourceless _DecoratorContextManager method reconstruction unsupported",
-        )
-
-    def test_sourceless_decorator_ctx_manager_mutating_method_graph_breaks(self):
+    def test_sourceless_decorator_ctx_manager_mutating_method(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
             def __init__(self):
                 self.n = 0
@@ -17783,7 +17777,7 @@ fn
             return method
 
         class A:
-            method = make_method(MyCM().bump)
+            method = __call__ = make_method(MyCM().bump)
 
         def fn(x):
             return A().method(x)
@@ -17794,19 +17788,20 @@ fn
         self.assertEqual((ref.item(), cm.n), (2.0, 1))
 
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual((res.item(), cm.n), (3.0, 2))
 
+        # __call__ still reaches the closure without a source.
         torch._dynamo.reset()
         with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch.compile(lambda x: A()(x), backend="eager", fullgraph=True)(x)
         self.assertEqual(
             ctx.exception.gb_type,
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
     @parametrize("delete", [False, True])
-    def test_sourceless_bound_clone_self_mutation_graph_breaks(self, delete):
+    def test_sourceless_bound_clone_self_mutation(self, delete):
         def make_method(bound):
             def method(self, x):
                 if delete:
@@ -17822,7 +17817,7 @@ fn
             ctx_manager.foo = 0
 
         class A:
-            method = make_method(ctx_manager.clone)
+            method = __call__ = make_method(ctx_manager.clone)
 
         def fn(x):
             return A().method(x)
@@ -17835,7 +17830,7 @@ fn
             del ctx_manager.foo
 
         torch._dynamo.reset()
-        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
         if delete:
             self.assertFalse(hasattr(ctx_manager, "foo"))
@@ -17843,9 +17838,10 @@ fn
         else:
             self.assertEqual(ctx_manager.foo, 1)
 
+        # __call__ still reaches the closure without a source.
         torch._dynamo.reset()
         with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch.compile(lambda x: A()(x), backend="eager", fullgraph=True)(x)
         self.assertEqual(
             ctx.exception.gb_type,
             "Attribute mutation on an untracked user-defined object",
