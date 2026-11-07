@@ -23,6 +23,7 @@ which is checked for during the Dynamo cache lookup.
 
 from __future__ import annotations
 
+import builtins
 import collections
 import contextlib
 import cProfile
@@ -1160,6 +1161,10 @@ class GraphRuntimeEnv:
             **(extra_globals or {}),
             backend_id: compiled_fn,
         }
+        # PyImport_Import requires __builtins__ in the calling frame's globals,
+        # but loaded AOT artifacts may lack it. Add the binding before creating
+        # the function, while preserving any existing value.
+        f_globals.setdefault("__builtins__", builtins.__dict__)
 
         # check that all external references are available
         self._check_external_refs(f_globals)
