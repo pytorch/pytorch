@@ -782,8 +782,11 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
     for user in node.users:
         if user.op in ("output", "call_module"):
             return True
-        if user.kwargs.get("out") is not None or user.kwargs.get("inplace"):
+        if user.kwargs.get("out") is not None:
             return True
+        if user.target in (torch.nn.functional.relu, torch.nn.functional.silu):
+            if get_arg_value(user, 1, "inplace"):
+                return True
         target = user.target
         if _is_mutable_node(target):
             return True
@@ -810,6 +813,8 @@ def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
         op = _user_aten_op(user)
         if op is None:
             # Unresolvable callables are opaque and may observe the strides.
+            return True
+        if op._schema.is_mutable:
             return True
         if op.is_view:
             return True

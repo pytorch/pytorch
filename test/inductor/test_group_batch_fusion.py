@@ -907,6 +907,15 @@ class TestGroupBatchFusion(TestCase):
             lambda graph, linear: graph.call_function(
                 torch.nn.functional.relu, args=(linear,), kwargs={"inplace": True}
             ),
+            lambda graph, linear: graph.call_function(
+                torch.nn.functional.relu, args=(linear, True)
+            ),
+            lambda graph, linear: graph.call_function(
+                torch.nn.functional.silu, args=(linear, True)
+            ),
+            lambda graph, linear: graph.call_function(torch.relu_, args=(linear,)),
+            lambda graph, linear: graph.call_function(torch.sigmoid_, args=(linear,)),
+            lambda graph, linear: graph.call_function(torch.tanh_, args=(linear,)),
             lambda graph, linear: graph.call_module("m", args=(linear,)),
             lambda graph, linear: graph.call_function(
                 torch.ops._batch_linear_lhs_test.require_contiguous.default,
@@ -926,6 +935,10 @@ class TestGroupBatchFusion(TestCase):
             lambda graph, linear: graph.call_function(
                 torch.ops.aten.sum.default, args=(linear,)
             ),
+            lambda graph, linear: graph.call_function(
+                torch.nn.functional.relu, args=(linear,)
+            ),
+            lambda graph, linear: graph.call_function(torch.relu, args=(linear,)),
             lambda graph, linear: graph.call_method("size", args=(linear, 0)),
         ]
         for build in safe_cases:
@@ -1109,6 +1122,37 @@ class TestGroupBatchFusion(TestCase):
             expected = module(x)
             actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_materializes_inplace_view(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 48, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return (
+                    torch.relu_(self.large(x)).view(-1),
+                    torch.sin(self.a(x)),
+                    torch.cos(self.b(x)),
+                )
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @requires_gpu()
