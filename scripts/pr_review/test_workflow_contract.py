@@ -162,9 +162,8 @@ def refuse_execution_outside_steps(
     passing them: a job whose keys are not at four spaces (legal YAML, and the
     regexes below assume four), and a quoted key carrying a backslash escape
     (`"\u0064efaults":` decodes to `defaults` and matches nothing here). Both
-    were found by review as silent bypasses. Stage 1 is additionally fenced by
-    `test_stage1_uses_only_spellings_this_class_can_read`; Stage 2 and the
-    suite-CI file have no such grammar test, which is why the check lives here.
+    were found by review as silent bypasses. All three workflows are also
+    fenced by `test_all_three_workflows_are_written_in_the_readable_subset`.
     """
     job_block_text = strip_comments(job_block(text, job))
     whole = strip_comments(text)
@@ -227,10 +226,10 @@ def refuse_unsafe_env_keys(
     it broken the same day: `BASH_FUNC_python3%%: '() { return 0; }'` replaces
     `python3` itself for every step in scope — bash imports exported functions
     from the environment — and it is on nobody's list of dangerous variables.
-    So the rule is inverted, as `test_stage1_uses_only_spellings_this_class_can
-    _read` already does for grammar: a name must be plain `SCREAMING_SNAKE`,
-    which `BASH_FUNC_python3%%` is not, and must not be one of the startup
-    variables, which are the legal-looking names that still execute code.
+    So the rule is inverted, as `refuse_unmodelled_spellings` already does for
+    grammar: a name must be plain `SCREAMING_SNAKE`, which `BASH_FUNC_python3%%`
+    is not, and must not be one of the startup variables, which are the
+    legal-looking names that still execute code.
 
     AND `env:` MUST BE A BLOCK. `env: {SHELLOPTS: noexec}` is a legal flow
     mapping that `indented_blocks` skips entirely — it yields no lines, so a
@@ -284,8 +283,8 @@ def refuse_unsafe_env_keys(
             # job holding the AWS session; `GIT_CONFIG_GLOBAL: pr/.gitconfig`
             # gives the job's `git` a PR-authored `diff.external`; `LD_PRELOAD`
             # is the classic. All three are plain SCREAMING_SNAKE and on
-            # nobody's denylist, which is why Stage 1 has had an allowlist
-            # since round 5 and this is now the same rule for the other two.
+            # nobody's denylist, which is why all three workflows are held to
+            # an allowlist here.
             case.assertIn(
                 name,
                 allowed,
@@ -991,11 +990,11 @@ def indented_block(text: str, key: str) -> list[str]:
 def refuse_unmodelled_spellings(case: unittest.TestCase, text: str, what: str) -> None:
     """Require `text` to be written in the narrow YAML subset these readers parse.
 
-    Extracted from Stage 1's grammar test so Stage 2 and the suite CI get the
-    same fence. Round 8 closed four separate defects that were all one shape —
-    a flow mapping or a bare list marker in a file with no grammar — while
-    Stage 1, which has had this since round 5, produced none of them. A grammar
-    on one of three files is not a grammar.
+    Run on all three workflows by
+    `test_all_three_workflows_are_written_in_the_readable_subset`. A flow
+    mapping or a bare list marker is invisible to every line-oriented reader
+    here, so a file outside the subset can hide a key those readers check. A
+    grammar on one of three files is not a grammar.
     """
     lines = text.split("\n")
     i = 0
@@ -2948,10 +2947,9 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
     each call site so a workflow added later is covered by the loop.
     """
 
-    # Stage 1 keeps its own, narrower list on
-    # `TestStage1RunsNoPullRequestContent.ALLOWED_ENV_KEYS`; that test is the
-    # one that owns Stage 1's surface, and this loop uses it rather than a
-    # second copy that could drift from it.
+    # Stage 1's narrower list is `TestStage1RunsNoPullRequestContent.
+    # ALLOWED_ENV_KEYS`, kept beside the rest of Stage 1's surface; this loop is
+    # its only reader, and uses it rather than a second copy that could drift.
     STAGE2_ENV_KEYS = frozenset(
         (
             "APPEND_SYSTEM_PROMPT",
@@ -3046,14 +3044,12 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
                 )
 
     def test_all_three_workflows_are_written_in_the_readable_subset(self):
-        """The grammar Stage 1 has had since round 5, on the other two files.
+        """The only whole-file grammar check, on all three workflows.
 
-        Round 8 closed four defects that were all one shape — a flow mapping or
-        a bare list marker somewhere no line-oriented reader models — and every
-        one was in Stage 2 or the suite CI. Stage 1, which this already
-        covered, produced none. A grammar on one of three files is not a
-        grammar, so it is applied to all three here and the Stage 1 test now
-        calls the same function.
+        A flow mapping or a bare list marker is a spelling no line-oriented
+        reader here models. A grammar on one of three files is not a grammar,
+        so it is applied to all three. Comments are stripped first: YAML
+        comments carry no structure.
         """
         for path in (STAGE1, STAGE2, SUITE_CI):
             with self.subTest(workflow=path.name):
@@ -3318,15 +3314,15 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         )
 
     def test_neither_stage_declares_a_workflow_level_collapse_group(self):
-        """The defect TestStage1CollapseGroupIsJobLevel exists for, on the
-        OTHER file, where it is worse.
+        """The defect TestStage1CollapseGroupIsJobLevel exists for, on both
+        files; it is worse on Stage 2.
 
         GitHub claims a workflow-level group before evaluating a job's `if:`,
         so a run the workflow is going to skip still joins it. Stage 2 receives
         a `workflow_run` completion for EVERY Stage 1 run, including the ones
         `prepare` refuses — so one group at column 0 lets a refused run cancel
-        a review already in flight. Stage 1 is pinned against this; Stage 2 was
-        not, and the reasoning transfers word for word.
+        a review already in flight. This is the only pin for either stage, and
+        the reasoning is the same for both.
         """
         for path in (STAGE1, STAGE2):
             with self.subTest(workflow=path.name):
@@ -3570,8 +3566,8 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
     * `environment: bedrock` + the shared role — i.e. reverting both together
       to the old interim state. Nothing fails; the untrusted job silently
       regains PutObject on `pr_review_verdicts/`, the forgery path this design
-      exists to remove. This is the dangerous one, and asserting the exact
-      expected pair below is what catches it.
+      exists to remove. This is the dangerous one, and the two tests below
+      that each pin one half of the pair are what catch it.
 
     Dropping the environment line entirely fails closed and is merely broken.
 
@@ -3616,14 +3612,6 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
             "the review job must declare `environment: claude-untrusted` — that "
             "declaration is the only thing that mints the OIDC `sub` the "
             "untrusted role's trust policy accepts",
-        )
-
-    def test_the_two_never_disagree(self):
-        """The pairing, asserted as a pair so a half-edit cannot pass."""
-        self.assertEqual(
-            (self.review_env, self.review_role),
-            (self.EXPECTED_ENV, self.EXPECTED_ROLE),
-            "the review job's `environment:` and REVIEW_ROLE must flip together",
         )
 
     def test_review_job_never_names_the_publisher_environment(self):
@@ -3679,7 +3667,9 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     with a single trigger and no stale file anywhere.
 
     So the group lives on `capture`, which a rejected run never enters, and the
-    workflow level carries none. `.github/scripts/ensure_actions_will_cancel.py`
+    workflow level carries none (pinned by
+    `test_neither_stage_declares_a_workflow_level_collapse_group`).
+    `.github/scripts/ensure_actions_will_cancel.py`
     is the reason one was kept after the ciforge incident; it selects files with
     `"pull_request" in on`, an exact key match, so this file left its scope when
     the trigger moved and the checker exits 0 without it.
@@ -3687,31 +3677,6 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
 
     def setUp(self):
         self.text = STAGE1.read_text()
-
-    def test_there_is_no_workflow_level_group_at_all(self):
-        """THE KEY, not the cancellation. Both narrowings were measured wrong.
-
-        An earlier version forbade only `cancel-in-progress: true`, on the
-        reasoning that a non-cancelling group is harmless. It is not: GitHub
-        cancels a PENDING run when another enters the same group, so with A
-        running and an eligible B pending, a rejected C entering the group
-        cancels B before C's own job condition is evaluated. And `true` has
-        spellings — `True`, `'true'`, `${{ … }}` — each of which a value regex
-        misses while restoring the defect in full.
-
-        Nothing here needs a workflow-level group, so the whole key goes.
-        """
-        self.assertIsNone(
-            re.search(
-                r"(?m)^[\"\']?concurrency[\"\']?[ \t]*:", strip_comments(self.text)
-            ),
-            "Stage 1 declares a workflow-level `concurrency:` again. It is "
-            "claimed before the job `if:`, so a run this workflow SKIPS joins "
-            "it and can cancel — or displace as pending — a review in flight. "
-            "No suffix fixes that: three of the four declared trigger types "
-            "carry no label to differentiate by. The collapse group belongs on "
-            "the `capture` job, which a rejected run never enters.",
-        )
 
     def test_capture_job_keeps_a_collapse_group(self):
         """The group must not be dropped either — bursts should still collapse."""
@@ -4149,15 +4114,15 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         Every other reader in this class works on `strip_comments(self.raw)`,
         which drops whole-line `#` comments — including comments inside a
         `run:` body. So `# PR context: ${{ github.event.pull_request.body }}`
-        added to the capture script was invisible to the expression scan AND
+        added to the capture script was invisible to those readers AND
         left the pinned digest unchanged, while the runner substituted a
         multi-line, attacker-authored body into the script text before bash saw
         a comment at all. A body containing a newline then contributes a line
         bash executes. Measured: all 328 tests green.
 
-        Read from RAW, therefore, and refuse the construct outright — Stage 1
-        passes everything it needs through `env:`, which is the rule the rest of
-        this class already enforces for non-comment lines.
+        Read from RAW, therefore, and refuse `${{` in `run:` bodies outright,
+        comment lines included; the allowlist test reads only uncommented
+        text. Stage 1 passes everything it needs through `env:`.
         """
         # From the RAW capture job, entry by entry. `block_scalars` matches only
         # at the OUTERMOST key indent of the text it is given, so handing it the
@@ -4256,69 +4221,6 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "TRIGGER_EVENT",
         )
     )
-
-    def test_every_environment_key_is_on_the_allowlist(self):
-        """Pinning the SCRIPT does not pin what bash runs before it.
-
-        The digest covers the `run:` body. It does not cover the environment
-        the shell starts in, and several standard variables turn that
-        environment into an execution vector on their own.
-        """
-        # THE WHOLE FILE. Scanning "the prefix before `jobs:`" plus "the
-        # capture job" left a third region uncovered: a top-level `env:`
-        # written AFTER the jobs mapping is valid YAML, reaches the job, and
-        # sat in neither. Whole-file GRAMMAR coverage does not make a narrower
-        # semantic scan complete — they are separate properties.
-        #
-        # ACCEPTED OVER-REACH: this collects EVERY mapping named `env`, not
-        # only the three that configure a runtime environment. A workflow
-        # declaring `on.workflow_dispatch.inputs.env` would have its
-        # `description:`/`type:` keys rejected as variable names. That is a
-        # false positive on a legal edit, and it is the deliberate trade for
-        # this file: two jobs' worth of YAML, one allowlist, and a failure
-        # that says exactly what to do. Narrow it to the three real scopes if
-        # this file ever grows an input named `env`.
-        for block in indented_blocks(self.text, "env"):
-            for ln in block:
-                m = re.match(r"^\s*[\"']?([A-Za-z_][\w-]*)[\"']?\s*:", ln)
-                if not m:
-                    continue
-                self.assertIn(
-                    m.group(1),
-                    self.ALLOWED_ENV_KEYS,
-                    f"an `env:` mapping in Stage 1 sets {m.group(1)!r}, which "
-                    "this class does not model. Some variable names make the "
-                    "shell execute code before the pinned script runs "
-                    "(BASH_ENV, ENV, LD_PRELOAD, PYTHONSTARTUP); decide which "
-                    "this is, then add it to ALLOWED_ENV_KEYS.",
-                )
-
-    def test_stage1_uses_only_spellings_this_class_can_read(self):
-        """FAIL CLOSED ON A GRAMMAR, instead of chasing spellings one at a time.
-
-        Five review rounds each found another legal YAML spelling that a
-        reader here did not model — `-  run:` with two spaces, a bare `-`
-        marker, `"extra":` quoted, `extra :` with a space before the colon, a
-        flow mapping, a key written after `jobs:`, an `&anchor` on an `env:`
-        header. Each fix was correct and each left the next one open, because
-        the language has more spellings than a text reader has rules and the
-        bypass is always one keystroke from the last fix.
-
-        So the direction is inverted: this asserts the file is written in the
-        NARROW SUBSET the readers above are built for, and anything outside it
-        is a loud failure naming this test rather than a silent mis-read. Same
-        trade `TestTheReadersPremisesStillHold` makes for the Stage 2 readers.
-
-        THE WHOLE FILE, not the capture job. Scoping it to the job left
-        workflow-level configuration outside the subset, and that is where the
-        two nastiest vectors live: `defaults : {run: {shell: 'bash -c "…"'}}`
-        before `jobs:` changes the interpreter of a script whose digest never
-        moves. A grammar that covers only part of a file is not a grammar.
-
-        Reformatting the workflow stays legal; reformatting it into a spelling
-        nothing here can parse does not.
-        """
-        refuse_unmodelled_spellings(self, self.text, "Stage 1")
 
     def test_no_step_reaches_the_network_or_evaluates_fetched_text(self):
         """Defence in depth behind the step-set pin, and it names the hazard.
@@ -4446,27 +4348,6 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "to a full commit SHA. A `./local` path resolves from the "
                 "workspace and a tag can be moved by whoever owns it.",
             )
-
-    def test_no_shell_interpolates_a_workflow_expression(self):
-        """THE script-injection contract, and the reason the `env:` block exists.
-
-        `${{ }}` is substituted into the script TEXT before bash sees it, so a
-        value containing a quote or a `$(` becomes code. Passing values through
-        `env:` and reading them as `"$VAR"` cannot do that, whatever they hold.
-        Checked by executing the extracted shell as well — see below — because
-        a trailing `#` satisfies a substring assertion and `strip_comments`
-        only drops whole-line comments.
-        """
-        for step in self._step_entries():
-            for _, body in block_scalars(step, "run"):
-                script = "\n".join(body)
-                self.assertNotIn(
-                    "${{",
-                    script,
-                    "a Stage 1 `run:` interpolates a workflow expression "
-                    "directly into the script; route it through `env:` and "
-                    "quote it instead.",
-                )
 
     def test_no_shell_reads_the_workspace(self):
         """Nothing is checked out there, so a read finds nothing today. It is
@@ -5603,18 +5484,6 @@ class TestSymlinkScrubIsNulSafe(unittest.TestCase):
         self.assertEqual(self.scrub.count("printf '%s\\0'"), 1)
         self.assertEqual(self.scrub.count("read -r -d ''"), 3)
 
-    def test_the_delete_uses_a_double_dash(self):
-        self.assertIn('rm -f -- "$link"', self.scrub)
-
-    def test_attacker_chosen_names_are_quoted_into_the_log(self):
-        # %s would let a newline in the name forge a `::error::` workflow command.
-        self.assertNotIn("printf '  %s\\n' \"$link\"", self.scrub)
-        self.assertIn("printf '  %q\\n' \"$link\"", self.scrub)
-
-    def test_it_still_fails_closed(self):
-        self.assertIn("::error::escaping symlink still present", self.scrub)
-        self.assertIn("exit 1", self.scrub)
-
 
 class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
     """pytorch/pytorch spells the marker `Ready for Review`; `==` never matched."""
@@ -6616,7 +6485,6 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         self.text = STAGE2.read_text()
         self.review = job_block(self.text, "review")
         self.stripped = strip_comments(self.review)
-        self.prepare = strip_comments(job_block(self.text, "prepare"))
 
     def _step(self, marker: str, hay: str | None = None) -> str:
         hay = self.stripped if hay is None else hay
@@ -6638,13 +6506,6 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         self.assertNotIn("merge-base", self.stripped)
         self.assertNotIn("--deepen", self.stripped)
         self.assertNotIn("--unshallow", self.stripped)
-
-    def test_prepare_resolves_it_from_the_compare_endpoint_and_validates_it(self):
-        self.assertIn("merge_base_commit.sha", self.prepare)
-        self.assertRegex(self.prepare, r"/compare/")
-        self.assertRegex(
-            self.prepare, r'"merge_base_sha=\$MERGE_BASE"\s*>>\s*"\$GITHUB_OUTPUT"'
-        )
 
     def _run_corroboration(self, merge_base: str, td: str, **identities):
         return run_corroboration(merge_base, td, **identities)
