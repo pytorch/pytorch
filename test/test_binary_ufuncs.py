@@ -4048,6 +4048,9 @@ class TestBinaryUfuncsDevice(TestCase):
         torch.float32,
         torch.float64,
         torch.bfloat16,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
     )
     @dtypes(
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
