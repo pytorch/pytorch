@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    onlyOn,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -39,6 +41,10 @@ def _torchVersionLessThan(major, minor):
         version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
     )
     return (current_major < major) or (current_major == major and current_minor < minor)
+
+
+def _signed_int64(value):
+    return value - (1 << 64) if value >= (1 << 63) else value
 
 
 def skipIfTorchVersionLessThan(major, minor):
@@ -402,7 +408,7 @@ class TestLibtorchAgnostic(TestCase):
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_is_pinned_cuda_true(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -488,7 +494,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, torch_op(a, b))
         self.assertEqual(id(result), id(out))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @skipIfTorchVersionLessThan(2, 10)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
@@ -942,17 +948,17 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(stream_id, expected_stream_id)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_stream_native_handle(self, device):
         import libtorch_agn_2_13 as libtorch_agnostic
 
-        device_idx = torch.cuda.current_device()
-        streams = [torch.cuda.Stream(device=device_idx) for _ in range(3)]
+        device_idx = torch.device(device).index
+        streams = [torch.Stream(device=device) for _ in range(3)]
 
         native_handles = []
         for stream in streams:
-            with torch.cuda.stream(stream):
-                expected = torch.accelerator.current_stream(device_idx).native_handle
+            with stream:
+                expected = torch.accelerator.current_stream(device).native_handle
                 nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
 
             self.assertEqual(nh, expected)
@@ -1174,23 +1180,23 @@ class TestLibtorchAgnostic(TestCase):
             libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
-    @deviceCountAtLeast(2)
+    @onlyOn(["cuda", "xpu"])
     def test_tensor_device(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3)
         self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
 
-        t_cuda = torch.randn(2, 3, device="cuda")
+        t_cuda = torch.randn(2, 3, device=device)
         self.assertEqual(
             libtorch_agnostic.ops.test_tensor_device(t_cuda), t_cuda.device
         )
 
-        t_cuda_1 = torch.randn(2, 3, device="cuda:1")
-        self.assertEqual(
-            libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
-        )
+        if torch.device(device).type == "cuda" and torch.cuda.device_count() > 1:
+            t_cuda_1 = torch.randn(2, 3, device="cuda:1")
+            self.assertEqual(
+                libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
+            )
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
@@ -1364,8 +1370,12 @@ for warning in w:
             elif memory_format == torch.contiguous_format:
                 self.assertTrue(result_with_device.is_contiguous())
 
-            # Test pin_memory on CUDA (only once, not for every parameter combination)
-            if device == "cuda" and layout is None and memory_format is None:
+            # Test pin_memory on CUDA and XPU (only once per device type)
+            if (
+                torch.device(device).type in ("cuda", "xpu")
+                and layout is None
+                and memory_format is None
+            ):
                 result_pinned = libtorch_agnostic.ops.my_empty(
                     [2, 3], torch.float32, None, "cpu", True, None
                 )
@@ -1596,6 +1606,7 @@ for warning in w:
         expected_both = torch.full([4, 5], 2.5, dtype=torch.float64, device=device)
         self.assertEqual(result_both, expected_both, exact_device=True)
 
+    @skipXPU
     def test_mv_tensor_accessor(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -1618,7 +1629,7 @@ for warning in w:
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.empty(2, 5, device=device, dtype=torch.float32)
-        expected_p = t.data_ptr()
+        expected_p = _signed_int64(t.data_ptr())
 
         for mutable in [True, False]:
             p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
@@ -1672,7 +1683,7 @@ for warning in w:
         supported_dtypes = self.get_supported_dtypes_for_data_ptr()
         for dtype in supported_dtypes:
             t = torch.empty(2, 5, device=device, dtype=dtype)
-            expected_p = t.data_ptr()
+            expected_p = _signed_int64(t.data_ptr())
 
             for rdtype in supported_dtypes:
                 if dtype == rdtype:
@@ -1910,7 +1921,7 @@ for warning in w:
         # Test basic from_blob with contiguous tensor
         original = torch.rand(2, 3, device=device, dtype=torch.float32)
         stable_result = libtorch_agnostic.ops.my_from_blob(
-            original.data_ptr(),
+            _signed_int64(original.data_ptr()),
             original.size(),
             original.stride(),
             device,
@@ -1924,7 +1935,7 @@ for warning in w:
         transposed = torch.rand(4, 6, device=device, dtype=torch.float32).t()
 
         stable_transposed = libtorch_agnostic.ops.my_from_blob(
-            transposed.data_ptr(),
+            _signed_int64(transposed.data_ptr()),
             transposed.size(),
             transposed.stride(),
             device,
@@ -2399,7 +2410,7 @@ except RuntimeError as e:
             # We need an original tensor to create the tensor with from_blob.
             original = torch.rand(2, 3, device=device, dtype=torch.float32)
             blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
-                original.data_ptr(),
+                _signed_int64(original.data_ptr()),
                 original.size(),
                 original.stride(),
                 device,
@@ -2450,7 +2461,7 @@ except RuntimeError as e:
             # We need an original tensor to create the tensor with from_blob.
             original = torch.rand(2, 3, device=device, dtype=torch.float32)
             blob_tensor = from_blob_fn(
-                original.data_ptr(),
+                _signed_int64(original.data_ptr()),
                 original.size(),
                 original.stride(),
                 device,
@@ -2788,7 +2799,9 @@ instantiate_device_type_tests(
     TestLibtorchAgnosticMetal, globals(), allow_mps=True, only_for="mps"
 )
 
-instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
+instantiate_device_type_tests(
+    TestLibtorchAgnostic, globals(), except_for=None, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
