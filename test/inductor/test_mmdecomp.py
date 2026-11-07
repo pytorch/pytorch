@@ -444,6 +444,18 @@ class TestDecomp(NNTestCase):
         decomposed = m == 1 if device_type == "cpu" else device_type == "xpu" and k == 1
         self.assertEqual(counters["inductor"]["decompose_addmm"], int(decomposed))
 
+    @parametrize("m,k", [(1, 4), (4, 1)])
+    def test_addmm_zero_alpha_ignores_nan_matrix(self, device, m, k):
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, alpha=0).relu()
+
+        x = torch.ones(4, device=device)
+        a = torch.full((m, k), float("nan"), device=device)
+        b = torch.ones(k, 4, device=device)
+        with fresh_cache():
+            out = torch.compile(fn, fullgraph=True)(x, a, b)
+        self.assertEqual(out, fn(x, a, b))
+
     @parametrize("op", [torch.addmm, torch.baddbmm])
     def test_zero_beta_fp16_alpha_overflow(self, device, op):
         def fn(x, a, b):
