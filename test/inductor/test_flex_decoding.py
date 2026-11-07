@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
+    skipCUDAIfMIG,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -2270,10 +2271,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
             (64, 16, (96, 128), None, 64),
             # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
-            (32, 4, 128, 256, 256),
+            # The pinned 256-row kernel spills (#203041), and launching it runs out of
+            # memory on MIG slices.
+            common_utils.subtest((32, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
             # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
             # must follow the pinned BLOCK_M, or rows past Q_LEN overwrite the next head's.
-            (16, 4, 128, 256, 256),
+            common_utils.subtest((16, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
         ],
     )
     def test_gqa_block_m_fits_sparse_q_block(
