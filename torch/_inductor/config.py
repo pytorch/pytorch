@@ -2632,6 +2632,13 @@ class triton:
     # this could be helpful to avoid recompilations in some cases
     mix_order_reduction_non_strict_mode = False
 
+    # Finalize the partial sums of a mix-order reduction with one Triton launch
+    # per group of consecutive accumulators, instead of one ATen sum per
+    # accumulator. Each ATen sum is a separate, mostly launch-bound kernel.
+    mix_order_reduction_triton_finalize = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_TRITON_FINALIZE", "0") == "1"
+    )
+
     # Maximum external read buffers (loads) in a mix-order reduction
     # kernel. Set to 0 to disable the check.
     mix_order_reduction_max_reads = 10
