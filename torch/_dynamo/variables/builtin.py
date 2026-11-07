@@ -2149,7 +2149,18 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if name == "__hash__" and len(args) == 1 and not kwargs:
             arg = args[0]
-            generic_hash(tx, arg)
+            if (
+                self.fn is bool
+                and isinstance(arg, ConstantVariable)
+                and type(arg.value) is bool
+            ):
+                return generic_hash(tx, arg)
+            unimplemented(
+                gb_type="Unsupported builtin __hash__ receiver",
+                context=f"{self.fn.__name__}.__hash__({arg})",
+                explanation="Dynamo cannot safely trace this unbound builtin __hash__ call.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         return super().call_method(tx, name, args, kwargs)
 

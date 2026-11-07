@@ -1992,6 +1992,16 @@
       ]
     }
   ],
+  "GB3303": [
+    {
+      "Gb_type": "Unsupported builtin __hash__ receiver",
+      "Context": "{self.fn.__name__}.__hash__({arg})",
+      "Explanation": "Dynamo cannot safely trace this unbound builtin __hash__ call.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0120": [
     {
       "Gb_type": "Unreachable sub-generator code",
