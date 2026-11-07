@@ -32,7 +32,7 @@ __all__ = []
 for name, func in itertools.chain(
     _public_functions(_funcs_impl), _public_functions(_reductions_impl)
 ):
-    if name in ["percentile", "quantile", "median"]:
+    if name in ["percentile", "quantile"]:
         decorated = normalizer(func, promote_scalar_result=True)
     elif name == "einsum":
         # normalized manually
