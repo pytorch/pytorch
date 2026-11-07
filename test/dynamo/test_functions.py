@@ -33,6 +33,7 @@ from torch import sub
 from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.source import SkipGuardSource
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -43,6 +44,7 @@ from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, sa
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
+from torch._dynamo.variables.object_protocol import mro_attr_source
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -221,6 +223,99 @@ def deque_length_hints():
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    def test_shared_mro_owner_base_replacement(self):
+        class Base:
+            scale = 1
+
+        class Other:
+            scale = 7
+
+        class Left(Base):
+            pass
+
+        class Right(Base):
+            pass
+
+        def fn(x, left, right):
+            return x + left.scale + right.scale
+
+        left, right, x = Left(), Right(), torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, left, right), x + 2)
+        Right.__bases__ = (Other,)
+        self.assertEqual(compiled(x, left, right), x + 8)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_mro_guards_bypass_metaclass_lookup(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__mro__":
+                    return ()
+                return super().__getattribute__(name)
+
+        class Input(metaclass=Meta):
+            @property
+            def scale(self):
+                return 3
+
+        def fn(x, obj):
+            return x + obj.scale
+
+        obj, x = Input(), torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 3
+        )
+
+    @parametrize("suppressed", ["context", "source"])
+    @parametrize("change", ["bases", "shadow"])
+    def test_mro_guards_after_suppressed_lookup(self, suppressed, change):
+        class Base:
+            scale = 1
+
+        class Other:
+            scale = 1
+
+            def __getattribute__(self, name):
+                if name == "scale":
+                    return 7
+                return super().__getattribute__(name)
+
+        class Input(Base):
+            pass
+
+        def prime(ctx):
+            obj = (
+                ctx.get_local("obj")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .realize()
+            )
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            source = obj.cls_source
+            if suppressed == "source":
+                source = SkipGuardSource(source)
+            with patch.object(
+                torch._guards.TracingContext.get().guards_context,
+                "skip_install",
+                suppressed == "context",
+            ):
+                mro_attr_source(tx, obj.python_type(), source, "scale")
+
+        def fn(x, obj):
+            comptime(prime)
+            return x + obj.scale
+
+        obj, x = Input(), torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, obj), x + 1)
+        if change == "bases":
+            Input.__bases__ = (Other,)
+        else:
+            Input.scale = 7
+        self.assertEqual(compiled(x, obj), x + 7)
+        self.assertEqual(counter.frame_count, 2)
+
     hw_classification = HardwareClassification.GENERIC
 
     @make_test
