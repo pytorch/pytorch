@@ -9,7 +9,7 @@ import logging
 import operator
 import textwrap
 import traceback
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
@@ -138,6 +138,7 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    from torch._higher_order_ops.user_kernel_hop import KernelSideTable
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
     from torch.types import IntLikeType
@@ -8809,6 +8810,8 @@ class UserDefinedKernel(ExternKernel):
         self,
         kernel_args: dict[str, Any],
         wrap_tensor_arg: Callable[[str, IRNode], IRNode] | None = None,
+        *,
+        kernel_idx: int | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8837,6 +8840,50 @@ class UserDefinedKernel(ExternKernel):
             inputs,
             tuple(constant_args),
             kwargs,
+        )
+        # The kernel's index in its DSL's side table (the HOP node's kernel_idx). A
+        # subclass that does not pass it sets it itself.
+        if kernel_idx is not None:
+            self.kernel_idx = kernel_idx
+
+    @classmethod
+    def lower_mutation_hop(
+        cls,
+        side_table: KernelSideTable[Any],
+        constant_args_idx: int,
+        kwargs: dict[str, Any],
+        **node_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Lowering of a node of a user-kernel mutation HOP: creates the IR node from
+        the node's graph kwargs joined with its side-table constant args (the other
+        node arguments go to the constructor as they are) and returns the tensor
+        kwargs, the node's value in the lowered graph."""
+        cls(
+            kernel_args=side_table.kernel_kwargs(constant_args_idx, kwargs),
+            **node_kwargs,
+        )
+        return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+    def set_kernel_param_order(
+        self, param_names: Iterable[str], kernel_args: Mapping[str, Any]
+    ) -> None:
+        """Order the kwargs the C++ wrapper passes by the kernel's parameters
+        (``param_names``), keeping the ones the call passed."""
+        self.ordered_kwargs_for_cpp_kernel = [
+            name for name in param_names if name in kernel_args
+        ]
+
+    def register_written_args(
+        self, kernel_args: Mapping[str, Any], names: Iterable[str]
+    ) -> None:
+        """register_mutations for the tensor arguments among ``names``, the kernel
+        arguments the launch writes."""
+        self.register_mutations(
+            [
+                kernel_args[name]
+                for name in names
+                if isinstance(kernel_args.get(name), TensorBox)
+            ]
         )
 
     def register_mutations(self, mutable_args: list[Any]) -> None:
@@ -9088,8 +9135,7 @@ class UserDefinedTritonKernel(UserDefinedKernel):
                 return TMADescriptor.create(t, tma_descriptor_metadata[k])
             return t
 
-        super().__init__(kernel_args, wrap_tensor_arg)
-        self.kernel_idx = kernel_idx
+        super().__init__(kernel_args, wrap_tensor_arg, kernel_idx=kernel_idx)
         self.grid = grid
         self.launch_kwargs = launch_kwargs
 
@@ -9098,9 +9144,7 @@ class UserDefinedTritonKernel(UserDefinedKernel):
         # If we are autotuning, not all arguments will be passed
         if not hasattr(kernel, "arg_names"):
             raise AssertionError('Expected hasattr(kernel, "arg_names")')
-        self.ordered_kwargs_for_cpp_kernel = [
-            arg for arg in kernel.arg_names if arg in kernel_args
-        ]
+        self.set_kernel_param_order(kernel.arg_names, kernel_args)
 
         from torch._higher_order_ops.triton_kernel_wrap import (
             identify_accessed_tensors,
@@ -9123,14 +9167,10 @@ class UserDefinedTritonKernel(UserDefinedKernel):
             tma_descriptor_metadata,
         )
 
-        # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
+        # Only tensor args are registered: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.
-        self.register_mutations(
-            [
-                kernel_args[key.name]
-                for key in self.arg_accesses.read_writes.writes
-                if isinstance(kernel_args.get(key.name), TensorBox)
-            ]
+        self.register_written_args(
+            kernel_args, [key.name for key in self.arg_accesses.read_writes.writes]
         )
 
 
