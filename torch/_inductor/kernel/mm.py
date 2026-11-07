@@ -87,7 +87,9 @@ from .mm_common import (
     load_kernel_template,
     mm_args,
     mm_grid,
+    native_matmul_scaled_add,
     persistent_mm_grid,
+    use_helion_native_matmul,
     use_native_matmul,
     zero_addmm_input,
 )
@@ -580,6 +582,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     # are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
     # combination, but are lowered to `tl.dot` during the code generation phase.
     if use_native_matmul(mat1, mat2):
+        if use_helion_native_matmul(mat1):
+            # The Helion kernel reads in0[tile_y, tile_r] and in1[tile_r, tile_x]
+            # from memory: a.reshape(M, K) stays a view of a's storage, and
+            # (a + 1) becomes a buffer of its own.
+            mat1, mat2 = realize_inputs(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 0)
         args, kwargs = transform_args(
@@ -600,7 +607,9 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 1)
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 1
+        )
 
         return dot_reduction
 
@@ -900,8 +909,9 @@ def _tuned_addmm_out_dtype(inp, mat1, mat2, out_dtype, *, alpha, beta, layout):
         lambda: "self dtype must match either out_dtype or mat1 dtype",
     )
     # TODO: drop the cpp_wrapper fallback once aten.addmm.dtype_out has an AOTI
-    # C shim (torchgen/aoti/fallback_ops.py).
-    if V.graph.cpp_wrapper:
+    # C shim (torchgen/aoti/fallback_ops.py). Helion native matmul also takes
+    # this path, so that the product is a dot with a fused bias add.
+    if V.graph.cpp_wrapper or use_helion_native_matmul(mat1):
         result = lowerings[aten.mm](mat1, mat2, out_dtype, layout=layout)
         if alpha != 1:
             result = lowerings[aten.mul](alpha, result)
@@ -966,17 +976,9 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             )
 
     if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
-        if alpha == 0:
-            arg2 = 0
-        else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
+        return native_matmul_scaled_add(
+            inp, alpha, beta, lambda: lowerings[aten.mm](mat1, mat2)
+        )
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(

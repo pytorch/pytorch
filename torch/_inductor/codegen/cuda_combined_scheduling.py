@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
+from .. import config
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -14,6 +15,7 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
+from ..virtualized import V
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
@@ -55,7 +57,18 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        self._triton_scheduling = TritonScheduling(scheduler)
+        self._triton_scheduling: TritonScheduling
+        # HelionScheduling emits native matmul schedules as Helion kernels and
+        # every other schedule as Triton. Like use_helion_native_matmul, it
+        # needs the Python wrapper.
+        if config.helion.native_matmul and not (
+            V.graph.cpp_wrapper or V.graph.fx_wrapper
+        ):
+            from .helion import HelionScheduling
+
+            self._triton_scheduling = HelionScheduling(scheduler)
+        else:
+            self._triton_scheduling = TritonScheduling(scheduler)
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
