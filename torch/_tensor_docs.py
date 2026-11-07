@@ -5147,13 +5147,15 @@ transfers and reusing CPU buffers.
 
 Here are the ways to call ``to``:
 
-.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(dtype, non_blocking=False, copy=False, *, memory_format=torch.preserve_format, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`dtype`
 
     Args:
         {memory_format}
+        round (str, optional): if given, the direction in which to round
+            values that :attr:`dtype` cannot represent; see the note below.
 
 .. note::
 
@@ -5162,7 +5164,7 @@ Here are the ways to call ``to``:
     If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
     the behavior is undefined and the result may vary across platforms.
 
-.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, *, memory_format=torch.preserve_format, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
@@ -5177,8 +5179,10 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+        round (str, optional): if given, the direction in which to round
+            values that :attr:`dtype` cannot represent; see the note below.
 
-.. method:: to(other, non_blocking=False, copy=False) -> Tensor
+.. method:: to(other, non_blocking=False, copy=False, *, round=None) -> Tensor
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
@@ -5191,12 +5195,50 @@ Here are the ways to call ``to``:
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
+    Args:
+        round (str, optional): if given, the direction in which to round
+            values that :attr:`dtype` cannot represent; see the note below.
+
 .. note::
 
     When :attr:`non_blocking` is ``True`` and the conversion is issued on
     a non-default CUDA stream, the caller is responsible for proper
     cross-stream synchronization. See :ref:`cuda-stream-semantics` for
     the required pattern.
+
+.. note::
+
+    :attr:`round` converts to a narrower floating-point dtype, rounding the
+    values that it cannot represent in the given direction. It is only allowed
+    when converting a ``float64``, ``float32``, ``float16`` or ``bfloat16``
+    tensor to a dtype that cannot represent all its values exactly
+    (``float32``, ``float16``, ``bfloat16`` or a float8 dtype), and raises an
+    error otherwise. The modes are the IEEE 754 rounding directions:
+
+    * ``"to_nearest_even"``: to the nearest value, ties to the one with an
+      even last digit. This is how conversions round without :attr:`round`.
+    * ``"toward_zero"``: to the nearest value whose magnitude is not larger.
+    * ``"toward_positive"``: to the nearest value that is not smaller.
+    * ``"toward_negative"``: to the nearest value that is not larger.
+
+    The exact value is rounded once, even for ``float64`` inputs. On overflow,
+    values whose magnitude is rounded down (toward zero) become the largest
+    finite value of their sign, e.g. ``"toward_negative"`` turns ``1e6`` into
+    ``65504`` in ``torch.float16``; the others become infinity, or, for dtypes
+    without infinity, the value that a conversion without :attr:`round`
+    produces (the largest finite value for ``torch.float8_e4m3fn`` and
+    ``torch.float8_e5m3fnu``, NaN for the ``fnuz`` dtypes and
+    ``torch.float8_e8m0fnu``). The unsigned dtypes ``torch.float8_e8m0fnu`` and
+    ``torch.float8_e5m3fnu`` round the magnitude of the input, so
+    ``"toward_negative"`` behaves like ``"toward_zero"``.
+    ``torch.float8_e8m0fnu`` only has powers of two: values below
+    :math:`2^{{-127}}` become :math:`2^{{-127}}`, and ties of
+    ``"to_nearest_even"`` round up.
+
+    A device change, if any, is a separate transfer, and the result is never
+    ``self``. Like a plain dtype conversion, its gradient is the identity (cast
+    back to the original dtype), unlike that of :func:`torch.round`, which is
+    zero.
 
 Example::
 
@@ -5218,6 +5260,9 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
+
+    >>> torch.tensor([0.1, 0.75, -0.75]).to(torch.bfloat16, round="toward_positive")
+    tensor([ 0.1001,  0.7500, -0.7500], dtype=torch.bfloat16)
 """.format(**common_args),
 )
 
