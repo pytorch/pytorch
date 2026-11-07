@@ -43,9 +43,10 @@ on your workloads. Put those profiles in $LLVM_BOLT_PROFILES_DIR and rebuild.
 The aarch64 CUDA nightly builds upload these unoptimized libraries, with a
 `libtorch_python.so` per Python version, as the `prebolt-cuda-aarch64-<cuda>`
 artifact. `tools/bolt/collect_profiles.sh` instruments them, runs
-`tools/bolt/synthetic_workload.py` on them with the nightly wheel of each
-Python version, and packages the profiles as a `torch.tar.zst` in the layout
-above. The "BOLT profile collection (GB300)" workflow
+`tools/bolt/synthetic_workload.py` on them with the nightly wheel of Python
+3.12 (and of further versions for version specific `torch_python` profiles),
+and packages the profiles as a `torch.tar.zst` in the layout above. The
+"BOLT profile collection (GB300)" workflow
 (`.github/workflows/bolt-profile-gb300.yml`) runs it on a GB300 runner and
 uploads the result as a workflow artifact.
 

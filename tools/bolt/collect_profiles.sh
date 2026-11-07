@@ -6,7 +6,8 @@
 # Python version. Only the run step needs a GPU machine:
 #
 #   instrument <prebolt-dir> <out-dir>
-#       Instrument the libraries of <prebolt-dir>.
+#       Instrument the libraries of <prebolt-dir> that do not depend on Python
+#       and the libtorch_python.so of each version of BOLT_PYTHON_VERSIONS.
 #   run <instrumented-dir> <runs-dir>
 #       Copy the instrumented libraries over those of the torch installed for
 #       python3, a wheel of the same build, run tools/bolt/synthetic_workload.py
@@ -16,9 +17,9 @@
 #       Merge the profiles of each library with merge-fdata, convert them to
 #       YAML, validate them with a trial optimization that uses the options of
 #       the build-time BOLT step, and package them as torch.tar.zst in the
-#       layout of cmake/bolt_profiles/torch.tar.zst. libtorch_python-<SOABI>.yaml
-#       comes from the run of that Python version, the other profiles and
-#       libtorch_python.yaml from the run of BOLT_SHARED_PROFILE_SOABI.
+#       layout of cmake/bolt_profiles/torch.tar.zst: libtorch_python.yaml and
+#       the other libraries' profiles from the run of the first Python version,
+#       libtorch_python-<SOABI>.yaml from the run of each further version.
 #
 # Environment:
 #   LLVM_BOLT_HOME             LLVM install with llvm-bolt, merge-fdata and the
@@ -32,9 +33,8 @@
 #   BOLT_WORKLOAD_WARMUP       synthetic_workload.py --warmup (run, default 50)
 #   BOLT_WORKLOAD_MAX_SECONDS  synthetic_workload.py --max-seconds (run,
 #                              default 0, no limit)
-#   BOLT_SHARED_PROFILE_SOABI  Python version whose run provides the profiles
-#                              of the libraries that do not depend on Python
-#                              (finalize, default cpython-312-<arch>-linux-gnu)
+#   BOLT_PYTHON_VERSIONS       Python versions to profile, e.g. "3.12 3.14t"
+#                              (instrument and finalize, default 3.12)
 #   BOLT_VALIDATE              set to 0 to skip the trial optimization (finalize)
 
 set -euo pipefail
@@ -45,7 +45,7 @@ BOLT_WORKLOAD_VARIANT="${BOLT_WORKLOAD_VARIANT:-all}"
 BOLT_WORKLOAD_STEPS="${BOLT_WORKLOAD_STEPS:-45000}"
 BOLT_WORKLOAD_WARMUP="${BOLT_WORKLOAD_WARMUP:-50}"
 BOLT_WORKLOAD_MAX_SECONDS="${BOLT_WORKLOAD_MAX_SECONDS:-0}"
-BOLT_SHARED_PROFILE_SOABI="${BOLT_SHARED_PROFILE_SOABI:-cpython-312-$(uname -m)-linux-gnu}"
+read -ra PYTHON_VERSIONS <<< "${BOLT_PYTHON_VERSIONS:-3.12}"
 BOLT_VALIDATE="${BOLT_VALIDATE:-1}"
 
 # Options of the build-time optimization in torch_optimize_layout_if_enabled
@@ -107,6 +107,9 @@ profile_stem() {
   fi
 }
 
+# The SOABI of Python version $1, e.g. cpython-314t-aarch64-linux-gnu for 3.14t.
+soabi() { echo "cpython-${1/./}-$(uname -m)-linux-gnu"; }
+
 build_id() {
   readelf -n "$1" 2> /dev/null | awk '/Build ID/ {print $3}'
 }
@@ -126,13 +129,16 @@ verify_libraries() {
 
 cmd_instrument() {
   [[ $# -eq 2 ]] || usage
-  local prebolt_dir rel sections stem
+  local prebolt_dir rel sections stem version
   prebolt_dir="$(cd "$1" && pwd)"
   make_output_dir "$2"
 
   local -a libs
-  mapfile -t libs < <(cd "${prebolt_dir}" && find . -name 'lib*.so' -printf '%P\n' | sort)
+  mapfile -t libs < <(cd "${prebolt_dir}" && find . -maxdepth 1 -name 'lib*.so' -printf '%P\n' | sort)
   [[ ${#libs[@]} -gt 0 ]] || die "no libraries in ${prebolt_dir}"
+  for version in "${PYTHON_VERSIONS[@]}"; do
+    libs+=("$(soabi "${version}")/libtorch_python.so")
+  done
   for rel in "${libs[@]}"; do
     # BOLT needs the static relocations that --emit-relocs keeps in .rela.text.
     sections="$(readelf -S --wide "${prebolt_dir}/${rel}")"
@@ -284,13 +290,14 @@ make_profile() {
 
 cmd_finalize() {
   [[ $# -eq 3 ]] || usage
-  local prebolt_dir runs_dir rel run
+  local prebolt_dir runs_dir rel run shared
   prebolt_dir="$(cd "$1" && pwd)"
   runs_dir="$(cd "$2" && pwd)"
   make_output_dir "$3"
   mkdir -p "${OUTPUT_DIR}"/{fdata,yaml}
-  [[ -f "${runs_dir}/${BOLT_SHARED_PROFILE_SOABI}/run-info.txt" ]] \
-    || die "no run for ${BOLT_SHARED_PROFILE_SOABI}, which provides the profiles of the libraries that do not depend on Python"
+  shared="$(soabi "${PYTHON_VERSIONS[0]}")"
+  [[ -f "${runs_dir}/${shared}/run-info.txt" ]] \
+    || die "no run for ${shared}, which provides the profiles of the libraries that do not depend on Python"
   verify_libraries "${prebolt_dir}" "${runs_dir}/sha256sums"
   cp "${runs_dir}/logs/"* "${OUTPUT_DIR}/logs/"
   setup_llvm
@@ -309,7 +316,7 @@ cmd_finalize() {
   local -a rels missing=()
   mapfile -t rels < <(awk '{print $2}' "${runs_dir}/sha256sums")
   for rel in "${rels[@]}"; do
-    run="${BOLT_SHARED_PROFILE_SOABI}"
+    run="${shared}"
     [[ "${rel}" != */* ]] || run="$(dirname "${rel}")"
     if [[ -f "${runs_dir}/${run}/run-info.txt" ]]; then
       make_profile "${rel}" "${run}"
@@ -317,11 +324,11 @@ cmd_finalize() {
       missing+=("$(profile_stem "${rel}").yaml")
     fi
   done
-  # The fallback for Python versions without a profile of their own.
-  cp "${OUTPUT_DIR}/yaml/libtorch_python-${BOLT_SHARED_PROFILE_SOABI}.yaml" "${OUTPUT_DIR}/yaml/libtorch_python.yaml"
+  # The profile of every Python version without one of its own.
+  mv "${OUTPUT_DIR}/yaml/libtorch_python-${shared}.yaml" "${OUTPUT_DIR}/yaml/libtorch_python.yaml"
   {
     echo
-    echo "libtorch_python.yaml: libtorch_python-${BOLT_SHARED_PROFILE_SOABI}.yaml"
+    echo "libtorch_python.yaml: libtorch_python-${shared}.yaml, for the Python versions without a profile of their own"
     [[ ${#missing[@]} -eq 0 ]] || echo "missing (no run): ${missing[*]}"
   } >> "${OUTPUT_DIR}/manifest.txt"
 
