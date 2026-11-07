@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
+from typing import Any, Generic, Never, TYPE_CHECKING, TypeVar
+from typing_extensions import override, ParamSpec, Protocol, TypedDict, Unpack
 
 import torch._inductor.async_compile
 import torch.fx
@@ -61,6 +61,7 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
+from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -799,10 +800,6 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
                 # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
                 # mutation node" and relies on it to mark which clones are unnecessary,
                 # so without it every user kernel pays a device-to-device copy.
-                from torch._higher_order_ops.user_kernel_hop import (
-                    user_kernel_hop_infos,
-                )
-
                 if any(
                     gm.graph.find_nodes(op="call_function", target=info.functional)
                     for info in user_kernel_hop_infos()
@@ -3212,15 +3209,8 @@ def compile_fx(
             # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
             # emit a non-portable artifact.
             #
-            # NB cudagraphs is deliberately NOT refused here. Its device dependence
-            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
-            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
-            # artifact is not shared across ranks today: the FX graph cache key embeds the
-            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
-            # and that is what the device-agnostic launcher handles. Whoever makes the FX
-            # graph cache key device-agnostic must revisit device_idxs (and re-check that
-            # graph-partition functions still define _coor_device_idx in their own scope)
-            # before cudagraphs can ride on a shared artifact.
+            # cudagraphs is not refused: CompiledFxGraph.device_index() resolves its
+            # device at load time, so the shared artifact carries no rank's index.
             raise RuntimeError(
                 "compile-on-one-rank (device-as-parameter) is not supported with "
                 "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "

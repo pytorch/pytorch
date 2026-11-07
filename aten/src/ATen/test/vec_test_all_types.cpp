@@ -595,6 +595,43 @@ namespace {
             [](const vec& v) { return v.exp_u20(); },
             test_case
         );
+
+        if constexpr (std::is_same_v<VT, float>) {
+            // Near and below ln(FLT_MIN), results must not flush to zero, and
+            // NaN must propagate. Also cover both ends of the exponent range
+            // (2^-125 and 2^128 scaling). Mix the inputs in one vector so
+            // lanes take different paths.
+            const VT inputs[] = {
+                VT(-86.64), VT(-86.8), VT(-86.99), VT(-87.0), VT(-87.2),
+                VT(-87.5), VT(-88.0), VT(-90.0), VT(-100.0), VT(-103.9),
+                VT(-110.0), -std::numeric_limits<VT>::infinity(),
+                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5),
+                VT(10.0), VT(88.0), VT(88.37), VT(88.5), VT(88.72)};
+            constexpr size_t num_inputs = std::size(inputs);
+            CACHE_ALIGN VT in[vec::size()];
+            CACHE_ALIGN VT out[vec::size()];
+            for (size_t base = 0; base < num_inputs; base += vec::size()) {
+                for (const auto i : c10::irange(vec::size())) {
+                    in[i] = inputs[(base + i) % num_inputs];
+                }
+                vec::loadu(in).exp_u20().store(out);
+                for (const auto i : c10::irange(vec::size())) {
+                    if (std::isnan(in[i])) {
+                        EXPECT_TRUE(std::isnan(out[i])) << "x=" << in[i];
+                        continue;
+                    }
+                    // Within 2 ulp; subnormals are 2^-149 apart.
+                    const double expected = std::exp(static_cast<double>(in[i]));
+                    const VT rounded = static_cast<VT>(expected);
+                    const double ulp = std::max<double>(
+                        std::nextafter(rounded, std::numeric_limits<VT>::infinity()) - rounded,
+                        std::numeric_limits<VT>::denorm_min());
+                    EXPECT_LE(std::abs(out[i] - expected), 2 * ulp) << "x=" << in[i];
+                    // The tolerance alone would accept a flush to zero.
+                    EXPECT_EQ(out[i] == 0, rounded == 0) << "x=" << in[i];
+                }
+            }
+        }
     }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
@@ -645,6 +682,48 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)
+    TYPED_TEST(Nan, OrNanIf) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT select_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT actual_vals[vec::size()];
+        const VT specials[] = {
+            (VT)1.5,
+            -(VT)0.0,
+            std::numeric_limits<VT>::infinity(),
+            -std::numeric_limits<VT>::infinity(),
+            std::numeric_limits<VT>::quiet_NaN(),
+            std::numeric_limits<VT>::denorm_min(),
+            -std::numeric_limits<VT>::max(),
+        };
+        constexpr int num_specials = sizeof(specials) / sizeof(specials[0]);
+        // The mask comes from a comparison so that on SVE it is a predicate.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          for (int i = 0; i < vec::size(); ++i) {
+            test_vals[i] = specials[(i + val) % num_specials];
+            select_vals[i] = (val & (1 << i)) ? (VT)1 : (VT)0;
+          }
+          const auto mask = vec::loadu(select_vals) != vec((VT)0);
+          vec::loadu(test_vals).or_nan_if(mask).store(actual_vals);
+          for (int i = 0; i < vec::size(); ++i) {
+            CACHE_ALIGN VT expected_val = test_vals[i];
+            if (val & (1 << i)) {
+              std::memset(static_cast<void*>(&expected_val), 0xFF, sizeof(VT));
+            }
+            ASSERT_EQ(
+                0, std::memcmp(&expected_val, &actual_vals[i], sizeof(VT)))
+                << "or_nan_if, mask: " << val << ", lane: " << i
+                << ", input: " << test_vals[i] << ", got: " << actual_vals[i];
+          }
+        }
+    }
+#endif
 #if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
     !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
     TYPED_TEST(Nan, ReduceMax) {
