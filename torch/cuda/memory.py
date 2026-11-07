@@ -913,7 +913,8 @@ def list_gpu_processes(device: "Device" = None) -> str:
         lines.append("no processes are running")
     for p in procs:
         if not torch.version.hip:
-            mem = p.usedGpuMemory / (1024 * 1024)
+            # NVML reports usedGpuMemory as None under the Windows WDDM driver.
+            used_bytes = p.usedGpuMemory
             pid = p.pid
         else:
             try:
@@ -922,9 +923,10 @@ def list_gpu_processes(device: "Device" = None) -> str:
                 # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
                 # is a BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
                 proc_info = p
-            mem = proc_info["memory_usage"]["vram_mem"] / (1024 * 1024)
+            used_bytes = proc_info["memory_usage"]["vram_mem"]
             pid = proc_info["pid"]
-        lines.append(f"process {pid:>10d} uses {mem:>12.3f} MB GPU memory")
+        mem = "N/A" if used_bytes is None else f"{used_bytes / (1024 * 1024):.3f}"
+        lines.append(f"process {pid:>10d} uses {mem:>12} MB GPU memory")
     return "\n".join(lines)
 
 
