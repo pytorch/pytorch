@@ -432,6 +432,21 @@ print(f"{{r1}}, {{r2}}")
             # Valid mask selecting device 1 on a multi-GPU system → both return 1
             self.assertEqual(_run("1"), "1, 1")
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_respects_oneapi_device_selector(self):
+        test_script = """\
+import torch
+print(f"{torch.xpu._device_count_zes()}, {torch.xpu.device_count()}")
+"""
+        env = {**os.environ, "ONEAPI_DEVICE_SELECTOR": "!*:gpu"}
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual(r, "-1, 0")
+
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_not_cached_pre_init(self):
