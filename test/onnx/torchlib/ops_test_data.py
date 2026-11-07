@@ -38,8 +38,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 
 import numpy as np
 import ops_test_common

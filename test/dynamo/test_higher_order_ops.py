@@ -2335,7 +2335,18 @@ def forward(self):
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
-    @parametrize("kind", ["function", "wrapped", "staticmethod", "exception"])
+    @parametrize(
+        "kind",
+        [
+            "function",
+            "wrapped",
+            "staticmethod",
+            "exception",
+            "stop_iteration",
+            "attribute_error",
+            "name_error",
+        ],
+    )
     @parametrize("hop", ["cond", "checkpoint"])
     @parametrize("via_dict", [False, True])
     @parametrize("local", [False, True])
@@ -2351,6 +2362,12 @@ def forward(self):
                 return staticmethod(inner)
             if kind == "exception":
                 return ValueError("test")
+            if kind == "stop_iteration":
+                return StopIteration("test")
+            if kind == "attribute_error":
+                return AttributeError("test")
+            if kind == "name_error":
+                return NameError("test")
             return inner
 
         def fn(pred, x):
@@ -2401,7 +2418,18 @@ def forward(self):
                 torch.tensor(True), torch.randn(4)
             )
 
-    @parametrize("kind", ["function", "wrapped", "staticmethod", "exception"])
+    @parametrize(
+        "kind",
+        [
+            "function",
+            "wrapped",
+            "staticmethod",
+            "exception",
+            "stop_iteration",
+            "attribute_error",
+            "name_error",
+        ],
+    )
     def test_cond_dunder_dict_read_then_outer_mutation(self, kind):
         # The first __dict__ access on `inner` happens inside the cond body,
         # whose side effects table is discarded after tracing. The later
@@ -2416,6 +2444,12 @@ def forward(self):
                 inner = staticmethod(inner)
             elif kind == "exception":
                 inner = ValueError("test")
+            elif kind == "stop_iteration":
+                inner = StopIteration("test")
+            elif kind == "attribute_error":
+                inner = AttributeError("test")
+            elif kind == "name_error":
+                inner = NameError("test")
 
             def branch():
                 return x + len(inner.__dict__) * 0

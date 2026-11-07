@@ -2086,6 +2086,72 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(got.__suppress_context__, fn(x).__suppress_context__)
 
     @parametrize(
+        "exception_type", [ValueError, StopIteration, AttributeError, NameError]
+    )
+    @parametrize("return_owner", [False, True])
+    @parametrize("graph_break", [False, True])
+    def test_builtin_exception_instance_dict_escapes(
+        self, exception_type, return_owner, graph_break
+    ):
+        def fn(x):
+            exc = exception_type("message")
+            attrs = exc.__dict__
+            attrs["first"] = 1
+            attrs["second"] = 2
+            del attrs["first"]
+            attrs["first"] = x
+            attrs["args"] = "shadow"
+            out = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+                out = out.sin()
+            return out, exc if return_owner else None, attrs, tuple(attrs), exc.args
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=not graph_break)
+
+        def check(x):
+            expected = fn(x)
+            out, exc, attrs, keys, args = compiled(x)
+            self.assertEqual(out, expected[0])
+            self.assertEqual(attrs, expected[2])
+            self.assertEqual(keys, expected[3])
+            self.assertEqual(tuple(attrs), keys)
+            self.assertEqual(args, expected[4])
+            self.assertIs(attrs["first"], x)
+            if return_owner:
+                self.assertIs(type(exc), exception_type)
+                self.assertIs(attrs, exc.__dict__)
+                self.assertEqual(exc.args, args)
+            else:
+                self.assertIsNone(exc)
+            return attrs
+
+        first = check(torch.randn(3))
+        frames = counter.frame_count
+        second = check(torch.randn(3))
+        self.assertIsNot(first, second)
+        self.assertEqual(frames, 2 if graph_break else 1)
+        self.assertEqual(counter.frame_count, frames)
+
+    def test_input_custom_exception_instance_dict(self):
+        def fn(exc, x):
+            attrs = exc.__dict__
+            before = attrs["code"]
+            attrs["code"] = x
+            return x + 1, before, attrs, exc.code
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        exc = CustomKeywordException("message", code=7)
+        x = torch.randn(3)
+        out, before, attrs, code = compiled(exc, x)
+        self.assertEqual(out, x + 1)
+        self.assertEqual(before, 7)
+        self.assertIs(attrs, exc.__dict__)
+        self.assertIs(code, x)
+        self.assertIs(exc.code, x)
+
+    @parametrize(
         "kind", ["builtin", "custom", "stop_iteration", "attribute_error", "name_error"]
     )
     @parametrize("slot", ["__cause__", "__context__", "args"])

@@ -42,7 +42,13 @@ class XPUAllocator : public DeviceAllocator {
 #ifdef _WIN32
     constexpr double kDiscreteGpuUsableFraction = 0.98;
 #else
-    constexpr double kDiscreteGpuUsableFraction = 0.95;
+    // Linux drivers > 1.18.40196 reserve the same headroom as Windows on Xe.
+    const auto version = device.get_info<sycl::info::device::driver_version>();
+    int major = 0, minor = 0, patch = 0;
+    const bool is_new_driver =
+        std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch) == 3 &&
+        std::make_tuple(major, minor, patch) > std::make_tuple(1, 18, 40196);
+    const double kDiscreteGpuUsableFraction = is_new_driver ? 0.98 : 0.95;
 #endif
     const double usable_fraction =
         device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)

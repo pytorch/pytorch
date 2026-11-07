@@ -883,13 +883,13 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
 void initialize_torch_libraries();
 #endif
 
 namespace detail {
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
 // This is an experimental feature to defer TorchLibraryInit cost to run either
 // at model load time, or when a client application explicitly calls
 // torch::initialize_torch_libraries().

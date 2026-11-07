@@ -13402,6 +13402,18 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize("shape,dim", [((0,), None), ((3, 0), 1), ((0, 3), 0)])
+    def test_mean_empty_double_backward(self, device, shape, dim):
+        x = torch.empty(shape, device=device, requires_grad=True)
+        y = x.mean() if dim is None else x.mean(dim=dim)
+        grad_output = torch.ones_like(y, requires_grad=True)
+        (grad_input,) = torch.autograd.grad(y, x, grad_output, create_graph=True)
+        self.assertEqual(grad_input, torch.empty_like(x))
+        (grad_grad_output,) = torch.autograd.grad(
+            grad_input, grad_output, torch.ones_like(grad_input)
+        )
+        self.assertEqual(grad_grad_output, torch.zeros_like(grad_output))
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
@@ -13711,11 +13723,28 @@ class TestAutogradDeviceType(TestCase):
         t4 = t1 * t1
         t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
-        # Child gpu graph (much longer than parent graph).
+        # Child gpu graph.
         prev = t2 * t2
         for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
+
+        # The parent's error does not cancel a reentrant child graph that has
+        # already started, so start the child before the parent errors and
+        # hold it until the parent has raised.
+        child_started = threading.Event()
+        parent_errored = threading.Event()
+        child_done = threading.Event()
+
+        def hold_child(grad):
+            child_started.set()
+            parent_errored.wait(timeout=60)
+
+        def wait_for_child(grad):
+            child_started.wait(timeout=60)
+
+        reentrant_root.register_hook(hold_child)
+        t5.register_hook(wait_for_child)
 
         class ReentrantFunc(Function):
             @staticmethod
@@ -13724,23 +13753,29 @@ class TestAutogradDeviceType(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
                 reentrant_root.backward(grad)
+                child_done.set()
                 return grad
 
         # Parent gpu graph.
         t6 = ReentrantFunc.apply(t3)
         t7 = t6 * t6
 
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
+        try:
+            # The parent raises without waiting for the held child.
+            with self.assertRaisesRegex(Exception, "Simulate error"):
+                torch.autograd.backward([t5.sum(), t7.sum()])
+            self.assertFalse(child_done.is_set())
+        finally:
+            parent_errored.set()
 
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
+        self.assertTrue(child_started.is_set())
+        # The child is its own graph task and runs to completion.
+        self.assertTrue(child_done.wait(timeout=60))
+        self.assertIsNotNone(t2.grad)
+        # The parent errored, so it must not run the rest of its graph.
         self.assertIsNone(t3.grad)
+        self.assertIsNone(t1.grad)
 
     @onlyAccelerator
     def test_reentrant_parent_error_on_cpu(self, device):
