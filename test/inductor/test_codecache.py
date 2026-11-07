@@ -5647,6 +5647,40 @@ class TestAutotuneCache(TestCase):
 
                 self.assertEqual(res1, res2)
 
+    @requires_gpu_and_triton
+    @config.patch(
+        {
+            "coordinate_descent_tuning": True,
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "compile_threads": 2,
+        }
+    )
+    def test_autotune_cache_worker_hit_skips_coordesc(self):
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+
+        shutdown_compile_workers()
+        self.addCleanup(shutdown_compile_workers)
+        AsyncCompile.wait_pool_ready()
+        self.assertTrue(AsyncCompile.use_process_pool())
+
+        def f(x):
+            return (x.sin() * 2).sum(-1)
+
+        x = torch.randn(4096, 4096).to(GPU_TYPE)
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        f_compiled(x)
+        self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+        self.reset()
+        counters.clear()
+
+        f_compiled(x)
+        self.assertEqual(counters["inductor"]["coordesc_tuning_bench"], 0)
+
 
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()
