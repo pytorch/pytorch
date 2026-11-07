@@ -21,8 +21,7 @@ from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, NamedTuple, Optional, Self, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -674,6 +673,8 @@ class TritonTemplateKernel(TritonKernel):
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
+        # Input args given a device-side TMA descriptor under HOST_SIDE_TMA.
+        self.device_tma_descriptor_args = OrderedSet[str]()
         self.call_sizes = call_sizes
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
@@ -1216,12 +1217,13 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True: registers the input's pointer arg in
-        host_tma_descriptor_args so the launcher replaces it with a
-        TensorDescriptor. Emits an alias so the template can use desc_name.
+        When HOST_SIDE_TMA is True and the input's sizes and strides are all
+        static: registers the input's pointer arg in host_tma_descriptor_args
+        so the launcher replaces it with a TensorDescriptor. Emits an alias so
+        the template can use desc_name.
 
-        When HOST_SIDE_TMA is False: emits device-side descriptor creation
-        using tl.make_tensor_descriptor().
+        Otherwise (HOST_SIDE_TMA False, or an input with a dynamic dim):
+        emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
             transposes a 2D tensor so the contiguous dim is last. If None,
@@ -1237,12 +1239,34 @@ class TritonTemplateKernel(TritonKernel):
         if dim_order is None:
             dim_order = list(range(ndim))
 
-        if self.meta.get("HOST_SIDE_TMA", False):
-            if input_name is None:
+        host_side = self.meta.get("HOST_SIDE_TMA", False)
+        arg_name = (
+            self.args.input_buffers.get(node.get_name(), input_name)
+            if input_name is not None
+            else None
+        )
+        if host_side and arg_name is not None:
+            # The host launcher needs static dims, so a dynamic input falls back
+            # to a device-side descriptor. def_kernel merges operands that view
+            # one buffer into a single arg, and the launcher would hand that arg
+            # to all of them as a TensorDescriptor, so they must all fall back.
+            device_args = self.device_tma_descriptor_args
+            if arg_name in device_args or not all(
+                isinstance(e, (int, sympy.Integer))
+                for e in (*size, *self.get_stride_and_maybe_freeze_layout(node))
+            ):
+                if arg_name in self.host_tma_descriptor_args:
+                    raise NotImplementedError(
+                        f"host-side TMA cannot share arg {arg_name} with a "
+                        "device-side descriptor for a dynamic view"
+                    )
+                device_args.add(arg_name)
+                host_side = False
+        if host_side:
+            if arg_name is None:
                 raise NotImplementedError(
                     "host-side TMA descriptors for template outputs are not supported"
                 )
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
             # Read dims off the IR node rather than via self.size()/self.stride():
             # those wrap the result in tl.full(...) under int64 indexing, which is
             # kernel-side syntax the host launcher cannot resolve.
@@ -2098,6 +2122,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # Use FixedGrid which properly handles grid values passed as arguments
         inductor_meta = FixedGrid.setup_grid_as_args() if additional_call_args else None
+        if self.asserts_need_real_inputs:
+            inductor_meta = {**(inductor_meta or {}), "asserts_need_real_inputs": True}
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -6507,6 +6533,8 @@ class AlgorithmSelectorCache(PersistentCache):
         pad_after = backing_size - reserve_span
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
+        # Triton codegen relies on rand_strided filling non-float tensors with
+        # zeros (see TritonKernel._is_zero_in_autotune_block).
         with preserve_rng_state():
             return rand_strided(
                 reserve,
