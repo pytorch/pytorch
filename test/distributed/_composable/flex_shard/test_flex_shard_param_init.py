@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -29,7 +30,11 @@ from torch.distributed.fsdp._flex_shard.placements import (
 from torch.distributed.tensor import DTensor, Shard as DTensorShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.common_flex_shard import expected_shard
 
 
@@ -113,6 +118,8 @@ def _init_from_full(model: nn.Module, inits: InitFns) -> None:
 
 
 class InitFromFullTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_copies_regions_of_one_full_draw(self):
         # Rows 0 and 2-3 of a [4, 6] parameter, stacked into one local tensor.
         layout = GlobalLayout(
@@ -131,6 +138,8 @@ class InitFromFullTest(TestCase):
 
 
 class InitFromFullDistributedTest(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 4

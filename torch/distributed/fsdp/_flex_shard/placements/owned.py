@@ -8,14 +8,9 @@ from __future__ import annotations
 
 import heapq
 import math
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, TYPE_CHECKING
 from typing_extensions import override
-
-import torch
-import torch.distributed as dist
-import torch.nn as nn
 
 from ..placement_contract import (
     BucketStorageLayout,
@@ -31,6 +26,11 @@ from .block_shard import BlockShard
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    import torch
+    import torch.distributed as dist
+    import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
     from ..bucket_storage import ParamInfo, PlacementFn

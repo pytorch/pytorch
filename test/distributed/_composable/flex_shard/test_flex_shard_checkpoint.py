@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -51,7 +52,11 @@ from torch.distributed.fsdp._flex_shard.placements.shard import (
 from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_flex_shard import (
     expected_shard,
@@ -133,6 +138,8 @@ def _checkpoint_state_dict(model: nn.Module) -> dict[str, Any]:
 
 
 class TestFlexShardGlobalLayout(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_shard_uneven_and_empty_ranks(self) -> None:
         self.assertEqual(
             _single_param_layout(Shard(0), (5, 4), 1, 2),
@@ -205,6 +212,8 @@ class TestFlexShardGlobalLayout(TestCase):
 
 
 class TestFlexShardCheckpointStateDict(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dcp_round_trip_of_checkpoint_wrapped_submodule(self) -> None:
         expected = torch.arange(20, dtype=torch.float32).view(5, 4)
         linear = nn.Linear(4, 5, bias=False)
@@ -288,6 +297,8 @@ def _adam_step(model: nn.Module, optimizer: torch.optim.Optimizer) -> None:
 
 
 class TestFlexShardOptimizerCheckpointHook(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_states_take_their_parameters_layouts(self) -> None:
         model = nn.Module()
         model.weight = nn.Parameter(torch.arange(12.0).view(4, 3))
@@ -555,6 +566,8 @@ class _OptimizerCheckpointRoundTrip(FSDPTest):
 
 
 class TestFlexShardOptimizerCheckpointTwoRanks(_OptimizerCheckpointRoundTrip):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -566,6 +579,8 @@ class TestFlexShardOptimizerCheckpointTwoRanks(_OptimizerCheckpointRoundTrip):
 
 
 class TestFlexShardOptimizerCheckpointFourRanks(_OptimizerCheckpointRoundTrip):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 4
