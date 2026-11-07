@@ -13,6 +13,7 @@
 
 static uint64_t op_counter = 0;
 static uint64_t last_saved_value = 0;
+static uint64_t int8pack_mm_calls = 0;
 
 // register guard
 namespace at {
@@ -141,6 +142,57 @@ at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, 
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
 }
 
+// The dummy device's memory is CPU memory in disguise (see
+// DummyCustomAllocator above), so its kernels can run the corresponding CPU
+// ATen op on an alias of the tensor storage. The explicit target_device
+// argument skips from_blob's pointer-to-device sniffing, which needs the
+// PrivateUse1HooksInterface that this dummy backend does not register.
+static at::Tensor alias_to_cpu(at::Tensor t) {
+  return at::from_blob(
+      t.mutable_data_ptr(),
+      t.sizes(),
+      t.strides(),
+      [t](void*) {},
+      t.options().device(at::kCPU),
+      at::Device(at::kCPU));
+}
+
+static at::Tensor alias_from_cpu(at::Tensor t) {
+  return at::from_blob(
+      t.mutable_data_ptr(),
+      t.sizes(),
+      t.strides(),
+      [t](void*) {},
+      t.options().device(at::Device(at::kPrivateUse1, 0)),
+      at::Device(at::kPrivateUse1, 0));
+}
+
+// Plain mm, so models that do not get a weight-only-quant fusion can still
+// run on the dummy device.
+at::Tensor custom_mm(const at::Tensor& self, const at::Tensor& mat2) {
+  op_counter += 1;
+  return alias_from_cpu(at::mm(alias_to_cpu(self), alias_to_cpu(mat2)));
+}
+
+at::Tensor& custom_mm_out(const at::Tensor& self, const at::Tensor& mat2, at::Tensor& out) {
+  op_counter += 1;
+  out.copy_(at::mm(alias_to_cpu(self), alias_to_cpu(mat2)));
+  return out;
+}
+
+// Weight-only-quant int8pack mm: this is the op the Inductor WOQ fusion
+// lowers to, so a backend that wants that fusion has to provide a kernel
+// for it.
+at::Tensor custom_weight_int8pack_mm(
+    const at::Tensor& self,
+    const at::Tensor& mat2,
+    const at::Tensor& scales) {
+  op_counter += 1;
+  int8pack_mm_calls += 1;
+  return alias_from_cpu(at::_weight_int8pack_mm(
+      alias_to_cpu(self), alias_to_cpu(mat2), alias_to_cpu(scales)));
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -158,6 +210,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty.memory_format", &custom_empty_memory_format);
   m.impl("empty_strided", &custom_empty_strided);
+  m.impl("mm", &custom_mm);
+  m.impl("mm.out", &custom_mm_out);
+  m.impl("_weight_int8pack_mm", &custom_weight_int8pack_mm);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -178,6 +233,10 @@ bool custom_op_called() {
   return called;
 }
 
+uint64_t int8pack_mm_call_count() {
+  return int8pack_mm_calls;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -185,6 +244,7 @@ bool custom_op_called() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_op_called", &custom_op_called, "check if our custom function was called");
+    m.def("int8pack_mm_call_count", &int8pack_mm_call_count, "number of aten::_weight_int8pack_mm calls");
     m.def("is_available", []() { return true; });
     m.def("device_count", []() { return 1; });
     m.def("current_device", []() { return 0; });
