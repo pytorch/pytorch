@@ -707,6 +707,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # attribute mutation (which may be forbidden inside a HOP).
         is_proxy = isinstance(self.items, SideEffectsProxyDict)
         if is_proxy:
+            self.install_dict_keys_match_guard()
             value = self.items.get(key)
         else:
             try:
@@ -1740,7 +1741,9 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # get_value_for_setattr, so the VT default declines the store
             # rather than mutating the function's shared __dict__.
             return object.__getattribute__(vt.get_function(), "__dict__")
-        elif istype(vt, variables.ExceptionVariable):
+        elif isinstance(vt, variables.ExceptionVariable) and not isinstance(
+            vt, variables.UserDefinedObjectVariable
+        ):
             # Synthetic exceptions created during tracing have no backing
             # Python object; their __dict__ starts empty and any custom
             # attribute is recorded in the side effects table.
@@ -1766,6 +1769,10 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def get_value___dict__(
         tx: "InstructionTranslatorBase", vt: VariableTracker
     ) -> dict[str, VariableTracker]:
+        initial_dict = vt.get_initial_instance_dict()
+        if initial_dict is not None:
+            # Constructor copies are the initial state, not user mutations.
+            return initial_dict.copy()
         # GENERIC_SETATTR on "__dict__" means the whole instance dict was
         # replaced through the __dict__ getset descriptor (obj.__dict__ = ...).
         # Per-key obj.__dict__[name] mutations are tracked as INSTANCE_DICT.
@@ -1774,8 +1781,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         ) and tx.output.side_effects.has_pending_mutation_of_attr(
             vt, "__dict__", AttrMutationKind.GENERIC_SETATTR
         ):
-            dict_vt = tx.output.side_effects.load_attr(vt, "__dict__")
+            dict_vt = tx.output.side_effects.load_attr(
+                vt, "__dict__", mutation_kind=AttrMutationKind.GENERIC_SETATTR
+            )
             if isinstance(dict_vt, ConstDictVariable):
+                if dict_vt.source and not is_constant_source(dict_vt.source):
+                    dict_vt.install_dict_keys_match_guard()
                 result = {}
                 for key, value in dict_vt.items.items():
                     try:
@@ -1851,7 +1862,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     def side_effects_table(self) -> dict[str, VariableTracker]:
         return {
-            name: value
+            name: self.side_effects.load_attr(
+                self.item,
+                name,
+                deleted_ok=True,
+                mutation_kind=AttrMutationKind.INSTANCE_DICT,
+            )
             for name, value in self.side_effects.store_attr_mutations.get(
                 self.item, {}
             ).items()
@@ -1865,7 +1881,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         if self.side_effects.has_pending_mutation_of_attr(
             self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
-            return self.side_effects.load_attr(self.item, name, deleted_ok=True)
+            return self.side_effects.load_attr(
+                self.item,
+                name,
+                deleted_ok=True,
+                mutation_kind=AttrMutationKind.INSTANCE_DICT,
+            )
         return self.item_dict[name]
 
     def __setitem__(self, key: kV, value: VariableTracker) -> None:
@@ -1888,7 +1909,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         if self.side_effects.has_pending_mutation_of_attr(
             self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
-            value = self.side_effects.load_attr(self.item, name, deleted_ok=True)
+            value = self.side_effects.load_attr(
+                self.item,
+                name,
+                deleted_ok=True,
+                mutation_kind=AttrMutationKind.INSTANCE_DICT,
+            )
             return not isinstance(value, variables.DeletedVariable)
         return name in self.item_dict
 
@@ -1898,13 +1924,14 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def __iter__(self) -> Iterator[HashableTracker]:
         Hasher = HashableTracker
         d = self.side_effects_table()
+        deleted = self.side_effects.instance_dict_deleted_keys.get(self.item, ())
+        for k in self.item_dict:
+            if k not in deleted and not isinstance(d.get(k), variables.DeletedVariable):
+                yield Hasher(ConstantVariable.create(k))
         for k, v in d.items():
-            if isinstance(v, variables.DeletedVariable):
-                continue
-            yield Hasher(ConstantVariable.create(k))
-
-        for k, v in self.item_dict.items():
-            if k not in d:
+            if (k not in self.item_dict or k in deleted) and not isinstance(
+                v, variables.DeletedVariable
+            ):
                 yield Hasher(ConstantVariable.create(k))
 
 
@@ -1939,7 +1966,16 @@ class DunderDictVariable(ConstDictVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
+        self.owner = vt
         self.items = SideEffectsProxyDict(vt, tx)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        value = self.owner.get_real_python_backed_value()
+        if self.owner.source is None and value is not NO_SUCH_SUBOBJ:
+            codegen.append_output(codegen.create_load_const_unchecked(value))
+        else:
+            codegen(self.owner)
+        codegen.append_output(codegen.create_load_attr("__dict__"))
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
@@ -1953,6 +1989,7 @@ class DunderDictVariable(ConstDictVariable):
         return self.items[name]
 
     def contains(self, name: str) -> bool:
+        self.install_dict_keys_match_guard()
         return name in self.items
 
     def getitem_or_default(
@@ -1989,10 +2026,16 @@ class DunderDictVariable(ConstDictVariable):
         "copy": Method(dict_copy),
     }
 
-    # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
-    # so we don't need to install guards. Guard installation is overridden to no-op.
     def install_dict_keys_match_guard(self) -> None:
-        pass
+        if self.source and not is_constant_source(self.source):
+            super().install_dict_keys_match_guard()
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        if self.source and not is_constant_source(self.source):
+            tx.output.guard_on_key_order.add(self.source)
+        return super().unpack_var_sequence(tx)
 
     def install_dict_contains_guard(
         self,
@@ -2001,4 +2044,6 @@ class DunderDictVariable(ConstDictVariable):
         *,
         key_present: bool | None = None,
     ) -> None:
-        pass
+        # The proxy includes pending owner mutations. Guard the original keys,
+        # rather than membership after those mutations have been applied.
+        self.install_dict_keys_match_guard()

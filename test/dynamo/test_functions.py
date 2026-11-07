@@ -2268,6 +2268,271 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(result_property._names, ["time"])
         self.assertEqual(result_property["nested"]._names, ["time"])
 
+    @parametrize("new_object", [False, True])
+    @parametrize("has_deleter", [False, True])
+    @parametrize("explicit", [False, True])
+    def test_mutable_mapping_property_deletion(self, new_object, has_deleter, explicit):
+        class Mapping(collections.abc.MutableMapping):
+            def __init__(self, value):
+                self.data = {"p": value}
+                self.set_count = 0
+                self.del_count = 0
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __delattr__(self, name):
+                super().__delattr__(name)
+
+            def delete_p(self):
+                super().__delattr__("p")
+
+            @property
+            def p(self):
+                return self.data["p"]
+
+            @p.setter
+            def p(self, value):
+                self.set_count += 1
+                self.data["p"] = value
+
+            @p.deleter
+            def p(self):
+                self.del_count += 1
+                del self.data["p"]
+
+        if not has_deleter:
+            Mapping.p = property(Mapping.p.fget, Mapping.p.fset)
+
+        def fn(x, obj):
+            if new_object:
+                obj = Mapping(x)
+            caught = False
+            try:
+                if explicit:
+                    obj.delete_p()
+                else:
+                    del obj.p
+            except AttributeError:
+                caught = True
+            return obj, caught, x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for _ in range(2):
+            x = torch.randn(3)
+            expected, expected_caught, expected_value = fn(x, Mapping(x))
+            result, caught, value = compiled(x, Mapping(x))
+            self.assertEqual(result.data, expected.data)
+            self.assertEqual(result.set_count, 0)
+            self.assertEqual(result.del_count, int(has_deleter))
+            self.assertEqual(caught, expected_caught)
+            self.assertEqual(caught, not has_deleter)
+            self.assertEqual(value, expected_value)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("graph_break", [False, True])
+    def test_nested_function_attribute_replay(self, graph_break):
+        def fn(x):
+            def inner(y):
+                return y + 1
+
+            def outer(y, f=inner):
+                return f(y)
+
+            inner.__dict__["__name__"] = "shadow"
+            inner.__name__ = "actual"
+            inner.tag = "old"
+            del inner.tag
+            inner.alias = inner
+            if graph_break:
+                torch._dynamo.graph_break()
+            inner.after = x + 2
+            return inner, outer, inner.__dict__, x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=not graph_break)
+        for _ in range(2):
+            x = torch.randn(3)
+            inner, outer, attrs, value = compiled(x)
+            self.assertIs(attrs, inner.__dict__)
+            self.assertIs(inner.alias, inner)
+            self.assertIs(outer.__defaults__[0], inner)
+            self.assertEqual(inner.__name__, "actual")
+            self.assertEqual(attrs["__name__"], "shadow")
+            self.assertNotIn("tag", attrs)
+            self.assertEqual(inner.after, x + 2)
+            self.assertEqual(outer(x), x + 1)
+            self.assertEqual(value, x + 1)
+
+    @parametrize("initial_attribute", [False, True])
+    @parametrize("wrap_count", [1, 2])
+    def test_wrapped_function_dictionary_snapshot(self, initial_attribute, wrap_count):
+        def fn(x):
+            def inner(y):
+                return y + 1
+
+            if initial_attribute:
+                inner.tag = "original"
+            wrapped = inner
+            for _ in range(wrap_count):
+                wrapped = torch.no_grad()(wrapped)
+            inner.tag = "changed"
+            inner.later = x
+            return inner, wrapped, wrapped.__dict__, x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for _ in range(2):
+            x = torch.randn(3)
+            inner, wrapped, attrs, value = compiled(x)
+            self.assertIs(attrs, wrapped.__dict__)
+            self.assertNotIn("later", attrs)
+            if initial_attribute:
+                self.assertEqual(attrs["tag"], "original")
+            else:
+                self.assertNotIn("tag", attrs)
+            original = wrapped
+            for _ in range(wrap_count):
+                original = original.__wrapped__
+            self.assertIs(original, inner)
+            self.assertEqual(value, x + 1)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "function type parameters require 3.12"
+    )
+    def test_wrapped_function_type_params_snapshot(self):
+        def fn(x):
+            def inner(y):
+                return y + 1
+
+            inner.__type_params__ = (int,)
+            wrapped = torch.no_grad()(inner)
+            inner.__type_params__ = (str,)
+            return wrapped, wrapped.__type_params__, x + 1
+
+        x = torch.randn(3)
+        wrapped, params, value = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(params, (int,))
+        self.assertEqual(wrapped.__type_params__, params)
+        self.assertEqual(wrapped.__wrapped__.__type_params__, (str,))
+        self.assertEqual(value, x + 1)
+
+    @unittest.skipIf(sys.version_info < (3, 14), "lazy annotations require 3.14")
+    def test_wrapped_function_annotations_cache_is_separate(self):
+        def fn(x):
+            def inner(value: int) -> str:
+                return str(value)
+
+            original = inner.__annotations__
+            original["extra"] = str
+            wrapped = torch.no_grad()(inner)
+            annotations = wrapped.__annotations__
+            return annotations is original, annotations, x + 1
+
+        x = torch.randn(3)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, expected)
+        self.assertFalse(result[0])
+        self.assertNotIn("extra", result[1])
+
+    @parametrize("method", ["__setattr__", "__delattr__"])
+    @parametrize("arguments", ["missing", "extra", "kwargs", "non_string"])
+    @parametrize("binding", ["function", "method", "captured_method"])
+    def test_function_attribute_mutation_invalid_arguments(
+        self, method, arguments, binding
+    ):
+        class Object:
+            def method(self):
+                pass
+
+        obj = Object()
+        target = Object.method if binding == "function" else obj.method
+        target.__dict__["tag"] = "unchanged"
+
+        def fn(x):
+            mutator = getattr(obj.method if binding == "method" else target, method)
+            try:
+                if arguments == "missing":
+                    mutator()
+                elif arguments == "extra":
+                    mutator("tag", 1, 2)
+                elif arguments == "kwargs":
+                    mutator(name="tag", value=1)
+                elif method == "__setattr__":
+                    mutator(1, 2)
+                else:
+                    mutator(1)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, None
+
+        x = torch.randn(3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(x)
+        self.assertEqual(expected[0], x + 1)
+        self.assertIsInstance(expected[1], str)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(target.__dict__, {"tag": "unchanged"})
+
+    @parametrize("method", ["__setattr__", "__delattr__"])
+    @parametrize("captured", [False, True])
+    @parametrize(
+        "name",
+        [
+            "tag",
+            "missing",
+            "__name__",
+            "__module__",
+            "__func__",
+            "__self__",
+            "__doc__",
+            "__get__",
+        ],
+    )
+    def test_captured_method_attribute_mutation_is_readonly(
+        self, method, captured, name
+    ):
+        class Object:
+            def method(self):
+                pass
+
+        obj = Object()
+        target = obj.method
+        target.__dict__["tag"] = "unchanged"
+
+        def fn(x):
+            bound = target if captured else obj.method
+            try:
+                if method == "__setattr__":
+                    bound.__setattr__(name, x)
+                else:
+                    bound.__delattr__(name)
+            except AttributeError as exc:
+                return x + 1, str(exc)
+            return x - 1, None
+
+        x = torch.randn(3)
+        expected = fn(x)
+        self.assertEqual(expected[0], x + 1)
+        self.assertIsInstance(expected[1], str)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(Object.method.__dict__, {"tag": "unchanged"})
+
     def _test_default_dict_helper(self, factory):
         dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -8530,7 +8795,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
-    @unittest.expectedFailure
     def test_del_defaults_sets_none(self):
         def h(a, b=1, *, k=1):
             return a + b + k

@@ -3387,6 +3387,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import UserMethodVariable
         from .builder import VariableBuilder
 
+        if (
+            istype(self.value, types.MethodType)
+            and isinstance(self.value.__func__, types.FunctionType)
+            and name in ("__setattr__", "__delattr__")
+        ):
+            func_source = self.source and AttrSource(self.source, "__func__")
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            method_var = UserMethodVariable(
+                VariableBuilder.create_internal_user_function(
+                    self.value.__func__, source=func_source
+                ),
+                VariableTracker.build(tx, self.value.__self__, obj_source),
+                source=self.source,
+            )
+            return method_var.call_method(tx, name, args, kwargs)
+
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
@@ -3921,7 +3937,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self, key, AttrMutationKind.INSTANCE_DICT
         ):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            mutated_attr = tx.output.side_effects.load_attr(
+                self, key, deleted_ok=True, mutation_kind=AttrMutationKind.INSTANCE_DICT
+            )
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
         # TODO(guilhermeleobas): This can trigger a side effect
@@ -4160,7 +4178,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name, AttrMutationKind.GENERIC_SETATTR
             ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                result = tx.output.side_effects.load_attr(
+                    self,
+                    name,
+                    deleted_ok=True,
+                    mutation_kind=AttrMutationKind.GENERIC_SETATTR,
+                )
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(
                         AttributeError,
@@ -4179,7 +4202,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name, AttrMutationKind.GENERIC_SETATTR
             ):
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                result = tx.output.side_effects.load_attr(
+                    self,
+                    name,
+                    deleted_ok=True,
+                    mutation_kind=AttrMutationKind.GENERIC_SETATTR,
+                )
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(
                         AttributeError,
@@ -5090,38 +5118,41 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # ExceptionVariable.reconstruct hardcodes `from builtins import
-        # <name>`, which is only correct for the true builtin exceptions it
-        # was designed to model. self.exc_type here is an arbitrary
-        # user-defined class, so import it from its actual defining module
-        # instead.
-        from .constant import ConstantVariable
-
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                self.exc_type.__module__, self.exc_type.__name__
+    def _reconstruct_exception(self, codegen: "PyCodegen") -> None:
+        base_cls = self.base_cls_vt
+        if base_cls is None:
+            unimplemented(
+                gb_type="Reconstruct exception without an allocator",
+                context=f"Exception: {self.exc_type.__name__}",
+                explanation="Dynamo did not track this exception's allocation.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        )
-        codegen.foreach(self.args)
-        codegen.call_function(len(self.args), False)
 
-        def codegen_attr(name: str) -> None:
-            attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
-                codegen.dup_top()
-                codegen(attr)
-                codegen.extend_output(codegen.rot_n(2))
-                codegen.store_attr(name)
+        def load_new() -> None:
+            codegen(base_cls)
+            codegen.append_output(codegen.create_load_attr("__new__"))
 
-        codegen_attr("__context__")
-        codegen_attr("__cause__")
-        codegen_attr("__suppress_context__")
+        # __init__ was already traced, including kwargs and side effects.
+        # Allocate first; the shared replay restores final args and attributes.
+        codegen.add_push_null(load_new)
+        if self.cls_source is not None:
+            codegen(self.cls_source)
+        else:
+            codegen.load_import_from(self.exc_type.__module__, self.exc_type.__name__)
+        codegen.foreach(self.initial_args)
+        codegen.call_function(1 + len(self.initial_args), False)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        ExceptionVariable.reconstruct(self, codegen)
+
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        # A custom constructor can set non-default exception chaining slots.
+        return {
+            "__context__": self.__context__,
+            "__cause__": self.__cause__,
+            "__suppress_context__": self.__suppress_context__,
+            **super().get_reconstruction_attributes(),
+        }
 
 
 class InspectVariable(UserDefinedObjectVariable):
@@ -6195,7 +6226,11 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         when tracing the fset hits an untraceable function.
         See: https://github.com/pytorch/pytorch/issues/172000
         """
-        if isinstance(name, variables.ConstantVariable) and isinstance(name.value, str):
+        if (
+            not isinstance(value, variables.DeletedVariable)
+            and isinstance(name, variables.ConstantVariable)
+            and isinstance(name.value, str)
+        ):
             name_str = name.value
             descriptor = inspect.getattr_static(type(self.value), name_str, None)
             if isinstance(descriptor, property) and descriptor.fset is not None:

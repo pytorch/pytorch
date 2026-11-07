@@ -49,7 +49,12 @@ from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+    is_generator,
+)
 from ..exc import (
     CompileOnOneRankUnsupported,
     format_frame_info,
@@ -92,6 +97,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    AttrMutationKind,
     GetSet,
     getset_load_or_build,
     getset_set,
@@ -483,16 +489,64 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("__setattr__", "__delattr__"):
-            # Data descriptors from tp_getset/tp_members win over the instance
-            # dict, as in PyObject_GenericSetAttr.
-            value = args[1] if name == "__setattr__" else None
-            if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
-            dict_method = "__setitem__" if value is not None else "__delitem__"
-            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
+            if kwargs:
+                raise_type_error(tx, f"wrapper {name}() takes no keyword arguments")
+            count = 2 if name == "__setattr__" else 1
+            if len(args) != count:
+                expected = (
+                    " expected 2 arguments" if count == 2 else "expected 1 argument"
+                )
+                raise_type_error(tx, f"{expected}, got {len(args)}")
+            if not issubclass(args[0].python_type(), str):
+                raise_type_error(
+                    tx,
+                    f"attribute name must be string, not '{args[0].python_type_name()}'",
+                )
+            attr = args[0].as_python_constant()
+            if self.python_type() is types.MethodType:
+                if attr == "__class__":
+                    unmodeled_setter(self, tx, args[1] if count == 2 else None)
+                descriptor = next(
+                    (
+                        cls.__dict__[attr]
+                        for cls in types.MethodType.__mro__
+                        if attr in cls.__dict__
+                    ),
+                    None,
+                )
+                if isinstance(descriptor, types.MemberDescriptorType):
+                    readonly_setter(self, tx, None)
+                if isinstance(descriptor, types.GetSetDescriptorType):
+                    msg = f"attribute '{attr}' of 'method' objects is not writable"
+                elif descriptor is not None:
+                    msg = f"'method' object attribute '{attr}' is read-only"
+                else:
+                    msg = f"'method' object has no attribute '{attr}'"
+                    if sys.version_info >= (3, 13):
+                        msg += " and no __dict__ for setting new attributes"
+                raise_attribute_error(tx, msg)
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None:
+                owner = (
+                    self._get_mutation_owner(tx)
+                    if istype(self, UserFunctionVariable)
+                    else self
+                )
+                out = getset.setter(
+                    owner, tx, args[1] if name == "__setattr__" else None
+                )
+                return out if out is not None else ConstantVariable.create(None)
+            dict_vt = self.get_dict_vt(tx)
+            if name == "__delattr__" and not dict_vt.contains(attr):
+                raise_attribute_error(
+                    tx, f"'{self.python_type_name()}' object has no attribute '{attr}'"
+                )
+            return dict_vt.call_method(
+                tx,
+                "__setitem__" if name == "__setattr__" else "__delitem__",
+                list(args),
+                kwargs,
+            )
         return super().call_method(tx, name, list(args), kwargs)
 
     def get_filename(self) -> str:
@@ -538,10 +592,18 @@ class BaseUserFunctionVariable(VariableTracker):
         # (tp_dictoffset). Resolve them at the instance-dict step so getattr
         # finds them before call_getattr_fallback (which raises). Known dunder
         # slots are handled earlier via tp_getset/tp_members and never reach here.
+        if self.dict_vt is not None or self.get_initial_instance_dict() is not None:
+            attrs = self.get_dict_vt(tx)
+            return attrs.getitem(name) if attrs.contains(name) else None
         try:
             fn = self.get_function()
         except NotImplementedError:
             return None
+        if fn in tx.output.side_effects and istype(
+            self, (UserFunctionVariable, UserMethodVariable)
+        ):
+            attrs = self.get_dict_vt(tx)
+            return attrs.getitem(name) if attrs.contains(name) else None
         fn_dict = getattr(fn, "__dict__", None)
         if not fn_dict or name not in fn_dict:
             return None
@@ -586,16 +648,9 @@ class BaseUserFunctionVariable(VariableTracker):
         if se_result is not None:
             return se_result
 
-        result = False
-
         if name in fn_known_dunder_attrs or name == "__dict__":
-            result = True
-        else:
-            try:
-                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
-            except NotImplementedError:
-                result = False
-        return VariableTracker.build(tx, result)
+            return ConstantVariable.create(True)
+        return super().call_obj_hasattr(tx, name)
 
     def closure_vars(
         self, tx: "InstructionTranslatorBase"
@@ -637,6 +692,28 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def get_value_for_setattr(self) -> object | None:
         return self.fn
+
+    def _get_mutation_owner(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        side_effects = tx.output.side_effects
+        if self.fn in side_effects:
+            owner = side_effects[self.fn]
+            if owner is not self and self.source is not None:
+                from .builder import VariableBuilder
+
+                VariableBuilder(tx, self.source)._reuse_tracked_variable(self.fn)
+            return owner
+        elif self.source is not None:
+            side_effects.track_object_existing(self.fn, self)
+        return self
+
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        if istype(self, UserFunctionVariable):
+            owner = self._get_mutation_owner(tx)
+            if owner is not self:
+                self.dict_vt = owner.get_dict_vt(tx)
+        return super().get_dict_vt(tx)
 
     def __init__(
         self,
@@ -808,6 +885,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     # These slots live on a real pre-existing function, so a write goes to the
     # side effects table to be replayed onto it after the graph.
 
+    def read_func_slot(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        owner: VariableTracker = self
+        if istype(self, UserFunctionVariable) and self.fn in tx.output.side_effects:
+            owner = self._get_mutation_owner(tx)
+        pending = load_pending_mutation(tx, owner, name)
+        if pending is not None:
+            return pending
+        return VariableTracker.build(
+            tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
+        )
+
     def _set_defaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
@@ -844,14 +934,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return ConstantVariable.create(None)
 
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        pending = load_pending_mutation(tx, self, "__annotations__")
-        if pending is not None:
-            return pending
-        return VariableTracker.build(
-            tx,
-            self.fn.__annotations__,
-            self.source and AttrSource(self.source, "__annotations__"),
-        )
+        return self.read_func_slot(tx, "__annotations__")
 
     def _set_annotations(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
@@ -875,11 +958,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     tp_members = {
         "__doc__": Member(
-            getset_load_or_build(lambda vt: vt.fn.__doc__, "__doc__"),
+            lambda s, tx: s.read_func_slot(tx, "__doc__"),
             getset_set("__doc__"),
         ),
         "__module__": Member(
-            getset_load_or_build(lambda vt: vt.fn.__module__, "__module__"),
+            lambda s, tx: s.read_func_slot(tx, "__module__"),
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
@@ -888,11 +971,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     tp_getset = {
         "__get__": GetSet(_get_dunder_get, readonly_setter),
         "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.fn.__name__, "__name__"),
+            lambda s, tx: s.read_func_slot(tx, "__name__"),
             _set_name,
         ),
         "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.fn.__qualname__, "__qualname__"),
+            lambda s, tx: s.read_func_slot(tx, "__qualname__"),
             _set_qualname,
         ),
         "__code__": GetSet(
@@ -904,19 +987,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             unmodeled_setter,
         ),
         "__defaults__": GetSet(
-            getset_load_or_build(lambda vt: vt.fn.__defaults__, "__defaults__"),
+            lambda s, tx: s.read_func_slot(tx, "__defaults__"),
             _set_defaults,
         ),
         "__kwdefaults__": GetSet(
-            getset_load_or_build(lambda vt: vt.fn.__kwdefaults__, "__kwdefaults__"),
+            lambda s, tx: s.read_func_slot(tx, "__kwdefaults__"),
             _set_kwdefaults,
         ),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
-        "__type_params__": GetSet(
-            getset_load_or_build(lambda vt: vt.fn.__type_params__, "__type_params__"),
-            _set_type_params,
-        ),
     }
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(
+            lambda s, tx: s.read_func_slot(tx, "__type_params__"), _set_type_params
+        )
 
     def tp_descr_get_impl(
         self,
@@ -1869,6 +1952,11 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     def get_function(self) -> types.FunctionType:
         return self.im_func.get_function()
 
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        return self.im_func.get_dict_vt(tx)
+
     def get_code(self) -> types.CodeType:
         return self.im_func.get_code()
 
@@ -2451,14 +2539,26 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         ),
         "__kwdefaults__": GetSet(_get_kwdefaults, _set_kwdefaults),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
-        "__type_params__": GetSet(_get_type_params, _set_type_params),
     }
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(_get_type_params, _set_type_params)
 
     if sys.version_info >= (3, 14):
         tp_getset["__annotate__"] = GetSet(_get_annotate, _set_annotate)
 
     def self_args(self) -> list[VariableTracker]:
         return []
+
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            tx.output.side_effects.track_attribute_mutation_new(self)
+        return super().get_dict_vt(tx)
+
+    def reconstruct_for_side_effects(self, codegen: "PyCodegen") -> bool:
+        self._reconstruct_function(codegen)
+        return True
 
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
@@ -2697,7 +2797,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
+    def _reconstruct_function(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
@@ -2747,16 +2847,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
-        # codegen attributes
-        tx = codegen.tx
-        if tx.output.side_effects.has_pending_mutation(self):
-            for name, value in tx.output.side_effects.store_attr_mutations[
-                self
-            ].items():
-                codegen.dup_top()
-                codegen(value)
-                codegen.extend_output(create_rot_n(2))
-                codegen.store_attr(name)
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self._reconstruct_function(codegen)
 
 
 class WrappedNestedUserFunctionVariable(
@@ -2766,6 +2858,7 @@ class WrappedNestedUserFunctionVariable(
         self,
         wrapped: NestedUserFunctionVariable,
         context: "ContextWrappingVariable",
+        tx: "InstructionTranslatorBase",
         **kwargs: Any,
     ) -> None:
         kwargs.pop("fn_name", None)
@@ -2789,6 +2882,90 @@ class WrappedNestedUserFunctionVariable(
         self.annotate = wrapped.annotate
         self.wrapped = wrapped
         self.context = context
+        from .object_protocol import generic_getattr
+
+        self.copied_attrs: dict[str, VariableTracker] = {
+            name: generic_getattr(tx, wrapped, name)
+            for name in functools.WRAPPER_ASSIGNMENTS
+        }
+        self.annotations = self.copied_attrs.get("__annotations__")
+        self.initial_dict = (
+            {
+                key if isinstance(key, str) else key.vt.as_python_constant(): value
+                for key, value in wrapped.dict_vt.items.items()
+            }
+            if wrapped.dict_vt is not None
+            else dict(wrapped.get_initial_instance_dict() or {})
+        )
+        self.initial_dict["__wrapped__"] = wrapped
+
+    def get_initial_instance_dict(self) -> dict[str, VariableTracker] | None:
+        return self.initial_dict
+
+    def _get_copied_metadata(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        pending = load_pending_mutation(tx, self, name)
+        return self.copied_attrs[name] if pending is None else pending
+
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: s._get_copied_metadata(tx, "__name__"), _set_name
+        ),
+        "__qualname__": GetSet(
+            lambda s, tx: s._get_copied_metadata(tx, "__qualname__"), _set_qualname
+        ),
+    }
+
+    tp_members = {
+        "__doc__": Member(
+            lambda s, tx: s._get_copied_metadata(tx, "__doc__"), getset_set("__doc__")
+        ),
+        "__module__": Member(
+            lambda s, tx: s._get_copied_metadata(tx, "__module__"),
+            getset_set("__module__"),
+        ),
+    }
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(
+            lambda s, tx: s._get_copied_metadata(tx, "__type_params__"),
+            NestedUserFunctionVariable._set_type_params,
+        )
+
+    def reconstruct_for_side_effects(self, codegen: "PyCodegen") -> bool:
+        self.reconstruct(codegen)
+        return True
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        wrapped = cast(NestedUserFunctionVariable, self.wrapped)
+        for name, value in self.copied_attrs.items():
+            if (
+                codegen.tx.output.side_effects.has_pending_mutation_of_attr(
+                    wrapped, name, AttrMutationKind.GENERIC_SETATTR
+                )
+                or (name == "__annotations__" and wrapped.annotations is not value)
+                or (name == "__annotate__" and wrapped.annotate is not value)
+            ):
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+                codegen.clear_tos()
+        codegen.dup_top()
+        codegen.append_output(codegen.create_load_attr("__dict__"))
+        codegen.load_method("clear")
+        codegen.call_method(0)
+        codegen.append_output(create_instruction("POP_TOP"))
+        codegen.clear_tos()
+        for name, value in self.initial_dict.items():
+            codegen.dup_top()
+            codegen(value)
+            codegen.extend_output(create_rot_n(2))
+            codegen.append_output(codegen.create_load_attr("__dict__"))
+            codegen(ConstantVariable.create(name))
+            codegen.append_output(create_instruction("STORE_SUBSCR"))
+            codegen.clear_tos()
 
 
 RE_CONSTANT_FOLD_FNS = {
@@ -3391,6 +3568,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     def get_name(self) -> str:
         return self.wrapper_obj.__name__
 
+    def get_doc(self) -> str | None:
+        return self.wrapper_obj.__doc__
+
     def get_qualname(self) -> str:
         # Before 3.11 the base falls back to co_name, since code objects have no
         # co_qualname; the wrapper carries the real qualname either way.
@@ -3597,6 +3777,9 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
     def get_name(self) -> str:
         return self.fn.get_name()
 
+    def get_doc(self) -> str | None:
+        return self.fn.get_doc()
+
     def get_qualname(self) -> str:
         return self.fn.get_qualname()
 
@@ -3606,6 +3789,8 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            return super().tp_getattro_impl(tx, name)
         return self.fn.tp_getattro_impl(tx, name)
 
     def get_function(self):
