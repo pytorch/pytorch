@@ -1090,6 +1090,10 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
+        del a, indices0, indices1, values
+        if torch.accelerator.is_available():
+            torch.accelerator.empty_cache()
+
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
         # Checks the issue (originally found on cuda) on gpu:
