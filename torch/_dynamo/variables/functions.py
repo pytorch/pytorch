@@ -442,6 +442,14 @@ fn_known_dunder_attrs = {
 }
 
 
+def _get_globals(
+    vt: "BaseUserFunctionVariable", tx: "InstructionTranslatorBase"
+) -> VariableTracker:
+    from .dicts import globals_dict_variable
+
+    return globals_dict_variable(tx, vt.get_globals())
+
+
 # GetSet setters for the function slots whose write is the same for every
 # function VT: the value goes to the side effects table, keyed on the VT.
 def _set_name(
@@ -883,6 +891,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        "__globals__": Member(_get_globals, readonly_setter),
     }
 
     tp_getset = {
@@ -2429,6 +2438,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        "__globals__": Member(_get_globals, readonly_setter),
     }
 
     tp_getset = {

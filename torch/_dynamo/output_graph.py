@@ -94,7 +94,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, logging as torchdynamo_logging, variables
+from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
@@ -2274,6 +2274,85 @@ class OutputGraph(OutputGraphCommon):
 
         return stack_values, meta
 
+    def _has_live_globals_namespace(self, tx: "InstructionTranslatorBase") -> bool:
+        from .bytecode_analysis import livevars_analysis
+        from .variables.dicts import GlobalDictVariable
+        from .variables.functions import LocalGeneratorObjectVariable
+
+        current_tx: InstructionTranslatorBase | None = tx
+        found = False
+        live_values: list[Any] = []
+
+        def frame_values(frame: "InstructionTranslatorBase") -> list[Any]:
+            # Keep persistent roots aligned with has_live_graph_intermediate.
+            values: list[Any] = [
+                frame.stack,
+                frame.symbolic_cellvars,
+                frame.post_prune_cell_and_freevars,
+                frame.debug_locals,
+                [frame.exn_vt_stack[i] for i in range(len(frame.exn_vt_stack))],
+                frame.active_generic_context_managers,
+                [
+                    entry.with_context
+                    for entry in frame.block_stack
+                    if entry.with_context is not None
+                ],
+            ]
+            if frame.exn_vt_stack._current_exception is not None:
+                values.append(frame.exn_vt_stack._current_exception)
+            instruction = frame.current_instruction
+            if instruction not in frame.instructions:
+                instruction = frame.instructions[0]
+            for name in livevars_analysis(frame.instructions, instruction):
+                key = name.replace(".", "implicit") if name.startswith(".") else name
+                if key in frame.symbolic_locals:
+                    values.append(frame.symbolic_locals[key])
+            return values
+
+        while current_tx is not None:
+            current_tx.prune_dead_locals()
+            live_values.extend(frame_values(current_tx))
+            current_tx = current_tx.parent
+        # Mutations of existing objects survive even without a live local alias.
+        live_values.extend(
+            var
+            for var in self.side_effects.id_to_variable.values()
+            if isinstance(
+                var.mutation_type, (AttributeMutationExisting, ValueMutationExisting)
+            )
+            and self.side_effects.is_modified(var)
+        )
+        live_values.extend(
+            [
+                self.backward_state,
+                self.side_effects.tensor_hooks,
+                self.side_effects.save_for_backward,
+            ]
+        )
+        visit_cache: dict[int, Any] = {}
+        seen_generator_tracers: set[int] = set()
+
+        def check(value: VariableTracker) -> None:
+            nonlocal found
+            # Realizing unrelated lazy values here would introduce extra guards.
+            if type.__instancecheck__(GlobalDictVariable, value):
+                found = True
+            elif type.__instancecheck__(LocalGeneratorObjectVariable, value):
+                tracer = cast(LocalGeneratorObjectVariable, value).inline_tracer
+                if id(tracer) not in seen_generator_tracers:
+                    seen_generator_tracers.add(id(tracer))
+                    live_values.extend(frame_values(tracer))
+                    live_values.append(tracer.gi_exc_state.items)
+
+        while live_values and not found:
+            VariableTracker.visit(
+                check,
+                live_values.pop(),
+                cache=visit_cache,
+                side_effects=self.side_effects,
+            )
+        return found
+
     def compile_subgraph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2297,6 +2376,17 @@ class OutputGraph(OutputGraphCommon):
 
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
+
+        if reason.graph_break and self._has_live_globals_namespace(tx):
+            unimplemented(
+                gb_type="live globals namespace across graph break",
+                context=tx.f_code.co_name,
+                explanation=(
+                    "Dynamo cannot resume a frame with a live globals namespace."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
 
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar

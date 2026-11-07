@@ -273,6 +273,8 @@ class BaseSetVariable(VariableTracker):
         from .dicts import ConstDictVariable
 
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
+            if isinstance(other, ConstDictVariable):
+                other.install_dict_keys_match_guard()
             yield from other.items.keys()
             return
 
@@ -287,6 +289,8 @@ class BaseSetVariable(VariableTracker):
         from .dicts import ConstDictVariable
 
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
+            if isinstance(other, ConstDictVariable):
+                other.install_dict_keys_match_guard()
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
 
@@ -1389,6 +1393,8 @@ class DictKeySetVariable(BaseSetVariable):
         from .dicts import ConstDictVariable
 
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
+            if isinstance(vt, ConstDictVariable):
+                vt.install_dict_keys_match_guard()
             items: list[Any] = list(vt.items.keys())
         else:
             items = unpack_iterable(tx, vt)

@@ -572,6 +572,10 @@ class BaseListVariable(VariableTracker):
                 OrderedSetVariable,
             ),
         ):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_keys_match_guard()
+                if args[0].source:
+                    tx.output.guard_on_key_order.add(args[0].source)
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
