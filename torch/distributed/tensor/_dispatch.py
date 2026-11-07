@@ -414,6 +414,26 @@ class OpDispatcher:
                 ):
                     raise AssertionError
 
+                local_device_type = first_local_arg.device.type
+                mesh_device_type = first_spec.mesh.device_type
+                # Users who disabled the distribute region opted out of coordination.
+                coordination_disabled = (
+                    random._rng_tracker is not None
+                    and not random._rng_tracker.distribute_region_enabled
+                )
+                if (
+                    not first_local_arg.is_meta
+                    and not coordination_disabled
+                    and local_device_type != mesh_device_type
+                ):
+                    # e.g. CPU-offloaded local tensors on an accelerator mesh.
+                    raise RuntimeError(
+                        f"DTensor random op {op_call} does not support local tensors on "
+                        f"{local_device_type} when the DeviceMesh is on {mesh_device_type}, "
+                        "since RNG cannot be coordinated across ranks. Run the op before "
+                        "moving the local tensors (e.g. before fully_shard with CPUOffloadPolicy)."
+                    )
+
                 if (
                     random._rng_tracker
                     and not first_local_arg.is_meta
