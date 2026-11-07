@@ -10,7 +10,9 @@ from torch.backends import (
     __allow_nonbracketed_mutation,
     _FP32Precision,
     _get_fp32_precision_getter,
+    _get_fp32_precision_state,
     _set_fp32_precision_setter,
+    _set_fp32_precision_state,
     ContextProp,
     PropModule,
 )
@@ -151,6 +153,12 @@ def is_acceptable(tensor):
     return True
 
 
+# The fp32 precision state that set_flags writes. set_flags returns resolved
+# values, so restoring through it pins settings that were inheriting; flags()
+# and torch.export restore these keys exactly instead.
+_FP32_PRECISION_STATE_KEYS = ("cuda.all", "cuda.conv", "cuda.rnn", "cudnn_allow_tf32")
+
+
 def set_flags(
     _enabled=None,
     _benchmark=None,
@@ -197,6 +205,7 @@ def flags(
     depthwise_kernel="auto",
 ):
     with __allow_nonbracketed_mutation():
+        orig_precision = _get_fp32_precision_state(*_FP32_PRECISION_STATE_KEYS)
         orig_flags = set_flags(
             enabled,
             benchmark,
@@ -212,6 +221,7 @@ def flags(
         # recover the previous values
         with __allow_nonbracketed_mutation():
             set_flags(*orig_flags)
+            _set_fp32_precision_state(orig_precision)
 
 
 # The magic here is to allow us to intercept code like this:

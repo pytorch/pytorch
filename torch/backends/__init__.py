@@ -2,6 +2,7 @@
 import sys
 import types
 from contextlib import contextmanager
+from typing import Any
 
 import torch
 
@@ -96,6 +97,64 @@ def flags(fp32_precision="none"):
     finally:
         with __allow_nonbracketed_mutation():
             set_flags(*orig_flags)
+
+
+_FP32_PRECISION_KEYS = (
+    "generic.all",
+    "cuda.all",
+    "cuda.conv",
+    "cuda.rnn",
+    "cuda.matmul",
+    "mkldnn.all",
+    "mkldnn.conv",
+    "mkldnn.rnn",
+    "mkldnn.matmul",
+    "float32_matmul_precision",
+    "cudnn_allow_tf32",
+)
+# The legacy getters raise when the legacy flags disagree with the per-backend
+# settings; a snapshot of such a state records this, and restoring skips them.
+_FP32_PRECISION_INCONSISTENT = "<inconsistent with fp32_precision>"
+_FP32_PRECISION_LEGACY: dict[str, tuple[Any, Any]] = {
+    "float32_matmul_precision": (
+        torch._C._get_float32_matmul_precision,
+        torch._C._set_float32_matmul_precision,
+    ),
+    "cudnn_allow_tf32": (
+        torch._C._get_cudnn_allow_tf32,
+        torch._C._set_cudnn_allow_tf32,
+    ),
+}
+
+
+def _get_fp32_precision_state(*keys: str) -> dict[str, Any]:
+    # Snapshot of the stored settings (all of them if no keys are given),
+    # before inheritance is resolved, for _set_fp32_precision_state. Writing
+    # back the resolved values instead would pin settings that were inheriting.
+    state: dict[str, Any] = {}
+    for key in keys or _FP32_PRECISION_KEYS:
+        if key in _FP32_PRECISION_LEGACY:
+            try:
+                state[key] = _FP32_PRECISION_LEGACY[key][0]()
+            except RuntimeError:
+                state[key] = _FP32_PRECISION_INCONSISTENT
+        else:
+            backend, op = key.split(".")
+            state[key] = torch._C._get_fp32_precision_getter(backend, op, raw=True)
+    return state
+
+
+def _set_fp32_precision_state(state: dict[str, Any]) -> None:
+    # The legacy setters also write per-backend settings (cuda and mkldnn
+    # matmul; cuda conv and rnn), so they run first and the settings are put
+    # back after them. A snapshot with a legacy key must include those settings.
+    for key, (_, setter) in _FP32_PRECISION_LEGACY.items():
+        if state.get(key, _FP32_PRECISION_INCONSISTENT) != _FP32_PRECISION_INCONSISTENT:
+            setter(state[key])
+    for key, value in state.items():
+        if key not in _FP32_PRECISION_LEGACY:
+            backend, op = key.split(".")
+            torch._C._set_fp32_precision_setter(backend, op, value, raw=True)
 
 
 def _get_fp32_precision_getter(backend, op):
