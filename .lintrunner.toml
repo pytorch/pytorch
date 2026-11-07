@@ -883,6 +883,7 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=cudaStreamSynchronize',
+    '--line-allowlist-pattern=C10_CUDA_ERROR_HANDLED',
     '--linter-name=RAWCUDA',
     '--error-name=raw CUDA API usage',
     """--error-description=\

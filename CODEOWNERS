@@ -1095,10 +1095,10 @@
 /torch/distributed/_composable/replicate.py @weifengpy
 /torch/nn/parallel/ @weifengpy
 # label: module: dtensor
-# owner: @weifengpy
-/torch/distributed/tensor/placement_types.py @weifengpy
-/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
-/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+# owner: @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/placement_types.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy @pianpwk @anshul-si
 #
 # [infra_developer_tools]
 # /.devcontainer/

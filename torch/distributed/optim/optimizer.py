@@ -100,6 +100,10 @@ class DistributedOptimizer:
     DistributedOptimizer takes remote references to parameters scattered
     across workers and applies the given optimizer locally for each parameter.
 
+    .. deprecated:: 2.16
+        ``torch.distributed.rpc`` is deprecated and will be removed in a future version.
+        See :ref:`distributed-rpc-framework` for alternatives.
+
     This class uses :meth:`~torch.distributed.autograd.get_gradients` in order
     to retrieve the gradients for specific parameters.
 
