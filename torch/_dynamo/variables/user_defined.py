@@ -130,6 +130,7 @@ from .base import (
 from .constant import ConstantVariable
 from .dicts import (
     ConstDictVariable,
+    FrozenDictVariable,
     NNModuleHooksDictVariable,
     NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
@@ -557,6 +558,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
         }
+        if torch._has_frozendict:
+            c_new_fns.add(torch._frozendict.__new__)
         return c_new_fns.union(exceptions)
 
     @staticmethod
@@ -1284,6 +1287,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         frozenset,
         list,
     }
+    if torch._has_frozendict:
+        _new_slot_owners_with_choke_points.add(torch._frozendict)
 
     @staticmethod
     def new_slot_owner(cls: type) -> type:
@@ -1455,6 +1460,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "__enter__"
         ):
             return args[0].enter(tx)
+        elif (
+            torch._has_frozendict
+            and issubclass(self.value, torch._frozendict)
+            and name == "fromkeys"
+            and self.lookup_cls_mro_attr(name) is torch._frozendict.__dict__[name]
+        ):
+            builtin = cast(
+                variables.FrozenDictBuiltinVariable,
+                VariableTracker.build(tx, torch._frozendict),
+            )
+            return builtin.fromkeys(tx, args, kwargs, cls=self)
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
@@ -5810,6 +5826,33 @@ class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
         # type(self)(items), which would misfire on this class's (value, items)
         # constructor.
         return SetVariable(list(items), mutation_type=ValueMutationNew())
+
+
+class UserDefinedFrozenDictVariable(UserDefinedObjectVariable, FrozenDictVariable):
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *FrozenDictVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: object, items=None, init_args=None, **kwargs: Any
+    ) -> None:
+        if items is None and init_args:
+            initial = init_args[0]
+            if not isinstance(initial, FrozenDictVariable):
+                raise AssertionError(
+                    f"Expected FrozenDictVariable, got {type(initial)}"
+                )
+            kwargs["storage"] = initial.storage
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
+        base_type = cast(type, FrozenDictVariable._cpython_type)
+        self._base_methods = {
+            method for method in base_type.__dict__.values() if callable(method)
+        }
+        self._base_methods.add(object.__init__)
+
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.mp_length_impl(tx)
 
 
 class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable):
