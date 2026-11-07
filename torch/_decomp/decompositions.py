@@ -242,7 +242,8 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
 
 
-@register_decomposition(aten.softshrink_backward)
+# hardshrink_backward is the same op: both delegate to shrink_backward_stub.
+@register_decomposition([aten.softshrink_backward, aten.hardshrink_backward])
 @out_wrapper("grad_input")
 def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
     # Like the ATen kernel, compute in the common dtype. The comparisons round
