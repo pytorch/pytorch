@@ -1483,7 +1483,7 @@ class GetItemAcceleratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, y), compiled(x, y))
 
 
-instantiate_device_type_tests(GetItemAcceleratorTests, globals())
+instantiate_device_type_tests(GetItemAcceleratorTests, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
