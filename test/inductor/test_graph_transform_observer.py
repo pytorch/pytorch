@@ -4,36 +4,53 @@ import math
 import os
 import shutil
 import tempfile
+from unittest import skipIf
 
 import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-try:
-    import pydot  # noqa: F401
-
-    HAS_PYDOT = True
-except ImportError:
-    HAS_PYDOT = False
-
-
-HAS_DOT = shutil.which("dot") is not None
+def _fused_attention_available(device: str) -> bool:
+    if device == "cuda":
+        return bool(PLATFORM_SUPPORTS_FUSED_ATTENTION)
+    # Out-of-tree accelerator backends do not report fused SDPA through
+    # PLATFORM_SUPPORTS_FUSED_ATTENTION, and fused attention is intentionally
+    # not a registered Capability (see #194039), so probe the actual device
+    # instead of assuming support.
+    try:
+        q = torch.randn(2, 2, 8, 16, device=device, dtype=torch.float16)
+        with torch.nn.attention.sdpa_kernel(
+            [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+            ]
+        ):
+            torch.nn.functional.scaled_dot_product_attention(q, q, q)
+        return True
+    except Exception:
+        return False
 
 
 class TestGraphTransformObserver(TestCase):
-    def test_sdpa_rewriter(self):
-        if not (
-            HAS_GPU_AND_TRITON
-            and PLATFORM_SUPPORTS_FUSED_ATTENTION
-            and HAS_PYDOT
-            and HAS_DOT
-        ):
-            return
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    def test_sdpa_rewriter(self, device):
+        if not _fused_attention_available(device):
+            self.skipTest("requires fused attention support")
+        if shutil.which("dot") is None:
+            self.skipTest("Requires dot")
+        try:
+            import pydot  # noqa: F401
+        except ImportError:
+            self.skipTest("Requires pydot")
 
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -52,9 +69,9 @@ class TestGraphTransformObserver(TestCase):
         compiled_fn = torch.compile(dot_prod_attention, fullgraph=True)
 
         tensor_shape = (4, 2, 16, 32)
-        q = torch.randn(tensor_shape, device=GPU_TYPE)
-        k = torch.randn(tensor_shape, device=GPU_TYPE)
-        v = torch.randn(tensor_shape, device=GPU_TYPE)
+        q = torch.randn(tensor_shape, device=device)
+        k = torch.randn(tensor_shape, device=device)
+        v = torch.randn(tensor_shape, device=device)
         compiled_fn(q, k, v)
 
         found_input_svg = False
@@ -68,6 +85,9 @@ class TestGraphTransformObserver(TestCase):
 
         self.assertTrue(found_input_svg)
         self.assertTrue(found_output_svg)
+
+
+instantiate_device_type_tests(TestGraphTransformObserver, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
