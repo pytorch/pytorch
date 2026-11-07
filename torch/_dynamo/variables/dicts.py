@@ -1976,6 +1976,10 @@ class FrozenDictVariable(VariableTracker):
         hashed = self._lookup_key(tx, key)
         value = self.items.get(hashed)
         if value is None:
+            if isinstance(self, variables.UserDefinedObjectVariable):
+                result = self._maybe_call_special(tx, "__missing__", [key])
+                if result is not None:
+                    return result
             raise_observed_exception(KeyError, tx, args=[key])
         return value
 
@@ -2155,9 +2159,14 @@ class FrozenDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return VariableTracker.build(tx, torch._frozendict).call_method(
-            tx, "fromkeys", args, kwargs
+        cls = None
+        if isinstance(self, variables.UserDefinedObjectVariable):
+            cls = VariableTracker.build(tx, self.python_type(), self.cls_source)
+        builtin = cast(
+            variables.FrozenDictBuiltinVariable,
+            VariableTracker.build(tx, torch._frozendict),
         )
+        return builtin.fromkeys(tx, args, kwargs, cls=cls)
 
     tp_methods = {
         "copy": Method(frozen_copy),
