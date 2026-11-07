@@ -20954,6 +20954,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
 
+    @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
+    def test_small_int_arithmetic_wraps(self, dtype):
+        # Check that uint8, int8 and int16 overflow behavior under various
+        # operations is the same for compiled and eager execution.
+        def fn(x):
+            y = x * 2 + x
+            out = [y.float(), y > 50, (~x) // 3, (x << 3).float(), (x - 100) // 3]
+            if x.dtype.is_signed:
+                out.append((x // -1).float())
+            return out
+
+        info = torch.iinfo(dtype)
+        spread = torch.arange(-128, 128) * max(1, info.max // 127)
+        edges = torch.tensor([info.min, info.min + 1, -1, 0, 1, info.max - 1, info.max])
+        x = torch.cat([spread, edges]).to(dtype).to(self.device)
+        self.common(fn, (x,), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
