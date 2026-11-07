@@ -335,6 +335,52 @@ fn = functools.partial(my_fn, scale=2)
             self.assertTrue(same(compiled(x), x + 2))
             self.assertEqual(mod.flag, 2)
 
+    def test_cpu_affinity_change_does_not_invalidate_num_threads_guard(self):
+        if not hasattr(os, "sched_getaffinity") or not hasattr(os, "sched_setaffinity"):
+            self.skipTest("sched_getaffinity/sched_setaffinity not available")
+        orig_affinity = os.sched_getaffinity(0)
+        if len(orig_affinity) < 2:
+            self.skipTest("Test requires at least 2 CPUs in initial affinity mask")
+
+        single_cpu = {min(orig_affinity)}
+        saved_env = {
+            k: os.environ.pop(k)
+            for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS")
+            if k in os.environ
+        }
+        try:
+            initial_threads = torch.get_num_threads()
+
+            # Simulate a dynamic container cpuset change (e.g., the container
+            # runtime updating cpuset.cpus) while Dynamo is tracing and after
+            # guard creation.
+            def compiler(gm, example_inputs):
+                os.sched_setaffinity(0, single_cpu)
+                return gm.forward
+
+            cnts = torch._dynamo.testing.CompileCounterWithBackend(compiler)
+
+            @torch.compile(backend=cnts, fullgraph=True)
+            def fn(x):
+                return x + 1
+
+            x = torch.ones(4)
+            self.assertTrue(same(fn(x), x + 1))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(torch.get_num_threads(), initial_threads)
+
+            os.sched_setaffinity(0, orig_affinity)
+            self.assertTrue(same(fn(x), x + 1))
+            self.assertEqual(cnts.frame_count, 1)
+
+            guard = torch._C._dynamo.guards.GlobalStateGuard()
+            os.sched_setaffinity(0, single_cpu)
+            self.assertEqual(torch.get_num_threads(), initial_threads)
+            self.assertTrue(guard.check(), f"GlobalStateGuard failed: {guard.reason()}")
+        finally:
+            os.sched_setaffinity(0, orig_affinity)
+            os.environ.update(saved_env)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
