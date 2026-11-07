@@ -368,8 +368,11 @@ def geomspace(
     )
     if dtype is None:
         dtype = comp_dtype
-    start = _util.cast_if_needed(start, comp_dtype)
-    stop = _util.cast_if_needed(stop, comp_dtype)
+    # Compute on the endpoint's device that is not the CPU, if any, so the
+    # result doesn't depend on the order of the arguments.
+    device = stop.device if start.device.type == "cpu" else start.device
+    start = _util.cast_if_needed(start, comp_dtype).to(device)
+    stop = _util.cast_if_needed(stop, comp_dtype).to(device)
     out_sign = torch.sgn(start)
     start = start / out_sign
     stop = stop / out_sign

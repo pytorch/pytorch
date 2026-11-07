@@ -798,6 +798,16 @@ class TestMiscDevice(TestCase):
             assert_equal(res.tensor.device.type, torch.device(device).type)
             assert_allclose(res.tensor.cpu(), w.geomspace(start, stop, 5).tensor)
 
+    @onlyAccelerator
+    def test_geomspace_mixed_devices(self, device):
+        # The result is on the accelerator whichever endpoint is on it
+        on_device = w.asarray(torch.tensor(7.0, device=device))
+        for res in (w.geomspace(1.0, on_device, 5), w.geomspace(on_device, 1.0, 5)):
+            assert_equal(res.tensor.device.type, torch.device(device).type)
+        assert_allclose(
+            w.geomspace(1.0, on_device, 5).tensor.cpu(), w.geomspace(1.0, 7.0, 5).tensor
+        )
+
 
 instantiate_device_type_tests(
     TestMiscDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
