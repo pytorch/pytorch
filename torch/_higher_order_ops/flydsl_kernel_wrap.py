@@ -26,8 +26,7 @@ import types
 import typing
 import weakref
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, TYPE_CHECKING
-from typing_extensions import Never
+from typing import Any, Literal, Never, TYPE_CHECKING
 
 import sympy
 
