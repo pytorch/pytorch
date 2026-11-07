@@ -419,11 +419,11 @@ IDX_T threadgroup_argmin(
   return idx_data[0];
 }
 
-// Reduction op functors bundling identity, replace predicate, and the value
-// reduction helpers (combine / simd_reduce / threadgroup_reduce) used by both
-// value and arg reductions. NaN handling: for floats, isnan-propagating
-// max/min and a strict "replace" predicate that lets NaN beat any finite
-// value and lets any finite value beat -INF/+INF identity.
+// Reduction op functors bundling identity and value reduction helpers.
+// Max/min also provide replace predicates and SIMD reductions for arg
+// reductions. NaN handling: for floats, isnan-propagating max/min and a strict
+// "replace" predicate that lets NaN beat any finite value and lets any finite
+// value beat -INF/+INF identity.
 //
 // Float identity is +/-INFINITY (not numeric_limits::lowest/max, i.e.
 // -/+FLT_MAX): max(-INF, x) = x for any finite x including -FLT_MAX, but
@@ -433,6 +433,40 @@ IDX_T threadgroup_argmin(
 // branch type-checks even when T is integral (Metal 3 lowers `if IF_CONSTEXPR`
 // to a runtime `if` and parses both arms). Both branches' bodies still get
 // dropped on Metal 4 where IF_CONSTEXPR is real `if constexpr`.
+template <typename T>
+struct SumOp {
+  static inline constexpr T identity() {
+    return T(0);
+  }
+  static inline T combine(T a, T b) {
+    return a + b;
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_sum(shared, val, tid, tptg);
+  }
+};
+
+template <typename T>
+struct ProdOp {
+  static inline constexpr T identity() {
+    return T(1);
+  }
+  static inline T combine(T a, T b) {
+    return c10::metal::mul(a, b);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, val, tid, tptg);
+  }
+};
+
 template <typename T>
 struct MaxOp {
   static inline constexpr T identity() {
