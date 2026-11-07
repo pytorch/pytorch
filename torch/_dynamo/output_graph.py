@@ -94,7 +94,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, logging as torchdynamo_logging, variables
+from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
@@ -782,6 +782,7 @@ class OutputGraph(OutputGraphCommon):
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
         self.cleanup_hooks: list[Callable[[], Any]] = []
+        self.warning_scopes: list[variables.CatchWarningsCtxManagerVariable] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
@@ -4599,6 +4600,17 @@ class SubgraphTracer(fx.Tracer):
         name: str | None = None,
         type_expr: Any | None = None,
     ) -> fx.Node:
+        if self.output_graph.warning_scopes and kind in (
+            "call_function",
+            "call_method",
+            "call_module",
+        ):
+            unimplemented(
+                gb_type="Runtime operation in a warning context",
+                context=str(target),
+                explanation="Dynamo cannot capture warnings produced by runtime graph operations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         check_pt2_compliant_op(self.output_graph, kind, target, args, kwargs)
         if self.parent is not None:
             flat_args = pytree.arg_tree_leaves(*args, **kwargs)

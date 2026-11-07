@@ -2303,6 +2303,37 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # func_annotate (3.14+); None is the NULL slot.
         self.annotate = annotate
 
+    def _set_code(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        if type(self) is not NestedUserFunctionVariable:
+            unmodeled_setter(self, tx, value)
+        if value is None or maybe_get_python_type(value) is not types.CodeType:
+            raise_type_error(tx, "__code__ must be set to a code object")
+        code = value.as_python_constant()
+        closure_size = (
+            len(self.closure.unpack_var_sequence(tx)) if self.closure is not None else 0
+        )
+        if closure_size != len(code.co_freevars):
+            name = self.tp_getattro_impl(tx, "__name__").as_python_constant()
+            raise_value_error(
+                tx,
+                f"{name}() requires a code object with {closure_size} free vars, "
+                f"not {len(code.co_freevars)}",
+            )
+        tx.output.side_effects.check_allowed_side_effect(self)
+        mask = inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
+        if sys.version_info >= (3, 13) and (self.get_code().co_flags & mask) != (
+            code.co_flags & mask
+        ):
+            variables.CatchWarningsCtxManagerVariable.emit_warning(
+                tx,
+                "Assigning a code object of non-matching type is deprecated "
+                "(e.g., from a generator to a plain function)",
+                DeprecationWarning,
+            )
+        store_attr_mutation(tx, self, "__code__", value)
+
     def _set_defaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
@@ -2443,7 +2474,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         ),
         "__code__": GetSet(
             getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
-            unmodeled_setter,
+            _set_code,
         ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
@@ -2477,7 +2508,22 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
 
     def get_code(self) -> types.CodeType:
-        return self.code.as_python_constant()
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # Keep the construction code unchanged so metadata and HOP rollback
+        # do not depend on mutating fields of this tracker.
+        pending = load_pending_mutation(tx, self, "__code__")
+        return (self.code if pending is None else pending).as_python_constant()
+
+    def get_name(self) -> str:
+        return self.code.as_python_constant().co_name
+
+    def get_qualname(self) -> str:
+        return self.code.as_python_constant().co_qualname
+
+    def get_doc(self) -> str | None:
+        return self.code.as_python_constant().co_consts[0]
 
     def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
@@ -2604,12 +2650,21 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             closure_cells = tuple(cells)
 
         func = types.FunctionType(
-            self.code.as_python_constant(),
+            self.get_code(),
             self.f_globals,
-            self.fn_name.as_python_constant(),
+            self.get_name(),
             argdefs=None,
             closure=closure_cells,
         )
+        func.__qualname__ = self.get_qualname()
+        func.__doc__ = self.get_doc()
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        for name in ("__name__", "__qualname__", "__doc__"):
+            value = load_pending_mutation(tx, self, name)
+            if value is not None:
+                setattr(func, name, value.as_python_constant())
         if self.defaults:
             func.__defaults__ = self.defaults.as_python_constant()
         if self.kwdefaults:
@@ -2701,9 +2756,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen.add_push_null(
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
-        codegen(self.code)
+        codegen(ConstantVariable.create(self.get_code()))
         codegen.extend_output([codegen.create_load_const_unchecked(self.f_globals)])
-        codegen(ConstantVariable.create(self.code.value.co_name))  # type: ignore[attr-defined]
+        codegen(ConstantVariable.create(self.get_name()))
 
         if self.defaults:
             codegen(self.defaults)
@@ -2738,6 +2793,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         codegen.extend_output(create_call_function(8, False))
 
+        if self.get_code() is not self.code.as_python_constant():
+            metadata = (
+                ("__qualname__", self.get_qualname()),
+                ("__doc__", self.get_doc()),
+            )
+            for name, value in metadata:
+                codegen.dup_top()
+                codegen(ConstantVariable.create(value))
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+
         if self.wrapped_fn:
             codegen.add_push_null(
                 lambda: codegen.load_import_from("functools", "wraps")
@@ -2753,6 +2819,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
             ].items():
+                if name == "__code__":
+                    # Construction already uses the effective code. Replaying
+                    # its setter would emit a captured warning a second time.
+                    continue
                 codegen.dup_top()
                 codegen(value)
                 codegen.extend_output(create_rot_n(2))

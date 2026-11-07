@@ -4290,14 +4290,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_catch_watchings1(self):
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             with warnings.catch_warnings(record=True):
                 return x.sin()
 
         x = torch.randn(8)
-        self.assertEqual(fn(x), x.sin())
-        self.assertEqual(cnt.frame_count, 1)
+        with self.assertRaisesRegex(Unsupported, "warning context"):
+            torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), x.sin())
 
     def test_catch_watchings2(self):
         cnt = CompileCounter()
