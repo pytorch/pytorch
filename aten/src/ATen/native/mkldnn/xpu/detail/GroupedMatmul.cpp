@@ -12,6 +12,7 @@
 
 namespace at::native::onednn {
 
+namespace {
 // Identifies which matmul operand a GroupedScaleSpec is being built for.
 enum class GroupedGemmArgType { Src, Wei };
 
@@ -40,7 +41,7 @@ inline GroupedScaleSpec make_grouped_scale_spec(
     bool b_is_2d) {
   TORCH_CHECK(
       a_is_2d && !b_is_2d,
-      "Currently only 2d x 3d grouped matmul with offsets is supported");
+      "Currently only 2d x 3d scaled grouped matmul with offsets is supported on xpu");
   bool is_src = (arg_type == GroupedGemmArgType::Src);
 
   switch (scaling_type) {
@@ -186,29 +187,47 @@ std::tuple<dnnl::memory, dnnl::memory, dnnl::memory> make_grouped_gemm_mem(
   return {src_mem, weights_mem, dst_mem};
 }
 
+} // namespace
+
 sycl::event scaled_grouped_matmul(
     const Tensor& mat_a,
     const Tensor& mat_b,
-    const std::optional<Tensor> scale_a,
-    const std::optional<Tensor> scale_b,
-    const std::optional<at::blas::ScalingType> scaling_choice_a,
-    const std::optional<at::blas::ScalingType> scaling_choice_b,
+    const std::optional<Tensor>& scale_a,
+    const std::optional<Tensor>& scale_b,
+    const std::optional<at::blas::ScalingType>& scaling_choice_a,
+    const std::optional<at::blas::ScalingType>& scaling_choice_b,
     const Tensor& offs,
     Tensor& out,
-    const std::optional<Tensor> alpha) {
+    const std::optional<Tensor>& alpha) {
   bool a_is_2d = mat_a.dim() == 2;
   bool b_is_2d = mat_b.dim() == 2;
 
   TORCH_CHECK(
-      (a_is_2d && !b_is_2d),
-      "Currently only 2d x 3d grouped matmul with offsets is supported");
+      a_is_2d,
+      "Currently only 2d x 3d and 2d x 2d grouped matmul with offsets is supported on xpu");
+  if (scaling_choice_a.has_value() || scaling_choice_b.has_value()) {
+    TORCH_CHECK(
+        scale_a.has_value() && scale_b.has_value(),
+        "Scaling choices provided but corresponding scales are missing");
+    TORCH_CHECK(
+        scale_a.value().dtype() == scale_b.value().dtype(),
+        "Scaling choices provided but corresponding scales have mismatched datatypes");
+    TORCH_CHECK(
+        scaling_choice_a.has_value() && scaling_choice_b.has_value(),
+        "Scaling choices provided but corresponding scaling choices are missing");
+    TORCH_CHECK(
+        scaling_choice_a.value() == scaling_choice_b.value(),
+        "Scaling choices for a and b must match");
+    TORCH_CHECK(
+        !b_is_2d,
+        "Scaled grouped matmul are only supported for 2d x 3d on xpu");
+  }
 
   bool is_fp4 = mat_a.scalar_type() == at::kFloat4_e2m1fn_x2;
-  int64_t M, N, K, group_count;
-  M = mat_a.size(-2);
-  K = is_fp4 ? mat_a.size(-1) * 2 : mat_a.size(-1);
-  N = mat_b.size(-1);
-  group_count = offs.size(0);
+  int64_t M = mat_a.size(-2);
+  int64_t K = is_fp4 ? mat_a.size(-1) * 2 : mat_a.size(-1);
+  int64_t N = mat_b.size(-1);
+  int64_t group_count = offs.size(0);
 
   auto [prepared_mat_a, prepared_mat_b, prepared_out] =
       prepare_grouped_matmul_inputs(mat_a, mat_b, out, a_is_2d, b_is_2d);
