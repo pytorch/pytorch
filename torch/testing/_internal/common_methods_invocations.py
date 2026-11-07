@@ -5602,7 +5602,7 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg((S, S, S, S)), args=(other, nb, cp), kwargs=kwargs)
 
 
-def sample_inputs_round_to(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs__to_dtype_rounded(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     # The narrower destinations of each source; float8 destinations are left out,
     # as these tests do not support them.
@@ -17820,15 +17820,17 @@ op_db: list[OpInfo] = [
         ),
     ),
     OpInfo(
-        "round_to",
+        "_to_dtype_rounded",
+        op=torch._to_dtype_rounded,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         # Only CPU and CUDA have kernels.
         dtypesIfMPS=empty_types(),
         dtypesIfXPU=empty_types(),
+        backward_dtypesIfXPU=empty_types(),
         supports_out=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        sample_inputs_func=sample_inputs_round_to,
+        sample_inputs_func=sample_inputs__to_dtype_rounded,
     ),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16, torch.float16),

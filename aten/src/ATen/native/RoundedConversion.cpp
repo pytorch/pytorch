@@ -6,7 +6,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/round_to_native.h>
+#include <ATen/ops/_to_dtype_rounded_native.h>
 #endif
 
 namespace at::native {
@@ -55,30 +55,30 @@ void check_rounded_conversion(ScalarType src, ScalarType dst) {
       dst);
 }
 
-c10::RoundingMode check_round_to(
+c10::RoundingMode check_to_dtype_rounded(
     const TensorBase& self,
     ScalarType dtype,
-    std::string_view mode) {
+    std::string_view round) {
   TORCH_CHECK(
       self.layout() == kStrided,
       "rounding is only supported for strided tensors, but got ",
       self.layout());
   check_rounded_conversion(self.scalar_type(), dtype);
-  return parse_rounding_mode(mode);
+  return parse_rounding_mode(round);
 }
 
 DEFINE_DISPATCH(to_dtype_rounded_stub);
 
-Tensor& round_to_out(
+Tensor& _to_dtype_rounded_out(
     const Tensor& self,
     ScalarType dtype,
-    std::string_view mode,
+    std::string_view round,
     std::optional<MemoryFormat> /*memory_format*/,
     Tensor& out) {
-  const auto rounding = check_round_to(self, dtype, mode);
+  const auto rounding = check_to_dtype_rounded(self, dtype, round);
   TORCH_CHECK(
       out.scalar_type() == dtype,
-      "round_to: expected out to have dtype ",
+      "_to_dtype_rounded: expected out to have dtype ",
       dtype,
       ", but got ",
       out.scalar_type());
