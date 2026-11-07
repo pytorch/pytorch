@@ -506,15 +506,26 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                # Sharding on nonzero dim requires even sharding
-                "lin_shapes": [[(32, 16), (16, 8)]],
+                # The (8, 17) and (1, 17) weights shard dim 1 unevenly, leaving
+                # empty ranks at 8 ranks; the latter has outer size 1
+                "lin_shapes": [
+                    [(32, 16), (16, 8)],
+                    [(16, 17), (17, 8)],
+                    [(16, 17), (17, 1)],
+                ],
                 "use_shard_placement_fn": [True],
                 # False tests Shard(1)-only weights; True adds Shard(0) biases.
                 "bias": [False, True],
-                "reduce_scatter_input_fn": [
-                    None,
-                    reduce_scatter_input_fn_with_native_copy,
-                ],
+            },
+            self._test_train_parity_single_group,
+        )
+        # The native reduce-scatter copy-in needs even nonzero-dim sharding
+        self.run_subtests(
+            {
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
+                "bias": [False, True],
+                "reduce_scatter_input_fn": [reduce_scatter_input_fn_with_native_copy],
             },
             self._test_train_parity_single_group,
         )
@@ -1647,6 +1658,77 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_train_parity_uneven_shard_dim1(self):
+        meshes = [init_device_mesh(device_type.type, (self.world_size,))]
+        if self.world_size >= 4:
+            meshes.append(
+                init_device_mesh(
+                    device_type.type,
+                    (2, self.world_size // 2),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
+        self.run_subtests(
+            {"mesh": meshes, "reshard_after_forward": [True, False, 2]},
+            self._test_train_parity_uneven_shard_dim1,
+        )
+
+    def _test_train_parity_uneven_shard_dim1(
+        self, mesh: DeviceMesh, reshard_after_forward: bool | int
+    ):
+        class FeedForward(nn.Module):
+            # Stacked gate and up projections, sharded on F like w2. Scaled like
+            # nn.Linear, so activations stay O(1) and fp32 reduction-order
+            # differences stay within tolerance.
+            def __init__(self, dim: int, hidden_dim: int):
+                super().__init__()
+                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim) / dim**0.5)
+                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim) / hidden_dim**0.5)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                gate, up = torch.einsum("bd,nfd->nbf", x, self.w13)
+                return (nn.functional.silu(gate) * up) @ self.w2.t()
+
+        torch.manual_seed(42)
+        # No shard world size up to 8 divides F = 13, and 8 ranks leave rank 7
+        # empty
+        model = nn.Sequential(*(FeedForward(8, 13) for _ in range(2)))
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2, fused=True)
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=lambda param: Shard(1),
+        )
+        for layer in model:
+            fully_shard_fn(layer)
+        fully_shard_fn(model)
+        # Unlike foreach, fused requires each gradient to have its parameter's
+        # strides, including the empty shards of rank 7
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
+
+        torch.manual_seed(42 + self.rank)
+        num_microbatches = 2
+        for _ in range(3):
+            for microbatch_idx in range(num_microbatches):
+                # HSDP accumulates reduce-scatter outputs until the all-reduce
+                model.set_requires_all_reduce(microbatch_idx == num_microbatches - 1)
+                inp = torch.randn((4, 8), device=device_type.type)
+                ref_loss = ref_model(inp).sum()
+                loss = model(inp).sum()
+                self.assertEqual(loss, ref_loss)
+                ref_loss.backward()
+                loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
 
 class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
     @property
@@ -1685,6 +1767,25 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
             self.assertTrue(param.to_local().is_contiguous())
             self.assertTrue(param.grad.is_contiguous())
             self.assertTrue(param.grad.to_local().is_contiguous())
+
+    def test_uneven_shard_dim1_bf16_all_gather(self):
+        # The columns of the (9, 13) weight split 4, 4, 4, 1 and those of the
+        # (4, 9) weight 3, 3, 3, 0: full shards take the bf16 foreach-copy fast
+        # path into the all-gather, while the others are padded first
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(13, 9, bias=False), nn.Linear(9, 4, bias=False)
+        ).to(device_type)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model).to(torch.bfloat16)
+        fully_shard(
+            model,
+            shard_placement_fn=lambda param: Shard(1),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        inp = torch.randn((2, 13), device=device_type.type)
+        self.assertEqual(model(inp), ref_model(inp.to(torch.bfloat16)))
 
 
 class TestFullyShardSharedParams(FSDPTestContinuous):
