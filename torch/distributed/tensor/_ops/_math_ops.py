@@ -94,18 +94,23 @@ class _NormPartial(Partial):
     ) -> torch.Tensor:
         if not isinstance(shard_spec, Shard):
             raise AssertionError(f"Expected Shard, got {type(shard_spec)}")
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_value(tensor, mesh, mesh_dim)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Raise fp16/bf16 norms to the power in fp32: 256**2 overflows fp16.
+        if tensor.dtype in (torch.float16, torch.bfloat16):
+            tensor = tensor.float()
         return tensor**self.norm_type
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
