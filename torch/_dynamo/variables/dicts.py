@@ -106,7 +106,7 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
+# - Implement tp_hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement tp_richcompare_impl() for key equality
 
@@ -162,6 +162,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     _nonvar_fields = {
         "_checking_python_constant",
+        # Reachability has to match what codegen emits, and codegen only
+        # ever emits self.items (removals set should_reconstruct_all rather
+        # than being recorded here). This is a construction-time snapshot,
+        # read only for keys that are still in self.items, so traversing it
+        # would make removed elements look reachable.
+        "original_items",
         *VariableTracker._nonvar_fields,
     }
 
@@ -219,8 +225,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # a per-instance flag suffices.
         self._checking_python_constant = False
 
-    def materialize_keys(self) -> None:
-        """Specialize deferred keys before copying their stored hashes."""
+    def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
+        """Specialize deferred keys and return storage for a detached container."""
+        return self.items
 
     def as_proxy(self) -> dict[Any, Any]:
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -590,10 +597,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self,
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
+        *,
+        for_insertion: bool = False,
     ) -> HashableTracker:
         _guard_nan_key(key)
         try:
-            return self._hashable_key(key)
+            return HashableTracker(key) if for_insertion else self._hashable_key(key)
         except ObservedTypeError:
             if sys.version_info < (3, 14):
                 raise
@@ -611,7 +620,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
+        # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
@@ -830,8 +839,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # NB - Guard on all the keys of the other dict to ensure
                 # correctness.
                 other.install_dict_keys_match_guard()
-                other.materialize_keys()
-                self._update_items(other.items)
+                self._update_items(other.materialize_keys())
             elif (
                 isinstance(
                     other,
@@ -973,9 +981,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
-            hkey = self._hashable_key(key)
+            hkey = (
+                HashableTracker(key) if value is not None else self._hashable_key(key)
+            )
         else:
-            hkey = self._lookup_key(tx, key)
+            hkey = self._lookup_key(tx, key, for_insertion=value is not None)
         tx.output.side_effects.mutation(self)
         if value is None:
             if isinstance(self.items, SideEffectsProxyDict) and hkey not in self.items:
@@ -1027,7 +1037,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
@@ -1240,10 +1250,10 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.MappingProxyType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # mappingproxy.__hash__ delegates to the underlying dict, which
         # raises TypeError. Mirror that behavior.
-        return self.dv_dict.hash_impl(tx)
+        return self.dv_dict.tp_hash_impl(tx)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -1354,8 +1364,46 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
         return super().call_obj_hasattr(tx, name)
 
 
+class NNModuleHooksDictVariable(ConstDictVariable):
+    # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
+    def is_python_constant(self) -> bool:
+        return not self.items
+
+    def install_dict_keys_match_guard(self) -> None:
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+
+    def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
+        # Detached containers reuse stored hashes and may never compare their keys.
+        for key in self.items:
+            key.vt.realize()
+        return self.items
+
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        if self.source is not None and kwargs.get("source", self.source) is None:
+            self.materialize_keys()
+        return super().clone(**kwargs)
+
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "ConstDictVariable":
+        self.materialize_keys()
+        cls = (
+            OrderedDictVariable
+            if isinstance(self, OrderedDictVariable)
+            else ConstDictVariable
+        )
+        return cls(items, mutation_type=ValueMutationNew())
+
+
+class NNModuleHooksOrderedDictVariable(NNModuleHooksDictVariable, OrderedDictVariable):
+    pass
+
+
 class _NNModuleHookFlagsDictVariable(ConstDictVariable):
     """Cache membership bookkeeping for a sourced hook-flags dictionary."""
+
+    GLOBAL_FLAGS = False
 
     _nonvar_fields = {
         "_hook_flag_keys",
@@ -1383,7 +1431,7 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
             and source.base.member in ("_forward_hooks", "_forward_pre_hooks")
             and self.source is not None
             and (
-                isinstance(self, NNModuleGlobalHookFlagsDictVariable)
+                self.GLOBAL_FLAGS
                 or isinstance(self.source, AttrSource)
                 and source.base.base == self.source.base
             )
@@ -1400,11 +1448,11 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
                     hooks = tx.output.resolve_source_value(source.base)
                     if not all(type(k) is int for k in dict.keys(hooks)):
                         return super().sq_contains_impl(tx, item)
-                    # Types and membership remain guarded without pinning local IDs.
+                    # These reads install TYPE_MATCH without pinning deferred IDs.
                     item.python_type()
                     for stored_key in self.items:
                         stored_key.vt.python_type()
-                    if isinstance(self, NNModuleGlobalHookFlagsDictVariable):
+                    if self.GLOBAL_FLAGS:
                         self.install_dict_keys_match_guard()
                     install_guard(
                         source.base.base.make_guard(
@@ -1418,49 +1466,33 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
                     self._hook_membership_sources.add(source.base)
                 return ConstantVariable.create(key in self._hook_flag_keys)
         if not self.items and isinstance(item, variables.LazyConstantVariable):
-            item.python_type()
+            item.python_type()  # install TYPE_MATCH without specializing the value
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(False)
         return super().sq_contains_impl(tx, item)
 
 
-class NNModuleGlobalHookFlagsDictVariable(_NNModuleHookFlagsDictVariable):
-    # Global IDs are shared across modules and may be pinned by DICT_KEYS_MATCH.
-    # The membership guard accounts for each module's differing local IDs.
+class NNModuleHookFlagsDictVariable(
+    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
+):
     pass
+
+
+class NNModuleHookFlagsOrderedDictVariable(
+    NNModuleHookFlagsDictVariable, OrderedDictVariable
+):
+    pass
+
+
+class NNModuleGlobalHookFlagsDictVariable(_NNModuleHookFlagsDictVariable):
+    # Global IDs may be pinned while local IDs vary across equivalent modules.
+    GLOBAL_FLAGS = True
 
 
 class NNModuleGlobalOrderedHookFlagsDictVariable(
     OrderedDictVariable, NNModuleGlobalHookFlagsDictVariable
 ):
     pass
-
-
-class NNModuleHooksDictVariable(OrderedDictVariable, _NNModuleHookFlagsDictVariable):
-    # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
-    def is_python_constant(self) -> bool:
-        return not self.items
-
-    def install_dict_keys_match_guard(self) -> None:
-        if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-
-    def materialize_keys(self) -> None:
-        # Detached containers reuse stored hashes and may never compare their keys.
-        for key in self.items:
-            key.vt.realize()
-
-    def clone(self, **kwargs: Any) -> VariableTracker:
-        if self.source is not None and kwargs.get("source", self.source) is None:
-            self.materialize_keys()
-        return super().clone(**kwargs)
-
-    def _new_dict(
-        self, items: dict[HashableTracker, VariableTracker]
-    ) -> "OrderedDictVariable":
-        for key in items:
-            key.vt.realize()
-        return OrderedDictVariable(items, mutation_type=ValueMutationNew())
 
 
 class DictViewVariable(VariableTracker):
@@ -1495,7 +1527,7 @@ class DictViewVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     @property
@@ -1721,7 +1753,7 @@ class DictValuesVariable(DictViewVariable):
     # (https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6630),
     # so it inherits object's tp_hash (PyObject_GenericHash) — hashable.
     #
-    # Override DictViewVariable.hash_impl to restore the base identity hash.
+    # Override DictViewVariable.tp_hash_impl to restore the base identity hash.
     kv = "values"
 
     # dict.values() do not implement tp_as_number
@@ -1737,8 +1769,8 @@ class DictValuesVariable(DictViewVariable):
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        return super(DictViewVariable, self).hash_impl(tx)
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return super(DictViewVariable, self).tp_hash_impl(tx)
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:
@@ -1753,14 +1785,6 @@ class DictValuesVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator.create(self.dv_dict.items)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # dict_values has no tp_richcompare (inherits object's).
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def debug_repr(self) -> str:
         if not self.view_items:
