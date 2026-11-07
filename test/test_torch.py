@@ -8094,7 +8094,7 @@ class TestTorch(TestCase):
             else:
                 source = torch.randint(0, 5, size_source, dtype=dtype, device=device)
 
-            ref_out = tensor.index_add(dim, index, source, alpha=2.) / 2.
+            ref_out = tensor.index_add(dim, index, source, alpha=2) / 2.
             ref_out = ref_out.to(dtype=dtype)
             out = tensor.index_add(dim, index, source)
 
