@@ -7,11 +7,12 @@
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
 import os
+import shutil
 import signal
+import tempfile
 import time
 import unittest
 import unittest.mock as mock
-import uuid
 
 import torch.distributed.elastic.timer as timer
 from torch.testing._internal.common_utils import (
@@ -42,7 +43,9 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            tmp_dir = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp_dir)
+            self.file_path = os.path.join(tmp_dir, "timer")
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
             )
@@ -213,7 +216,9 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
 
         def setUp(self):
             super().setUp()
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            tmp_dir = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp_dir)
+            self.file_path = os.path.join(tmp_dir, "timer")
             self.max_interval = 0.01
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
