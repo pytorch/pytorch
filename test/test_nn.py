@@ -11768,8 +11768,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     # Merge into OpInfo?
-    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
-                          https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -11828,7 +11826,8 @@ class TestNNDeviceType(NNTestCase):
                 grad_ref, = torch.autograd.grad(loss_ref, x_ref)
                 self.assertEqual(grad_device.cpu().double(), grad_ref, atol=1e-4, rtol=0)
             else:
-                gradcheck(ctc_after_softmax, [x])
+                # CUDA backward accumulates with atomicAdd, so repeated runs differ in the last bits (gh-34870)
+                gradcheck(ctc_after_softmax, [x], nondet_tol=GRADCHECK_NONDET_TOL)
 
     def test_ctc_loss_error(self, device):
         log_probs = torch.rand(0, 0, 4, device=device)
