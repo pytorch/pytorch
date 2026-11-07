@@ -244,6 +244,10 @@ class _Ops:
         return x
 
 
+class _DescriptorAlias(list):
+    count = list.count
+
+
 # Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
 # torch, stdlib and own-module globals the test builds through _module_namespaces;
 # G['impl'] is an aliased user module and G['config'] a config module, neither
@@ -329,6 +333,50 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 obj,
                 guard_filter_fn=lambda entries: [True] * len(entries),
             )
+
+    def test_method_descriptor_alias_guard_survives_serialization(self):
+        def fn(x):
+            return x + _DescriptorAlias([1, 1]).count(1)
+
+        x = torch.ones(1)
+        compiled = _aot_compile(fn, x)
+        state, _ = _kept_types(compiled)
+        self.assertTrue(
+            any(
+                guard.create_fn_name() == "FUNCTION_MATCH"
+                and guard.name.endswith("['count']")
+                for guard in state.output_graph.guards
+            )
+        )
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x))
+        self.assertEqual(loaded(x), fn(x))
+        with mock.patch.object(_DescriptorAlias, "count", list.index):
+            self.assertFalse(loaded.guard_check(x))
+
+    @parametrize("caching_precompile", (False, True))
+    def test_module_attribute_guard_survives_serialization(self, caching_precompile):
+        def fn(x, module):
+            return x + module.weight
+
+        module = torch.nn.Linear(3, 3)
+        x = torch.ones(3)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            compiled = _aot_compile(fn, x, module)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, module))
+        self.assertEqual(loaded(x, module), fn(x, module))
+        state, _ = _kept_types(compiled)
+        self.assertTrue(
+            any(
+                guard.create_fn_name() == "TENSOR_MATCH"
+                and guard.name.startswith("L['module']")
+                for guard in state.output_graph.guards
+            )
+        )
+        self.assertFalse(loaded.guard_check(x, torch.nn.Linear(3, 4)))
 
     @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))
