@@ -1716,39 +1716,6 @@ class TestGitHubPRGhstackDependencies(TestCase):
             waivers,
         )
 
-    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
-    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
-    @mock.patch("trymerge.find_matching_merge_rule")
-    @mock.patch("trymerge.GitRepo")
-    @mock.patch("trymerge.get_ghstack_prs")
-    def test_merge_ghstack_into_lets_lower_prs_wait_for_classification(
-        self,
-        mock_get_ghstack_prs: mock.MagicMock,
-        mock_repo: mock.MagicMock,
-        mock_find_matching_merge_rule: mock.MagicMock,
-        _mock_can_skip_internal_checks: mock.MagicMock,
-        _mock_is_closed: mock.MagicMock,
-        *args: Any,
-    ) -> None:
-        """A lower PR's failure still being classified waits like the top PR's."""
-        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
-        top_pr = GitHubPR("pytorch", "pytorch", 106068)
-        mock_get_ghstack_prs.return_value = [
-            (parent_pr, "rev_parent"),
-            (top_pr, "rev_top"),
-        ]
-        mock_find_matching_merge_rule.return_value = (None, [], [], {})
-        window = ClassificationWaitWindow()
-
-        top_pr.merge_ghstack_into(mock_repo, True, classification_wait=window)
-
-        mock_find_matching_merge_rule.assert_called_once()
-        self.assertIs(mock_find_matching_merge_rule.call_args.args[0], parent_pr)
-        self.assertIs(
-            mock_find_matching_merge_rule.call_args.kwargs["classification_wait"],
-            window,
-        )
-
     @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
     @mock.patch.object(GitHubPR, "is_closed", return_value=False)
     @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
@@ -2206,12 +2173,14 @@ class TestDockerCiGates(TestCase):
 
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
-        # The window reaches the top PR's rule check and the lower PRs', so a waiting
+        # The window reaches the top PR's rule check and the lower PR's, so a waiting
         # job anywhere in the stack is retried.
-        self.assertIs(
-            mock_find_matching_merge_rule.call_args.kwargs["classification_wait"],
-            window,
-        )
+        windowed = [
+            call.args[0]
+            for call in mock_find_matching_merge_rule.call_args_list
+            if call.kwargs.get("classification_wait") is window
+        ]
+        self.assertEqual(windowed, [top_pr, lower_pr])
         top_pr.merge_changes_locally.assert_called_once_with(
             repo,
             False,
@@ -3344,14 +3313,33 @@ class TestClassificationWait(TestCase):
         drci = {"FAILED": [{"id": 6, "name": "pull / job"}]}
         self.assertTrue(is_unlisted_by_drci(self._check(7), drci))
 
-    def test_checks_that_are_not_actions_jobs_are_never_unlisted(self) -> None:
-        """EasyCLA and the Meta internal check never appear in Dr.CI."""
+    def test_ai_pending_skips_a_malformed_list(self) -> None:
+        """The category is new, so its shape is not trusted to fail a merge on."""
+        check = self._check(7)
+        for pending in (None, "text", [None, "x", {"name": "pull / job"}]):
+            with self.subTest(pending=pending):
+                drci = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+                drci["AI_PENDING"] = pending
+                self.assertFalse(is_ai_pending(check, drci))
+                window = ClassificationWaitWindow()
+                self.assertIsNone(self._classify(check, drci, window))
+
+    def test_checks_that_are_not_actions_jobs_never_wait(self) -> None:
+        """EasyCLA and the Meta internal check never appear in Dr.CI, and an App check
+        run's job id does not make it a job the advisor can clear."""
         external = self._check(7, url="https://code.facebook.com/cla/")
-        self.assertFalse(is_unlisted_by_drci(external, {"FAILED": []}))
-        self.assertFalse(is_unlisted_by_drci(self._check(None), {"FAILED": []}))
         # A CRCR relay check links to the downstream run, not to a job.
         relay = self._check(7, url=self.URL.split("/job/")[0])
-        self.assertFalse(is_unlisted_by_drci(relay, {"FAILED": []}))
+        job = {"id": 7, "name": "pull / job"}
+        for check in (external, relay):
+            for drci in ({"FAILED": []}, {"FAILED": [job], "AI_PENDING": [job]}):
+                with self.subTest(url=check.url, drci=drci):
+                    window = ClassificationWaitWindow()
+                    self.assertIsNone(self._classify(check, drci, window))
+            with self.subTest(url=check.url, drci="saved reason"):
+                window = ClassificationWaitWindow(reasons={7: "AI_PENDING"})
+                self.assertIsNone(self._classify(check, {}, window))
+        self.assertFalse(is_unlisted_by_drci(self._check(None), {"FAILED": []}))
 
     def test_a_job_dr_ci_has_not_listed_waits(self) -> None:
         drci = {"FAILED": []}
@@ -3719,18 +3707,6 @@ class TestClassificationWait(TestCase):
         self.assertEqual(self.sleeps, 1)
         self.assertIn("mandatory check(s) failed", str(failed.exception))
         self.assertNotIn("the merge waited on", str(failed.exception))
-
-    def test_merge_changes_locally_hands_the_window_to_the_ghstack_gate(self) -> None:
-        pr = mock.MagicMock(spec=GitHubPR)
-        pr.default_branch.return_value = "main"
-        pr.is_ghstack_pr.return_value = True
-        repo = mock.MagicMock(spec=GitRepo)
-        repo.remote = "origin"
-        window = ClassificationWaitWindow()
-        GitHubPR.merge_changes_locally(pr, repo, classification_wait=window)
-        self.assertIs(
-            pr.merge_ghstack_into.call_args.kwargs["classification_wait"], window
-        )
 
     def test_a_waiting_job_does_not_use_the_ignorable_budget(self) -> None:
         """Waiting clears nothing, so it must not count toward the flaky cap."""
@@ -4869,15 +4845,17 @@ class TestMergeChangesLocallyEndToEnd(LandingTestCase):
         self,
     ) -> None:
         self.stacked_rule.side_effect = [None, MandatoryChecksMissingError("pending")]
-        with self.assertRaises(MandatoryChecksMissingError):
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "pending"):
             GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
         self.assertEqual(
             self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir), []
         )
 
-    def test_retry_after_a_failed_cherry_pick_lands_each_pr_once(self) -> None:
+    def test_a_rerun_after_a_failed_cherry_pick_lands_each_pr_once(self) -> None:
         """The first attempt fails after #101 was cherry-picked onto the clone's main.
-        Trunk moves before merge_into runs again on the same clone."""
+        Trunk moves before merge_into runs again on the same clone. merge() does not
+        retry this error, and a pending lower PR now stops it before any cherry-pick
+        (see above), so this pins only that each attempt starts from the remote tip."""
         picks = 0
         cherry_pick = self.repo.cherry_pick
 

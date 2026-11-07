@@ -1543,7 +1543,6 @@ class GitHubPR:
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
         ignore_current_checks: set[tuple[int, str]] | None = None,
-        classification_wait: ClassificationWaitWindow | None = None,
     ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
@@ -1569,7 +1568,6 @@ class GitHubPR:
                     skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=can_skip_internal_checks(self, comment_id),
                     ignore_current_checks=ignore_current_checks,
-                    classification_wait=classification_wait,
                 )
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
@@ -1831,7 +1829,6 @@ class GitHubPR:
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
         ignore_current_checks: set[tuple[int, str]] | None = None,
-        classification_wait: ClassificationWaitWindow | None = None,
     ) -> list[GitHubPR]:
         """
         Commits the PR, or the open PRs of its ghstack stack up to and including it,
@@ -1839,10 +1836,12 @@ class GitHubPR:
 
         First fetches `branch` from the remote, which needs network access, and
         force-resets the local `branch` to `<remote>/<branch>`, discarding any local
-        commits on it. merge() retries on the same repo, so this keeps the commits of
-        an attempt that failed before its push from landing again.
+        commits on it, so commits an earlier attempt left in `repo` never land.
 
-        :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
+        :param skip_all_rule_checks: If true, skips the rule checks of a ghstack stack's
+            lower PRs. merge_into passes it, having checked them before the greenlight
+            check, and so does --check-mergeability, which only tests that the stack
+            applies.
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
@@ -1864,7 +1863,6 @@ class GitHubPR:
                 skip_all_rule_checks=skip_all_rule_checks,
                 ghstack_prs=ghstack_prs,
                 ignore_current_checks=ignore_current_checks,
-                classification_wait=classification_wait,
             )
 
         msg = self.gen_commit_message()
@@ -2328,8 +2326,7 @@ def is_authorized_without_greenlight(
     Greenlight rule -- leaving greenlight the sole authority with the guard switched off.
     The one argument not passed is `classification_wait`: without it a job still waiting
     on its classification counts as failed here, which can only make this check stricter.
-    `merge_into` asks only after every PR it lands has passed its own rule check, so by
-    then no job is still waiting on its classification.
+    `merge_into` asks only after every PR it lands has passed its own rule check.
 
     An answer is cached per approver set and head commit. Both are re-read from GitHub on
     every retry, so an approval added mid-merge still takes effect; what the cache drops
@@ -2995,9 +2992,13 @@ def is_ai_pending(check: JobCheckState, drci_classifications: Any) -> bool:
     if not check or not drci_classifications or not check.job_id:
         return False
 
+    # A new category whose shape production has not confirmed yet: skip a malformed
+    # entry rather than fail the merge on it, as is_unlisted_by_drci does.
+    pending = drci_classifications.get("AI_PENDING")
+    if not isinstance(pending, list):
+        return False
     return any(
-        check.job_id == pending["id"]
-        for pending in drci_classifications.get("AI_PENDING", [])
+        isinstance(job, dict) and check.job_id == job.get("id") for job in pending
     )
 
 
@@ -3008,11 +3009,9 @@ def is_unlisted_by_drci(check: JobCheckState, drci_classifications: Any) -> bool
     from a database that lags GitHub, so a job that failed moments ago may not be in
     its answer yet -- nor dispatched to the AI CI Advisor, which Dr.CI does while
     answering. Only meaningful for a live answer: the check-run summary is a snapshot.
-    Only a check whose URL is a GitHub Actions job's counts (see RE_GHA_JOB_URL).
+    awaiting_classification checks first that the check is a GitHub Actions job's.
     """
     if not check or not drci_classifications or not check.job_id:
-        return False
-    if not RE_GHA_JOB_URL.search(check.url or ""):
         return False
 
     # Unlike its siblings, which read known categories, this walks every key, so it
@@ -3055,17 +3054,23 @@ class ClassificationWaitWindow:
 
 
 def awaiting_classification(
-    check: JobCheckState, live_classifications: Any
+    check: JobCheckState,
+    live_classifications: Any,
+    classification_wait: ClassificationWaitWindow,
 ) -> str | None:
     """The AWAITING_CLASSIFICATIONS key for a failed job whose classification is still
     on the way, or None.
 
-    Only a plain FAILURE qualifies: it is the only conclusion the AI CI Advisor can
-    clear, and the case where Dr.CI's lag has been seen to fail a merge. A job Dr.CI
-    has already put in a blocking category with no verdict coming is not waited on.
+    Only a plain FAILURE of a GitHub Actions job qualifies (see RE_GHA_JOB_URL): it is
+    the only conclusion the AI CI Advisor can clear, and the case where Dr.CI's lag has
+    been seen to fail a merge. A job Dr.CI has already put in a blocking category with
+    no verdict coming is not waited on. Without a live answer, a job whose wait is
+    already open keeps the reason it last waited under.
     """
-    if check.status != "FAILURE" or not live_classifications:
+    if check.status != "FAILURE" or not RE_GHA_JOB_URL.search(check.url or ""):
         return None
+    if not live_classifications:
+        return classification_wait.reasons.get(check.job_id)
     if is_unlisted_by_drci(check, live_classifications):
         return "DRCI_PENDING"
     if is_ai_pending(check, live_classifications):
@@ -3254,13 +3259,9 @@ def get_classifications(
 
         if classification_wait is None or not check.job_id:
             continue
-        awaiting = awaiting_classification(check, live_classifications)
-        if (
-            awaiting is None
-            and live_classifications is None
-            and check.status == "FAILURE"
-        ):
-            awaiting = classification_wait.reasons.get(check.job_id)
+        awaiting = awaiting_classification(
+            check, live_classifications, classification_wait
+        )
         if awaiting is not None and classification_wait.within_budget(
             check.job_id, time.time()
         ):
