@@ -364,7 +364,10 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     const ::c10d::ReconfigureOptions& opts) {
-  std::lock_guard reconfigureLock(reconfigure_mutex_);
+  std::unique_lock reconfigureLock(reconfigure_mutex_);
+  TORCH_CHECK(
+      !reconfiguring_.load(std::memory_order_acquire),
+      "ProcessGroupNCCL reconfigure is already in progress");
   TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL has been finalized");
@@ -459,30 +462,61 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   // process-group config normally uses blocking NCCL calls.
   config.blocking = 0;
 
-  // Tear down the previous communicator generation: stop the watchdog, revoke
-  // in-flight work, drain the work queue, and abort the comm unless it is
-  // shrunk below. Port of the pre-reconfigure cleanup in torchcomms'
-  // TorchCommNCCL::reconfigure.
-  // The watchdog revokes without reconfigure_mutex_, so stop it first to
-  // avoid a concurrent second commRevoke on the same communicator. Done even
-  // if a previous initialization failed after starting the watchdog.
+  // Close admission before taking the retiring generation's work snapshot.
+  reconfiguring_.store(true, std::memory_order_release);
+  reconfigure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  std::unique_lock<std::shared_mutex> admissionLock(
+      collective_admission_mutex_);
+  {
+    std::lock_guard<std::mutex> generationLock(work_generation_state_->mutex);
+    work_generation_state_->invalidated = true;
+  }
+
+  const bool hadInitializedComm =
+      init_state_ == InitializationState::INITIALIZED;
+  const auto oldUuid = reconfigure_uuid_;
+  auto workStatus = WorkNCCL::WorkStatus::COMPLETED;
+  reconfigureLock.unlock();
+  admissionLock.unlock();
+  // Stop the watchdog even after a partially failed initialization.
   stopWatchdog();
+  if (hadInitializedComm) {
+    workStatus = workq_.garbageCollect();
+    failPendingGeneration(oldUuid);
+  }
+  reconfigureLock.lock();
+  admissionLock.lock();
   std::unique_lock revokeLock(revoke_mutex_);
+
   ncclComm_t oldComm = nullptr;
   if (init_state_ == InitializationState::INITIALIZED) {
-    auto workStatus = workq_.garbageCollect();
+    TORCH_CHECK(
+        !inQuorum || nccl_comm_,
+        "NCCL communicator was aborted before reconfigure shrink/grow");
     if (nccl_comm_ && !revoked_.exchange(true) &&
         (workStatus == WorkNCCL::WorkStatus::NOT_STARTED ||
          workStatus == WorkNCCL::WorkStatus::INPROGRESS)) {
-      NCCL_CHECK_IGNORE(
-          nccl_api_,
-          nccl_api_->commRevoke(nccl_comm_),
-          "NCCL commRevoke failed during reconfigure");
+      try {
+        waitForNcclCompletion(
+            *nccl_api_,
+            nccl_comm_,
+            nccl_api_->commRevoke(nccl_comm_),
+            timeout,
+            "NCCL commRevoke failed during reconfigure");
+      } catch (const std::exception& e) {
+        LOG(ERROR) << e.what();
+      }
     }
 
     detachMemoryHook();
     retireComm();
+    revokeLock.unlock();
+    reconfigureLock.unlock();
+    admissionLock.unlock();
     workq_.finalize();
+    reconfigureLock.lock();
+    admissionLock.lock();
+    revokeLock.lock();
 
     oldComm = std::exchange(nccl_comm_, nullptr);
     init_state_ = InitializationState::UNINITIALIZED;
@@ -556,7 +590,28 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     nccl_comm_ = newComm;
   }
 
-  initNcclResources();
+  try {
+    initNcclResources();
+  } catch (...) {
+    const auto initException = std::current_exception();
+    try {
+      stopWatchdog();
+      detachMemoryHook();
+      retireComm();
+      abortCommIgnoringErrors(
+          *nccl_api_,
+          newComm,
+          timeout,
+          "NCCL commAbort failed after resource initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to clean up replacement NCCL communicator: "
+                 << e.what();
+    }
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    init_state_ = InitializationState::UNINITIALIZED;
+    std::rethrow_exception(initException);
+  }
   init_state_ = InitializationState::INITIALIZED;
   TORCH_CHECK(
       rank_ == newRank && comm_size_ == newSize,
@@ -569,6 +624,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
       " of ",
       newSize);
   reconfigure_uuid_ = opts.uuid;
+  work_generation_state_ = std::make_shared<WorkGenerationState>();
+  reconfiguring_.store(false, std::memory_order_release);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL reconfigure completed for rank: "
                      << rank_;
