@@ -40,6 +40,7 @@ from .base import (
     Member,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    store_attr_mutation,
     type_qualified_name,
     unmodeled_setter,
     VariableTracker,
@@ -69,6 +70,14 @@ DescriptorTypes: TypeAlias = (
     | types.MemberDescriptorType
     | types.GetSetDescriptorType
 )
+
+
+def _is_c_struct_member(descriptor: types.MemberDescriptorType) -> bool:
+    """A member of a C type: may be T_OBJECT (del, then reads give None) or a
+    numeric field (del raises). __slots__ members live on heap types and are
+    always T_OBJECT_EX."""
+    Py_TPFLAGS_HEAPTYPE = 1 << 9
+    return not descriptor.__objclass__.__flags__ & Py_TPFLAGS_HEAPTYPE
 
 
 def _check_descriptor_obj_type(
@@ -124,16 +133,8 @@ class DescriptorVariable(VariableTracker):
         ),
     }
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.as_python_constant()), False
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Method descriptors inherit `object_richcompare` rather than their receiver's comparison.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
@@ -353,13 +354,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -610,20 +611,19 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         obj = self.obj.realize()
         tracker = tx.output.builtin_method_keys
-        tracker.activate(tx)
+        tracker.activate(tx, unguarded=self.value is None)
         if self.value is not None:
             return hash(self.value), False
         if obj.source is not None:
             receiver = tracker.add_receiver(tx, obj.source)
             return hash(_bind_builtin_method(self.descriptor, receiver)), True
         if self.has_fresh_container_receiver():
-            # Internal bucket only: method equality still distinguishes C
-            # functions. User-visible hash() retains its escape restrictions.
+            # Internal bucket; equality still distinguishes C functions.
             return id(obj), True
         # Constant receivers may alias inputs but cannot join a source guard.
-        return self.hash_impl(tx)
+        return self.tp_hash_impl(tx)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.
@@ -646,7 +646,10 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                     gb_type="builtin method hash with unstable receiver",
                     context=f"{self}",
                     explanation="Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
-                    hints=[*graph_break_hints.DIFFICULT],
+                    hints=[
+                        "Bind the method on an input or another stable object.",
+                        *graph_break_hints.DIFFICULT,
+                    ],
                 )
         return hash(_bind_builtin_method(self.descriptor, receiver)), True
 
@@ -665,7 +668,16 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
         from .object_protocol import vt_identity_compare
 
-        same_self = vt_identity_compare(self.obj.realize(), other.obj.realize())
+        receivers = []
+        for obj in (self.obj.realize(), other.obj.realize()):
+            if obj.is_symnode_like() and obj.source is not None:
+                # Compare boxed identity without replacing the computational receiver.
+                install_guard(obj.source.make_guard(GuardBuilder.ID_MATCH))
+                obj = ConstantVariable.create(
+                    tx.output.resolve_source_value(obj.source)
+                )
+            receivers.append(obj)
+        same_self = vt_identity_compare(*receivers)
         eq = None
         if same_self is not None:
             eq = same_self.as_python_constant() and _same_c_function(
@@ -681,6 +693,8 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
     def as_python_constant(self) -> Any:
+        if self.value is not None:
+            return self.value
         obj = self.obj.as_python_constant()
         if hasattr(self.descriptor, "__get__"):
             return _bind_builtin_method(self.descriptor, obj)
@@ -724,9 +738,8 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             if result is not None:
                 return result
         if is_torch_class(descriptor.__objclass__):
-            # Keep specialized handlers such as the autograd engine's callback
-            # above this fallback. Tensor descriptors still go through trace_rules
-            # so subclass overrides cannot replace their graph operation.
+            # Keep specialized handlers above this fallback; trace Tensor descriptors
+            # through trace_rules so subclass overrides cannot replace graph operations.
             fn = VariableTracker.build(tx, descriptor)
             return fn.call_function(tx, [obj, *args], kwargs)
         if mro_lookup(obj.python_type(), name) is descriptor:
@@ -1222,11 +1235,18 @@ class MemberDescriptorVariable(DescriptorVariable):
             # what PyMember_SetOne raises.
             entry.setter(obj, tx, value)
             return ConstantVariable.create(None)
+        if value is None and _is_c_struct_member(self.descriptor):
+            unimplemented(
+                gb_type="Delete of an unmodeled C member",
+                context=f"del {obj}.{name}",
+                explanation=f"Dynamo does not model deleting the C struct member '{name}'.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # No model for this member. STORE_ATTR itself applies the descriptor, so
         # replay via store_attr on the target (mirrors the __slots__ path in
         # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, name, stored)
+        store_attr_mutation(tx, obj, name, stored)
         return ConstantVariable.create(None)
 
 
@@ -1502,7 +1522,10 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
+            if sys.version_info >= (3, 13):
+                display_name = getattr(self.descriptor, "__name__", None)
+            else:
+                display_name = getattr(self.descriptor.fget, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             # property_descr_set formats %R of the owner's *type*, whose
             # repr is its bare __qualname__ (no module prefix) -- unlike

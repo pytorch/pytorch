@@ -51,6 +51,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at::native {
 
@@ -133,6 +134,10 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
   } else {
     TORCH_CHECK(self.sizes() == other.sizes(),
                "mkldnn_mul_out: currently mkldnn not support broadcasting");
+    // oneDNN's NEON-only JIT binary kernel fails to build
+    if (mkldnn_lacks_aarch64_kernels()) {
+      return result.copy_(self.to_dense().mul(other.to_dense()).to_mkldnn());
+    }
     ideep::tensor y = itensor_from_mkldnn(other);
     ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
 

@@ -85,6 +85,17 @@
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "{cls.__name__} defines a C __hash__ that Dynamo cannot trace into.",
+      "Hints": [
+        "Use torch._dynamo.allow_c_slot({cls.__name__}) to ",
+        "register it as safe if its slots are pure and ",
+        "deterministic.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Untraceable C tp_hash",
       "Context": "hash_impl {self}",
       "Explanation": "{cls.__name__} defines a C __hash__ that Dynamo cannot trace into.",
       "Hints": [
@@ -201,6 +212,15 @@
   "GB0871": [
     {
       "Gb_type": "Non-constant __hash__ return",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "__hash__ returned a non-constant {type(result).__name__}.",
+      "Hints": [
+        "Ensure that your custom __hash__ function returns an integer.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
+      "Gb_type": "Non-constant __hash__ return",
       "Context": "hash_impl {self}",
       "Explanation": "__hash__ returned a non-constant {type(result).__name__}.",
       "Hints": [
@@ -299,16 +319,6 @@
       "Context": "",
       "Explanation": "Directly using invoke_subgraph is not supported. Use nested_compile_region",
       "Hints": []
-    }
-  ],
-  "GB0580": [
-    {
-      "Gb_type": "Dictionary mutated during iteration",
-      "Context": "str(error)",
-      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB0018": [
@@ -896,6 +906,16 @@
       ]
     }
   ],
+  "GB6745": [
+    {
+      "Gb_type": "Missing tp_hash_impl override",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "{type(self).__name__} wraps {type(real_val).__name__} which has a non-default tp_hash. Add a tp_hash_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0055": [
     {
       "Gb_type": "Failed to convert args/kwargs to proxy",
@@ -1207,6 +1227,16 @@
       "Context": "str(func)",
       "Explanation": "Attempted to inline a function with the `__self__` attribute. Dynamo is expected to decompose method calls into function calls with a `self` argument.",
       "Hints": []
+    }
+  ],
+  "GB9636": [
+    {
+      "Gb_type": "Builtin method keys with mutated equality",
+      "Context": "hashable key comparison",
+      "Explanation": "Dynamo cannot compare builtin method keys after their peer's class equality changes inside the compiled function.",
+      "Hints": [
+        "Move the class equality change outside the compiled function."
+      ]
     }
   ],
   "GB8974": [
@@ -2386,6 +2416,16 @@
       ]
     }
   ],
+  "GB7866": [
+    {
+      "Gb_type": "hasattr on a class attribute set earlier in the frame",
+      "Context": "hasattr({self.value}, {name}), value {value}",
+      "Explanation": "Dynamo cannot tell whether the lookup raises AttributeError without running the stored value's __get__ or the metaclass __getattribute__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1380": [
     {
       "Gb_type": "Illegal __getitem__ invocation in strict mode",
@@ -2887,6 +2927,16 @@
       ]
     }
   ],
+  "GB4682": [
+    {
+      "Gb_type": "Delete of an unmodeled C member",
+      "Context": "del {obj}.{name}",
+      "Explanation": "Dynamo does not model deleting the C struct member '{name}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7637": [
     {
       "Gb_type": "non-string key in object __dict__",
@@ -3292,6 +3342,14 @@
     }
   ],
   "GB9648": [
+    {
+      "Gb_type": "Missing tp_richcompare_impl override",
+      "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "{type(self).__name__} wraps {real_type.__name__} which has a non-default tp_richcompare. Add a tp_richcompare_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
     {
       "Gb_type": "Missing tp_richcompare_impl override",
       "Context": "tp_richcompare_impl {self} {op}",
@@ -4975,6 +5033,14 @@
   "GB0682": [
     {
       "Gb_type": "Non-constant GetAttrVariable hash",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "Cannot hash {self} because Dynamo doesn't know how to represent the type of the getattr() result, which is not a constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Non-constant GetAttrVariable hash",
       "Context": "hash_impl {self}",
       "Explanation": "Cannot hash {self} because Dynamo doesn't know how to represent the type of the getattr() result, which is not a constant.",
       "Hints": [
@@ -5167,6 +5233,16 @@
       "Explanation": "The attribute '{name}' does not exist on opaque class {self.value}.",
       "Hints": [
         "Ensure '{name}' is a valid attribute of {type(self.value)}."
+      ]
+    }
+  ],
+  "GB8756": [
+    {
+      "Gb_type": "Conversion of compile-time-only hash value",
+      "Context": "FakeIdVariable",
+      "Explanation": "An identity-dependent hash cannot be converted to a constant result.",
+      "Hints": [
+        "Compute the hash outside the compiled function."
       ]
     }
   ],
@@ -7132,7 +7208,36 @@
       "Context": "{self}",
       "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
       "Hints": [
+        "Bind the method on an input or another stable object.",
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    },
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0580": [
+    {
+      "Gb_type": "Dictionary mutated during iteration",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "str(type(dict_vt))",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]
