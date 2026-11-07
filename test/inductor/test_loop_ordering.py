@@ -2564,6 +2564,23 @@ class TestSplitIterationRanges(MockSchedulerTest):
             )
         )
 
+    def test_is_compatible_false_for_non_sympifiable_size(self):
+        """is_compatible answers False for sizes sympy cannot represent.
+
+        A caller-supplied size that is not sympifiable (e.g. a raw python
+        list reaching statically_known_equals) raises SympifyError inside
+        _split_iteration_ranges. The is_compatible predicate must turn that
+        into False so callers skip the fusion instead of failing the compile.
+        """
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        self.assertFalse(
+            SIMDKernel.is_compatible(
+                [sympy.Integer(4), sympy.Integer(4)],
+                [[sympy.Integer(2), [2, 2]], []],
+            )
+        )
+
     def test_backed_leftover_extent_still_splits(self):
         """A backed leftover extent that resolves to 1 still splits.
 

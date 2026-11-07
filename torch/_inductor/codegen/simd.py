@@ -17,6 +17,7 @@ from typing_extensions import TypeVar
 from unittest.mock import patch
 
 import sympy
+from sympy.core.sympify import SympifyError
 
 import torch
 import torch._logging
@@ -1032,7 +1033,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         try:
             cls._split_iteration_ranges(groups, lengths)
             return True
-        except CantSplit:
+        except (CantSplit, SympifyError):
+            # A caller-supplied element sympy cannot represent (e.g. a raw
+            # python list) is definitionally not splittable; skip the fusion.
             return False
 
     def split_and_set_ranges(
