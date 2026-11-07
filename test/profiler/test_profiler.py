@@ -5019,6 +5019,45 @@ class TestProfilerTraceCompression(TestCase):
                 with gzip.open(gzip_path, "rt") as f:
                     self.assertIn("traceEvents", json.load(f))
 
+    @parametrize("use_python_export", [False, True])
+    @parametrize("suffix", [".json", ".json.gz"])
+    def test_export_to_missing_dir(self, use_python_export, suffix):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "missing_dir", "trace" + suffix)
+            # Only Kineto's native save raises from C++; the rest fail in open().
+            native = suffix == ".json" and not use_python_export
+            error = RuntimeError if native else FileNotFoundError
+            with self.assertRaisesRegex(error, "missing_dir"):
+                prof.export_chrome_trace(bad_path, use_python_export=use_python_export)
+            # A failed export must not consume the native trace.
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            opener = gzip.open if suffix.endswith(".gz") else open
+            with opener(path, "rt") as f:
+                self.assertIn("traceEvents", json.load(f))
+
+    def test_failed_compressed_export_keeps_existing_file(self):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        def failing_export(path, *args, **kwargs):
+            raise OSError("export failed")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.gz")
+            with open(path, "wb") as f:
+                f.write(b"existing trace")
+            with patch.object(prof.profiler, "export_chrome_trace", failing_export):
+                with self.assertRaisesRegex(OSError, "export failed"):
+                    prof.export_chrome_trace(path)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), b"existing trace")
+            # The partially written file is cleaned up.
+            self.assertEqual(os.listdir(tmpdir), ["trace.json.gz"])
+
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 class TestPythonChromeTraceExport(TestCase):
