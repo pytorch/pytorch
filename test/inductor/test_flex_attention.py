@@ -2448,6 +2448,28 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    def test_create_block_mask_dynamic_recompile_single_block(self, device):
+        # https://github.com/pytorch/pytorch/issues/202850: with dynamic seq_len s0,
+        # the KV block count (s0 + 127) // 128 is always 1 and used to crash Inductor.
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def attn(q):
+            length = q.shape[2]
+            block_mask = create_block_mask(
+                causal, B=1, H=None, Q_LEN=length, KV_LEN=length, device=q.device
+            )
+            return flex_attention(q, q, q, block_mask=block_mask)
+
+        compiled = torch.compile(attn)
+        # 5 compiles a static graph; 128 is a new size, so it recompiles as dynamic.
+        for seq_len in (5, 128, 64):
+            q = torch.randn(1, 1, seq_len, 16, device=device)
+            torch.testing.assert_close(compiled(q), attn(q), atol=2e-3, rtol=2e-3)
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_mps  # hardcodes kernel_options={"BACKEND": "TRITON"}
     def test_kv_order_invariance_padded_causal(self, device):
         if device == "cuda" and not PLATFORM_SUPPORTS_BF16:
