@@ -4,7 +4,12 @@ macro(custom_protobuf_find)
   message(STATUS "Use custom protobuf build.")
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
+  option(protobuf_BUILD_CONFORMANCE "" OFF)
   option(protobuf_WITH_ZLIB "" OFF)
+  set(protobuf_INSTALL ON CACHE BOOL "" FORCE)
+  set(ABSL_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
+  set(ABSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  set(ABSL_PROPAGATE_CXX_STD ON)
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     # If we are going to link protobuf locally, we will need to turn off
     # shared libs build for protobuf.
@@ -17,7 +22,16 @@ macro(custom_protobuf_find)
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
   option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
-  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
+  # On aarch64, protobuf+abseil static libs linked into libtorch_cpu.so can
+  # exceed the ±128MB branch range (R_AARCH64_CALL26 relocation overflow),
+  # especially with the prioritized text linker script that reorders sections.
+  # Build protobuf as shared on aarch64 so inter-library calls use PLT/GOT.
+  set(__caffe2_protobuf_shared OFF)
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(__caffe2_protobuf_shared ON)
+  endif()
+
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND NOT __caffe2_protobuf_shared)
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
@@ -33,13 +47,7 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  # protobuf's CMakeLists.txt injects compiler-only flags (e.g. /bigobj, /utf-8)
-  # via add_definitions(), which CMake also applies to the resource compiler.
-  # protobuf works around this by overriding CMAKE_RC_COMPILE_OBJECT to drop the
-  # compile <FLAGS>, but only when CMAKE_CXX_COMPILER_ID STREQUAL "MSVC". With
-  # clang-cl the id is "Clang" (while MSVC stays true), so the workaround is
-  # skipped and rc.exe fails with "RC1106 invalid option: /bigobj". Install the
-  # same override for the clang-cl case, restoring it afterwards.
+  # Keep protobuf compiler flags away from the resource compiler with clang-cl.
   set(__caffe2_CMAKE_RC_COMPILE_OBJECT "${CMAKE_RC_COMPILE_OBJECT}")
   if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     enable_language(RC)
@@ -47,37 +55,21 @@ macro(custom_protobuf_find)
         "<CMAKE_RC_COMPILER> /l0x409 <DEFINES> /fo<OBJECT> <SOURCE>")  # codespell:ignore fo
   endif()
 
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-    message(WARNING "Ancient protobuf forces CMake compatibility")
-    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
-    unset(CMAKE_POLICY_VERSION_MINIMUM)
-  else()
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+  if(__caffe2_protobuf_shared)
+    set(protobuf_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
   endif()
 
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf)
   set(CMAKE_RC_COMPILE_OBJECT "${__caffe2_CMAKE_RC_COMPILE_OBJECT}")
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
-  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND NOT __caffe2_protobuf_shared)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(BUILD_SHARED_LIBS ON)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
   endif()
 
-  # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
-  # result, for older versions, we will manually add alias.
-  if(NOT TARGET protobuf::libprotobuf)
-    add_library(protobuf::libprotobuf ALIAS libprotobuf)
-    add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
-    # There is link error when cross compiling protoc on mobile:
-    # https://github.com/protocolbuffers/protobuf/issues/2719
-    # And protoc is very unlikely needed for mobile builds.
-    if(NOT (ANDROID OR IOS))
-      add_executable(protobuf::protoc ALIAS protoc)
-    endif()
-  endif()
 endmacro()
 
 # Main entry for protobuf. If we are building on Android, iOS or we have hard
@@ -112,28 +104,13 @@ if((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lite
       "the future, and you will need to specify -DBUILD_CUSTOM_PROTOBUF=ON "
       "explicitly.")
   custom_protobuf_find()
-
-  # TODO(jiayq): enable this in the future, when Jenkins Mac support is
-  # properly set up with protobuf installs.
-
-  # message(FATAL_ERROR
-  #     "Protobuf cannot be found. Caffe2 will have to build with libprotobuf. "
-  #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
 include_directories(BEFORE SYSTEM ${__tmp})
 
-# If Protobuf_VERSION is known (true in most cases, false if we are building
-# local protobuf), then we will add a protobuf version check in
-# Caffe2Config.cmake.in.
-if(DEFINED ${Protobuf_VERSION})
-  set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
-else()
-  set(CAFFE2_KNOWN_PROTOBUF_VERSION FALSE)
-  set(Protobuf_VERSION "Protobuf_VERSION_NOTFOUND")
-endif()
+set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
 
 
 # Figure out which protoc to use.

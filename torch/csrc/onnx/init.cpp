@@ -1,7 +1,7 @@
-#include <onnx/onnx_pb.h>
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <torch/csrc/onnx/onnx_pb.h>
 #include <torch/version.h>
 
 #include <torch/csrc/Exceptions.h>

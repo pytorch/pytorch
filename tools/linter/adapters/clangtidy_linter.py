@@ -165,6 +165,8 @@ def check_file(
         f"-I{build_dir}",
         "--extra-arg",
         f"-I{build_dir}/aten/src",
+        "--extra-arg",
+        "-xc++",
     ]
     cmd = [
         binary,
