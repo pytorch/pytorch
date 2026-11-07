@@ -2,6 +2,7 @@
 
 #include <ATen/native/RoundedConversion.h>
 
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 
@@ -12,10 +13,24 @@
 
 namespace at::native {
 
+// The float8_e8m0fnu and float8_e5m3fnu destinations, whose instructions need
+// arch-specific targets, are in separate files that are also built for them
+// (see cmake/Codegen.cmake).
+void to_dtype_rounded_kernel_cuda_e8m0(
+    TensorIteratorBase& iter,
+    c10::RoundingMode mode);
+void to_dtype_rounded_kernel_cuda_e5m3(
+    TensorIteratorBase& iter,
+    c10::RoundingMode mode);
+
+// Internal linkage: the files including this one are built for different
+// architectures, so their kernels must not be merged.
+namespace {
+
 // Each conversion below uses a hardware instruction where one exists for the
-// (src, dst, mode) combination and the target architecture, and otherwise the
-// portable software conversion, which produces the same values (NaN may be
-// encoded differently).
+// (src, dst, mode) combination and the target architecture. Otherwise it uses
+// NVIDIA's emulation of the instruction where noted, or the portable software
+// conversion. All produce the same values, but NaN may be encoded differently.
 template <typename dst_t>
 C10_HOST_DEVICE inline dst_t
 convert_rounded_from_float(float x, c10::RoundingMode mode) {
@@ -89,8 +104,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
 #if CUDA_VERSION >= 12080
   } else if constexpr (std::is_same_v<dst_t, Float8_e8m0fnu>) {
     // Uses cvt.rz/rp.ue8m0x2.f32 when built for sm_100a and similar targets
-    // (RoundedConversionArchSpecific.cu, see cmake/Codegen.cmake), and
-    // emulates it otherwise.
+    // (RoundedConversionE8m0.cu), and NVIDIA's emulation otherwise.
     // The unsigned format rounds the magnitude, so toward_negative is
     // toward_zero. There is no round-to-nearest instruction.
     if (mode != RoundingMode::ToNearestEven) {
@@ -203,10 +217,20 @@ void to_dtype_rounded_loop(TensorIteratorBase& iter, c10::RoundingMode mode) {
   }
 }
 
-// The float8_e8m0fnu and float8_e5m3fnu destinations, whose instructions need
-// arch-specific targets, are in a separate file that is also built for them.
-void to_dtype_rounded_kernel_cuda_arch_specific(
+// Converts to dst_t from any supported source.
+template <typename dst_t>
+void to_dtype_rounded_kernel_cuda_to(
     TensorIteratorBase& iter,
-    c10::RoundingMode mode);
+    c10::RoundingMode mode) {
+  AT_DISPATCH_V2(
+      iter.input_dtype(),
+      "to_dtype_rounded_cuda",
+      AT_WRAP([&] { to_dtype_rounded_loop<scalar_t, dst_t>(iter, mode); }),
+      kDouble,
+      kFloat,
+      kHalf,
+      kBFloat16);
+}
 
+} // namespace
 } // namespace at::native
