@@ -1,10 +1,12 @@
 # Owner(s): ["module: hub"]
 
+import io
 import os
 import tempfile
 import unittest
 import warnings
 import zipfile
+from email.message import Message
 from unittest.mock import patch
 
 import torch
@@ -137,6 +139,35 @@ class TestHub(TestCase):
                 raise AssertionError(
                     f"Expected permissions {expected_permissions}, got {actual_permissions}"
                 )
+
+    def _fake_response(self, body, content_length):
+        response = io.BytesIO(body)
+        headers = Message()
+        headers["Content-Length"] = str(content_length)
+        response.info = lambda: headers
+        return response
+
+    def test_download_url_to_file_truncated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dst = os.path.join(tmpdir, "weights.pth")
+            response = self._fake_response(b"short", 100)
+            with patch.object(hub, "urlopen", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "expected 100 bytes, got 5"):
+                    hub.download_url_to_file(
+                        "https://example.com/weights", dst, progress=False
+                    )
+            self.assertEqual(os.listdir(tmpdir), [])
+
+    def test_download_url_to_file_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dst = os.path.join(tmpdir, "weights.pth")
+            response = self._fake_response(b"complete", 8)
+            with patch.object(hub, "urlopen", return_value=response):
+                hub.download_url_to_file(
+                    "https://example.com/weights", dst, progress=False
+                )
+            with open(dst, "rb") as f:
+                self.assertEqual(f.read(), b"complete")
 
     @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):

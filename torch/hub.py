@@ -757,6 +757,7 @@ def download_url_to_file(
                 file_size = int(content_length[0])
 
             sha256 = hashlib.sha256() if hash_prefix is not None else None
+            downloaded = 0
             with tqdm(
                 total=file_size,
                 disable=not progress,
@@ -771,9 +772,16 @@ def download_url_to_file(
                     f.write(buffer)
                     if sha256 is not None:
                         sha256.update(buffer)
+                    downloaded += len(buffer)
                     pbar.update(len(buffer))
 
             f.close()
+            # urllib returns a short read without raising when the connection
+            # drops before Content-Length bytes arrive.
+            if file_size is not None and downloaded != file_size:
+                raise RuntimeError(
+                    f"incomplete download from {url}: expected {file_size} bytes, got {downloaded}"
+                )
             if sha256 is not None and hash_prefix is not None:
                 digest = sha256.hexdigest()
                 if digest[: len(hash_prefix)] != hash_prefix:
