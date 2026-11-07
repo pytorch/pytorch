@@ -2439,6 +2439,14 @@ with open(sys.argv[1], "w") as f:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("name", ["XPU_RUNTIME", "XPU_DRIVER"])
+    def test_activity_filter_xpu_host_type_not_in_cpu_group(self, name):
+        """Host-side XPU activity types are requested through ProfilerActivity.XPU."""
+        with self.assertRaisesRegex(RuntimeError, "non-member activity type name"):
+            with profile(activities=[{ProfilerActivity.CPU: [name]}]):
+                torch.randn(2)
+
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     # The child deadlocks once the parent has initialized Kineto's XPU profiler,
