@@ -210,9 +210,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
         tokenizer.checkToken(++i, ",");
       }
     }
-    TORCH_INTERNAL_ASSERT(
-        i < tokenizer.size(),
-        "Expected closing bracket ']' in ConfigTokenizer but reached end of config");
+    tokenizer.checkToken(i, "]");
   } else { // Keep this for backwards compatibility
     size_t value = tokenizer.toSizeT(i);
     TORCH_CHECK_VALUE(
