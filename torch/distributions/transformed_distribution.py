@@ -197,9 +197,9 @@ class TransformedDistribution(Distribution):
         sign = 1
         for transform in self.transforms:
             sign = sign * transform.sign
-        if isinstance(sign, int) and sign == 1:
-            return value
-        return sign * (value - 0.5) + 0.5
+        if isinstance(sign, int):
+            return value if sign == 1 else 1 - value
+        return torch.where(sign > 0, value, 1 - value)
 
     def cdf(self, value):
         """

@@ -6568,6 +6568,31 @@ class TestNumericalStabilityDevice(DistributionsTestCase):
                 expected_gradient=tensor_type([0.0]),
             )
 
+    def test_cdf_icdf_small_tail_probabilities(self):
+        # Reference values were computed with mpmath at 40 digits.
+        for dtype, rtol in [(torch.float, 1e-5), (torch.double, 1e-12)]:
+
+            def t(x):
+                return torch.tensor(x, dtype=dtype)
+
+            cases = [
+                (Exponential(t(1.0)).cdf(t(1e-20)), 1e-20),
+                (Weibull(t(1.0), t(2.0)).cdf(t(1e-9)), 1e-18),
+                (
+                    TransformedDistribution(
+                        Exponential(t(1.0)), AffineTransform(t(0.0), t(2.0))
+                    ).cdf(t(1e-20)),
+                    5e-21,
+                ),
+                (Cauchy(t(0.0), t(1.0)).cdf(t(-1e8)), 3.1830988618379066e-09),
+                (Cauchy(t(0.0), t(1.0)).icdf(t(1e-12)), -318309886183.79065),
+            ]
+            for actual, expected in cases:
+                self.assertEqual(actual, t(expected), atol=0, rtol=rtol)
+            self.assertEqual(
+                Cauchy(t(0.0), t(1.0)).icdf(t([0.0, 0.5, 1.0])), t([-inf, 0.0, inf])
+            )
+
 
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
