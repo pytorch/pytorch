@@ -5851,6 +5851,8 @@ def logspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    dtype_was_none = dtype is None
+
     if dtype is None:
         dtype = torch.get_default_dtype()
 
@@ -5877,8 +5879,9 @@ def logspace(
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
-        dtype = default_complex_dtype
-        _dtype = None  # torch.linspace will update the correct dtype
+        if dtype_was_none:
+            dtype = default_complex_dtype
+        _dtype = dtype  
     else:
         _dtype = highest_precision_float(device)
 
