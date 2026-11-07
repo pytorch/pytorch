@@ -4089,6 +4089,46 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
             torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
 
+    def test_native_batch_norm_empty_running_stats(self):
+        # Empty running stats in training mode used to segfault / access violation (#85217).
+        x = torch.full((5, 5), 1.0)
+        w = torch.full((5,), 1.0)
+        b = torch.full((5,), 1.0)
+        rm = torch.full((0,), 1.0)
+        rv = torch.full((0,), 1.0)
+        with self.assertRaisesRegex(RuntimeError, "running_mean should contain 5 elements not 0"):
+            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+
+    def test_native_batch_norm_mismatched_stats_length(self):
+        # Undersized running stats should not cause out-of-bounds heap access (#195547).
+        x = torch.full((5, 5), 1.0)
+        w = torch.full((5,), 1.0)
+        b = torch.full((5,), 1.0)
+        rm = torch.full((2,), 1.0)
+        rv = torch.full((2,), 1.0)
+        with self.assertRaisesRegex(RuntimeError, "running_mean should contain 5 elements not 2"):
+            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+
+    def test_native_batch_norm_invalid_weight_dim(self):
+        # Weight and bias must be 1D tensors matching channel count (#85217).
+        x = torch.full((5, 5), 1.0)
+        w = torch.full((1, 5), 1.0)
+        b = torch.full((5,), 1.0)
+        rm = torch.full((5,), 1.0)
+        rv = torch.full((5,), 1.0)
+        with self.assertRaisesRegex(RuntimeError, "weight should be a 1D tensor, but got 2D"):
+            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+
+    def test_native_batch_norm_invalid_input_dim(self):
+        # Input must have at least 2 dimensions (batch and channel).
+        x = torch.full((5,), 1.0)
+        w = torch.full((5,), 1.0)
+        b = torch.full((5,), 1.0)
+        rm = torch.full((5,), 1.0)
+        rv = torch.full((5,), 1.0)
+        with self.assertRaisesRegex(RuntimeError, "Expected input to have at least 2 dimensions, but got 1"):
+            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)

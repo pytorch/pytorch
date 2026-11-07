@@ -5,6 +5,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
+#include <ATen/native/batch_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/BatchNorm.h>
 #include <c10/util/safe_conv.h>
@@ -179,6 +180,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& save_var) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       isFloatingType(self.scalar_type()), "batch_norm is not implemented for ", self.scalar_type(), " on MPS");
+  
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK_VALUE(has_running_mean == has_running_var,
@@ -204,6 +209,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                                                   bool train,
                                                   double momentum,
                                                   double epsilon) {
+                                                  
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   auto output = at::empty_like(self);
 
   int64_t n_input = self.size(1);

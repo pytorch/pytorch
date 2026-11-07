@@ -2,6 +2,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/native/batch_norm.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
@@ -434,6 +435,10 @@ void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var,
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
+  
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK_VALUE(has_running_mean == has_running_var,
@@ -461,6 +466,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
+  
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
