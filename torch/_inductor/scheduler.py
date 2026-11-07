@@ -10679,6 +10679,13 @@ class Scheduler:
         if isinstance(node2, FusedNestedReductions):
             return False
 
+        if (node1.is_reduction() or node2.is_reduction()) and (
+            (node1.get_buffer_names() | node2.get_buffer_names())
+            & V.graph.no_fuse_with_reduction
+        ):
+            WhyNoFuse(node1, node2)("shared-read cat preserves independent reduction")
+            return False
+
         if isinstance(node1, FusedMixOrderReductions):
             if self._fusion_blocked_by_placement(node1, node2):
                 return False

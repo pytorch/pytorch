@@ -68,6 +68,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .dependencies import MemoryDep
 from .ir import (
     BaseView,
     DtypeView,
@@ -1127,6 +1128,21 @@ def _foreach_map(subgraph, *args, **kwargs):
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    pending = V.graph.pending_shared_read_cats.pop(V.current_node, None)
+    if (
+        pending is not None
+        and pending.result is x
+        and isinstance(x.data, ir.StorageBox)
+        and isinstance(x.data.data, ir.Pointwise)
+        and not config.force_pointwise_cat
+    ):
+        # Only move the terminal cast; producer type promotion and rounding stay put.
+        converted = [to_dtype(inp, dtype, copy=True) for inp in pending.inputs]
+        with (
+            V.set_current_node(pending.node),
+            V.graph.set_current_node(pending.node),
+        ):
+            return _create_shared_read_cat(converted, pending.dim)
     if dtype.is_complex or x.get_dtype().is_complex:
         if x.get_size():
             # Decompose since aa aten fallback is more friendly for c++ codegen.
@@ -2385,6 +2401,101 @@ def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | 
     return reduction_name
 
 
+@dataclasses.dataclass(frozen=True)
+class PendingSharedReadCat:
+    result: TensorBox
+    inputs: tuple[TensorBox, ...]
+    dim: int
+    node: torch.fx.Node
+
+
+def _cat_terminal_cast(node: torch.fx.Node) -> Optional[torch.fx.Node]:
+    if len(node.users) != 1:
+        return None
+    user = next(iter(node.users))
+    if (
+        user.op != "call_function"
+        or user.target != prims.convert_element_type.default
+        or len(user.args) != 2
+        or user.args[0] is not node
+        or user.kwargs
+        or not user.users
+        or not all(n.op == "output" for n in user.users)
+        or node.meta.get("inductor_realize_to_strides", False)
+    ):
+        return None
+    floating_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    val = node.meta.get("val")
+    if (
+        not isinstance(val, torch.Tensor)
+        or val.dtype not in floating_dtypes
+        or user.args[1] not in floating_dtypes
+    ):
+        return None
+    return user
+
+
+def _create_shared_read_cat(inputs: Sequence[TensorBox], dim: int) -> TensorBox:
+    result = TensorBox(ir.ConcatKernel.create(inputs, dim))
+    # Block fusion with reductions only; do not break read reuse between the two pointwise branches.
+    V.graph.no_fuse_with_reduction.update(
+        inp.get_name() for inp in result.data.data.inputs
+    )
+    return result
+
+
+def _cat_inputs_share_read(inputs: Sequence[TensorBox]) -> bool:
+    """Check whether two same-shape pointwise outputs can reuse elementwise reads via horizontal fusion."""
+    if len(inputs) != 2 or config.max_fusion_size < 2 or not is_triton(inputs[0]):
+        return False
+
+    # Symbolic shapes must be provably equal; downstream only a single-user terminal real-float cast is accepted.
+    if not (
+        all(user.op == "output" for user in V.current_node.users)
+        or _cat_terminal_cast(V.current_node) is not None
+    ):
+        return False
+    fx_inputs = V.current_node.args[0]
+    if not all(
+        len(node.users) == 1
+        and V.current_node in node.users
+        and isinstance(node.meta.get("val"), torch.Tensor)
+        and node.meta["val"].is_contiguous()
+        for node in fx_inputs
+    ):
+        return False
+
+    producers = []
+    for inp in inputs:
+        # Only accept unmaterialized standalone producers; avoid copying views or layout-fixed buffers.
+        if not (
+            isinstance(inp, TensorBox)
+            and isinstance(inp.data, ir.StorageBox)
+            and isinstance(inp.data.data, ir.Pointwise)
+        ):
+            return False
+        producers.append(inp.data.data)
+    if producers[0] is producers[1]:
+        return False
+    size = producers[0].get_size()
+    if not V.graph.sizevars.statically_known_list_equals(
+        size, producers[1].get_size()
+    ) or not all(V.graph.sizevars.statically_known_gt(s, 0) for s in size):
+        return False
+
+    # Compare full dependencies (buffers, indices and iteration domains), not just buffer names.
+    # Shared scalar or broadcast reads alone do not justify horizontal fusion.
+    common_reads = producers[0].get_reads() & producers[1].get_reads()
+    return any(
+        isinstance(dep, MemoryDep)
+        and not dep.is_indirect()
+        and not dep.is_scalar()
+        and dep.stride1_for_last_dim(result_for_complex_expression=False)
+        and V.graph.sizevars.statically_known_equals(dep.get_numel(), sympy_product(size))
+        for dep in common_reads
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
@@ -2588,6 +2699,26 @@ def cat(inputs, dim=0):
         horizontal_fuse_cat = (
             all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
         )
+
+        # Shared-read cat: when both inputs are single-consumer pointwise
+        # producers sharing a full-domain read and the cat only feeds graph
+        # outputs (or a single terminal dtype cast), compute over the common
+        # input domain and write the output slices directly instead of a
+        # masked pointwise cat over the concatenated domain.
+        if (
+            not has_multi_consumers
+            and horizontal_fuse_cat
+            and _cat_inputs_share_read(inputs)
+        ):
+            if (cast_node := _cat_terminal_cast(V.current_node)) is not None:
+                # Keep the cat IR legal until the cast consumes it and decides the final output storage.
+                result = pointwise_cat(inputs, dim)
+                V.graph.pending_shared_read_cats[cast_node] = PendingSharedReadCat(
+                    result, tuple(inputs), dim, V.current_node
+                )
+                return result
+            # Compute over the common input domain and write output slices directly so reads and intermediates are reused.
+            return _create_shared_read_cat(inputs, dim)
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
