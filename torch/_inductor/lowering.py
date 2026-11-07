@@ -358,12 +358,33 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     """
     Copy cpu scalar if doesn't not match with given `device`
     """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        # Like eager, a GPU kernel takes a 0-dim CPU operand by value. When the
+        # operand is computed from a CPU tensor that is not 0-dim (and so cannot
+        # be passed by value), realize it into its own 0-dim CPU buffer, which
+        # the scheduler passes as a scalar, instead of fusing that tensor's CPU
+        # pointer into the GPU kernel.
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device is not None
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and any(
+                len(V.graph.get_buffer(name).get_size()) != 0
+                for name in x.get_read_names()
+            )
+        ):
+            if isinstance(x.data, ir.BaseView):
+                # Realizing a view realizes its backing storage, which is
+                # not 0-dim; copy the view into a 0-dim buffer instead.
+                x = clone(x)
+            x.realize()
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
@@ -411,12 +432,25 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+        # The op runs on the first GPU operand's device, as in make_pointwise,
+        # so CPU scalars are checked against it rather than the first operand's.
+        op_device = next(
+            (
+                d
+                for d in (
+                    *(args[i].get_device() for i in args_indices),
+                    *(kwargs[k].get_device() for k in kwargs_indices),
+                )
+                if d is not None and is_gpu(d.type)
+            ),
+            device,
+        )
 
         for i in args_indices:
-            args[i] = maybe_copy_cpu_scalar(args[i], device)
+            args[i] = maybe_copy_cpu_scalar(args[i], op_device)
 
         for k in kwargs_indices:
-            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], op_device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg: Any) -> Any:

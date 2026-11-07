@@ -19977,6 +19977,92 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
         self.assertEqual(eager, compiled)
 
+    @requires_gpu_and_triton
+    def test_cpu_scalar_expr_with_gpu_tensor(self):
+        # A 0-dim CPU operand computed from a 1-element CPU tensor must be
+        # passed to the GPU kernel by value, not as a CPU pointer.
+        def fn(a, b):
+            return a * ((1.0 - b.to(torch.float32).squeeze()) * 2.5) + b[0] * 3
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor([0.005], dtype=torch.float64)
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), torch.compile(fn, dynamic=dynamic)(a, b))
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_view_with_gpu_tensor(self):
+        # squeeze() is the last CPU op, so the operand is a view of a [1]
+        # buffer; it must still reach the GPU kernel as a 0-dim value.
+        def fn(a, b):
+            return a * (b * 2).squeeze()
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor([0.005], dtype=torch.float64)
+        for dynamic in (False, True):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), torch.compile(fn, dynamic=dynamic)(a, b))
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_expr_first_operand_with_gpu_tensor(self):
+        # The GPU device must be found when the CPU operand comes first.
+        def fn_cpu_first(a, b):
+            return ((1.0 - b.float().squeeze()) * 2.5) * a
+
+        def fn_gpu_first(a, b):
+            return a * ((1.0 - b.float().squeeze()) * 2.5)
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor([0.005], dtype=torch.float64)
+        for fn in (fn_cpu_first, fn_gpu_first):
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), torch.compile(fn)(a, b))
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_with_gpu_tensor_cudagraphs(self):
+        # The scalar changes between calls, so the kernel that reads it by
+        # value must not be recorded in the CUDA graph.
+        def fn(a, b):
+            return a * ((1.0 - b.float().squeeze()) * 2.5) + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        fn_c = torch.compile(fn, mode="reduce-overhead")
+        for v in (0.1, 0.2, 0.3, 0.4):
+            b = torch.tensor([v], dtype=torch.float64)
+            self.assertEqual(fn(a, b), fn_c(a, b))
+
+    @requires_gpu_and_triton
+    @config.patch(implicit_fallbacks=True)
+    def test_cpu_scalar_expr_from_custom_op_with_gpu_tensor(self):
+        @torch.library.custom_op("test_inductor::lr_schedule", mutates_args=())
+        def lr_schedule(step: torch.Tensor) -> torch.Tensor:
+            return (step.to(torch.float64) * 1e-3).reshape(1)
+
+        @lr_schedule.register_fake
+        def _(step):
+            return step.new_empty([1], dtype=torch.float64)
+
+        def fn(a, step):
+            lr = lr_schedule(step + 1).to(torch.float32).squeeze()
+            return a * ((1.0 - lr) * 2.5)
+
+        a = torch.rand(20, device=GPU_TYPE)
+        step = torch.tensor(5)
+        self.assertEqual(fn(a, step), torch.compile(fn)(a, step))
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_expr_from_0d_cpu_tensor_with_gpu_tensor(self):
+        def fn(a, b):
+            return a * (b * 2).sin()
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.tensor(0.5)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.assertEqual(fn(a, b), torch.compile(fn)(a, b))
+        # 0-dim CPU inputs are passed by value, so the CPU math stays fused.
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     def test_cpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
             return a + b[0]

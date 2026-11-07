@@ -12059,6 +12059,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
+        # The kernel gets these as values (.item()) at launch, which a CUDA
+        # graph would record only once.
+        if any(
+            dep.name in V.graph.zero_dim_cpu_tensor_list
+            for dep in node.read_writes.reads
+        ):
+            return "reads a 0-dim CPU buffer by value"
+
         # Decided on the FX node so that MultiOutput children, which share their
         # parent's fx_node, are split together with it.
         if isinstance(ir_node, ir.DeviceCopy) or (
