@@ -9585,6 +9585,55 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_utilization(self):
+        # On CUDA these APIs reach NVML through the in-tree ctypes binding
+        # rather than the optional nvidia-ml-py package (issue #118173).
+        self.assertIsInstance(torch.cuda.utilization(), int)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_memory_usage(self):
+        self.assertIsInstance(torch.cuda.memory_usage(), int)
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_list_gpu_processes(self):
+        device = torch.cuda.current_device()
+        _ = torch.empty(1024 * 1024, dtype=torch.int8, device="cuda")
+        torch.cuda.synchronize()
+        output = torch.cuda.list_gpu_processes(device)
+        self.assertIn(f"GPU:{device}", output)
+        if "no processes are running" in output:
+            # NVML can't see per-process memory under WDDM or in containers.
+            self.skipTest("NVML reports no per-process info on this platform")
+        self.assertIn(str(os.getpid()), output)
+
+    def test_nvml_windows_nvsmi_fallback(self):
+        # On Windows, _load falls back to the NVSMI nvml.dll location when the
+        # DLL is not on the default search path, as on some DCH driver installs
+        # (issue #118173). Pure loader logic, exercised on any platform.
+        import torch.cuda._nvml as _nvml
+
+        tried = []
+        fake_lib = object()
+
+        def fake_cdll(name, *args, **kwargs):
+            tried.append(name)
+            if name == "nvml.dll":
+                raise OSError("not found on default search path")
+            return fake_lib
+
+        expected = os.path.join(
+            r"C:\Program Files", "NVIDIA Corporation", "NVSMI", "nvml.dll"
+        )
+        with (
+            patch.object(_nvml, "_lib", None),
+            patch.object(sys, "platform", "win32"),
+            patch.dict(os.environ, {"ProgramFiles": r"C:\Program Files"}),
+            patch.object(_nvml.ctypes, "CDLL", fake_cdll),
+        ):
+            self.assertIs(_nvml._load(), fake_lib)
+        self.assertEqual(tried, ["nvml.dll", expected])
+
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfNonPrimaryRocmPartition
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)

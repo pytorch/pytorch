@@ -1545,7 +1545,7 @@ class TestUtilsInternal(TestCase):
         finally:
             torch._utils_internal.max_clock_rate.cache_clear()
 
-    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+    def test_max_clock_rate_falls_back_to_nvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")
 
@@ -1554,8 +1554,8 @@ class TestUtilsInternal(TestCase):
         cast(Any, triton_testing).nvsmi = nvsmi
         cast(Any, triton).testing = triton_testing
 
-        pynvml = types.ModuleType("pynvml")
-        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        from torch.cuda import _nvml
+
         calls = []
 
         def nvmlDeviceGetMaxClockInfo(handle, clock_type):
@@ -1565,21 +1565,18 @@ class TestUtilsInternal(TestCase):
         def nvmlShutdown():
             calls.append("shutdown")
 
-        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
-        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
-
         torch._utils_internal.max_clock_rate.cache_clear()
         try:
             with (
                 unittest.mock.patch.dict(
                     sys.modules,
-                    {
-                        "triton": triton,
-                        "triton.testing": triton_testing,
-                        "pynvml": pynvml,
-                    },
+                    {"triton": triton, "triton.testing": triton_testing},
                 ),
                 unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    _nvml, "nvmlDeviceGetMaxClockInfo", nvmlDeviceGetMaxClockInfo
+                ),
+                unittest.mock.patch.object(_nvml, "nvmlShutdown", nvmlShutdown),
                 unittest.mock.patch.object(
                     torch.cuda, "_get_pynvml_handler", return_value="handle"
                 ) as get_pynvml_handler,
