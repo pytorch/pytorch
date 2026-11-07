@@ -337,15 +337,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         torch.set_default_device(None)
 
     def test_pop_torch_function_mode(self):
-        m = BaseTorchFunctionMode()
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                out = super().__torch_function__(func, types, args, kwargs or {})
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        m = AddHundred()
         with m:
 
             @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 _pop_torch_function_stack()
-                return x + 1
+                return torch.add(x, 1)
 
-            fn(torch.ones(2, 2))
+            self.assertEqual(fn(torch.ones(2, 2)), torch.full((2, 2), 2.0))
 
             self.assertEqual(_len_torch_function_stack(), 0)
             # reset stack so __exit__ doesn't crash
@@ -974,6 +981,170 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         fn()
         self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_has_torch_function_with_mode_active(self):
+        from torch.overrides import has_torch_function_unary
+
+        def fn(x):
+            if has_torch_function_unary(x):
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        with BaseTorchFunctionMode():
+            self.assertEqual(opt_fn(x), fn(x))
+
+    def test_handle_torch_function_explicit_dispatch(self):
+        from torch.overrides import handle_torch_function, has_torch_function_unary
+
+        def my_op(x):
+            if has_torch_function_unary(x):
+                return handle_torch_function(my_op, (x,), x)
+            return x + 1
+
+        class MyOpMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                if func is my_op:
+                    return args[0] * 10
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return my_op(x) + my_op(x)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with MyOpMode():
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_handle_torch_function_subclass_dispatch(self):
+        from torch.overrides import handle_torch_function
+
+        def fn(x):
+            return handle_torch_function(fn, (x,), x)
+
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return len(types)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        class TypesMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return len(types)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(1).as_subclass(TestSubclass)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), 1)
+        self.assertEqual(opt_fn(x), 1)
+        with TypesMode(), torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(fn(x), 0)
+            self.assertEqual(opt_fn(x), 0)
+
+    def test_handle_torch_function_respects_disable(self):
+        from torch.overrides import handle_torch_function
+
+        def fn(x):
+            return handle_torch_function(fn, (x,), x)
+
+        class AddTen(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func is fn:
+                    return args[0] + 10
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with AddTen(), torch._C.DisableTorchFunction():
+            self.assertRaisesRegex(TypeError, "no implementation found", fn, x)
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "All __torch_function__ overrides returned NotImplemented",
+                opt_fn,
+                x,
+            )
+
+    def test_handle_torch_function_does_not_flatten_relevant_args(self):
+        from torch.overrides import handle_torch_function
+
+        class AddTenTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return args[0] + 10
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def fn(x):
+            return handle_torch_function(fn, ([x],), x)
+
+        x = torch.ones(1).as_subclass(AddTenTensor)
+        self.assertRaisesRegex(TypeError, "no implementation found", fn, x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "All __torch_function__ overrides returned NotImplemented",
+            opt_fn,
+            x,
+        )
+
+    def test_inlined_mode_not_reapplied_at_runtime(self):
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        def fn(x):
+            return torch.add(x, 1) * 2
+
+        x = torch.zeros(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        with AddHundred():
+            expected = fn(x)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_inlined_mode_preserves_backend_modes(self):
+        seen = []
+
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        class RecordingMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                seen.append(func)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def backend(gm, _):
+            def run(*args):
+                with RecordingMode():
+                    return gm(*args)
+
+            return run
+
+        def fn(x):
+            return torch.add(x, 1)
+
+        x = torch.zeros(2)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with AddHundred():
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertTrue(seen)
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
@@ -2193,7 +2364,11 @@ class outer_fn(torch.nn.Module):
             create_block_mask,
             flex_attention,
         )
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.utils._pytree import (
+            _deregister_pytree_node,
+            register_pytree_node,
+            SUPPORTED_NODES,
+        )
 
         # Register BlockMask as pytree node (same as sixlib/attention_mask.py)
         if BlockMask not in SUPPORTED_NODES:
@@ -2204,6 +2379,7 @@ class outer_fn(torch.nn.Module):
                 flatten_with_keys_fn=BlockMask._flatten_with_keys,
                 serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
             )
+            self.addCleanup(_deregister_pytree_node, BlockMask)
 
         d_model, n_heads = 64, 4
         batch_size, seq_len = 2, 32

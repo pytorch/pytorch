@@ -50,18 +50,19 @@ from torch.fx.passes.split_module import split_module, split_module_simple
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_Z3,
     run_tests,
-    TestCase,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
+    TEST_Z3,
+    TestCase,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -88,6 +89,8 @@ def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule
 
 
 class TestFXExperimental(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -2096,6 +2099,7 @@ class {test_classname}(torch.nn.Module):
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
+    @skipIfTorchDynamo("traces 8 full torchvision models (~6 min); this tests an FX pass")
     def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
@@ -2128,7 +2132,8 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
-    @onlyCPU
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
@@ -2255,6 +2260,10 @@ class TestModule(torch.nn.Module):
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
 
+
+class TestNormalizeOperatorsGeneric(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_normalize_quantized_eb(self):
         target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         args = (
@@ -2300,6 +2309,8 @@ if TEST_Z3:
     from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
 
     class TestTranslationValidation(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def _prepare_for_translation_validation(self):
             validator = TranslationValidator()
 
@@ -2467,7 +2478,7 @@ if TEST_Z3:
 
 
 instantiate_parametrized_tests(TestFXExperimental)
-instantiate_device_type_tests(TestNormalizeOperators, globals())
+instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

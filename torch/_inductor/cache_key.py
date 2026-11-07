@@ -4,8 +4,7 @@ import base64
 import dataclasses
 import hashlib
 import json
-from typing import Any, Literal, Protocol
-from typing_extensions import assert_never
+from typing import assert_never, Literal, Protocol
 
 
 CacheKeyComponent = str | bytes | bytearray | memoryview
@@ -70,7 +69,7 @@ class CacheKeyStrategy:
     def key(self, *components: CacheKeyComponent) -> str:
         return f"{self.prefix}{self.digest(*components)}"
 
-    def key_from_json(self, value: Any, *, sort_keys: bool = True) -> str:
+    def key_from_json(self, value: object, *, sort_keys: bool = True) -> str:
         return self.key(json.dumps(value, sort_keys=sort_keys))
 
 

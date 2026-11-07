@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import gc
 import re
+import sys
+import types
 import unittest
 import weakref
 from unittest.mock import patch
@@ -8,6 +10,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import trace_rules
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
@@ -20,12 +23,15 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
+    parametrize,
     requires_accelerator,
     requires_cuda,
     requires_xpu,
@@ -51,6 +57,28 @@ def strip_annotation_desc(gm_str: str) -> str:
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
 
 
+def compile_and_get_synchronize_device_args(sync, x):
+    """Compile a fn calling ``sync()`` and return its synchronize_device args."""
+
+    def fn(x):
+        y = x + 1
+        sync()
+        return y * 2
+
+    torch._dynamo.reset()
+    backend = torch._dynamo.testing.EagerAndRecordGraphs()
+    out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+    torch.testing.assert_close(out, (x + 1) * 2)
+    # fullgraph=True guarantees a single graph.
+    (graph,) = backend.graphs
+    return [
+        node.args
+        for node in graph.graph.nodes
+        if node.target is torch.ops.streams.synchronize_device
+    ]
+
+
+@instantiate_parametrized_tests
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
@@ -107,7 +135,7 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
         triton_kernel_wrapper_functional returns a dict.  If the dict node is
         threaded through control_deps as a pass-through value,
-        decompose_triton_kernel_wrapper_functional later replaces it with a
+        decompose_user_kernel_wrapper_functional later replaces it with a
         raw Python dict (via replace_with_graph -> replace_all_uses_with),
         corrupting the graph and causing KeyError during lowering.
 
@@ -338,6 +366,16 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             torch.ops.streams.synchronize_device.default, ()
         )
 
+    def test_cpu_synchronize_explicit_none(self) -> None:
+        # Eager treats device=None as the current device; Dynamo used to crash
+        # calling torch.device(None).
+        x = torch.ones(2, 2)
+        for sync in (
+            lambda: torch.cpu.synchronize(None),
+            lambda: torch.cpu.synchronize(device=None),
+        ):
+            self.assertEqual(compile_and_get_synchronize_device_args(sync, x), [])
+
     def test_empty_wait_stream_anchors_record(self) -> None:
         self._assert_empty_sync_anchors_record(
             torch.ops.streams.wait_stream.default, (1, 0)
@@ -465,6 +503,254 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
+
+    @parametrize("holder_kind", ("list", "set", "attr"))
+    def test_event_record_after_input_mutation_escapes_via_container(self, holder_kind):
+        # The event is stored into caller-owned state, which is replayed at
+        # subgraph exit and so is reachable from outside the region.
+        class Holder:
+            pass
+
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            if holder_kind == "list":
+                holder.append(e)
+            elif holder_kind == "set":
+                holder.add(e)
+            else:
+                holder.evt = e
+            return x + 1
+
+        holder = {"list": [], "set": set(), "attr": Holder()}[holder_kind]
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), holder
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_return_set(self):
+        # The event is inside a newly-built set returned from the
+        # compiled region.  The set is not in id_to_variable, so the
+        # event is reachable only through all_stack_values -- and only
+        # if the traversal follows HashableTracker dict keys.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            return {e}
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally(self):
+        # The event is created and recorded inside a generator's finally
+        # block -- close_local_generators traces the finally bytecode
+        # after the first escape scan, so this exercises the second scan
+        # at the end of compile_subgraph. Unlike
+        # test_event_record_after_input_mutation_non_escaping_generator_finally
+        # (same shape but no escape), the finally block here appends the
+        # event to a pre-existing list argument, so it does escape and
+        # must error.
+        def gen(s, holder):
+            try:
+                yield
+            finally:
+                e = torch.Event(device="cpu")
+                e.record(s)
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            with s:
+                x.add_(1)
+                g = gen(s, holder)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally_deferred(
+        self,
+    ):
+        # The event is created and recorded in the main function body, so
+        # it is pending but not escaping at the first escape scan (before
+        # close_local_generators runs). It only escapes afterward, when
+        # the generator's finally block appends it to a pre-existing list
+        # -- this must be caught by the second scan, not silently dropped
+        # by the first.
+        def gen(holder, e):
+            try:
+                yield
+            finally:
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+                g = gen(holder, e)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), []
+            )
+
+    @torch._dynamo.config.patch(reorderable_logging_functions={print})
+    def test_event_record_after_input_mutation_escapes_via_debug_locals(self):
+        # Verifies the tx.debug_locals root: codegen_suffix always codegens
+        # debug_locals as an actual call at subgraph exit, so the event has
+        # to be reconstructed there, which the analysis conservatively
+        # treats as an escape.  (can_reorder_logs only admits the event
+        # wrapped in a StringFormatVariable, so print itself receives a
+        # string -- the event is materialized, not handed to user code.)
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            print("{}".format(e))  # noqa: UP032 (needs .format() to trace as StringFormatVariable)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_raises_when_input_stream_waits(self):
+        # The event never leaves the region, but s2 waits on it and is
+        # therefore ordered after the record point -- and the caller owns s2,
+        # so synchronizing it outside observes the same stale input.
+        # This errors while tracing rather than through the escape scan: a
+        # stream the caller passed in is reachable from outside by
+        # construction, so there is nothing to prove about reachability.
+        def fn(x, s2):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            e.wait(s2)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), torch.Stream(device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_returned_waiting_stream(
+        self,
+    ):
+        # s2 waits on the event and is then returned, so synchronizing it
+        # outside observes the pre-mutation input.  Here s2 is created inside
+        # the region and has no source, so only the escape scan can catch it.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            return s2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_event_on_waiting_stream(
+        self,
+    ):
+        # Neither the original event nor the waiting stream escapes, but a
+        # second event recorded on that stream does.  It is ordered after
+        # e.record(), which is still before the epilogue copy updates x, so
+        # synchronizing on it outside observes the stale input.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            e2 = torch.Event(device="cpu")
+            e2.record(s2)
+            return e2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    @parametrize("second_mutation", (False, True))
+    def test_event_record_after_input_mutation_escapes_via_recording_stream(
+        self, second_mutation
+    ):
+        # Returning the stream the event was recorded on.  Synchronizing that
+        # stream from outside is ordered after x is updated only while it is
+        # also the last stream to write x, because the epilogue copy is
+        # scheduled onto the last writer: without the second mutation it does
+        # cover the copy, and with it the copy follows s2 instead, so a sync
+        # on s lands after the record but before x is updated.
+        #
+        # Both must raise.  Which stream ends up owning the copy is decided
+        # when the backend schedules the graph, long after this check runs --
+        # with an eager backend there is no epilogue copy at all -- so the
+        # two cases are indistinguishable here and the first is a deliberate
+        # over-approximation.  main rejects both at record time.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            if second_mutation:
+                s2 = torch.Stream(device="cpu")
+                with s2:
+                    x.add_(1)
+            return s
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_waited_on_stream(self):
+        # Ordering is transitive: s2 waits on the event, s3 waits on s2, so s3
+        # is ordered after the record point as well.  Only s3 is returned, so
+        # synchronizing it outside observes the stale input even though neither
+        # the event nor s2 ever leaves the region.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            s3 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            s3.wait_stream(s2)
+            return s3
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
 
 
 @requires_accelerator
@@ -1702,6 +1988,119 @@ class <lambda>(torch.nn.Module):
         )
         self.assertEqual(len(control_deps_nodes), 2)
 
+    def test_control_deps_multiple_waiters_thread_latest_passthrough(
+        self, device
+    ) -> None:
+        consumer1 = torch.Stream(device=device)
+        consumer2 = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        join1 = torch.Event(device=device)
+        join2 = torch.Event(device=device)
+
+        def fn(x) -> torch.Tensor:
+            default_stream = torch.accelerator.current_stream(device)
+            y = x + 1
+            fork.record(default_stream)
+
+            with consumer1:
+                fork.wait()
+                out1 = y * 2
+                join1.record()
+
+            with consumer2:
+                fork.wait()
+                out2 = y * 3
+                join2.record()
+
+            default_stream.wait_event(join1)
+            default_stream.wait_event(join2)
+            return out1 + out2
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
+        gm = fw_graphs[0]
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        import operator
+
+        wait_ctrls = []
+        for ctrl in gm.graph.find_nodes(op="call_function", target=control_deps):
+            subgraph = getattr(gm, ctrl.args[1].target)
+            waits = subgraph.graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+            if waits:
+                wait_ctrls.append((waits[0].args[0], ctrl))
+
+        event_ids = [event_id for event_id, _ in wait_ctrls]
+        fork_waits = [
+            ctrl for event_id, ctrl in wait_ctrls if event_ids.count(event_id) == 2
+        ]
+        muls = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mul.Tensor)
+
+        self.assertEqual(len(fork_waits), 2)
+        self.assertEqual(len(muls), 2)
+        self.assertIs(muls[1].args[0].target, operator.getitem)
+        self.assertIs(muls[1].args[0].args[0], fork_waits[1])
+        gm.graph.lint()
+
+    @parametrize("sync_kind", ("wait_stream", "full_barrier"))
+    def test_intervening_sync_updates_event_passthrough(
+        self, device, sync_kind
+    ) -> None:
+        import operator
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        intervening_stream = torch.Stream(device=device)
+        consumer_stream = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        intervening_event = torch.Event(device=device)
+
+        def fn(x) -> torch.Tensor:
+            default_stream = torch.accelerator.current_stream(device)
+            y = x + 1
+            fork.record(default_stream)
+
+            if sync_kind == "wait_stream":
+                intervening_stream.wait_stream(default_stream)
+            else:
+                default_stream.synchronize()
+                intervening_event.record(intervening_stream)
+
+            with consumer_stream:
+                fork.wait()
+                return y * 2
+
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
+        gm = fw_graphs[0]
+        wrap_all_sync_nodes_with_control_deps(gm)
+        event_waits = []
+        for ctrl in gm.graph.find_nodes(op="call_function", target=control_deps):
+            subgraph = getattr(gm, ctrl.args[1].target)
+            waits = subgraph.graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+            if waits:
+                event_waits.append(ctrl)
+
+        consumers = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mul.Tensor
+        )
+        self.assertEqual(len(event_waits), 1)
+        self.assertEqual(len(consumers), 1)
+        self.assertIs(consumers[0].args[0].target, operator.getitem)
+        self.assertIs(consumers[0].args[0].args[0], event_waits[0])
+        gm.graph.lint()
+
     def test_control_deps_prevents_invalid_reordering(self, device) -> None:
         """
         Test that control_deps creates proper data dependencies that prevent invalid reordering.
@@ -2144,6 +2543,37 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device)
             )
 
+    @parametrize("record_via", ("explicit_event", "no_arg"))
+    def test_event_record_after_input_mutation_escapes_via_stream_record_event(
+        self, device, record_via
+    ):
+        # A second event recorded on the waiting stream is ordered after the
+        # record point as well, so returning it observes the stale input even
+        # though neither the original event nor the waiting stream ever leaves
+        # the region.  Parametrized over stream.record_event(event) and the
+        # no-argument form that creates the event itself, which are separate
+        # implementations.
+        # Accelerator-only: the no-argument form calls the real record_event()
+        # while tracing, which CPU rejects before the check is ever reached.
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            if record_via == "no_arg":
+                return s2.record_event()
+            e2 = torch.Event(device=device)
+            s2.record_event(e2)
+            return e2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device)
+            )
+
     def test_event_record_after_input_mutation_through_view(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2173,6 +2603,259 @@ class GraphModule(torch.nn.Module):
                 torch.Event(device=device),
             )
 
+    @parametrize("via_stream_record_event", (False, True))
+    def test_event_record_after_input_mutation_non_escaping_no_error(
+        self, device, via_stream_record_event
+    ):
+        # The record-after-mutation hazard needs an observer outside the
+        # compiled region; an event created during tracing that never
+        # escapes (not returned, not stored) cannot have one, so this
+        # must compile.  Parametrized over how the event is obtained --
+        # torch.Event(...).record() vs. stream.record_event() -- since those
+        # are separate implementations that share only the record-time check.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                if via_stream_record_event:
+                    e = s.record_event()
+                else:
+                    e = torch.Event(device=device)
+                    e.record()
+                e.wait()
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+        self.assertTrue(
+            any(node.target is torch.ops.streams.wait_event for node in nodes),
+            "wait_event op not found in graph",
+        )
+
+    def test_event_record_after_input_mutation_non_escaping_cross_stream_wait(
+        self, device
+    ):
+        # An in-graph wait is safe because downstream ops read the
+        # functionalized buffer rather than x's real storage, so the pending
+        # epilogue copy cannot make them stale.  That is only genuinely
+        # exercised when the wait is issued from a stream other than the
+        # recording one, hence passing s2 explicitly -- a no-argument wait()
+        # would resolve to whatever stream happens to be current instead.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            e.wait(s2)
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        record_node = next(
+            n for n in nodes if n.target is torch.ops.streams.record_event
+        )
+        wait_node = next(n for n in nodes if n.target is torch.ops.streams.wait_event)
+        # args are (event_index, stream_index); same event, different
+        # streams -- this is what makes the wait a genuine cross-stream
+        # wait rather than the ambient-stream wait _get_stream_arg would
+        # resolve a no-arg wait() to.
+        self.assertEqual(record_node.args[0], wait_node.args[0])
+        self.assertNotEqual(record_node.args[1], wait_node.args[1])
+
+    @parametrize("propagate_via", ("wait_event", "wait_stream", "record_event"))
+    def test_event_record_after_input_mutation_non_escaping_propagated(
+        self, device, propagate_via
+    ):
+        # Each variant adds another object ordered after the record point: a
+        # stream waiting on the event, a stream waiting on that stream, an
+        # event recorded on it.  None of them leaves the region, so nothing
+        # outside can observe the stale input and all three must compile.
+        # This is the guard against the propagation over-firing.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            if propagate_via == "wait_stream":
+                torch.Stream(device=device).wait_stream(s2)
+            elif propagate_via == "record_event":
+                s2.record_event(torch.Event(device=device))
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        # Compiling at all is the real assertion; comparing the full sequence
+        # is what keeps the three variants distinguishable, since they share
+        # the same record/wait prefix.
+        stream_ops = [
+            node.target
+            for node in backend.graphs[0].graph.nodes
+            if node.target
+            in (
+                torch.ops.streams.record_event,
+                torch.ops.streams.wait_event,
+                torch.ops.streams.wait_stream,
+            )
+        ]
+        expected_ops = [torch.ops.streams.record_event, torch.ops.streams.wait_event]
+        if propagate_via == "wait_stream":
+            expected_ops.append(torch.ops.streams.wait_stream)
+        elif propagate_via == "record_event":
+            expected_ops.append(torch.ops.streams.record_event)
+        self.assertEqual(stream_ops, expected_ops)
+
+    def test_event_record_after_input_mutation_non_escaping_generator_finally(
+        self, device
+    ):
+        # The event is created and recorded inside a generator's finally
+        # block and never escapes -- close_local_generators traces the
+        # finally bytecode after the first escape scan, so this exercises
+        # the second scan at the end of compile_subgraph.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def gen(s):
+            try:
+                yield
+            finally:
+                e = torch.Event(device=device)
+                e.record(s)
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                g = gen(s)
+                next(g)
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+
+    @parametrize("container", ("set", "dict"))
+    def test_event_record_after_input_mutation_non_escaping_removed_from_container(
+        self, device, container
+    ):
+        # The event goes into a container and is taken back out again. Only the
+        # current contents get reconstructed, so nothing outside can reach it;
+        # the container's construction-time snapshot must not count as an
+        # escape.
+        def fn(x):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            if container == "set":
+                holder = {e}
+                holder.remove(e)
+            else:
+                holder = {"a": e}
+                holder.pop("a")
+            return holder
+
+        # Separate inputs because fn mutates its argument.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x_compiled)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(out, expected)
+        self.assertEqual(x_eager, x_compiled)
+
+    def test_event_record_after_input_mutation_non_escaping_generator_local_holder(
+        self, device
+    ):
+        # The finally block records an event on a stream, then stores it on an
+        # object it also creates and drops. That object outlives pruning only
+        # so the generator can be closed, so it must not be treated as a
+        # surviving escape root.
+        class Holder:
+            pass
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def gen(s):
+            try:
+                yield
+            finally:
+                e = torch.Event(device=device)
+                e.record(s)
+                h = Holder()
+                h.evt = e
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                g = gen(s)
+                next(g)
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2201,20 +2884,6 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device=device)
         )
 
-    def test_event_not_returned_no_error(self, device):
-        def fn(x):
-            s = torch.Stream(device=device)
-            e = torch.Event(device=device)
-            with s:
-                x.add_(1)
-                e.record()
-            return x
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
-            )
-
     @unittest.skipIf(
         IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/178155",
@@ -2228,6 +2897,28 @@ class GraphModule(torch.nn.Module):
         s = torch.Stream(device=device)
         e = device_mod.Event()
         s.record_event(e)
+
+    @parametrize("api", ["positional", "kwarg", "accelerator"])
+    def test_synchronize_explicit_none_matches_no_arg(self, device, api):
+        # Eager treats device=None as the current device, so it must trace to the
+        # same graph as the no-arg call instead of crashing in torch.device(None).
+        device_mod = getattr(torch, torch.device(device).type)
+        if api == "positional":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(None)  # noqa: E731
+        elif api == "kwarg":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(device=None)  # noqa: E731
+        else:
+            sync_default = torch.accelerator.synchronize
+            sync_none = lambda: torch.accelerator.synchronize(None)  # noqa: E731
+
+        x = torch.ones(2, 2, device=device)
+        expected = compile_and_get_synchronize_device_args(sync_default, x)
+        self.assertEqual(len(expected), 1)
+        self.assertEqual(
+            compile_and_get_synchronize_device_args(sync_none, x), expected
+        )
 
     def test_event_synchronize_tracing(self, device):
         def fn(x):
@@ -2687,6 +3378,39 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
+    def test_nested_compile_in_backend_preserves_user_objects(self, device):
+        """A compile run from inside another compile's backend must not clobber
+        the outer compile's external object registry before the outer pre-graph
+        bytecode is generated, and the inner call's runtime object table must
+        not leak into AOTAutograd tracing of the outer graph."""
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        inner = torch.compile(
+            lambda t: t * torch.accelerator.current_stream(device).stream_id,
+            backend="eager",
+        )
+        aot_eager = aot_autograd(fw_compiler=nop)
+
+        def backend(gm, example_inputs):
+            inner(torch.ones(2, device=device))
+            return aot_eager(gm, example_inputs)
+
+        def fn(x, s):
+            with torch.accelerator.current_stream(device):
+                cur_id = torch.accelerator.current_stream(device).stream_id
+                y = x + 1
+            with s:
+                return y * 2, cur_id
+
+        x = torch.ones(2, device=device)
+        s = torch.Stream(device=device)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+        with torch.Stream(device=device) as other:
+            self.assertEqual(compiled(x, s), fn(x, s))
+            self.assertEqual(compiled(x, s)[1], other.stream_id)
+
     def test_recorded_events_append_runtime_objects(self, device):
         events = []
 
@@ -2781,6 +3505,45 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    def test_synchronize_indexless_device_resolves_current_device(self) -> None:
+        # Single-GPU counterpart to the 2-GPU test in test_compile_on_one_rank.py,
+        # since the dynamo shards are single-GPU. Patching current_device_index
+        # drives both the trace-time resolution and the guard that checks it, so a
+        # second current device must produce a second graph carrying the new index.
+        def f():
+            torch.cuda.synchronize(torch.device("cuda"))
+            return 1
+
+        def emitted():
+            return [
+                n.args
+                for g in backend.graphs
+                for n in g.graph.nodes
+                if "synchronize_device" in str(n.target)
+            ]
+
+        torch._dynamo.reset()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        # Devices 3 and 5 needn't exist, so keep Dynamo's current-stream setup and the
+        # synchronize itself off the hardware.
+        stream = torch.accelerator.current_stream()
+        synced = []
+        for index in (3, 5):
+            with (
+                patch.object(
+                    torch.accelerator, "current_device_index", return_value=index
+                ),
+                patch.object(torch.accelerator, "current_stream", return_value=stream),
+                patch.object(
+                    torch.accelerator, "synchronize", side_effect=synced.append
+                ),
+            ):
+                compiled()
+
+        self.assertEqual(emitted(), [("cuda", 3), ("cuda", 5)])
+        self.assertEqual(synced, [torch.device("cuda", 3), torch.device("cuda", 5)])
+
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
@@ -3164,6 +3927,378 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+
+def _accelerator_has_stream_api() -> bool:
+    """Whether the default accelerator provides the stream APIs the traced
+    tests need and routes current_stream into the handler table (torch.mps
+    has the APIs but its current_stream is in Dynamo's MOD_SKIPLIST)."""
+    if not torch.accelerator.is_available():
+        return False
+    module = torch.get_device_module(torch.accelerator.current_accelerator().type)
+    if not (hasattr(module, "Stream") and hasattr(module, "current_stream")):
+        return False
+    return module.current_stream in TorchInGraphFunctionVariable._get_handlers()
+
+
+class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
+    """
+    Regression test for https://github.com/pytorch/pytorch/pull/192970
+    Issue: https://github.com/pytorch/pytorch/issues/192969
+
+    Verifies that out-of-tree PrivateUse1 backends registered via DeviceInterface
+    get correct stream handling in Dynamo tracing:
+
+    - `current_stream` of the default accelerator's device module (e.g.
+      `torch.npu` for torch_npu) is intercepted by the handler, so `wait_stream`
+      receives valid stream indices and not `None`.
+    - `current_stream` of any other registered backend or device type fails
+      loudly with a device mismatch graph break instead of silently returning
+      the tracked stream of the wrong device.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        # Class cleanups run in LIFO order and, unlike tearDownClass, also run
+        # when setUpClass itself fails midway.  Registered first so it runs
+        # last: the handler table must be rebuilt only after the fake backend
+        # is gone from the interface registry and the trace rules.
+        cls.addClassCleanup(TorchInGraphFunctionVariable._get_handlers.cache_clear)
+
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def current_stream():
+                # Stand-in for an out-of-tree backend's current_stream, on a
+                # device other than the default accelerator so that silently
+                # substituting the tracked stream would be observable.  When
+                # the handler is correctly registered, Dynamo intercepts the
+                # call during tracing and never runs this function.
+                return torch.Stream(device="cpu")
+
+            # Override the base stubs: has_triton() walks all registered
+            # interfaces and would otherwise raise NotImplementedError from
+            # them (noise in compilation-metrics logging).
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return False
+
+        # Patch __module__/__qualname__ so that trace_rules string matching
+        # can resolve "torch.fake_device.current_stream" correctly.
+        fn = FakeDeviceInterface.current_stream
+        original_module = fn.__module__
+        fn.__module__ = "torch.fake_device"
+        fn.__qualname__ = "current_stream"
+        cls.addClassCleanup(setattr, fn, "__module__", original_module)
+
+        fake_device_module = types.ModuleType("fake_device")
+        fake_device_module.current_stream = fn
+        torch.fake_device = fake_device_module
+        cls.addClassCleanup(lambda: delattr(torch, "fake_device"))
+        sys.modules["torch.fake_device"] = fake_device_module
+        cls.addClassCleanup(sys.modules.pop, "torch.fake_device", None)
+        register_interface_for_device("fake_device", FakeDeviceInterface)
+        cls.addClassCleanup(device_interfaces.pop, "fake_device", None)
+
+        rule = dict.fromkeys(
+            ["torch.fake_device.current_stream"],
+            TorchInGraphFunctionVariable,
+        )
+        trace_rules.torch_name_rule_map.append(rule)
+        cls.addClassCleanup(trace_rules.torch_name_rule_map.remove, rule)
+        trace_rules.clear_lru_cache()
+        cls.addClassCleanup(trace_rules.clear_lru_cache)
+
+        # Rebuild the handler table so it includes the fake backend.
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+    def test_handler_table_contains_fake_backend(self):
+        """
+        CPU-runnable smoke test for the registration loop (the traced tests
+        below all require an accelerator): the fake backend's current_stream
+        must map to the same handler as torch.accelerator.current_stream, and
+        the abstract DeviceInterface.current_stream stub must not leak in as a
+        handler key (regression: the stub was once installed, which made
+        current_stream() of non-overriding interfaces silently return the
+        tracked stream instead of raising NotImplementedError).
+        """
+        handlers = TorchInGraphFunctionVariable._get_handlers()
+        self.assertIn(torch.fake_device.current_stream, handlers)
+        self.assertIs(
+            handlers[torch.fake_device.current_stream],
+            handlers[torch.accelerator.current_stream],
+        )
+        self.assertNotIn(DeviceInterface.current_stream, handlers)
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_wait_stream_graph_has_valid_index(self):
+        """
+        A newly created stream waits on `current_stream()` of the default
+        accelerator's device module; the handler must resolve it to a
+        StreamVariable with a valid stream index instead of None.
+
+        Which registration path this exercises depends on the machine: on
+        cuda/xpu it goes through the explicit @register entry (guarding that
+        the no-arg reverse lookup does not false-positive), while on
+        PrivateUse1 accelerator hardware (e.g. NPU) it is the literal
+        #192969 reproducer - without the registration loop,
+        `wait_stream(<stream>, None)` raises a RuntimeError from the C++
+        streams layer. The loop's success path has its own CI-runnable test
+        below (test_registration_loop_wait_stream_success).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+
+        def fn(x):
+            s = device_module.Stream()
+            s.wait_stream(device_module.current_stream())
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        # Execute the compiled function.
+        # Without the fix, this raises:
+        #   RuntimeError: streams::wait_stream() Expected a value of type 'int'
+        #   for argument 'waiting_stream_index' but instead found type 'NoneType'.
+        compiled_fn(torch.tensor(1.0))
+
+        # Compilation and execution succeeded: verify the graph structure.
+        self.assertEqual(len(backend.graphs), 1, "Should compile in a single frame")
+        graph = backend.graphs[0].graph
+
+        wait_stream_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and "wait_stream" in str(n.target)
+        ]
+
+        self.assertTrue(
+            len(wait_stream_nodes) > 0,
+            "No wait_stream node found in the compiled graph",
+        )
+
+        for node in wait_stream_nodes:
+            self.assertIsInstance(node.args[0], int)
+            self.assertEqual(
+                node.args[1],
+                CURRENT_STREAM_INDEX,
+                "wait_stream should reference the ambient current stream "
+                "(regression from #192969!)",
+            )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_registration_loop_wait_stream_success(self):
+        """
+        Regression test for the registration loop's success path (the #192969
+        fix itself): a backend whose current_stream is reachable ONLY through
+        the get_registered_device_interfaces() loop - not the explicit
+        @register list - must trace to a valid stream index. The fake backend
+        is registered under "<accelerator>:fake"; the reverse lookup strips
+        the ":fake" suffix, so the mismatch check passes and the handler
+        returns the tracked current stream. Without the loop, wait_stream
+        receives None (the #192969 error). The sibling test above cannot
+        cover this on CI: cuda/xpu current_stream already had an explicit
+        @register before this PR.
+        """
+        # Registered first so it runs last, after this test's registrations
+        # are undone (same ordering rationale as setUpClass).
+        self.addCleanup(TorchInGraphFunctionVariable._get_handlers.cache_clear)
+
+        device_type = torch.accelerator.current_accelerator().type
+
+        class FakeAccInterface(DeviceInterface):
+            @staticmethod
+            def current_stream():
+                # Never executed under compile: the handler intercepts.
+                return torch.Stream(device="cpu")
+
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return False
+
+        fn = FakeAccInterface.current_stream
+        original_module = fn.__module__
+        fn.__module__ = "torch.fake_acc"
+        fn.__qualname__ = "current_stream"
+        self.addCleanup(setattr, fn, "__module__", original_module)
+
+        fake_acc_module = types.ModuleType("fake_acc")
+        fake_acc_module.current_stream = fn
+        torch.fake_acc = fake_acc_module
+        self.addCleanup(lambda: delattr(torch, "fake_acc"))
+        sys.modules["torch.fake_acc"] = fake_acc_module
+        self.addCleanup(sys.modules.pop, "torch.fake_acc", None)
+        register_interface_for_device(f"{device_type}:fake", FakeAccInterface)
+        self.addCleanup(device_interfaces.pop, f"{device_type}:fake", None)
+
+        rule = dict.fromkeys(
+            ["torch.fake_acc.current_stream"],
+            TorchInGraphFunctionVariable,
+        )
+        trace_rules.torch_name_rule_map.append(rule)
+        self.addCleanup(trace_rules.torch_name_rule_map.remove, rule)
+        trace_rules.clear_lru_cache()
+        self.addCleanup(trace_rules.clear_lru_cache)
+
+        # Rebuild the handler table so it includes the fake accelerator
+        # backend registered above.
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+        device_module = torch.get_device_module(device_type)
+
+        def fn_under_test(x):
+            s = device_module.Stream()
+            s.wait_stream(torch.fake_acc.current_stream())
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn_under_test, backend=backend, fullgraph=True)(torch.tensor(1.0))
+
+        self.assertEqual(len(backend.graphs), 1, "Should compile in a single frame")
+        graph = backend.graphs[0].graph
+
+        wait_stream_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and "wait_stream" in str(n.target)
+        ]
+
+        self.assertTrue(
+            len(wait_stream_nodes) > 0,
+            "No wait_stream node found in the compiled graph",
+        )
+
+        for node in wait_stream_nodes:
+            self.assertIsInstance(node.args[0], int)
+            self.assertEqual(
+                node.args[1],
+                CURRENT_STREAM_INDEX,
+                "wait_stream should reference the ambient current stream",
+            )
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_mixed_backend_current_stream_graph_breaks(self):
+        """
+        Mixing device types must fail loudly instead of silently returning the
+        tracked stream of the wrong device:
+        - a registered backend that is not the default accelerator (here
+          `torch.fake_device`)
+        - the default accelerator's module queried for a foreign device type
+          (the other GPU backend) or for 'cpu'
+        An int device index is not a mismatch: it is an index into the called
+        module's own device.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        other_type = "cuda" if device_type != "cuda" else "xpu"
+
+        def int_arg_fn(x):
+            device_module.current_stream(0)
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(int_arg_fn, backend=backend, fullgraph=True)(torch.tensor(1.0))
+        self.assertEqual(len(backend.graphs), 1)
+        torch._dynamo.reset()
+
+        def fake_backend_fn(x):
+            torch.fake_device.current_stream()
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fake_backend_fn, backend="eager", fullgraph=True)(
+                torch.tensor(1.0)
+            )
+        msg = str(ctx.exception)
+        self.assertIn("Dynamo stream mismatch", msg)
+        self.assertIn("fake_device", msg)
+        torch._dynamo.reset()
+
+        for foreign_type in (other_type, "cpu"):
+
+            def foreign_fn(x):
+                device_module.current_stream(foreign_type)
+                return x + 1
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+                torch.compile(foreign_fn, backend="eager", fullgraph=True)(
+                    torch.tensor(1.0)
+                )
+            msg = str(ctx.exception)
+            self.assertIn("Dynamo stream mismatch", msg)
+            self.assertIn(foreign_type, msg)
+            self.assertIn(device_type, msg)
+            torch._dynamo.reset()
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_foreign_backend_stream_not_silently_substituted(self):
+        """
+        Variant of the scenario in
+        https://gist.github.com/guilhermeleobas/138d6e71069e00efecf7b6294dc989d1:
+        a registered backend whose current_stream() returns a stream on a
+        foreign device, with the stream returned out of the compiled region.
+        Dynamo's stream state cannot represent that stream, so tracing must
+        fail loudly; silently returning the tracked accelerator stream would
+        make compiled diverge from eager (different device and stream_id).
+        """
+
+        def fn(x):
+            return torch.fake_device.current_stream(), x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        msg = str(ctx.exception)
+        self.assertIn("Dynamo stream mismatch", msg)
+        self.assertIn("fake_device", msg)
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_bad_device_arg_is_clean_graph_break(self):
+        """
+        A bogus device argument must surface as the structured "bad device
+        argument" graph break, not escape the handler as an internal error
+        (regression: the device mismatch check once raised ValueError from
+        torch.device() outside its try block).
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+
+        def fn(x):
+            device_module.current_stream("bogus_device")
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+        self.assertIn("bad device argument", str(ctx.exception))
 
 
 if __name__ == "__main__":

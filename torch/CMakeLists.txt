@@ -64,7 +64,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
-    ${TORCH_ROOT}/third_party/kineto/libkineto/include
+    ${TORCH_ROOT}/torch/csrc/profiler/kineto/libkineto/include
     ${TORCH_ROOT}/third_party/cpp-httplib
     ${TORCH_ROOT}/third_party/nlohmann/include
 
@@ -106,25 +106,25 @@ set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-set(TORCH_PYTHON_LINK_FLAGS "")
+set(TORCH_PYTHON_LINK_OPTIONS)
 
 if(MSVC)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "/NODEFAULTLIB:LIBCMT.LIB")
     # Python headers use #pragma comment(lib, "pythonXX") which makes MSVC search
     # for the library by bare name.  Add the directory so the linker can find it.
     foreach(_pylib IN LISTS Python_LIBRARIES)
       if(_pylib MATCHES "python[0-9].*\\.lib$")
         get_filename_component(_pylib_dir "${_pylib}" DIRECTORY)
-        string(APPEND TORCH_PYTHON_LINK_FLAGS " /LIBPATH:\"${_pylib_dir}\"")
+        list(APPEND TORCH_PYTHON_LINK_OPTIONS "/LIBPATH:${_pylib_dir}")
         break()
       endif()
     endforeach()
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${Python_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
-      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+      list(APPEND TORCH_PYTHON_LINK_OPTIONS "/DEBUG:FULL")
     endif()
 elseif(APPLE)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "LINKER:-undefined,dynamic_lookup")
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -449,8 +449,8 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
    target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
-if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+if(TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(torch_python PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -487,10 +487,10 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
-  #    headers baked from the submodule build dir; no nccl4py).
+  #    headers baked from the submodule build dir; no nccl-extensions).
   #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
-  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
-  #    headers also from nccl4py, so nothing is baked).
+  #    and preloaded from the nccl-extensions wheel at runtime (JIT headers
+  #    also from nccl-extensions, so nothing is baked).
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -504,8 +504,8 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     set_target_properties(_nccl_ep PROPERTIES
       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
     if(USE_SYSTEM_NCCL)
-      # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
-      # dir up from torch/ via $ORIGIN/..) at import.
+      # Dynamic: retain the legacy nccl/ep/lib search path. nccl-extensions'
+      # CUDA-specific library is preloaded by _prepare_nccl_extensions().
       set_target_properties(_nccl_ep PROPERTIES
         INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
     else()
@@ -583,10 +583,10 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
   target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
-  if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if(MSVC AND TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(nnapi_backend PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
   endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
-set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_OPTIONS "${TORCH_PYTHON_LINK_OPTIONS}" PARENT_SCOPE)

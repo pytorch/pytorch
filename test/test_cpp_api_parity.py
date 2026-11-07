@@ -21,6 +21,8 @@ import torch.testing._internal.common_utils as common
 PRINT_CPP_SOURCE = False
 
 devices = ["cpu", "cuda"]
+if common.TEST_XPU:
+    devices.append("xpu")
 if common.TEST_PRIVATEUSE1:
     devices.append(common.TEST_PRIVATEUSE1_DEVICE_TYPE)
 
