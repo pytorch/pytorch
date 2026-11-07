@@ -1,19 +1,26 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import ReinplaceCounters
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    reinplace_inplaceable_ops,
+    reinplace_inplaceable_ops_core,
+)
+from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -98,6 +105,122 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         inp2 = (inp[0].clone(), inp[1].clone())
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
+
+    def test_input_copyback_preserves_earlier_result(self):
+        def f(x, indices, value, replacement):
+            updated = aten.index_put.default(x, [indices], value)
+            x.copy_(replacement)
+            return updated[1]
+
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4).clone()
+        indices = torch.tensor([0])
+        value = torch.full((4,), 10.0)
+        replacement = torch.full_like(x, -1.0)
+        expected_input = x.clone()
+        expected = f(expected_input, indices, value, replacement)
+        gm = make_fx(f, tracing_mode="fake")(x, indices, value, replacement)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual_input = x.clone()
+        self.assertEqual(gm(actual_input, indices, value, replacement), expected)
+        self.assertEqual(actual_input, expected_input)
+
+    def test_input_copyback_preserves_earlier_result_e2e(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, indices, values, replacement):
+                updated = x.index_put((indices,), values)
+                x.copy_(replacement)
+                return updated[1]
+
+        model = Model()
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4).clone()
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        replacement = torch.full_like(x, -1.0)
+        expected_input = x.clone()
+        actual_input = x.clone()
+        expected = model(expected_input, indices, values, replacement)
+        actual = torch.compile(model, fullgraph=True)(
+            actual_input, indices, values, replacement
+        )
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_input, expected_input)
+
+    @parametrize("destination", ["input", "view", "temporary"])
+    @parametrize("overwrite", ["copy", "add"])
+    def test_existing_mutation_preserves_functional_result(self, destination, overwrite):
+        def f(x, indices, values, replacement):
+            base = x.cos() if destination == "temporary" else x
+            target = base.view_as(base) if destination == "view" else base
+            updated = target.index_put((indices,), values)
+            base.copy_(updated.view_as(base))
+            if overwrite == "copy":
+                base.copy_(replacement)
+            else:
+                base.add_(100)
+            return updated[1]
+
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4).clone()
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        replacement = torch.full_like(x, -1.0)
+        expected_input = x.clone()
+        expected = f(expected_input, indices, values, replacement)
+        gm = make_fx(f, tracing_mode="fake")(x, indices, values, replacement)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.recompile()
+        actual_input = x.clone()
+        self.assertEqual(gm(actual_input, indices, values, replacement), expected)
+        self.assertEqual(actual_input, expected_input)
+        self.assertTrue(any(n.target is aten.index_put.default for n in gm.graph.nodes))
+
+    @parametrize("transpose", [False, True])
+    def test_result_copy_preserves_functional_result(self, transpose):
+        def f(x, indices, values):
+            base = x.cos()
+            updated = base.index_put((indices,), values)
+            base.copy_(updated.t() if transpose else updated)
+            return updated
+
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        indices = torch.tensor([0])
+        values = torch.full((2,), 10.0)
+        expected = f(x, indices, values)
+        gm = make_fx(f, tracing_mode="fake")(x, indices, values)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(x, indices, values), expected)
+        self.assertTrue(any(n.target is aten.index_put.default for n in gm.graph.nodes))
+
+    @parametrize("keep_earlier_result", [False, True])
+    def test_sequential_reinplacement_preserves_live_result(self, keep_earlier_result):
+        def f(x, indices, values):
+            base = x.cos()
+            updated = base.index_put((indices,), values)
+            next_value = updated.index_put((indices,), values + 1)
+            return (updated, next_value) if keep_earlier_result else next_value
+
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        expected = f(x, indices, values)
+        gm = make_fx(f, tracing_mode="fake")(x, indices, values)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(x, indices, values), expected)
+        targets = [
+            n.target
+            for n in gm.graph.nodes
+            if n.target in (aten.index_put.default, aten.index_put_.default)
+        ]
+        self.assertEqual(
+            targets,
+            [
+                aten.index_put_.default,
+                aten.index_put.default if keep_earlier_result else aten.index_put_.default,
+            ],
+        )
 
     def test_dont_modify_live(self):
         def f(x, y):
@@ -569,6 +692,70 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+
+    @parametrize("reinplace_whenever_possible", [False, True])
+    def test_scatter_reinplace_whenever_possible(self, reinplace_whenever_possible):
+        def f(x, value):
+            base = x.sin()
+            updated = aten.select_scatter.default(base, value, 0, 1)
+            return updated.cos()
+
+        inputs = (torch.randn(2, 4), torch.randn(4))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with (
+            inductor_config.patch(
+                reinplace_whenever_possible=reinplace_whenever_possible
+            ),
+            V.set_fake_mode(fake_mode),
+        ):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        if reinplace_whenever_possible:
+            self.assertIn(aten.copy_.default, targets)
+            self.assertNotIn(aten.select_scatter.default, targets)
+        else:
+            self.assertIn(aten.select_scatter.default, targets)
+            self.assertNotIn(aten.copy_.default, targets)
+        self.assertEqual(gm(*inputs), f(*inputs))
+
+    @parametrize("enabled", [False, True])
+    @parametrize("auto_select", [False, True])
+    @parametrize("keep_input_live", [False, True])
+    def test_all_reduce_reinplace_whenever_possible(
+        self, enabled, auto_select, keep_input_live
+    ):
+        def f(x):
+            base = x.sin()
+            updated = torch.ops._c10d_functional.all_reduce.default(
+                base, "sum", "test_group"
+            )
+            return (updated, base) if keep_input_live else updated
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4))
+        with (
+            inductor_config.patch(
+                reinplace_whenever_possible=enabled,
+                **{"_collective.auto_select": auto_select},
+            ),
+            mock.patch(
+                "torch.distributed._symmetric_memory.is_symm_mem_enabled_for_group",
+                return_value=True,
+            ),
+        ):
+            reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        targets = [node.target for node in gm.graph.nodes]
+        should_mutate = not keep_input_live and (enabled or not auto_select)
+        self.assertEqual(
+            torch.ops._c10d_functional.all_reduce_.default in targets, should_mutate
+        )
+        self.assertEqual(
+            torch.ops._c10d_functional.all_reduce.default in targets, not should_mutate
+        )
 
     def test_generalized_scatter(self):
         # This is an integration test for the reinplacing pass.
