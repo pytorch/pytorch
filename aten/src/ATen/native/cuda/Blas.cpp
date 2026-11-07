@@ -1096,7 +1096,8 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
-      auto r_stride = result.stride(0);
+      // A length-1 result can be contiguous with any stride, including zero
+      auto r_stride = result.size(0) == 1 ? int64_t(1) : result.stride(0);
       auto vec_stride = vec.stride(0);
 
       // Check for contiguity of `vec` and update `vec_stride` accordingly
