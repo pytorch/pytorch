@@ -173,6 +173,28 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _track_sourced_function_attribute_mutation(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name_var: VariableTracker,
+) -> bool:
+    if not isinstance(obj, variables.BaseUserFunctionVariable):
+        return False
+    if not name_var.is_python_constant():
+        return False
+    name = name_var.as_python_constant()
+    if not isinstance(name, str) or obj.lookup_tp_getset_member(name) is None:
+        return False
+    if obj.source is None:
+        return True
+    underlying = obj.get_value_for_setattr()
+    if underlying is None or not hasattr(underlying, "__dict__"):
+        return False
+    if not tx.output.side_effects.is_attribute_mutation(obj):
+        tx.output.side_effects.track_object_existing(underlying, obj)
+    return True
+
+
 IN_PLACE_DESUGARING_MAP = {
     operator.iadd: operator.add,
     operator.isub: operator.sub,
@@ -3145,6 +3167,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj: VariableTracker,
         name_var: VariableTracker,
     ) -> VariableTracker:
+        _track_sourced_function_attribute_mutation(tx, obj, name_var)
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(
@@ -3895,6 +3918,8 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if _track_sourced_function_attribute_mutation(tx, obj, name_var):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         if isinstance(
             obj,
             (

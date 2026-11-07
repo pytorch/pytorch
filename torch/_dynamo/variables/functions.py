@@ -448,20 +448,22 @@ def _set_name(
     vt: VariableTracker,
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
-) -> None:
+) -> VariableTracker:
     if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__name__ must be set to a string object")
     store_attr_mutation(tx, vt, "__name__", value)
+    return ConstantVariable.create(None)
 
 
 def _set_qualname(
     vt: VariableTracker,
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
-) -> None:
+) -> VariableTracker:
     if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__qualname__ must be set to a string object")
     store_attr_mutation(tx, vt, "__qualname__", value)
+    return ConstantVariable.create(None)
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -487,10 +489,13 @@ class BaseUserFunctionVariable(VariableTracker):
             # dict, as in PyObject_GenericSetAttr.
             value = args[1] if name == "__setattr__" else None
             if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
+                attr = args[0].as_python_constant()
+                if isinstance(attr, str):
+                    entry = self.lookup_tp_getset_member(attr)
+                    if entry is not None:
+                        out = entry.setter(self, tx, value)
+                        if out is not None:
+                            return out
             dict_method = "__setitem__" if value is not None else "__delitem__"
             return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
@@ -2409,11 +2414,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self,
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
-    ) -> None:
+    ) -> VariableTracker:
         # func_set_type_params: del (NULL) is rejected too.
         if value is None or not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple")
         store_attr_mutation(tx, self, "__type_params__", value)
+        return ConstantVariable.create(None)
 
     def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         c = self.closure

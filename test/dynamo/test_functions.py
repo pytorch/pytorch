@@ -113,6 +113,10 @@ def func_with_default(a, b, some_default_arg=True):
         return a - b
 
 
+def function_without_closure():
+    return None
+
+
 def make_test(fn=None, expected_frame_count=1):
     if fn is None:
         return lambda fn: make_test(fn, expected_frame_count=expected_frame_count)
@@ -2372,6 +2376,90 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_function_closure_is_readonly_for_nested_and_sourced_functions(self):
+        def fn(x):
+            captured = x
+
+            def nested():
+                return captured
+
+            def check(target, delete):
+                target_alias = target
+                try:
+                    if delete:
+                        delattr(target_alias, "__closure__")
+                    else:
+                        target_alias.__closure__ = target_alias.__closure__
+                except AttributeError as exc:
+                    return type(exc), str(exc)
+                return None, ""
+
+            return (
+                x + 1,
+                check(nested, False),
+                check(nested, True),
+                check(function_without_closure, False),
+                check(function_without_closure, True),
+            )
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            expected = fn(x)
+            actual = opt_fn(x)
+            self.assertEqual(expected, actual)
+            self.assertEqual(
+                actual[1:],
+                ((AttributeError, "readonly attribute"),) * 4,
+            )
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_function_closure_setattr_error_survives_graph_break(self):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            target_alias = function_without_closure
+            try:
+                target_alias.__closure__ = None
+            except AttributeError as exc:
+                result = type(exc), str(exc)
+            else:
+                result = None, ""
+            return x + 1, result
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(expected, actual)
+        self.assertEqual(actual[1], (AttributeError, "readonly attribute"))
+
+    def test_function_member_setters_preserve_success_and_type_errors(self):
+        def fn(x):
+            def nested():
+                "original doc"
+
+            nested.__doc__ = "updated doc"
+            try:
+                function_without_closure.__annotations__ = 1
+            except TypeError as exc:
+                error = type(exc), str(exc)
+            else:
+                error = None, ""
+            return x + 1, nested.__doc__, error
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(expected, actual)
+        self.assertEqual(actual[1], "updated doc")
+        self.assertEqual(
+            actual[2],
+            (TypeError, "__annotations__ must be set to a dict object"),
+        )
 
     @parametrize("wrapped", (False, True))
     def test_inspect_signature_skip_function(self, wrapped):
@@ -8530,7 +8618,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
-    @unittest.expectedFailure
     def test_del_defaults_sets_none(self):
         def h(a, b=1, *, k=1):
             return a + b + k
