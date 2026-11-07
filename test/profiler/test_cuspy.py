@@ -923,6 +923,18 @@ class TestCuspyRecordsCUDA(TestCase):
         _attach_event_node_ids(plain, None)
         self.assertNotIn("graph_node_id", plain["cuda_event"])
 
+        source = (3 << 32) | 21
+        native = {
+            "cuda_event": {
+                "event_id": np.array([5, 5], dtype=np.int64),
+                "graph_node_id": np.array([n0, n1], dtype=np.int64),
+                "source_graph_node_id": np.array([source, 0], dtype=np.int64),
+            }
+        }
+        _attach_event_node_ids(native, r, {source: "source", n1: "exec"}.get)
+        self.assertEqual(native["cuda_event"]["graph_node_id"].tolist(), [n0, n1])
+        self.assertEqual(native["cuda_event"]["annotation"].tolist(), ["source", "exec"])
+
     def test_window_graph_deps_collapses_event_nodes(self):
         # A dependency arrow must span a kernel -> event_record -> wait_event -> kernel chain
         # (event/wait nodes never render as spans, so they can't be arrow endpoints). The window

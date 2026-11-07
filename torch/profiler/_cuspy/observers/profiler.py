@@ -387,6 +387,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
             # lane. No-op when no resolver is installed.
             if (
                 self._lane_resolver is not None
+                and kind_str != "cuda_event"
                 and "graph_node_id" in frame
                 and "stream_id" in frame
             ):
@@ -751,19 +752,21 @@ def _attach_metadata(
 def _attach_event_node_ids(
     columns: dict[str, dict[str, Any]], recorder: Any, resolver: Any = None
 ) -> None:
-    """Learn ``event_id -> graph_node_id`` from this window's launches and attach a
-    ``graph_node_id`` + ``annotation`` column to the ``cuda_event`` frame. Passive: reads only
-    records that already flow (never touches the events). Mutates ``columns`` in place; no-op
-    when the bridge is disabled or there are no CUDA_EVENT records.
+    """Attach event-record node ids and annotations.
 
-    Each graph launch's graphed kernel/memset records share the launch ``correlation_id`` and
-    carry the exec graph id in the upper 32 bits of ``graph_node_id``; the same-launch
-    CUDA_EVENT records execute in ``cuda_event_sync_id`` order. Matching the k-th event record
-    to the graph's k-th ordered event node (recorded at instantiate) yields the mapping."""
+    Use CUPTI graph node ids directly when present; older CUPTI uses the positional
+    join against event nodes recorded at graph instantiation.
+    """
     if recorder is None:
         return
     ce = columns.get("cuda_event")
     if ce is None or not len(ce["event_id"]):
+        return
+    if "graph_node_id" in ce:
+        gnid = ce["graph_node_id"]
+        ce["annotation"] = _resolve_annotation_column(
+            resolver, gnid, ce.get("source_graph_node_id", gnid)
+        )
         return
     from torch.profiler._cuspy._event_nodes import resolve_window
 
@@ -1175,7 +1178,7 @@ def _cuda_event_columns(cols, convert, resolver):
     # a point span (end == start). The frame stays a join input (is_timed=False); the timed
     # graph_event_node span frame is derived from it per window in _add_graph_event_node_spans.
     start_ns = convert(cols[CudaEvent.DEVICE_TIMESTAMP.id])
-    return {
+    frame = {
         "cuda_event_sync_id": cols[CudaEvent.CUDA_EVENT_SYNC_ID.id].astype(np.int64),
         "correlation_id": cols[CudaEvent.CORRELATION_ID.id].astype(np.int64),
         "device_id": cols[CudaEvent.DEVICE_ID.id].astype(np.int64),
@@ -1185,6 +1188,12 @@ def _cuda_event_columns(cols, convert, resolver):
         "start_ns": start_ns,
         "end_ns": start_ns,
     }
+    field = getattr(CudaEvent, "GRAPH_NODE_ID", None)
+    if field is not None and field.id in cols:
+        gnid = cols[field.id].astype(np.int64)
+        frame["graph_node_id"] = gnid
+        frame["source_graph_node_id"] = _source_gnid(cols, CudaEvent, gnid)
+    return frame
 
 
 def _environment_columns(cols, convert, resolver):
