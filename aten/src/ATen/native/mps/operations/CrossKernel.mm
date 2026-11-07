@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <utility>
 
 namespace at::native {
 namespace {
@@ -31,6 +32,11 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
   // closed-form index mapping that works for outermost, innermost, and any dim.
   const bool is_dense = out.is_contiguous() && input.is_contiguous() && other.is_contiguous();
   const std::string suffix = is_dense ? "dense" : "strided";
+  // The dense kernel's element offsets are uint32 and the strided one's thread index is int32
+  TORCH_CHECK(is_dense ? std::in_range<uint32_t>(out.numel()) : std::in_range<int32_t>(numThreads),
+              "linalg.cross: MPS does not support tensors with ",
+              out.numel(),
+              " elements and this layout");
 
   // For the strided kernel, build squashed sizes (cross dim removed) for the
   // thread-index → position mapping, plus full element strides (all ndim dims,
