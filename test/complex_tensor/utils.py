@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field, fields
-from enum import auto, Enum
+from enum import auto, Flag
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -34,8 +35,9 @@ COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
 BINARY_NONLINEAR_CUDA_TOL = {"rtol": 5e-6, "atol": 2e-5}
 
 
-class Variant(Enum):
+class Variant(Flag):
     Op = auto()
+    OpInterleaved = auto()
     GradCheck = auto()
     Distributed = auto()
 
@@ -56,6 +58,7 @@ def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
 
 TRANSFORM_FUNCS = {
     Variant.Op: _as_complex_tensor,
+    Variant.OpInterleaved: functools.partial(_as_complex_tensor, interleaved=True),
     Variant.Distributed: _as_complex_dtensor,
 }
 
@@ -73,7 +76,17 @@ class Descriptor:
         if fields1 != fields2:
             return False
 
+        if "variant" in fields1:
+            if (
+                self.variant is not None
+                and other.variant is not None
+                and self.variant not in other.variant
+            ):
+                return False
+
         for f in fields1:
+            if f.name == "variant":
+                continue
             f1 = getattr(self, f.name)
             f2 = getattr(other, f.name)
             if f1 is not None and f2 is not None and f1 != f2:
@@ -159,7 +172,7 @@ class TestCase(PytorchTestCase):
     def check_consistency(
         self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
     ) -> None:
-        if variant not in {Variant.Op, Variant.Distributed}:
+        if variant not in {Variant.Op, Variant.OpInterleaved, Variant.Distributed}:
             raise AssertionError(
                 f"`check_consistency` called with the wrong `variant`: {variant}"
             )
