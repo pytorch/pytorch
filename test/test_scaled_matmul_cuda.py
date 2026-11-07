@@ -222,6 +222,11 @@ def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def _uses_swizzled_mx_scales(device) -> bool:
+    # Only cuBLAS takes block scales in the swizzled 32x4x4 layout.
+    return torch.device(device).type == "cuda" and not torch.version.hip
+
+
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
     """The MX block-scale layout to request for `mat_dtype` on this device.
 
@@ -229,7 +234,7 @@ def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
     instead of relying on `infer_scale_swizzle`, whose element counts do not
     distinguish the two where their paddings coincide.
     """
-    if not torch.version.hip and "xpu" not in device:
+    if _uses_swizzled_mx_scales(device):
         return SwizzleType.SWIZZLE_32_4_4
     return SwizzleType.SWIZZLE_32_8 if rocm_mx_swizzle(mat_dtype) else SwizzleType.NO_SWIZZLE
 
@@ -866,10 +871,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
+        # Only cuBLAS rejects an e5m2 output. Other backends compute it and the exact comparison fails.
         with self.assertRaises(
             TypeError if "mps" in device
-            else AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
-            else RuntimeError
+            else RuntimeError if "cuda" in device and not torch.version.hip
+            else AssertionError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
@@ -1742,10 +1748,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
-        # XPU and CPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
-        if "xpu" not in device and "cpu" not in device:
+        # Only the CUDA and MPS kernels reject a bias with float32 output.
+        if "cuda" in device or "mps" in device:
             self.assertRaisesRegex(
-                ValueError if torch.cuda.is_available() or "mps" in device else RuntimeError,
+                ValueError,
                 "Bias is not supported when out_dtype is set to Float32",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
@@ -2429,7 +2435,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A, A_scale, A_global_scale = data_to_nvfp4_with_global_scale(A_ref, BLOCK_SIZE)
         B, B_scale, B_global_scale = data_to_nvfp4_with_global_scale(B_ref, BLOCK_SIZE)
 
-        if torch.version.cuda:
+        if _uses_swizzled_mx_scales(device):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
             swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
@@ -2704,7 +2710,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device):
+        if rocm_mx_swizzle(A.dtype) or _uses_swizzled_mx_scales(device):
             A_scale = to_blocked(A_scale, swizzle_32_8=rocm_mx_swizzle(A.dtype))
             B_scale = to_blocked(B_scale, swizzle_32_8=rocm_mx_swizzle(B.dtype))
 
@@ -2762,12 +2768,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             if recipe == "nvfp4"
             else ScalingType.BlockWise1x32
         )
-        if not torch.version.hip:
-            swizzle = SwizzleType.SWIZZLE_32_4_4
-        elif rocm_mx_swizzle(x_lowp.dtype):
-            swizzle = SwizzleType.SWIZZLE_32_8
-        else:
-            swizzle = SwizzleType.NO_SWIZZLE
+        swizzle = mx_swizzle_for(device, x_lowp.dtype)
 
         num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
         if swizzle == SwizzleType.SWIZZLE_32_8:
