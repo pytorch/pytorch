@@ -291,6 +291,8 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _is_literal(value: object) -> bool:
+        # Serializer literals include scalar values and torch.device; this is broader
+        # than utils.is_identity_singleton, whose objects share process-wide identity.
         # An always-picklable constant: the singletons and scalars dynamo treats
         # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
         # pickle). The guard pickler carries these whether or not a guard reads
