@@ -330,7 +330,8 @@ struct HostPrivatePool {
   // the HostMemPool, or MemPool with pinned routing, that made it routable.
   int use_count{1};
   // Threads may route to it (create_pool, create_or_incref_host_mem_pool). It
-  // may also be a capture's pool.
+  // may also be a capture's pool. Either way, its new blocks come from
+  // allocate_host_mem_pool_memory.
   bool is_host_mem_pool{false};
   // Open thread routes to this pool, over all threads.
   int route_count{0};
@@ -1225,7 +1226,7 @@ struct CachingHostAllocatorImpl {
  private:
   // The newest scope that matches wins, as in the device allocator: a capture
   // begun inside a thread route takes the capturing stream, and a route begun
-  // inside a capture takes it back. Returns (pool id, pool, is a thread route,
+  // inside a capture takes it back. Returns (pool id, pool, is a host mem pool,
   // id of the capture that matches the current stream or (0, 0)).
   std::tuple<c10::MempoolId_t, BlockPool&, bool, c10::MempoolId_t>
   get_allocation_pool_for_current_stream() {
@@ -1252,7 +1253,7 @@ struct CachingHostAllocatorImpl {
                           id.first, ",", id.second,
                           ") but the current stream is not capturing.");
         }
-        return {id, pit->second->blocks, false, id};
+        return {id, pit->second->blocks, pit->second->is_host_mem_pool, id};
       }
     }
     if (r != nullptr) {
@@ -1402,10 +1403,10 @@ private:
         false, "Not implemented for allocate_host_memory");
   }
 
-  // Allocates the memory of a new block of a host mem pool, which the calling
-  // thread is routed to. A backend that carves blocks out of memory shared by
-  // all pools (CUDA's pinned reserve segment) must allocate afresh here, so
-  // that the memory comes from the routed thread.
+  // Allocates the memory of a new block of a host mem pool, for a thread routed
+  // to it or a capture into it. A backend that carves blocks out of memory
+  // shared by all pools (CUDA's pinned reserve segment) must allocate afresh
+  // here, so that the memory comes from the calling thread.
   virtual void allocate_host_mem_pool_memory(size_t size, void** ptr) {
     allocate_host_memory(size, ptr);
   }
