@@ -51,33 +51,27 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_GPU_AND_TRITON,
-    TRITON_HAS_CPU,
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
 )
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_FBCODE,
+    IS_MACOS,
+)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, TRITON_HAS_CPU
 from torch.utils._triton import has_triton_package
 
 
 try:
-    from .test_extension_backend import BaseExtensionBackendTests
+    from .test_extension_backend import BaseExtensionBackendTests, TestCase
 except ImportError:
-    from test_extension_backend import BaseExtensionBackendTests
+    from test_extension_backend import BaseExtensionBackendTests, TestCase
 
-if TRITON_HAS_CPU or HAS_GPU_AND_TRITON:
+if has_triton_package():
     import triton
     import triton.language as tl
-
-    if TRITON_HAS_CPU:
-        TRITON_DEVICE_TYPE = "cpu"
-    else:
-        TRITON_DEVICE_TYPE = GPU_TYPE
-
-requires_triton_backend = unittest.skipUnless(
-    HAS_GPU_AND_TRITON or TRITON_HAS_CPU, "Requires Triton backend."
-)
 
 
 def mock_triton_hash_with_backend(*args, **kwargs):
@@ -87,7 +81,7 @@ def mock_triton_hash_with_backend(*args, **kwargs):
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class TritonExtensionBackendTests(BaseExtensionBackendTests):
+class TritonExtensionBackendTestBase(BaseExtensionBackendTests):
     """
     Test creating a backend for inductor with Triton scheduling.
     """
@@ -113,6 +107,144 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
 
         # Restore the default backend.
         cls._default_backend_patch.stop()
+
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class TritonHeuristicsTestBase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if config.cpp_wrapper:
+            raise unittest.SkipTest(
+                "Not possible to fix until CppWrapperCpu supports triton for CPU"
+            )
+        common.init_backend_registration()
+        for registry in (
+            common.device_codegens,
+            common.custom_backend_passes,
+            common.custom_backend_codegen_configs,
+        ):
+            backend_patch = unittest.mock.patch.dict(registry)
+            backend_patch.start()
+            cls.addClassCleanup(backend_patch.stop)
+
+    def _register_custom_backend_with_heuristics(self, device):
+        path_to_ext_heuristics = str(
+            Path(__file__).parent / "extension_backends" / "triton"
+        )
+        # Add the path to sys.path in the parent process so that the
+        # ExtensionCachingAutotuner class (defined in extension_triton_heuristics)
+        # can be resolved when the compiled kernel is unpickled from the
+        # compile subprocess back into the parent process.
+        if path_to_ext_heuristics not in sys.path:
+            sys.path.append(path_to_ext_heuristics)
+            self.addCleanup(sys.path.remove, path_to_ext_heuristics)
+
+        class ExtensionTritonKernel(codegen.triton.TritonKernel):
+            @classmethod
+            @functools.lru_cache(None)
+            def gen_common_triton_imports(cls) -> str:
+                default_imports = super().gen_common_triton_imports()
+                custom_imports = IndentedBuffer()
+                custom_imports.splice(default_imports)
+
+                custom_imports.splice("""
+                    import extension_triton_heuristics as triton_heuristics
+                """)
+                return custom_imports
+
+            @classmethod
+            def triton_meta_common(cls) -> dict[str, Any]:
+                triton_meta = super().triton_meta_common()
+                triton_meta[EXTENSION_TRITON_META_FIELD] = True
+                return triton_meta
+
+        class ExtensionTritonScheduling(codegen.triton.TritonScheduling):
+            kernel_type = ExtensionTritonKernel
+
+        class ExtensionPythonWrapperCodegen(PythonWrapperCodegen):
+            @classmethod
+            def _get_triton_info_kernel_cls(cls) -> type[codegen.triton.TritonKernel]:
+                return ExtensionTritonKernel
+
+            @staticmethod
+            def create(
+                is_subgraph: bool,
+                subgraph_name: str | None,
+                parent_wrapper: PythonWrapperCodegen | None,
+                partition_signatures: ir.GraphPartitionSignature | None = None,
+            ):
+                if is_subgraph:
+                    if subgraph_name is None:
+                        raise AssertionError
+                    if parent_wrapper is None:
+                        raise AssertionError
+                    return PythonWrapperCodegen.create(
+                        subgraph_name, parent_wrapper, partition_signatures
+                    )
+                return ExtensionPythonWrapperCodegen()
+
+        register_backend_for_device(
+            torch.device(device).type,
+            ExtensionTritonScheduling,
+            ExtensionPythonWrapperCodegen,
+        )
+
+    def _test_codegen_with_custom_heuristics_module(self, device):
+        self._register_custom_backend_with_heuristics(device)
+
+        def add(x, y):
+            return x + y
+
+        x = torch.zeros((32,), device=device)
+        y = x
+        compiled_add = torch.compile(add)
+
+        code = run_and_get_triton_code(compiled_add, x, y)
+        FileCheck().check("import extension_triton_heuristics").check(
+            f"{EXTENSION_TRITON_META_FIELD}"
+        ).check("@triton.jit").run(code)
+
+    def _test_codegen_with_custom_heuristics_module_udtk(self, device):
+        self._register_custom_backend_with_heuristics(device)
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        args = [torch.randn(32, device=device) for _ in range(2)]
+        code = run_and_get_triton_code(torch.compile(add), *args)
+
+        FileCheck().check("import extension_triton_heuristics").check(
+            "@triton.jit"
+        ).run(code)
+
+
+class TritonExtensionBackendGenericTests(TritonExtensionBackendTestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_open_device_registration(self):
         torch._register_device_module("privateuseone", self.module)
@@ -184,119 +316,48 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             "def triton_tem_fused_flex_attention"
         ).run(code)
 
-    def _register_custom_backend_with_heuristics(self, device):
-        path_to_ext_heuristics = str(
-            Path(__file__).parent / "extension_backends" / "triton"
-        )
-        # Add the path to sys.path in the parent process so that the
-        # ExtensionCachingAutotuner class (defined in extension_triton_heuristics)
-        # can be resolved when the compiled kernel is unpickled from the
-        # compile subprocess back into the parent process.
-        if path_to_ext_heuristics not in sys.path:
-            sys.path.append(path_to_ext_heuristics)
-            self.addCleanup(sys.path.remove, path_to_ext_heuristics)
 
-        class ExtensionTritonKernel(codegen.triton.TritonKernel):
-            @classmethod
-            @functools.lru_cache(None)
-            def gen_common_triton_imports(cls) -> str:
-                default_imports = super().gen_common_triton_imports()
-                custom_imports = IndentedBuffer()
-                custom_imports.splice(default_imports)
+@unittest.skipUnless(TRITON_HAS_CPU, "Requires Triton CPU backend.")
+class TritonExtensionBackendCPUTests(TritonHeuristicsTestBase):
+    hw_classification = HardwareClassification.CPU
 
-                custom_imports.splice("""
-                    import extension_triton_heuristics as triton_heuristics
-                """)
-                return custom_imports
+    def test_codegen_with_custom_heuristics_module(self, device):
+        self._test_codegen_with_custom_heuristics_module(device)
 
-            @classmethod
-            def triton_meta_common(cls) -> dict[str, Any]:
-                triton_meta = super().triton_meta_common()
-                triton_meta[EXTENSION_TRITON_META_FIELD] = True
-                return triton_meta
+    def test_codegen_with_custom_heuristics_module_udtk(self, device):
+        self._test_codegen_with_custom_heuristics_module_udtk(device)
 
-        class ExtensionTritonScheduling(codegen.triton.TritonScheduling):
-            kernel_type = ExtensionTritonKernel
 
-        class ExtensionPythonWrapperCodegen(PythonWrapperCodegen):
-            @classmethod
-            def _get_triton_info_kernel_cls(cls) -> type[codegen.triton.TritonKernel]:
-                return ExtensionTritonKernel
+@unittest.skipUnless(has_triton_package(), "Requires Triton package.")
+@unittest.skipIf(TRITON_HAS_CPU, "Triton CPU backend takes precedence.")
+class TritonExtensionBackendAcceleratorTests(TritonHeuristicsTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-            @staticmethod
-            def create(
-                is_subgraph: bool,
-                subgraph_name: str | None,
-                parent_wrapper: PythonWrapperCodegen | None,
-                partition_signatures: ir.GraphPartitionSignature | None = None,
-            ):
-                if is_subgraph:
-                    if subgraph_name is None:
-                        raise AssertionError
-                    if parent_wrapper is None:
-                        raise AssertionError
-                    return PythonWrapperCodegen.create(
-                        subgraph_name, parent_wrapper, partition_signatures
-                    )
-                return ExtensionPythonWrapperCodegen()
+    def setUp(self):
+        device = self.get_primary_device()
+        if not HAS_TRITON:
+            raise unittest.SkipTest(f"triton is required for {device}")
+        super().setUp()
 
-        register_backend_for_device(
-            device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
-        )
+    @onlyAccelerator
+    def test_codegen_with_custom_heuristics_module(self, device):
+        self._test_codegen_with_custom_heuristics_module(device)
 
-    @requires_triton_backend
-    def test_codegen_with_custom_heuristics_module(self):
-        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
+    @onlyAccelerator
+    def test_codegen_with_custom_heuristics_module_udtk(self, device):
+        self._test_codegen_with_custom_heuristics_module_udtk(device)
 
-        def add(x, y):
-            return x + y
 
-        x = torch.zeros((32,), device=GPU_TYPE)
-        y = x
-        compiled_add = torch.compile(add)
-
-        code = run_and_get_triton_code(compiled_add, x, y)
-        FileCheck().check("import extension_triton_heuristics").check(
-            f"{EXTENSION_TRITON_META_FIELD}"
-        ).check("@triton.jit").run(code)
-
-    @requires_triton_backend
-    def test_codegen_with_custom_heuristics_module_udtk(self):
-        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
-
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: tl.constexpr,
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            return output
-
-        args = [torch.randn(32, device=GPU_TYPE) for _ in range(2)]
-        code = run_and_get_triton_code(torch.compile(add), *args)
-
-        FileCheck().check("import extension_triton_heuristics").check(
-            "@triton.jit"
-        ).run(code)
+instantiate_device_type_tests(
+    TritonExtensionBackendCPUTests,
+    globals(),
+    only_for=("cpu",),
+)
+instantiate_device_type_tests(
+    TritonExtensionBackendAcceleratorTests,
+    globals(),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
