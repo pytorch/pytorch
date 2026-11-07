@@ -12386,6 +12386,10 @@ class TestGroupedMM(TestCase):
             grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
             out.backward(grad)
         ends = offs.cpu().tolist() if offs is not None else [0] * a.size(0)
+        # MI200 fp16 backward GEMMs round inputs to bf16 (fp16_alt_impl), but only in some rocBLAS kernels, so the
+        # grouped and per-group gradients can pick different kernels and differ by bf16 rounding.
+        fp16_alt_impl = TEST_WITH_ROCM and a.is_cuda and isRocmArchAnyOf(MI200_ARCH) and a.dtype == torch.float16
+        grad_tol = {"atol": 0.15, "rtol": 1e-2} if fp16_alt_impl else {}
         start = 0
         for group, end in enumerate(ends):
             span = slice(start, end)
@@ -12402,8 +12406,8 @@ class TestGroupedMM(TestCase):
             self.assertEqual(out[out_idx], out_ref)
             if backward:
                 out_ref.backward(grad[out_idx])
-                self.assertEqual(a.grad[a_idx], a_ref.grad)
-                self.assertEqual(b.grad[b_idx], b_ref.grad)
+                self.assertEqual(a.grad[a_idx], a_ref.grad, **grad_tol)
+                self.assertEqual(b.grad[b_idx], b_ref.grad, **grad_tol)
             start = end
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
