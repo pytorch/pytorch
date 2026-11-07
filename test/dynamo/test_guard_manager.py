@@ -15,6 +15,7 @@ from unittest import mock
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -2585,6 +2586,50 @@ class TagSafetyChecks(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_nn_module_tag_safe_with_method_code_guard(self):
+        # forward and helper get a __code__ guard via type(mod).__dict__; that
+        # must not cost the module its tag-safe root.
+        class Mod(torch.nn.Module):
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x)
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x)
+
+        # The tag-safe root must not hide the guards: rebinding either class
+        # function still recompiles.
+        Mod.helper = lambda self, x: x * 9
+        self.assertEqual(opt_fn(x), x * 9)
+        self.assertEqual(cnt.frame_count, 2)
+        Mod.forward = lambda self, x: self.helper(x) + 1
+        self.assertEqual(opt_fn(x), x * 9 + 1)
+        self.assertEqual(cnt.frame_count, 3)
+
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
@@ -2844,6 +2889,23 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn(100, expected))
         self.assertFalse(handler.eval_fn("hello", expected))
 
+    def test_duplicate_input(self):
+        from torch._dynamo.source import LocalSource
+
+        other = LocalSource("other")
+        guard = self._make_guard(
+            functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=other)
+        )
+        handler = self._get_handler("DUPLICATE_INPUT")
+        self.assertEqual(handler.get_extra_sources_fn(guard), (other,))
+        tensor, other_tensor = torch.ones(1), torch.ones(1)
+        expected = handler.get_metadata_fn(guard, (tensor, tensor))
+        self.assertTrue(handler.eval_fn((tensor, tensor), expected))
+        self.assertFalse(handler.eval_fn((tensor, other_tensor), expected))
+        expected = handler.get_metadata_fn(guard, (tensor, other_tensor))
+        self.assertTrue(handler.eval_fn((tensor, other_tensor), expected))
+        self.assertFalse(handler.eval_fn((tensor, tensor), expected))
+
     def test_constant_match(self):
         from torch._dynamo.guards import GuardBuilder
 
@@ -2968,6 +3030,22 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([4, 5, 6], expected))
         self.assertTrue(handler.eval_fn((7, 8, 9), expected))
         self.assertFalse(handler.eval_fn([1], expected))
+
+    def test_dictionary_storage_length(self):
+        class Mapping(dict):
+            def __len__(self):
+                return 99
+
+        guard = self._make_guard(GuardBuilder.SEQUENCE_LENGTH)
+        handler = self._get_handler("SEQUENCE_LENGTH")
+        value = Mapping(a=1, b=2)
+        expected = handler.get_metadata_fn(guard, value)
+        root = RootGuardManager()
+        root.add_dict_length_check_guard(expected, [], None)
+        self.assertTrue(root.check(value))
+        self.assertTrue(handler.eval_fn(value, expected))
+        self.assertFalse(root.check(Mapping(a=1)))
+        self.assertFalse(handler.eval_fn(Mapping(a=1), expected))
 
     def test_dict_contains(self):
         from torch._dynamo.guards import GuardBuilder

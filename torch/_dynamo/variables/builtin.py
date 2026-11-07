@@ -566,7 +566,7 @@ class BaseBuiltinVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
@@ -1967,12 +1967,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
         if self.fn is object and not args and not kwargs:
-            # object() -> a fresh opaque instance, wrapped as ObjectVariable to
-            # match how SourcelessBuilder wraps bare `object` instances. Falling
-            # through to the constant handler cannot build a VT from object().
-            from .builder import SourcelessBuilder
-
-            return SourcelessBuilder.create(tx, object())
+            # object() -> a fresh opaque instance. Falling through to the
+            # constant handler cannot build a VT from object().
+            return VariableTracker.build(tx, object())
 
         key: tuple[object, ...]
         if kwargs:
@@ -2503,11 +2500,17 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        # Call arg.__round__()
+        # builtin_round: call arg.__round__(), passing ndigits positionally
+        # and only when it is not None.
         round_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, VariableTracker.build(tx, "__round__")], {}
         )
-        return round_method.call_function(tx, list(args), kwargs)
+        if len(args) + len(kwargs) > 1 or kwargs.keys() - {"ndigits"}:
+            actual = f"{len(args) + 1} args, kwargs {list(kwargs)}"
+            raise_args_mismatch(tx, "round", "number, ndigits=None", actual)
+        ndigits = args[0] if args else kwargs.get("ndigits")
+        round_args = [] if ndigits is None or ndigits.is_constant_none() else [ndigits]
+        return round_method.call_function(tx, round_args, {})
 
     def call_range(
         self,
@@ -2631,7 +2634,8 @@ class BuiltinVariable(BaseBuiltinVariable):
             for key in iterable.items:
                 storage.items[key] = value
         else:
-            for key in lazily_unpack(tx, iterable):
+            # A key hash can advance this same iterator.
+            for key in lazily_unpack(tx, iterable, allow_fast_path=False):
                 hashed = storage._lookup_key(tx, key, container_name="frozendict")
                 storage.items[hashed] = value
         return variables.FrozenDictVariable.create(storage)
@@ -2690,15 +2694,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         # path (do-not-rehash-dict-keys).
         if isinstance(args[0], variables.ConstDictVariable):
             args[0].install_dict_order_guard(tx)
-            args[0].materialize_keys()
-        if isinstance(
+            items = list(args[0].materialize_keys())
+        elif isinstance(
             args[0],
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
                 variables.OrderedSetVariable,
-                variables.ConstDictVariable,
             ),
         ):
             items = list(args[0].items.keys())
@@ -3622,8 +3625,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             elif pyanyset_checkexact(args[0]):
                 args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
+            storage = (
+                args[0].materialize_keys()
+                if isinstance(args[0], ConstDictVariable)
+                else args[0].items
+            )
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-            result.items.update(dict.fromkeys(args[0].items.keys(), value))
+            result.items.update(dict.fromkeys(storage, value))
             return result
         return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
 
@@ -3663,11 +3671,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
-            if name in _RICH_CMP_DUNDERS:
-                # dict.__eq__(ordered, other) uses dict's slot, not OrderedDict's.
-                no_keywords(tx, f"wrapper {name}", kwargs)
-                return obj._slotdefs[name].wrapper(
-                    obj, tx, ConstDictVariable.tp_richcompare_impl, args[1:], kwargs
+            if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
                 )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
@@ -3874,6 +3884,11 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
+            obj = args[0]
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
+                raise
             try:
                 result = getattr(*[a.as_python_constant() for a in args])
             except AttributeError:
@@ -4023,6 +4038,12 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
+            obj, variables.UserDefinedClassVariable
+        ) and name_var.is_constant_match("__bases__"):
+            # CPython recomputes the MRO of the class and its subclasses on this
+            # write; a pending store would leave later lookups on the old one.
+            unmodeled_setter(obj, tx, val)
         elif (
             not tx.output.side_effects.is_attribute_mutation(obj)
             and obj.source is not None

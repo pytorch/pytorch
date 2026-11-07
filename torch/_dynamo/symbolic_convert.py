@@ -189,6 +189,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -3399,14 +3400,9 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
-            # An eager getattr would run a user-defined __get__ at trace time
-            # and bake its result into the graph.
-            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
-                inspect.getattr_static(
-                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
-                ),
-                types.FunctionType,
-            ):
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(self, attr):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(
@@ -4242,14 +4238,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(  # noqa: RVT001
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
-        )
+        ann = None
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(
@@ -4265,8 +4254,18 @@ class InstructionTranslatorBase(
                 ann_items,
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
-        self.push(fn)
+
+        self.push(
+            NestedUserFunctionVariable(  # noqa: RVT001
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                closure,
+                ann,
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4525,21 +4524,45 @@ class InstructionTranslatorBase(
         if inst.opname == "DICT_MERGE":
             v = v.realize()
             if isinstance(v, ConstDictVariable):
-                # Bind fixed-signature keywords by name. A **kwargs callee can
-                # observe their order, so guard the input before copying it.
                 # Match CALL_FUNCTION_EX's callable/NULL stack layout.
                 offset = 3 if sys.version_info >= (3, 13) else 2
-                fn = self.stack[-inst.arg - offset]
-                v.install_dict_keys_match_guard()
+                fn = self.stack[-inst.arg - offset].realize()
+                positional = self.stack[-inst.arg - 1].realize()
+                nargs = 0
+                while isinstance(fn, FunctoolsPartialVariable):
+                    nargs += len(fn.args)
+                    fn = fn.func.realize()
                 observes_order = True
-                if isinstance(fn, BaseUserFunctionVariable):
+                if isinstance(fn, BaseUserFunctionVariable) and istype(
+                    positional, (ListVariable, TupleVariable)
+                ):
                     try:
-                        observes_order = bool(fn.get_code().co_flags & CO_VARKEYWORDS)
+                        code = fn.get_code()
+                        observes_order = bool(code.co_flags & CO_VARKEYWORDS)
+                        if not observes_order:
+                            nargs += len(positional.items)
+                            nargs += isinstance(fn, UserMethodVariable)
+                            nargs = min(nargs, code.co_argcount)
+                            names = code.co_varnames[
+                                max(code.co_posonlyargcount, nargs) : code.co_argcount
+                                + code.co_kwonlyargcount
+                            ]
+                            # Binding errors expose the order of unexpected keywords.
+                            for key in v.items:
+                                if not key.vt.is_python_constant():
+                                    observes_order = True
+                                    break
+                                name = key.vt.as_python_constant()
+                                if type(name) is not str or name not in names:
+                                    observes_order = True
+                                    break
                     except NotImplementedError:
                         pass
                 if observes_order:
                     v.install_dict_order_guard(self)
-                v = v.clone(source=None, mutation_type=ValueMutationNew())
+                else:
+                    v.install_dict_keys_match_guard()
+                v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
@@ -5021,8 +5044,10 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.annotate = attr
+            fn.annotations = attr.call_function(
+                self, [VariableTracker.build(self, 1)], {}
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:

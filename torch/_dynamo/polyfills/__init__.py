@@ -525,6 +525,9 @@ def odict_update(
                 self[key] = data[key]
             data = ()
     for pair in data:
+        if (type(pair) is tuple or type(pair) is list) and len(pair) == 2:
+            self[pair[0]] = pair[1]
+            continue
         # CPython's mutablemapping_add_pairs consumes at most three items per pair.
         pair = iter(pair)
         key = next(pair, missing)
@@ -589,12 +592,7 @@ def frozendict_fromkeys(
 ) -> C:
     if not torch._has_frozendict:
         raise AssertionError("requires builtins.frozendict")
-    # Use identity checks: tuple membership can invoke a metaclass's `__eq__`.
-    if any(
-        type(iterable) is kind for kind in (dict, torch._frozendict, set, frozenset)
-    ):
-        return cls(dict.fromkeys(iterable, value))
-    return cls((key, value) for key in iterable)
+    return _frozendict_fromkeys(cls(), iterable, value)
 
 
 def foreach_map_fn(*args: Any) -> Any:
