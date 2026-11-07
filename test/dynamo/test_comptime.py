@@ -2,7 +2,6 @@
 
 import collections
 import re
-import sys
 import time
 import typing
 from io import StringIO
@@ -69,7 +68,7 @@ Tensor(shape=(s77,), dtype=torch.float32)
 {'foo': Tensor(shape=(s77,), dtype=torch.float32)}
 range(1, 3)
 Employee(name='foo', id=2)
-UserDefinedListVariable(mylist)
+[1, 2]
 set()
 {'a', 'b'}
 s77""",
@@ -144,10 +143,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertIn("-->", out)
         # Check that the bytecode resembles what we expect
         self.assertIn("STORE_FAST", out)
-        if sys.version_info < (3, 11):
-            self.assertIn("BINARY_MULTIPLY", out)
-        else:
-            self.assertIn("BINARY_OP", out)
+        self.assertIn("BINARY_OP", out)
 
     def test_print_value_stack(self):
         global FILE
@@ -350,6 +346,13 @@ y = Tensor(shape=(2,), dtype=torch.float32)
             'guarded_class': None
         }
         global '' TORCH_FUNCTION_STATE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' FX_ANNOTATION
         {
             'guard_types': None,
             'code': None,

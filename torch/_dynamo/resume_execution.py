@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import dis
+import functools
 import sys
 from typing import Any, cast, TYPE_CHECKING
 
@@ -64,10 +66,9 @@ IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 # If is_resume - this codegen is for a resume function
 def _initial_push_null(insts: list[Instruction]) -> None:
-    if sys.version_info >= (3, 11):
-        insts.append(create_instruction("PUSH_NULL"))
-        if sys.version_info < (3, 13):
-            insts.append(create_instruction("SWAP", arg=2))
+    insts.append(create_instruction("PUSH_NULL"))
+    if sys.version_info < (3, 13):
+        insts.append(create_instruction("SWAP", arg=2))
 
 
 # Generates bytecode from template and splits the code where LOAD_FAST dummy is present.
@@ -255,9 +256,92 @@ class ReenterWith:
         return create_ctx + setup_with, push_exc_info_inst
 
 
+_RESUME_SIGNATURE = "__torch_dynamo_resume_call_v1__"
+
+
+def implicit_super_arg0(code: types.CodeType) -> str | None:
+    while code in ContinueExecutionCache.generated_code_metadata:
+        code = ContinueExecutionCache.generated_code_metadata[code].code
+    if not code.co_argcount:
+        return None
+    name = code.co_varnames[0]
+    if (
+        "__class__" in code.co_cellvars + code.co_freevars
+        or name in code.co_cellvars
+        or any(
+            inst.argval == name
+            and inst.opname in ("DELETE_FAST", "DELETE_DEREF", "LOAD_FAST_AND_CLEAR")
+            for inst in dis.get_instructions(code)
+        )
+    ):
+        return name
+    return None
+
+
+def _call_resume(
+    fn: Callable[..., Any],
+    arg0_source: tuple[str, int] | None,
+    keyword_names: tuple[str, ...] | None,
+    *args: Any,
+) -> Any:
+    """Adapt saved-frame arguments without changing their shared state.
+
+    The input ABI is two synthetic arguments followed by saved stack/locals.
+    This adapter owns a fresh list. A cell receiver is the actual closure cell;
+    a fast receiver is moved from the saved arguments; an empty receiver is
+    bound to None and deleted by the continuation prologue. Nullary frames
+    use keyword-only saved state to preserve CPython's co_argcount check.
+    """
+    if keyword_names is not None:
+        return fn(**dict(zip(keyword_names, args)))
+    values = list(args)
+    if arg0_source is not None:
+        kind, index = arg0_source
+        if kind == "cell":
+            closure = fn.__closure__
+            if closure is None:
+                raise AssertionError("expected a closure for the cell receiver")
+            first = closure[index]
+        elif kind == "fast":
+            first = values.pop(index)
+        else:
+            first = None
+        values.insert(0, first)
+    return fn(*values)
+
+
+def make_resume_function(
+    code: types.CodeType,
+    f_globals: dict[str, Any],
+    name: str,
+    closure: tuple[types.CellType, ...] | None = None,
+) -> Callable[..., Any]:
+    """Restore the versioned calling convention, including after package load.
+
+    The compiler reserves co_consts[0] for a tuple containing the signature
+    tag, receiver source and keyword-only parameter names. Legacy resume
+    code has no such header and retains its original calling convention.
+    """
+    import types
+
+    fn = types.FunctionType(code, f_globals, name, None, closure)
+    signature = code.co_consts[0] if code.co_consts else None
+    if (
+        isinstance(signature, tuple)
+        and len(signature) == 3
+        and signature[0] == _RESUME_SIGNATURE
+    ):
+        _, arg0_source, keyword_names = signature
+        if arg0_source is not None or keyword_names is not None:
+            return functools.partial(_call_resume, fn, arg0_source, keyword_names)
+    return fn
+
+
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
+    arg0_source: tuple[str, int] | None = None
+    keyword_names: tuple[str, ...] | None = None
     instructions: list[Instruction] = dataclasses.field(default_factory=list)
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
@@ -372,7 +456,6 @@ class ContinueExecutionCache:
                 pop_nested_resume_result,
             )
 
-        is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
 
         def update(
@@ -386,29 +469,48 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            freevars = tuple(sorted(freevars))
+            freevars = tuple(sorted(set(freevars)))
+            arg0_name = implicit_super_arg0(code)
+            if not code.co_argcount:
+                meta.keyword_names = tuple(args)
+            elif arg0_name is not None:
+                if arg0_name in code.co_cellvars:
+                    meta.arg0_source = ("cell", freevars.index(arg0_name))
+                elif arg0_name in args:
+                    meta.arg0_source = ("fast", args.index(arg0_name))
+                    args.remove(arg0_name)
+                else:
+                    meta.arg0_source = ("empty", 0)
+                args.insert(0, arg0_name)
             code_options["co_name"] = (
                 f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
             )
-            if is_py311_plus:
-                qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
-                if len(qualified_path) == 1:
-                    code_options["co_qualname"] = code_options["co_name"]
-                else:
-                    if len(qualified_path) != 2:
-                        raise AssertionError(
-                            f"Expected qualified path to have 2 parts, got {len(qualified_path)}"
-                        )
-                    module_name, co_name = qualified_path
-                    code_options["co_qualname"] = (
-                        f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
+            qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
+            if len(qualified_path) == 1:
+                code_options["co_qualname"] = code_options["co_name"]
+            else:
+                if len(qualified_path) != 2:
+                    raise AssertionError(
+                        f"Expected qualified path to have 2 parts, got {len(qualified_path)}"
                     )
+                module_name, co_name = qualified_path
+                code_options["co_qualname"] = (
+                    f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
+                )
             code_options["co_firstlineno"] = lineno
-            code_options["co_cellvars"] = ()
+            code_options["co_cellvars"] = (
+                (arg0_name,)
+                if meta.arg0_source and meta.arg0_source[0] == "cell"
+                else ()
+            )
             code_options["co_freevars"] = freevars
-            code_options["co_argcount"] = len(args)
+            code_options["co_argcount"] = (
+                0 if meta.keyword_names is not None else len(args)
+            )
             code_options["co_posonlyargcount"] = 0
-            code_options["co_kwonlyargcount"] = 0
+            code_options["co_kwonlyargcount"] = (
+                len(args) if meta.keyword_names is not None else 0
+            )
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
@@ -421,12 +523,11 @@ class ContinueExecutionCache:
             target = next(i for i in instructions if i.offset == resume_offset)
 
             prefix = []
-            if is_py311_plus:
-                if freevars:
-                    prefix.append(
-                        create_instruction("COPY_FREE_VARS", arg=len(freevars))
-                    )
-                prefix.append(create_instruction("RESUME", arg=0))
+            if freevars:
+                prefix.append(create_instruction("COPY_FREE_VARS", arg=len(freevars)))
+            prefix.append(create_instruction("RESUME", arg=0))
+            if meta.arg0_source and meta.arg0_source[0] == "empty":
+                prefix.append(create_instruction("DELETE_FAST", argval=arg0_name))
 
             # Set is_tracing_resume_prologue to prevent graph breaks.
             # This doesn't really do anything at runtime, but dynamo will trace this
@@ -471,18 +572,16 @@ class ContinueExecutionCache:
                     hook = hooks.pop(i)
                     hook_insts, exn_target = hook(code_options, cleanup)
                     prefix.extend(hook_insts)
-                    if is_py311_plus:
-                        hook_target_offset = hook_target_offsets.pop(i)
-                        old_hook_target = offset_to_inst[hook_target_offset]
-                        meta.prefix_block_target_offset_remap.append(hook_target_offset)
-                        old_hook_target_remap[old_hook_target] = exn_target
+                    hook_target_offset = hook_target_offsets.pop(i)
+                    old_hook_target = offset_to_inst[hook_target_offset]
+                    meta.prefix_block_target_offset_remap.append(hook_target_offset)
+                    old_hook_target_remap[old_hook_target] = exn_target
 
-            if is_py311_plus:
-                # reverse the mapping since targets of later/nested contexts are inserted
-                # into the mapping later, but show up earlier in the prefix.
-                meta.prefix_block_target_offset_remap = list(
-                    reversed(meta.prefix_block_target_offset_remap)
-                )
+            # reverse the mapping since targets of later/nested contexts are inserted
+            # into the mapping later, but show up earlier in the prefix.
+            meta.prefix_block_target_offset_remap = list(
+                reversed(meta.prefix_block_target_offset_remap)
+            )
 
             if hooks:
                 raise AssertionError(f"Unprocessed hooks remaining: {hooks}")
@@ -502,6 +601,12 @@ class ContinueExecutionCache:
                         f"argnames_null requires Python 3.12+, got {sys.version_info}"
                     )
                 for v in argnames_null:
+                    if (
+                        v == arg0_name
+                        and meta.arg0_source
+                        and meta.arg0_source[0] == "empty"
+                    ):
+                        continue
                     if v in args:
                         raise AssertionError(
                             f"argnames_null variable {v!r} should not be in args"
@@ -549,10 +654,12 @@ class ContinueExecutionCache:
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("LOAD_CONST", argval=-1),
                         create_instruction("DELETE_SUBSCR"),
-                        # delete __nested values
-                        create_instruction("DELETE_FAST", argval="__nested_resume_fns"),
+                        # Release nested values while keeping synthetic arg[0] non-empty.
+                        create_instruction("LOAD_CONST", argval=None),
+                        create_instruction("STORE_FAST", argval="__nested_resume_fns"),
+                        create_instruction("LOAD_CONST", argval=None),
                         create_instruction(
-                            "DELETE_FAST", argval="__nested_frame_values"
+                            "STORE_FAST", argval="__nested_frame_values"
                         ),
                         # Set is_tracing_resume_prologue back to allow graph breaks
                         # in the nested resume
@@ -587,8 +694,7 @@ class ContinueExecutionCache:
                 if inst.offset == target.offset:
                     break
                 inst.starts_line = None
-                if sys.version_info >= (3, 11):
-                    inst.positions = None
+                inst.positions = None
 
             if cleanup:
                 prefix.extend(cleanup)
@@ -596,9 +702,6 @@ class ContinueExecutionCache:
 
             # remap original instructions' exception table entries
             if old_hook_target_remap:
-                # pyrefly: ignore [unbound-name]
-                if not is_py311_plus:
-                    raise AssertionError("old_hook_target_remap requires Python 3.11+")
                 for inst in instructions:
                     if (
                         inst.exn_tab_entry
@@ -609,6 +712,13 @@ class ContinueExecutionCache:
                         ]
 
             # TODO(jansel): add dead code elimination here
+            # The immutable header survives marshal/package loading. Instruction
+            # argvals retain the original constants and fix_vars remaps their indices.
+            signature = (_RESUME_SIGNATURE, meta.arg0_source, meta.keyword_names)
+            code_options["co_consts"] = (signature, *code_options["co_consts"])
+            for inst in instructions:
+                if inst.opcode in dis.hasconst:
+                    inst.arg = None
             instructions[:] = prefix + instructions
 
         new_code, _ = transform_code_object(code, update)
@@ -696,82 +806,79 @@ class ContinueExecutionCache:
                 "resume instruction not found in original code - this is a bug."
             )
 
-        if sys.version_info >= (3, 11):
-            # setup_fn_target_offsets currently contains the target offset of
-            # each setup_fn, based on `code`. When we codegen the resume function
-            # based on the original code object, `meta.code`, the offsets in
-            # setup_fn_target_offsets must be based on `meta.code` instead.
-            offset_key = (orig_init_offset, orig_resume_offset)
-            # NOTE: we key by offset_key since the same resume function may graph
-            # break in multiple places and we need different block_target_offset_remap's
-            # for each graph break location. Keying by orig_resume_offset may not be enough
-            # if 2 graph breaks on different initial offsets resume on the same instruction
-            # (although this is rare and not tested anywhere).
-            if offset_key not in meta.block_target_offset_remap:
-                block_target_offset_remap = meta.block_target_offset_remap[
-                    offset_key
-                    # pyrefly: ignore [implicit-any]
-                ] = {}
+        # setup_fn_target_offsets currently contains the target offset of
+        # each setup_fn, based on `code`. When we codegen the resume function
+        # based on the original code object, `meta.code`, the offsets in
+        # setup_fn_target_offsets must be based on `meta.code` instead.
+        offset_key = (orig_init_offset, orig_resume_offset)
+        # NOTE: we key by offset_key since the same resume function may graph
+        # break in multiple places and we need different block_target_offset_remap's
+        # for each graph break location. Keying by orig_resume_offset may not be enough
+        # if 2 graph breaks on different initial offsets resume on the same instruction
+        # (although this is rare and not tested anywhere).
+        if offset_key not in meta.block_target_offset_remap:
+            block_target_offset_remap = meta.block_target_offset_remap[
+                offset_key
+                # pyrefly: ignore [implicit-any]
+            ] = {}
 
-                def remap_block_offsets(
-                    instructions: list[Instruction], code_options: dict[str, Any]
-                ) -> None:
-                    # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
-                    # so we can tell which block a prefix PUSH_EXC_INFO belongs to,
-                    # by counting. Then we can use meta.prefix_block_target_offset_remap
-                    # to determine where in the original code the PUSH_EXC_INFO offset
-                    # replaced.
-                    prefix_blocks: list[Instruction] = []
-                    for inst in instructions:
-                        # NOTE meta.prefix_block_target_offset_remap is based off of how we codegen'd
-                        # context managers at the prefix/prologue of the resume function. It is the same for
-                        # every graph break in the same resume function, so we do not need to recompute
-                        # for each graph break (unlike for meta.block_target_offset_remap)
-                        if len(prefix_blocks) == len(
-                            meta.prefix_block_target_offset_remap
-                        ):
-                            break
-                        if inst.opname == "PUSH_EXC_INFO":
-                            prefix_blocks.append(inst)
+            def remap_block_offsets(
+                instructions: list[Instruction], code_options: dict[str, Any]
+            ) -> None:
+                # NOTE: each prefix block generates exactly one PUSH_EXC_INFO,
+                # so we can tell which block a prefix PUSH_EXC_INFO belongs to,
+                # by counting. Then we can use meta.prefix_block_target_offset_remap
+                # to determine where in the original code the PUSH_EXC_INFO offset
+                # replaced.
+                prefix_blocks: list[Instruction] = []
+                for inst in instructions:
+                    # NOTE meta.prefix_block_target_offset_remap is based off of how we codegen'd
+                    # context managers at the prefix/prologue of the resume function. It is the same for
+                    # every graph break in the same resume function, so we do not need to recompute
+                    # for each graph break (unlike for meta.block_target_offset_remap)
+                    if len(prefix_blocks) == len(meta.prefix_block_target_offset_remap):
+                        break
+                    if inst.opname == "PUSH_EXC_INFO":
+                        prefix_blocks.append(inst)
 
-                    # remap block target offsets for blocks generated in the resume prefix
-                    for inst, o in zip(
-                        prefix_blocks, meta.prefix_block_target_offset_remap
-                    ):
-                        block_target_offset_remap[cast(int, inst.offset)] = o
+                # remap block target offsets for blocks generated in the resume prefix
+                for inst, o in zip(
+                    prefix_blocks, meta.prefix_block_target_offset_remap
+                ):
+                    block_target_offset_remap[cast(int, inst.offset)] = o
 
-                    # current bytecode targets are after the prefix PUSH_EXC_INFO's
-                    cur_start_offset = (
-                        cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
+                # current bytecode targets are after the prefix PUSH_EXC_INFO's
+                cur_start_offset = (
+                    cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
+                )
+                # get the remaining block target offsets of the current bytecode
+                cur_inst_offsets = sorted(
+                    n for n in setup_fn_target_offsets if n > cur_start_offset
+                )
+                targets = _filter_iter(
+                    instructions, cur_inst_offsets, lambda inst, o: inst.offset == o
+                )
+                # The original code and resume code should have matching suffixes.
+                # Match the post-prefix block target offsets of the current resume code
+                # and the original code.
+                orig_targets = reversed(
+                    _filter_iter(
+                        zip(reversed(instructions), reversed(meta.instructions)),
+                        reversed(targets),
+                        lambda v1, v2: v1[0] is v2,
                     )
-                    # get the remaining block target offsets of the current bytecode
-                    cur_inst_offsets = sorted(
-                        n for n in setup_fn_target_offsets if n > cur_start_offset
-                    )
-                    targets = _filter_iter(
-                        instructions, cur_inst_offsets, lambda inst, o: inst.offset == o
-                    )
-                    # The original code and resume code should have matching suffixes.
-                    # Match the post-prefix block target offsets of the current resume code
-                    # and the original code.
-                    orig_targets = reversed(
-                        _filter_iter(
-                            zip(reversed(instructions), reversed(meta.instructions)),
-                            reversed(targets),
-                            lambda v1, v2: v1[0] is v2,
-                        )
-                    )
-                    for orig, cur in zip(orig_targets, targets):
-                        block_target_offset_remap[cur.offset] = orig[1].offset
+                )
+                for orig, cur in zip(orig_targets, targets):
+                    block_target_offset_remap[cur.offset] = orig[1].offset
 
-                transform_code_object(code, remap_block_offsets)
+            transform_code_object(code, remap_block_offsets)
 
-            # if offset_key or offset is not in setup_fn_target_offsets, it is an error
-            # that needs to be fixed
-            setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[offset_key][n]
-                for n in setup_fn_target_offsets
-            )
+        # if offset_key or offset is not in setup_fn_target_offsets, it is an error
+        # that needs to be fixed
+        setup_fn_target_offsets = tuple(
+            meta.block_target_offset_remap[offset_key][n]
+            for n in setup_fn_target_offsets
+        )
         return ContinueExecutionCache.lookup(
             meta.code,
             lineno,
