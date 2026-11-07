@@ -260,6 +260,52 @@ _RANDOM_KEYS = (random.Random().random, random.Random().random)
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    @parametrize("name", ["__getattr__", "__getattribute__"])
+    @parametrize("inherited", [False, True])
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
+    def test_defaulted_getattr_guards_added_lookup_hook(self, name, inherited):
+        class Base:
+            pass
+
+        class Input(Base):
+            pass
+
+        def getter(self, key):
+            return 7 if key == "value" else object.__getattribute__(self, key)
+
+        def fn(x, obj):
+            return x + getattr(obj, "value", 1)
+
+        x, obj = torch.ones(1), Input()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, obj), x + 1)
+        setattr(Base if inherited else Input, name, getter)
+        self.assertEqual(compiled(x, obj), x + 7)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_defaulted_getattr_reads_property_once(self):
+        class Input:
+            def __init__(self):
+                self.reads = 0
+
+            @property
+            def value(self):
+                self.reads += 1
+                return self.reads
+
+        def fn(x, obj):
+            return x + getattr(obj, "value", 9), obj.reads
+
+        x, obj = torch.ones(1), Input()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for _ in range(2):
+            obj.reads = 0
+            self.assertEqual(compiled(x, obj), (x + 1, 1))
+            self.assertEqual(obj.reads, 1)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_shared_mro_owner_base_replacement(self):
         class Base:
             scale = 1

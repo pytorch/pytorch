@@ -1049,9 +1049,9 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         pass
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .iter import SetIterator
+        from .iter import DictKeysIterator
 
-        return SetIterator.create(self.items)
+        return DictKeysIterator.create(self.items)
 
     def debug_repr(self) -> str:
         if not self.items:
