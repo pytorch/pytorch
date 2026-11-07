@@ -120,8 +120,17 @@ void initializeStreamsEvents(
     // Get a non-default stream to execute asynchronous CUDA operations
     // on this device. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
+#if defined(USE_ROCM)
+    // On ROCm the high-priority stream pool maps onto few hardware queues,
+    // whose short signal ring saturates under the stress tests' back-to-back
+    // submits and forces a host-side busy wait (ROCm/rocm-systems#11678). Use
+    // normal priority instead.
+    streams.push_back(
+        impl.getStreamFromGlobalPool(device, /*isHighPriority=*/false));
+#else
     streams.push_back(
         impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
+#endif
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -177,8 +186,17 @@ void initializeStreamsEvents(
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this output. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
+#if defined(USE_ROCM)
+    // On ROCm the high-priority stream pool maps onto few hardware queues,
+    // whose short signal ring saturates under the stress tests' back-to-back
+    // submits and forces a host-side busy wait (ROCm/rocm-systems#11678). Use
+    // normal priority instead.
+    streams.push_back(
+        impl.getStreamFromGlobalPool(device, /*isHighPriority=*/false));
+#else
     streams.push_back(
         impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
+#endif
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
