@@ -167,6 +167,10 @@ test_failures = {
         ("cpu",), is_skip=True
     ),
     "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
+    # all dims are size 1, so there is no symbolic loop bound
+    "test_index_put_duplicate_indices_single_element_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
