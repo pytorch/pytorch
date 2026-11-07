@@ -19,7 +19,7 @@ import functools
 import operator
 import types
 from collections.abc import Iterable, Iterator
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 from torch.utils._ordered_set import OrderedSet
@@ -44,7 +44,6 @@ from ..utils import (
 from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import (
-    _builtin_method_sources,
     guard_key_collisions,
     HashableTracker,
     invalidate_key_summary,
@@ -88,6 +87,22 @@ def set_copy(obj: "BaseSetVariable") -> "BaseSetVariable":
     return obj._new_set(obj.items.keys())  # type: ignore[missing-attribute]
 
 
+def _contains_builtin_method(value: object) -> bool:
+    from .builder import bound_builtin_method_descriptor
+
+    pending = [value]
+    while pending:
+        value = pending.pop()
+        kind = type(value)
+        if issubclass(kind, tuple):
+            pending.extend(tuple.__iter__(cast(tuple[object, ...], value)))
+        elif issubclass(kind, frozenset):
+            pending.extend(frozenset.__iter__(cast(frozenset[object], value)))
+        elif bound_builtin_method_descriptor(value) is not None:
+            return True
+    return False
+
+
 class BaseSetVariable(VariableTracker):
     """Shared logic for the set-family VTs (set, frozenset, dict_keys, OrderedSet).
 
@@ -109,6 +124,15 @@ class BaseSetVariable(VariableTracker):
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
+
+    _nonvar_fields = {
+        # Same reason as ConstDictVariable.original_items: a construction-time
+        # snapshot read only for still-live keys, so traversing it would make
+        # removed elements look reachable.  Here the mismatch is even wider --
+        # reconstruct emits set_items and never consults original_items at all.
+        "original_items",
+        *VariableTracker._nonvar_fields,
+    }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -289,10 +313,14 @@ class BaseSetVariable(VariableTracker):
 
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
-            other.materialize_keys()
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            guard_key_collisions(self.items, other.items)
-            yield from other.items.keys()
+            storage = (
+                other.materialize_keys()
+                if isinstance(other, ConstDictVariable)
+                else other.items
+            )
+            guard_key_collisions(self.items, storage)
+            yield from storage
             return
 
         for item in lazily_unpack(tx, other):
@@ -308,9 +336,13 @@ class BaseSetVariable(VariableTracker):
 
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
-            other.materialize_keys()
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            keys = list(other.items.keys())
+            storage = (
+                other.materialize_keys()
+                if isinstance(other, ConstDictVariable)
+                else other.items
+            )
+            keys = list(storage)
         else:
             keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
         guard_key_collisions(self.items, keys)
@@ -352,6 +384,13 @@ class BaseSetVariable(VariableTracker):
         pending = [*args, *kwargs.values()]
         while pending:
             value = pending.pop()
+            if isinstance(value, variables.LazyVariableTracker):
+                if not value.is_realized() and (
+                    value.source is None
+                    or _contains_builtin_method(value.original_value())
+                ):
+                    return None
+                value = value.realize()
             if isinstance(
                 value,
                 (
@@ -361,19 +400,10 @@ class BaseSetVariable(VariableTracker):
                 ),
             ):
                 return None
-            if isinstance(value, variables.LazyVariableTracker):
-                if value.is_realized():
-                    pending.append(value.realize())
-                elif value.source is None or any(
-                    _builtin_method_sources(value.original_value(), value.source)
-                ):
-                    return None
-                continue
             if isinstance(value, variables.BaseListVariable):
                 pending.extend(value.items)
-        # Only literal operands can be materialized without losing identity.
-        # For example, converting (receiver.count,) to a Python constant can
-        # copy receiver, changing method equality against the original set.
+        # Materializing receiver.count can copy its receiver, changing method-key
+        # equality. Only literal operands are safe.
         if (
             not any(key.has_builtin_method for key in self.items)
             and check_constant_args([self, *args], kwargs)
@@ -432,7 +462,6 @@ class BaseSetVariable(VariableTracker):
         out_items = dict(self.items)
         for other in args:
             keys = self._operand_keys(tx, other)
-            guard_key_collisions(out_items, keys)
             for key in keys:
                 store_item(out_items, key, BaseSetVariable._default_value())
         return self._new_set(out_items)
@@ -527,7 +556,6 @@ class BaseSetVariable(VariableTracker):
         result = set_copy(self_)
         if self_ is other_:
             return result
-        guard_key_collisions(result.items, other_.items)
         result._update_items(other_.items)  # type: ignore[missing-attribute]
         return result
 
@@ -689,7 +717,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
@@ -702,8 +730,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     ) -> VariableTracker:
         # Convert add to __setitem__ with None value
         tx.output.side_effects.mutation(self)
-        key = self._hashable_key(args[0])
-        self._insert_key(key)
+        self._insert_key(HashableTracker(args[0]))
         return ConstantVariable.create(None)
 
     def pop(
@@ -1022,9 +1049,9 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         pass
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .iter import SetIterator
+        from .iter import DictKeysIterator
 
-        return SetIterator.create(self.items)
+        return DictKeysIterator.create(self.items)
 
     def debug_repr(self) -> str:
         if not self.items:
@@ -1058,7 +1085,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def sq_contains_impl(
@@ -1215,13 +1242,10 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         for item in items:
             # pyrefly: ignore [bad-argument-type]
             key = HashableTracker(item.realize())
-            guard_key_collisions(new_items, (key,))
             store_item(new_items, key, BaseSetVariable._default_value())
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
-        self.items.clear()
-        invalidate_key_summary(self.items)
-        self._update_items(new_items)
+        self.items = new_items
         return ConstantVariable.create(None)
 
     tp_methods = {
@@ -1363,8 +1387,8 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # frozenset is hashable, unlike set (SetVariable.hash_impl raises TypeError).
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # frozenset is hashable, unlike set (SetVariable.tp_hash_impl raises TypeError).
         # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
@@ -1432,7 +1456,7 @@ class DictKeySetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def _dictview_binop(
@@ -1456,9 +1480,11 @@ class DictKeySetVariable(BaseSetVariable):
 
         if isinstance(vt, ConstDictVariable):
             vt.install_dict_order_guard(tx)
-            vt.materialize_keys()
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
-            items: list[Any] = list(vt.items.keys())
+            storage = (
+                vt.materialize_keys() if isinstance(vt, ConstDictVariable) else vt.items
+            )
+            items: list[Any] = list(storage)
         else:
             items = unpack_iterable(tx, vt)
         return SetVariable(items, mutation_type=ValueMutationNew())

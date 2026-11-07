@@ -17,7 +17,7 @@ import inspect
 import itertools
 import operator
 import sys
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -313,13 +313,6 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="Unimplemented next() call",
@@ -423,6 +416,8 @@ class ChainVariable(IteratorVariable):
 
 
 class RepeatIteratorVariable(IteratorVariable):
+    _cpython_type = itertools.repeat
+
     # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c
     # repeat carries a `cnt` count: -1 means unbounded; CPython's repeat_new
     # clamps a user-supplied negative `times` to 0. We model that with `times`
@@ -509,6 +504,8 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
+    _cpython_type = itertools.count
+
     # advance_count tracks how many next() calls were made during tracing,
     # used by side_effects.py to replay them on the real iterator post-execution.
     _nonvar_fields = {
@@ -1056,3 +1053,6 @@ class DictItemsIterator(DictViewIterator):
 class SetIterator(DictViewIterator):
     _cpython_type = type(iter(set()))
     view_type = "keys"
+
+    def python_type(self) -> type:
+        return cast(type, self._cpython_type)

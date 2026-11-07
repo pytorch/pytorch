@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -196,12 +197,6 @@ timer_counter = itertools.count()
 
 
 # Abstraction on top of counters.
-class ReInplaceTrigger(enum.Enum):
-    AUTO_FUNC_V1 = 1
-    AUTO_FUNC_V2 = 2
-    TRITON_OPS = 3
-
-
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -1511,15 +1506,15 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    # These types cannot be subclassed. Identity avoids spoofed __class__ and metaclass equality.
-    return any(
-        type(value) is function_type
-        for function_type in (
+    # Use actual types to ignore spoofed __class__ while retaining CPython subtypes.
+    return issubclass(
+        type(value),
+        (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-        )
+        ),
     )
 
 
@@ -3041,19 +3036,20 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
-"""
-    Difference between is_safe_constant and common_constant_types.
-    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
-                             as ConstantVariable.
-    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
-"""
-
 
 def is_identity_singleton(value: object) -> bool:
     """Constants whose process-wide identity does not depend on their source."""
     return any(
         value is item for item in (None, True, False, Ellipsis, NotImplemented)
     ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
+
+
+"""
+    Difference between is_safe_constant and common_constant_types.
+    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
+                             as ConstantVariable.
+    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
+"""
 
 
 def is_safe_constant(v: object) -> bool:
@@ -5691,9 +5687,10 @@ def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
 
 
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
 
+    value = cast(types.BuiltinMethodType, value)
     receiver = value.__self__
     receiver_is_type = issubclass(type(receiver), type)
     owner = cast(type, receiver if receiver_is_type else type(receiver))
