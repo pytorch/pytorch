@@ -1403,7 +1403,9 @@ torch.{device_type}.synchronize()
         # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
         x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
         self.assertTrue(x.is_contiguous())
-        expected = F.adaptive_avg_pool2d(x.clone(memory_format=torch.contiguous_format), (2, 3))
+        expected = F.adaptive_avg_pool2d(
+            x.clone(memory_format=torch.contiguous_format), (2, 3)
+        )
         self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
 
     def test_adaptive_avg_pool3d_output_size_one(self, device):
