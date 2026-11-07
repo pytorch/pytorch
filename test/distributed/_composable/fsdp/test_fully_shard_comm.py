@@ -387,6 +387,18 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
             outputs.append(output)
         self.assertEqual(outputs[0], outputs[1])
 
+    def test_uneven_grads_raise(self, device):
+        # 5 columns over 4 ranks need padding, which the native copy-in doesn't
+        # write, so it raises on every rank before the reduce-scatter
+        grad = torch.randn(2, 5, device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "does not support gradients sharded unevenly on dim 1: size \\(2, 5\\)",
+        ):
+            reduce_scatter_input_fn_with_native_copy(
+                [grad], shard_dims=[1], world_size=4
+            )
+
 
 instantiate_device_type_tests(
     TestFullyShardNativeReduceScatterInputFn, globals(), only_for=("cpu", "cuda", "xpu")

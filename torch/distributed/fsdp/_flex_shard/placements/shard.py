@@ -14,6 +14,7 @@ from typing_extensions import override
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch._prims_common import make_contiguous_strides_for
 
 from ..placement_contract import (
     BucketParamStorageLayout,
@@ -675,14 +676,30 @@ class Shard(Placement):
         results: list[torch.Tensor] = []
         flat_offset = 0
         for info, padded_size in zip(infos, layout.padded_sizes, strict=True):
+            # pyrefly: ignore [missing-attribute]
+            dim = info.placement.dim
             local_shape = info.placement.compute_local_shape(
                 info.global_shape, rank, world_size
             )
-            shard = (
-                recv_buf.narrow(0, flat_offset, local_shape.numel())
-                .view(local_shape)
-                .contiguous()
-            )
+            if dim != 0 and info.global_shape[dim] % world_size:
+                # The shard arrives padded on its shard dim, as the copy-in
+                # padded it: the padded strides view its data, which the
+                # runtime copies compact after the post-reduce steps (see
+                # begin_reduce_grad)
+                padded_shape = list(info.global_shape)
+                padded_shape[dim] = -(-padded_shape[dim] // world_size)
+                shard = torch.as_strided(
+                    recv_buf,
+                    local_shape,
+                    make_contiguous_strides_for(padded_shape),
+                    storage_offset=recv_buf.storage_offset() + flat_offset,
+                )
+            else:
+                shard = (
+                    recv_buf.narrow(0, flat_offset, local_shape.numel())
+                    .view(local_shape)
+                    .contiguous()
+                )
             results.append(shard)
             flat_offset += padded_size.numel() // world_size
         return results
@@ -786,7 +803,11 @@ def _reduce_scatter_copy_in_layout(
         ):
             if shard_dim == 0:
                 continue
-            if tensor.is_contiguous():
+            if tensor.size(shard_dim) % world_size:
+                # Each rank's chunk, zero-padded to the first chunk's size,
+                # along dim 0, as FSDP2's copy-in does for uneven shards
+                tensors[idx] = _pad_and_reorder_by_rank(tensor, shard_dim, world_size)
+            elif tensor.is_contiguous():
                 num_leading_dims[idx] = shard_dim
             else:
                 # As FSDP2 does, reorder the grad along dim 0 so that each
@@ -803,6 +824,35 @@ def _reduce_scatter_copy_in_layout(
             ) * world_size
         padded_sizes.append(torch.Size(padded_size))
     return tensors, num_leading_dims, padded_sizes
+
+
+def _pad_and_reorder_by_rank(
+    grad: torch.Tensor, shard_dim: int, world_size: int
+) -> torch.Tensor:
+    """
+    Returns grad's chunks on shard_dim, each zero-padded to the first chunk's
+    size and stacked along dim 0, in one pass over grad. For example, a (2, 5)
+    gradient on Shard(1) over 4 ranks gives the ranks 2, 2, 1 and 0 columns:
+
+        grad                    shards (4, 2, 2), returned as (8, 2)
+        g00 g01 g02 g03 g04     rank 0    rank 1    rank 2    rank 3
+        g10 g11 g12 g13 g14     g00 g01   g02 g03   g04 0     0 0
+                                g10 g11   g12 g13   g14 0     0 0
+    """
+    size = grad.shape[shard_dim]
+    chunk_size = math.ceil(size / world_size)
+    # Full chunks come first, then at most one short chunk, then empty ones
+    num_full, short_size = divmod(size, chunk_size)
+    shard_shape = (*grad.shape[:shard_dim], chunk_size, *grad.shape[shard_dim + 1 :])
+    shards = grad.new_zeros(world_size, *shard_shape)
+    # One copy moves the full chunks to a leading rank dim, a second the short chunk
+    full = grad.narrow(shard_dim, 0, num_full * chunk_size)
+    full = full.unflatten(shard_dim, (num_full, chunk_size)).movedim(shard_dim, 0)
+    shards[:num_full].copy_(full)
+    if short_size:
+        short_chunk = grad.narrow(shard_dim, num_full * chunk_size, short_size)
+        shards[num_full].narrow(shard_dim, 0, short_size).copy_(short_chunk)
+    return shards.flatten(0, 1)
 
 
 def _reduce_scatter_copy_in(

@@ -323,7 +323,7 @@ class FullyShardBucket:
     ) -> None:
         self.modules = modules
         self.mesh_info = mesh_info
-        self.post_forward_mesh_info = post_forward_mesh_info
+        self._post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
         self.offload_policy = offload_policy
@@ -387,6 +387,14 @@ class FullyShardBucket:
         )
         # Re-read at lazy init, as FSDP2 reads extensions then (see refresh)
         self.has_extensions = self.own_storage
+        shard_world_size = (
+            mesh_info.shard_mesh_size if isinstance(mesh_info, FSDPMeshInfo) else 1
+        )
+        self.has_uneven_nonzero_dim_shards = any(
+            (dim := fsdp_param.fsdp_placement.dim) != 0
+            and fsdp_param._orig_size[dim] % shard_world_size != 0
+            for fsdp_param in self.fsdp_params
+        )
         # FSDP2's set_reduce_scatter_max_input_buffers; the root's engine context
         # keeps the largest of its groups'
         self.max_input_buffers = 1
@@ -556,26 +564,47 @@ class FullyShardBucket:
 
     def param_driven_unshard(self) -> bool:
         """Whether the all-gather needs ``ParamDrivenShard``: parameters with
-        their own all-gather, or a layout other than the native rank-major
-        one."""
+        their own all-gather, parameters unevenly sharded on a nonzero dim,
+        whose all-gather inputs ``FSDPParam`` pads, or a layout other than the
+        native rank-major one."""
         from ..experimental import all_gather_output_fn_with_native_copy
 
         layout = self.all_gather_layout
         return (
             self.own_storage
             or self.has_extensions
+            or self.has_uneven_nonzero_dim_shards
             or not (
                 type(layout) is DefaultAllGatherLayout
                 and layout.output_fn in (None, all_gather_output_fn_with_native_copy)
             )
         )
 
+    @property
+    def post_forward_mesh_info(self) -> FSDPMeshInfo | None:
+        return self._post_forward_mesh_info
+
+    @post_forward_mesh_info.setter
+    def post_forward_mesh_info(
+        self, post_forward_mesh_info: FSDPMeshInfo | None
+    ) -> None:
+        self.set_post_forward_mesh_info(post_forward_mesh_info)
+
+    @property
+    def _post_backward_pending(self) -> bool:
+        """Whether a backward without gradient sync left gradients for a later
+        reduction, as FSDP2's group attribute of that name."""
+        return self.bucket.needs_sync
+
+    def reshard(self) -> None:
+        self.bucket.reshard()
+
     def set_post_forward_mesh_info(
         self, post_forward_mesh_info: FSDPMeshInfo | None
     ) -> None:
         """Reshard after forward (``post_forward_mesh_info`` not None), to the
         smaller post-forward mesh for an int ``reshard_after_forward``."""
-        self.post_forward_mesh_info = post_forward_mesh_info
+        self._post_forward_mesh_info = post_forward_mesh_info
         self.storage._reshard_after_forward = post_forward_mesh_info is not None
         self.storage._post_forward_group = (
             post_forward_mesh_info.shard_process_group
@@ -646,9 +675,15 @@ class FullyShardBucket:
             sharded_param = cast(DTensor, fsdp_param.sharded_param)
             local = sharded_param._local_tensor
             length = local.size(shard_dim) if local.numel() > 0 else 0
-            sharded_param._local_tensor = view.view(
+            # Shard(0) data is stored padded, Shard(i), i > 0, data compact
+            stored_size = (
                 fsdp_param.padded_sharded_param_size
-            ).narrow(shard_dim, 0, length)
+                if shard_dim == 0
+                else fsdp_param.sharded_size
+            )
+            sharded_param._local_tensor = view.view(stored_size).narrow(
+                shard_dim, 0, length
+            )
         self.views = views
         self.storage._byte_storage = storage
         self.storage._total_bytes = total
@@ -1242,6 +1277,7 @@ def share_context(states: list[Any]) -> None:
                 callbacks.extend(c for c in old_callbacks if c not in callbacks)
             for other in state._state_ctx.all_states:
                 other._engine_context = context
+            state._state_ctx.engine_context = context
         state._shared_engine_context = context
 
 

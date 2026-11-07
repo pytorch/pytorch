@@ -69,7 +69,9 @@ class AllGatherInput:
     are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
     and nonzero trailing dims, shrink, leaving unspecified data after the gathered
     prefix. Extensions own any padding: the local shard is unpadded on ranks with
-    a smaller shard, so per-row payloads such as scales need padding too. When
+    a smaller shard, so per-row payloads such as scales need padding too. On a
+    nonzero shard dim, the padding lies inside every row of the gathered
+    parameter, and ``fsdp_post_all_gather`` must drop it. When
     ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
     of an unevenly sharded parameter to have the padded sharded size, so return
     payloads of other shapes, such as scales, as records.
@@ -554,10 +556,14 @@ def _prepare_default_all_gather_outputs(
 # chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
 # as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
 # same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
-# prefix. A uint8 all_gather_output has split_sizes in bytes, while outputs keep
-# their dtypes. Of its arguments, fn may only write outputs, whose version
-# counters FSDP preserves, and must keep none. FSDP skips it for a single rank or
-# an empty all-gather.
+# prefix. Outputs of unevenly sharded Shard(i), i > 0, parameters without an
+# all-gather extension are smaller: each of their rows takes the prefix that
+# holds data, which skips the padding of the last nonempty rank's chunk and the
+# chunks of the empty ranks after it.
+# A uint8 all_gather_output has split_sizes in bytes, while outputs keep their
+# dtypes. Of its arguments, fn may only write outputs, whose version counters
+# FSDP preserves, and must keep none. FSDP skips it for a single rank or an
+# empty all-gather.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -566,29 +572,73 @@ def _default_all_gather_output_fn(
     outer_sizes: list[int],
     world_size: int,
 ) -> None:
-    """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
+    """
+    Copies all_gather_output into outputs in two steps. For example, with 4 ranks,
+    A (5, 3) on Shard(0), B (2, 8) on Shard(1) and C (2, 5) on Shard(1) give
+    split_sizes = [6, 4, 4] and outer_sizes = [1, 2, 2]. Row r of
+    all_gather_output.view(4, -1) holds rank r's padded shards, written here as
+    b17 for B[1, 7] and .. for padding:
+
+                 A                         B                 C
+        rank 0   a00 a01 a02 a10 a11 a12 | b00 b01 b10 b11 | c00 c01 c10 c11
+        rank 1   a20 a21 a22 a30 a31 a32 | b02 b03 b12 b13 | c02 c03 c12 c13
+        rank 2   a40 a41 a42 ..  ..  ..  | b04 b05 b14 b15 | c04 ..  c14 ..
+        rank 3   ..  ..  ..  ..  ..  ..  | b06 b07 b16 b17 | ..  ..  ..  ..
+
+    1. One split_with_sizes_copy writes each column block into a destination
+       viewed as (world_size, split_size). A Shard(0) chunk is whole rows, so A's
+       block goes straight into its output, where A is the prefix
+       output[:15].view(5, 3). B's and C's rows interleave the ranks' chunks
+       (outer_size > 1), so their blocks go into rank-major buffers.
+    2. Each buffer, viewed as (rank, row, chunk), is copied into its output's
+       rows: row j takes row j of every rank's chunk. C's output holds only its
+       10 elements, so its rows skip the padding and the empty rank 3:
+
+        B   b00 b01 b02 b03 b04 b05 b06 b07     C   c00 c01 c02 c03 c04
+            b10 b11 b12 b13 b14 b15 b16 b17         c10 c11 c12 c13 c14
+    """
     byte_views = all_gather_output.dtype == torch.uint8
     split_outputs: list[torch.Tensor] = []
-    reassembled: list[tuple[torch.Tensor, torch.Tensor, int]] = []
+    # (rank-major buffer, output, outer size, whether the output drops padding)
+    reassembled: list[tuple[torch.Tensor, torch.Tensor, int, bool]] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        copy_output = output
-        if outer_size > 1:
-            copy_output = torch.empty_like(output)
-            reassembled.append((copy_output, output, outer_size))
-        if byte_views and copy_output.nbytes == world_size * split_size:
+        # In all_gather_output's elements, which are bytes for byte views
+        gathered = world_size * split_size
+        size = output.nbytes if byte_views else output.numel()
+        dst = output
+        if outer_size > 1 or size < gathered:
+            numel = gathered // output.element_size() if byte_views else gathered
+            dst = output.new_empty(numel)
+            reassembled.append((dst, output, outer_size, size < gathered))
+            size = gathered
+        if byte_views and size == gathered:
             # View as bytes last: a view of a byte view keeps the byte view alive
-            split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
+            split_outputs.append(dst.view(world_size, -1).view(torch.uint8))
             continue
-        split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        if split_output.numel() != world_size * split_size:  # a smaller payload
-            split_output = split_output[: world_size * split_size]
-        split_outputs.append(split_output.view(world_size, split_size))
+        if byte_views:
+            dst = dst.view(torch.uint8)
+        if size > gathered:  # a smaller payload fills a prefix
+            dst = dst[:gathered]
+        split_outputs.append(dst.view(world_size, split_size))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
-    for copy_output, output, outer_size in reassembled:
-        chunks = copy_output.view(world_size, outer_size, -1).unbind(0)
-        torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
+    for buffer, output, outer_size, drops_padding in reassembled:
+        chunks = buffer.view(world_size, outer_size, -1)
+        rows = output.view(outer_size, -1)
+        if not drops_padding:
+            torch.cat(chunks.unbind(0), dim=1, out=rows)
+        else:
+            # torch.chunk gives full chunks, at most one short chunk, then empty ones,
+            # so each row is num_full whole chunks and then the short chunk, if any
+            chunk_size = chunks.size(2)
+            num_full, short_size = divmod(rows.size(1), chunk_size)
+            full_size = num_full * chunk_size
+            rows[:, :full_size].view(outer_size, num_full, chunk_size).copy_(
+                chunks[:num_full].transpose(0, 1)
+            )
+            if short_size:
+                rows[:, full_size:].copy_(chunks[num_full, :, :short_size])
 
 
 def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
@@ -627,6 +677,16 @@ def foreach_all_gather_copy_out(
             all_gather_output, plan, world_size, _default_all_gather_output_fn
         )
         return persistent_buffers
+    for param in params:
+        if param.drops_row_padding:
+            # The contract cannot express outputs that drop the padding inside
+            # each row. The condition is the same on every rank, so every rank
+            # raises.
+            raise NotImplementedError(
+                f"Custom all-gather layouts do not support {param.name}, which is "
+                f"unevenly sharded on dim {param.shard_dim}; use "
+                "DefaultAllGatherLayout or an all-gather extension"
+            )
     first_unshard = not any(p.all_gather_outputs for p in params)
     buffers: list[torch.Tensor] = []
     if not first_unshard:

@@ -96,6 +96,12 @@ class ParamAllGather:
         # Output layouts of the inputs last flattened
         self.output_layouts: tuple[_AllGatherOutputLayout, ...] = ()
         self.from_extension = False
+        # Whether the outputs drop the padding inside the rows of an unevenly
+        # sharded Shard(i), i > 0, parameter without an all-gather extension,
+        # which then has its unpadded numel (see init_all_gather_outputs)
+        self.drops_row_padding = False
+        self.shard_dim = 0
+        self.unpadded_numel = 0
         # Extension layouts checked against the allocated outputs, which never
         # change, keyed by each input's size, dtype and, for records, integer dim
         self._layouts_by_key: dict[Any, tuple[_AllGatherOutputLayout, ...]] = {}
@@ -113,9 +119,14 @@ class ParamAllGather:
     ) -> None:
         if self.all_gather_outputs:
             return  # already initialized
+        output_numels = [numel * world_size for numel in all_gather_input_numels]
+        if self.drops_row_padding:
+            # The copy-out drops the padding (see _default_all_gather_output_fn),
+            # while extensions receive it, as for Shard(0)
+            output_numels = [self.unpadded_numel]
         self.all_gather_outputs = [
-            torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
-            for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
+            torch.empty(torch.Size([numel]), dtype=dtype, device=device)
+            for numel, dtype in zip(output_numels, all_gather_input_dtypes)
         ]
 
     def alloc_all_gather_outputs(self) -> None:
@@ -142,6 +153,7 @@ class ParamAllGather:
         *,
         shard_world_size: int,
         shard_dim: int,
+        global_shape: torch.Size,
         padded_sharded_size: torch.Size,
         uneven: bool,
     ) -> list[torch.Tensor]:
@@ -149,6 +161,9 @@ class ParamAllGather:
         parameter's sharding and any allocated outputs, and return them
         flattened."""
         self.from_extension = inputs.from_extension
+        self.drops_row_padding = shard_dim != 0 and uneven and not self.from_extension
+        self.shard_dim = shard_dim
+        self.unpadded_numel = global_shape.numel()
         if not inputs.from_extension:
             self.output_layouts = (
                 _get_all_gather_output_layout(
@@ -316,6 +331,7 @@ class ParamDrivenShard(Shard):
                     all_gather.representation.all_gather_inputs(index),
                     shard_world_size=world_size,
                     shard_dim=shard_dim,
+                    global_shape=info.global_shape,
                     padded_sharded_size=torch.Size(padded_sharded_size),
                     uneven=uneven,
                 )
@@ -471,7 +487,13 @@ class ParamDrivenShard(Shard):
         for index, (param, info) in enumerate(
             zip(all_gather.params, infos, strict=True)
         ):
-            outputs = param.unflatten_all_gather_outputs()
+            # Only an extension's outputs have the layouts of its inputs; the
+            # default output may drop the padding of its single input
+            outputs = (
+                param.unflatten_all_gather_outputs()
+                if param.from_extension
+                else tuple(param.all_gather_outputs)
+            )
             if param.unsharded_param is not None:
                 for tensor in param.inner_tensors:
                     if tensor.untyped_storage().size() == 0:

@@ -11,6 +11,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed.device_mesh import _get_device_handle
 
 from .placement_contract import PlacementPreparedUnshard, PlacementUnshardResult
@@ -91,6 +92,21 @@ def _first_tensor_device(*tensor_groups: list[torch.Tensor]) -> torch.device | N
     return next(
         (d for d in devices if d.type != "cpu"), devices[0] if devices else None
     )
+
+
+def _has_contiguous_strides(tensor: torch.Tensor) -> bool:
+    # Not is_contiguous(), which holds for any strides of an empty tensor
+    return tensor.stride() == tuple(make_contiguous_strides_for(tensor.shape))
+
+
+def _compact(grad: torch.Tensor) -> torch.Tensor:
+    """``grad``, or a copy with contiguous strides if it views the reduce
+    output with padded strides (an unevenly sharded Shard(i), i > 0, grad),
+    since fused optimizers reject grads whose strides differ from their
+    params'."""
+    if _has_contiguous_strides(grad):
+        return grad
+    return grad.clone(memory_format=torch.contiguous_format)
 
 
 def _get_bucket_placement(
@@ -216,7 +232,7 @@ def begin_reduce_grad(
                 "an all-reduce hook yet."
             )
         result = prepared.placement.reduce_prepared_grad(prepared, reduction)
-        return SyncReduceGradResult(result.sharded_grads)
+        return SyncReduceGradResult([_compact(g) for g in result.sharded_grads])
 
     device = prepared.buffers[0].device
     device_handle = _get_device_handle(device.type)
@@ -268,13 +284,22 @@ def begin_reduce_grad(
                 output.div_(post_factor)
             event = device_handle.Event()
             event.record(post_stream)
+    sharded_grads = [] if partial else result.sharded_grads
+    if not all(_has_contiguous_strides(g) for g in sharded_grads):
+        # Grads that view the reduce output with padded strides, copied compact
+        # once the post-reduce steps wrote that output, as FSDP2 does
+        with device_handle.stream(post_stream):
+            post_stream.wait_event(event)
+            sharded_grads = [_compact(g) for g in sharded_grads]
+            event = device_handle.Event()
+            event.record(post_stream)
     # The reduce output is read on another stream only by the post-reduce
     # steps; otherwise the sharded grads, which alias or copy it on its own
     # stream, alone decide its lifetime, as in FSDP2 (e.g. freed once
     # offloaded to CPU).
     output_buffers = result.buffers if post_stream is not reduce_grad_stream else []
     return AsyncReduceGradResult(
-        sharded_grads=[] if partial else result.sharded_grads,
+        sharded_grads=sharded_grads,
         event=event,
         buffers=[*prepared.buffers, *output_buffers],
         allocation_streams=(copy_in_stream, reduce_grad_stream, post_stream),

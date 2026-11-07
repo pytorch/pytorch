@@ -47,8 +47,10 @@ class FSDPStateContext(Generic[_StateType]):
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
         self.iter_forward_root: _StateType | None = None
-        # Whether to finalize backward in this backward's final callback
-        self.is_last_backward: bool = True
+        # The engine context of the states, which keeps is_last_backward as
+        # BucketCommContext.wait_reductions_at_backward_end
+        self.engine_context: BucketCommContext | None = None
+        self._is_last_backward = True
         # Whether backward finalization is owned by the caller
         self.manual_backward_finalization: bool = False
         # Manual finalization mode selected when backward starts
@@ -59,6 +61,19 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
+
+    @property
+    def is_last_backward(self) -> bool:
+        """Whether to finalize backward in this backward's final callback."""
+        return self._is_last_backward
+
+    @is_last_backward.setter
+    def is_last_backward(self, is_last_backward: bool) -> None:
+        # Callers such as torchtitan set this directly and restore it, so the
+        # engine context follows every write
+        self._is_last_backward = is_last_backward
+        if self.engine_context is not None:
+            self.engine_context.wait_reductions_at_backward_end = is_last_backward
 
 
 class FSDPState(_State):
@@ -164,9 +179,6 @@ class FSDPState(_State):
             # for that point instead.
             context = self._engine_context
             if context is not None:
-                context.wait_reductions_at_backward_end = (
-                    self._state_ctx.is_last_backward
-                )
                 context.manual_backward_finalization = (
                     self._state_ctx.manual_backward_finalization
                 )
@@ -246,6 +258,8 @@ class FSDPState(_State):
             context = new_engine_context(self._device)
         context.backward_start_callbacks.append(self._engine_backward_start)
         context.backward_end_callbacks.append(self._engine_backward_end)
+        self._state_ctx.engine_context = context
+        context.wait_reductions_at_backward_end = self._state_ctx.is_last_backward
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._engine_context = context

@@ -44,17 +44,20 @@ __global__ void im2col_kernel(
     int64_t h_in = h_out * stride_height - pad_height;
     int64_t w_in = w_out * stride_width - pad_width;
 
-    dt* col = data_col + (channel_out * height_col + h_out) * width_col + w_out;
-    const dt* im = data_im + (channel_in * height + h_in) * width + w_in;
+    // Index from the base pointers: with padding, the window origin lies
+    // before data_im, and forming such a pointer is undefined behavior.
+    int64_t col_offset = (channel_out * height_col + h_out) * width_col + w_out;
+    int64_t im_offset = (channel_in * height + h_in) * width + w_in;
 
     for (int64_t i = 0; i < kernel_height; ++i) {
       for (int64_t j = 0; j < kernel_width; ++j) {
         int64_t h = h_in + i * dilation_height;
         int64_t w = w_in + j * dilation_width;
-        *col = (h >= 0 && w >= 0 && h < height && w < width)
-            ? im[i * dilation_height * width + j * dilation_width]
+        data_col[col_offset] = (h >= 0 && w >= 0 && h < height && w < width)
+            ? data_im
+                  [im_offset + i * dilation_height * width + j * dilation_width]
             : static_cast<dt>(0);
-        col += height_col * width_col;
+        col_offset += height_col * width_col;
       }
     }
   }

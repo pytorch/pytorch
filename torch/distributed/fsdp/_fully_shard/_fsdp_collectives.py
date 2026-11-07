@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.fsdp._flex_shard.placements.shard import _pad_and_reorder_by_rank
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
 
 from ._fsdp_api import _ReduceOp
@@ -332,12 +333,20 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable[[torch.Tensor], None]:
-    """Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
+    """Reorder gradients sharded on a nonzero dim by rank, zero-padding that dim
+    to the padded sharded size, and return their copy-in."""
     if world_size > 1:
+        # The copy-in gives rank r the r-th of world_size chunks along dim 0. For
+        # Shard(0) that is already its shard, so stack the other gradients' rank
+        # chunks along dim 0.
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
-                chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
-                unsharded_grads[i] = torch.cat(chunks, dim=0)
+                grad = unsharded_grads[i]
+                if grad.shape[shard_dim] % world_size == 0:
+                    grad = torch.cat(torch.chunk(grad, world_size, shard_dim), dim=0)
+                else:
+                    grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
+                unsharded_grads[i] = grad
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
 
 

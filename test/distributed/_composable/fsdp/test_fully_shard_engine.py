@@ -45,7 +45,7 @@ class TestFullyShardEngine(FSDPTest):
 
     def _shard(self, model: _Net) -> None:
         def placement_fn(param: nn.Parameter) -> Shard:
-            # FSDP shards Shard(i > 0) evenly only
+            # Shard(1) where it splits evenly, which the engine's Shard gathers
             if param.ndim > 1 and param.size(1) % self.world_size == 0:
                 return Shard(1)
             return Shard(0)
@@ -66,6 +66,27 @@ class TestFullyShardEngine(FSDPTest):
         optim.step()
         results += [p.to_local() for p in model.parameters()]
         return results
+
+    @skip_if_lt_x_gpu(2)
+    def test_backward_prefetch_skips_buckets_without_unshard_in_backward(self):
+        # A bucket that does not unshard in backward never takes a backward
+        # prefetch, so one would stay in flight past a backward that keeps
+        # prefetches, into the next forward after the optimizer step
+        model = nn.Sequential(nn.Embedding(16, 8), nn.Linear(8, 8)).to(device_type)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+        # Embedding weights are not needed for the embedding backward
+        model[0].set_unshard_in_backward(False)
+        model.set_is_last_backward(False)
+        model(torch.randint(0, 16, (4,), device=device_type)).sum().backward()
+        state = model._get_fsdp_state()
+        context = state._engine_context
+        self.assertEqual(context.pending_unshards, [])
+        # Direct writes reach the engine too, as torchtitan's chunked loss
+        # sets and restores is_last_backward
+        state._state_ctx.is_last_backward = True
+        self.assertTrue(context.wait_reductions_at_backward_end)
 
     @skip_if_lt_x_gpu(2)
     def test_params_live_in_one_engine_bucket(self):

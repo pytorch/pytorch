@@ -465,18 +465,25 @@ class BucketCommContext:
         """Return the bucket whose backward re-gather follows ``bucket``'s.
 
         Backward visits buckets in reverse post-forward order. Buckets without
-        reshard-after-forward, or already unsharded, need no re-gather.
+        reshard-after-forward, already unsharded, or that do not unshard in
+        backward (``ShardedBucketStorage._unshard_in_backward``) need no
+        re-gather.
         """
         idx = bucket.post_forward_index
         if idx is None:
             return None
         if self.keep_prefetches_until_used:
             # The previous bucket in post-forward order, a no-op if it is
-            # unsharded already
-            return self.post_forward_order[idx - 1] if idx > 0 else None
+            # unsharded already. As in FSDP2, none if it does not unshard in
+            # backward, since nothing would take the prefetch.
+            previous = self.post_forward_order[idx - 1] if idx > 0 else None
+            if previous is None or not previous.bucket_storage._unshard_in_backward:
+                return None
+            return previous
         for candidate in reversed(self.post_forward_order[:idx]):
             if (
                 candidate.bucket_storage._reshard_after_forward
+                and candidate.bucket_storage._unshard_in_backward
                 and not candidate.is_unsharded
             ):
                 return candidate
@@ -1439,7 +1446,11 @@ class BucketRuntime:
             )
             return
         for target in targets:
-            self.context.prefetch(self.context.bucket_runtime(target), explicit=True)
+            runtime = self.context.bucket_runtime(target)
+            # A bucket that does not unshard in backward would never take a
+            # backward prefetch, which then would stay in flight
+            if forward or runtime.bucket_storage._unshard_in_backward:
+                self.context.prefetch(runtime, explicit=True)
 
     def _set_unsharded_grad_dtypes(self, *, defer_upcast: bool) -> None:
         """Defer or restore the upcast of grads accumulating in a wider dtype.

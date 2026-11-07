@@ -14,6 +14,7 @@
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <c10/metal/common.h>
+#include <c10/util/SmallVector.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
@@ -655,6 +656,13 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
 }
 
+// Threadgroups that keep every GPU core busy: 4 x 1024 threads cover the ~3072 resident threads per core
+static inline int64_t occupancy_threadgroups() {
+  constexpr int64_t threadgroups_per_core = 4;
+  static const int64_t cores = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  return threadgroups_per_core * cores;
+}
+
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
 }
@@ -773,6 +781,15 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   }
 }
 
+// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
+inline c10::SmallVector<c10::metal::DimDivider, 5> dimDividers(IntArrayRef sizes) {
+  c10::SmallVector<c10::metal::DimDivider, 5> dividers;
+  for (const auto size : sizes) {
+    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
+  }
+  return dividers;
+}
+
 template <typename T>
 void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter,
                                                         const std::string& name,
@@ -855,8 +872,9 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
+        const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(
-            computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
