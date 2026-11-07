@@ -1399,6 +1399,13 @@ torch.{device_type}.synchronize()
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
 
+    def test_adaptive_avg_pool2d_size_one_channel_stride(self, device):
+        # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
+        x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
+        self.assertTrue(x.is_contiguous())
+        expected = F.adaptive_avg_pool2d(x.clone(memory_format=torch.contiguous_format), (2, 3))
+        self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
+
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
             (2, 3, 6, 6, 6), dtype=torch.float, device=device, requires_grad=True
