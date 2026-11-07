@@ -1156,6 +1156,10 @@ endif()
 include(cmake/Dependencies.cmake)
 
 cmake_dependent_option(
+  USE_ELEMENTWISE_OPT "Build GPU elementwise optimization kernels for SM90 and newer"
+  OFF "USE_CUDA;NOT USE_ROCM" OFF)
+
+cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
@@ -1539,6 +1543,15 @@ endif()
 add_subdirectory(torch/headeronly)  # headeronly headers
 add_subdirectory(c10)
 add_subdirectory(caffe2)
+
+if(USE_ELEMENTWISE_OPT)
+  foreach(_elementwise_target torch_cuda torch_cuda_linalg)
+    if(TARGET ${_elementwise_target})
+      target_compile_definitions(${_elementwise_target} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CUDA>:USE_ELEMENTWISE_OPT>")
+    endif()
+  endforeach()
+endif()
 
 # ---[ CMake related files Uninstall option.
 if(NOT TARGET caffe2_uninstall)
