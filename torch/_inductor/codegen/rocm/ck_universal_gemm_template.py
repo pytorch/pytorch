@@ -16,7 +16,7 @@ from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
-from ...utils import IndentedBuffer, is_dynamic, try_import_ck_lib
+from ...utils import IndentedBuffer, is_dynamic, rocm_gfx_arch, try_import_ck_lib
 
 
 _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
@@ -418,6 +418,11 @@ class CKGemmTemplate(CKTemplate):
         if op.c_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
         if self.is_blocked_by_tf32_setting(op):
+            return None
+        # CK compiles K1 >= 32 instances to an empty kernel body on anything but
+        # gfx950 (GridwiseGemm::IsValidCompilationParameter), yet IsSupportedArgument
+        # still accepts them, so they would launch without writing the output.
+        if max(op.a_k1, op.b_k1) >= 32 and rocm_gfx_arch() != "gfx950":
             return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
