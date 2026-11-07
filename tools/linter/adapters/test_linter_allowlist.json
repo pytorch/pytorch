@@ -451,7 +451,6 @@
   "test/inductor/test_kernel_optimization.py",
   "test/inductor/test_layout_optim.py",
   "test/inductor/test_lookup_table.py",
-  "test/inductor/test_loop_ordering.py",
   "test/inductor/test_low_contention_collectives.py",
   "test/inductor/test_max_autotune.py",
   "test/inductor/test_max_autotune_blackwell.py",
