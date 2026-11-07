@@ -73,6 +73,10 @@ test_failures = {
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # dynamic shapes do not fold the final reduction into a mix order reduction
+    "test_pdl_kernel_after_folded_reduction_waits_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
     # With tensorify enabled, SymInt div no longer graph-breaks; the full
     # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
