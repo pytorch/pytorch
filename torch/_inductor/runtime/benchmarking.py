@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -19,7 +20,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -30,16 +30,9 @@ T = TypeVar("T")
 
 
 def _get_default_gpu_device_type() -> str:
-    avail_gpus = [
-        device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
-    ]
-    if len(avail_gpus) > 1:
-        raise AssertionError(
-            f"expected at most one available GPU type, got {avail_gpus}"
-        )
-    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    from torch._inductor.utils import get_gpu_type
+
+    return get_gpu_type()
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
@@ -359,6 +352,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -367,6 +361,22 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+
+        def clear_grads() -> None:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+
+        if cudagraph_unroll is None:
+            # Preserve the historical config behavior: invalid global values
+            # fall back to one replay. Per-call overrides are a stricter API
+            # and reject invalid values below.
+            n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        else:
+            n_iters = cudagraph_unroll
+            if n_iters < 1:
+                raise ValueError("cudagraph_unroll must be at least 1")
+
         # Warmup
         torch.cuda.synchronize()
         _callable()
@@ -376,9 +386,7 @@ class Benchmarker:
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
+            clear_grads()
             _callable()
         stream.synchronize()
 
@@ -386,16 +394,18 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            _callable()
+            for _ in range(n_iters):
+                clear_grads()
+                _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        if isinstance(result, list):
+            return [t / n_iters for t in result]  # type: ignore[return-value]
+        return result / n_iters
 
 
 # Make built-in defaults explicit via the registry
@@ -558,10 +568,32 @@ class TritonBenchmarker(Benchmarker):
             raise
 
 
+# AMD Infinity Cache (MALL) size by gfx target; torch's device properties do not
+# report it. Unknown archs get Triton's 256 MB flush size.
+_ROCM_MALL_SIZE = {
+    "gfx908": 0,  # MI100
+    "gfx90a": 0,  # MI200
+    "gfx942": 256 * 1024 * 1024,  # MI300X
+    "gfx950": 256 * 1024 * 1024,  # MI350X
+}
+
+
+@functools.cache
+def _rocm_mall_size() -> int:
+    """MALL bytes of the current ROCm device."""
+    props = torch.cuda.get_device_properties(torch.cuda.current_device())
+    arch = getattr(props, "gcnArchName", "").split(":", 1)[0]
+    return _ROCM_MALL_SIZE.get(arch, 256 * 1024 * 1024)
+
+
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
-        self._in_cudagraph_benchmark = False
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -584,6 +616,21 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if cache_size:
                 return cache_size
         return 256 * 1024 * 1024
+
+    def get_flush_size(
+        self: Self, device_type: str | torch.device | None = None
+    ) -> int:
+        """Bytes to flush between timed runs so each starts with cold caches.
+
+        On ROCm, L2_cache_size is the per-XCD L2 (4 MB on MI300X/MI350X) and the
+        Infinity Cache (MALL) behind it is not in torch's device properties, so add
+        it. Flushing only the L2 leaves operands warm in the MALL, which misranks
+        autotune choices.
+        """
+        cache_size = self.get_device_cache_size(device_type)
+        if not torch.version.hip:
+            return cache_size
+        return cache_size + _rocm_mall_size()
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -616,17 +663,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = super().benchmark_gpu_with_cuda_graph(
-                _callable, grad_to_none=grad_to_none, **kwargs
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
             )
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         return result
 
     @may_distort_benchmarking_result
@@ -713,12 +765,17 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         device_interface.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        # (CUDA). On ROCm, flush by reading the buffer instead: zero_() leaves it
+        # dirty in the L2 / Infinity Cache and the timed call then pays the
+        # write-back. Read a float32 buffer, since summing int32 first writes an
+        # int64 copy.
         buffer = torch.empty(
-            self.get_device_cache_size(device_type) // 4,
-            dtype=torch.int,
+            self.get_flush_size(device_type) // 4,
+            dtype=torch.float32 if torch.version.hip else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush = buffer.sum if torch.version.hip else buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
@@ -727,7 +784,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -742,7 +799,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
-            buffer.zero_()
+            flush()
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
@@ -751,7 +808,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()

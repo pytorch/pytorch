@@ -472,7 +472,7 @@ class TestSegmentReductions(TestCase):
                         initial = 1000
                     elif reduce == 'max':
                         initial = -1000
-                    segment_reduce_args = {x, reduce}
+                    segment_reduce_args = (x, reduce)
                     segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
                     if mode == 'lengths':
                         segment_reduce_kwargs[mode] = lengths

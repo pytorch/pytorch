@@ -54,6 +54,41 @@ DEFINE_SVE_CAST(int32_t, s32, c10::BFloat16, bf16)
 DEFINE_SVE_CAST(int16_t, s16, c10::BFloat16, bf16)
 #endif // __ARM_FEATURE_BF16
 
+template <typename T>
+inline constexpr bool is_sve_vec_bool_v =
+    !std::is_same_v<VecBool<T>, Vectorized<T>>;
+
+// Between types of the same width a comparison result stays a predicate, as
+// the lanes line up. Otherwise it goes through its mask, like cast does.
+template <typename dst_t, typename src_t>
+inline auto cast(const SveVecBool<src_t>& p) {
+  if constexpr (is_sve_vec_bool_v<dst_t> && sizeof(dst_t) == sizeof(src_t)) {
+    return VecBool<dst_t>(svbool_t(p));
+  } else {
+    return cast<dst_t>(Vectorized<src_t>(p));
+  }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ VECBOOL OPS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// A comparison result in a bitwise op with a Vectorized<T> is used as its
+// mask. Two comparison results combine as predicates (see SveVecBool).
+#define DEFINE_SVE_VECBOOL_BINARY_OP(op)                                      \
+  template <typename T>                                                       \
+  inline Vectorized<T> operator op(SveVecBool<T> a, const Vectorized<T>& b) { \
+    return Vectorized<T>(a) op b;                                             \
+  }                                                                           \
+  template <typename T>                                                       \
+  inline Vectorized<T> operator op(const Vectorized<T>& a, SveVecBool<T> b) { \
+    return a op Vectorized<T>(b);                                             \
+  }
+
+DEFINE_SVE_VECBOOL_BINARY_OP(&)
+DEFINE_SVE_VECBOOL_BINARY_OP(|)
+DEFINE_SVE_VECBOOL_BINARY_OP(^)
+
+#undef DEFINE_SVE_VECBOOL_BINARY_OP
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <int64_t scale = 1>
@@ -85,8 +120,7 @@ std::
         const double* base_addr,
         const Vectorized<int64_t>& vindex_,
         const Vectorized<double>& mask_) {
-  svbool_t mask =
-      svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+  svbool_t mask = svcmplt_s64(ptrue, svreinterpret_s64_f64(mask_), ZERO_S64);
   svint64_t vindex =
       svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
   return svsel_f64(
@@ -100,8 +134,7 @@ std::
         const float* base_addr,
         const Vectorized<int32_t>& vindex_,
         const Vectorized<float>& mask_) {
-  svbool_t mask =
-      svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+  svbool_t mask = svcmplt_s32(ptrue, svreinterpret_s32_f32(mask_), ZERO_S32);
   svint32_t vindex =
       svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
   return svsel_f32(

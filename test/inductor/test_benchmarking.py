@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from torch._inductor.config import (
     inductor_default_autotune_warmup,
 )
 from torch._inductor.runtime.benchmarking import (
+    _get_default_gpu_device_type,
     Benchmarker,
     InductorBenchmarker,
     TorchProfilerBenchmarker,
@@ -19,6 +21,7 @@ from torch._inductor.runtime.benchmarking import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -432,7 +435,9 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+    def _run_fake_cuda_graph_benchmark(
+        self, iters, return_mode="min", grads=None, cudagraph_unroll=None
+    ):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeCUDAGraph:
@@ -444,6 +449,8 @@ class TestBenchmarker(TestCase):
             def benchmark_gpu(self, _callable, **kwargs):
                 calls.append("benchmark_gpu")
                 _callable()
+                if kwargs.get("return_mode") == "all":
+                    return [9.0, 18.0]
                 return 9.0
 
         benchmarker = FakeBenchmarker()
@@ -469,6 +476,11 @@ class TestBenchmarker(TestCase):
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
+                patch.object(
+                    _bench.inductor_config,
+                    "autotune_cudagraph_benchmarking_iters",
+                    iters,
+                ),
                 patch("torch.cuda.synchronize"),
                 patch("torch.cuda.Stream", FakeStream),
                 patch("torch.cuda.current_stream", return_value=current_stream),
@@ -476,12 +488,21 @@ class TestBenchmarker(TestCase):
                 patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
             ):
+                kwargs = {}
+                if cudagraph_unroll is not None:
+                    kwargs["cudagraph_unroll"] = cudagraph_unroll
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: calls.append("call")
+                    lambda: calls.append("call"),
+                    grad_to_none=grads,
+                    return_mode=return_mode,
+                    **kwargs,
                 )
         finally:
             _bench.set_gpu_benchmark_lock_context(previous)
+        return result, calls
 
+    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=1)
         self.assertEqual(result, 9.0)
         self.assertEqual(
             calls,
@@ -498,11 +519,113 @@ class TestBenchmarker(TestCase):
             ],
         )
 
+    def test_cudagraph_recursion_guard_is_thread_local(self):
+        from torch._inductor.runtime.benchmarking import Benchmarker
+
+        benchmarker = InductorBenchmarker()
+        both_entered = threading.Barrier(2)
+        first_finished = threading.Event()
+        observed = []
+        errors = []
+
+        def benchmark_with_cuda_graph(_self, _callable, **kwargs):
+            both_entered.wait(timeout=5)
+            if threading.current_thread().name == "second":
+                self.assertTrue(first_finished.wait(timeout=5))
+                observed.append(benchmarker._in_cudagraph_benchmark)
+            return 1.0
+
+        def run(name):
+            try:
+                benchmarker.benchmark_gpu_with_cuda_graph(lambda: None)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                if name == "first":
+                    first_finished.set()
+
+        with patch.object(
+            Benchmarker,
+            "benchmark_gpu_with_cuda_graph",
+            benchmark_with_cuda_graph,
+        ):
+            first = threading.Thread(target=run, args=("first",), name="first")
+            second = threading.Thread(target=run, args=("second",), name="second")
+            first.start()
+            second.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(observed, [True])
+        self.assertFalse(benchmarker._in_cudagraph_benchmark)
+
+    @parametrize(
+        "return_mode, expected",
+        (("min", 0.9), ("all", [0.9, 1.8])),
+    )
+    def test_benchmark_gpu_with_cuda_graph_amortizes_launches(
+        self, return_mode, expected
+    ):
+        # 10 calls captured per graph; the replay time is reported per call
+        result, calls = self._run_fake_cuda_graph_benchmark(
+            iters=10, return_mode=return_mode
+        )
+        self.assertEqual(result, expected)
+        self.assertEqual(calls.count("call"), 2 + 10)
+        self.assertEqual(calls[-4:], ["benchmark_gpu", "replay", "exit", "exit"])
+
+    def test_benchmark_gpu_with_cuda_graph_overrides_configured_unroll(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(
+            iters=10, cudagraph_unroll=4
+        )
+        self.assertEqual(result, 2.25)
+        self.assertEqual(calls.count("call"), 2 + 4)
+
+    @parametrize("configured_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_clamps_invalid_configured_unroll(
+        self, configured_unroll
+    ):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=configured_unroll)
+        self.assertEqual(result, 9.0)
+        self.assertEqual(calls.count("call"), 2 + 1)
+
+    @parametrize("cudagraph_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_rejects_invalid_unroll(
+        self, cudagraph_unroll
+    ):
+        with self.assertRaisesRegex(ValueError, "must be at least 1"):
+            self._run_fake_cuda_graph_benchmark(
+                iters=10, cudagraph_unroll=cudagraph_unroll
+            )
+
+    def test_benchmark_gpu_with_cuda_graph_clears_grads_per_iteration(self):
+        class FakeTensor:
+            def __init__(self):
+                self.grad_clear_count = 0
+
+            @property
+            def grad(self):
+                return None
+
+            @grad.setter
+            def grad(self, _value):
+                self.grad_clear_count += 1
+
+        tensor = FakeTensor()
+        self._run_fake_cuda_graph_benchmark(iters=3, grads=[tensor])
+        self.assertEqual(tensor.grad_clear_count, 1 + 3)
+
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeBuffer:
             def zero_(self):
+                pass
+
+            def sum(self):
                 pass
 
         class FakeDeviceInterface:
@@ -541,6 +664,7 @@ class TestBenchmarker(TestCase):
                     return_value=FakeDeviceInterface(),
                 ),
                 patch.object(_bench.torch, "empty", return_value=FakeBuffer()),
+                patch.object(_bench, "_rocm_mall_size", return_value=0),
                 patch.object(
                     _bench.inductor_config, "autotune_cudagraph_benchmarking", True
                 ),
@@ -609,6 +733,114 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+    def test_inductor_benchmarker_flush_size_adds_rocm_mall(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = InductorBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 4 * 1024 * 1024
+        with patch.object(torch.version, "hip", None):
+            self.assertEqual(benchmarker.get_flush_size("cuda"), 4 * 1024 * 1024)
+        for arch, mall in (
+            ("gfx950:sramecc+:xnack-", 256),
+            ("gfx942", 256),
+            ("gfx90a", 0),
+            ("gfx9999", 256),
+        ):
+            props = unittest.mock.Mock(gcnArchName=arch)
+            _bench._rocm_mall_size.cache_clear()
+            try:
+                with (
+                    patch.object(torch.version, "hip", "mock-hip"),
+                    patch.object(_bench.torch.cuda, "current_device", return_value=0),
+                    patch.object(
+                        _bench.torch.cuda, "get_device_properties", return_value=props
+                    ),
+                ):
+                    self.assertEqual(
+                        benchmarker.get_flush_size("cuda"), (4 + mall) * 1024 * 1024
+                    )
+            finally:
+                _bench._rocm_mall_size.cache_clear()
+
+    @parametrize("hip_value", (None, "mock-hip"))
+    def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value):
+        # ROCm flushes by reading a float32 buffer (zero_() leaves dirty lines whose
+        # write-back the timed call pays); CUDA keeps the int32 zero_() flush.
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        class FakeBuffer:
+            def zero_(self):
+                calls.append("zero_")
+
+            def sum(self):
+                calls.append("sum")
+
+        class FakeDeviceInterface:
+            def synchronize(self):
+                pass
+
+        class FakeEvent:
+            def record(self):
+                pass
+
+            def elapsed_time(self, other):
+                return 1.0
+
+        class FakeInductorBenchmarker(InductorBenchmarker):
+            def get_device_cache_size(self, device_type=None):
+                return 4
+
+            def get_event_pairs(self, iters, device_type=None):
+                return [(FakeEvent(), FakeEvent()) for _ in range(iters)]
+
+        empty_calls = []
+
+        def fake_empty(*args, **kwargs):
+            empty_calls.append((args, kwargs))
+            return FakeBuffer()
+
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(_bench.torch, "empty", side_effect=fake_empty),
+            patch.object(_bench, "_rocm_mall_size", return_value=256),
+            patch.object(torch.version, "hip", hip_value),
+        ):
+            FakeInductorBenchmarker().benchmark_gpu(
+                lambda: None,
+                estimation_iters=2,
+                memory_warmup_iters=3,
+                benchmark_iters=4,
+                is_vetted_benchmarking=True,
+                device_type="cuda",
+            )
+
+        (size,), kwargs = empty_calls[0]
+        if hip_value:
+            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
+            self.assertEqual(calls, ["zero_"] + ["sum"] * (2 + 3 + 4))
+        else:
+            self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
+            self.assertEqual(calls, ["zero_"] * (1 + 2 + 3 + 4))
+
+
+class TestGpuBenchmarkDeviceTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_default_delegates_to_get_gpu_type(self):
+        # _get_default_gpu_device_type is a thin delegate to
+        # torch._inductor.utils.get_gpu_type, which owns GPU discovery
+        # (DeviceInterface.is_gpu()) and multi-GPU disambiguation. Patching
+        # get_gpu_type at the module attribute is picked up because the
+        # delegate imports it by name at each call, sidestepping its
+        # functools.cache.
+        sentinel = "privateuse1_test_device"
+        with patch("torch._inductor.utils.get_gpu_type", return_value=sentinel):
+            self.assertEqual(_get_default_gpu_device_type(), sentinel)
 
 
 if __name__ == "__main__":

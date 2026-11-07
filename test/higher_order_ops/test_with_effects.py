@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 import torch
 import torch._dynamo
 import torch._functorch
-import torch._inductor
-import torch._inductor.decomposition
 from functorch.compile import (
     aot_function,
     default_decompositions,
@@ -29,13 +27,18 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -90,6 +93,8 @@ def make_inputs_non_leaves(inps):
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -247,7 +252,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM70OrLater, "triton")
     def test_compile_inductor(self):
         def f(x):
             torch.ops.aten._print("moo")
@@ -405,116 +409,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
         res.sum().backward()
-
-    @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM80OrLater, "triton")
-    @unittest.skipIf(not TEST_CUDA, "triton")
-    @skipIfNoDynamoSupport
-    def test_register_effectful_custom_op(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch._dynamo.config.capture_scalar_outputs = True
-            torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-            # global variable to store the recorded tensor and prefix.
-            recorded_dict = {}
-
-            # Pytorch custom op implementation
-            @torch.library.custom_op("mylib::record_scalar_tensor", mutates_args=())
-            def record_scalar_tensor(x: torch.Tensor, prefix: str) -> None:
-                recorded_dict[prefix] = x.clone()
-                return
-
-            # Meta function of the custom op
-            @record_scalar_tensor.register_fake
-            def record_scalar_tensor_meta(x, prefix):
-                return
-
-            record_scalar_tensor.register_effect(_EffectType.ORDERED)
-
-            self.assertEqual(_get_effect(record_scalar_tensor), _EffectType.ORDERED)
-
-            my_config = {}
-            my_config["MockModule"] = "mean"
-            my_config["MockModule.linear"] = "mean"
-            my_config["MockModule.relu"] = "mean"
-
-            class MyLinear(torch.nn.Module):
-                def __init__(self, in_features, out_features):
-                    super().__init__()
-                    self.weight = torch.nn.Parameter(
-                        torch.randn(out_features, in_features), requires_grad=True
-                    )
-                    self.bias = torch.nn.Parameter(
-                        torch.randn(out_features), requires_grad=True
-                    )
-
-                def forward(self, x):
-                    return torch.nn.functional.linear(x, self.weight, self.bias)
-
-            class MockModule(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.linear = MyLinear(10, 10)
-                    self.register_buffer(
-                        "buf0", torch.randn(10, 10, requires_grad=True)
-                    )
-
-                def forward(self, x):
-                    return torch.nn.functional.relu(self.linear(x) + self.buf0)
-
-            def forward_hook(
-                module: torch.nn.Module,
-                inputs: torch.Tensor,
-                output: torch.Tensor,
-                prefix: str,
-                aggregate_method: str,
-            ) -> torch.Tensor:
-                if aggregate_method == "mean":
-                    torch.ops.mylib.record_scalar_tensor(output.mean(), prefix)
-                elif aggregate_method == "max":
-                    torch.ops.mylib.record_scalar_tensor(output.max(), prefix)
-                else:
-                    # demo purpose, using "min"
-                    torch.ops.mylib.record_scalar_tensor(output.sum(), prefix)
-                return output
-
-            def add_hooks(module, config):
-                handles: list[RemovableHandle] = []
-                q = deque([(module.__class__.__name__, module)])
-                while q:
-                    name, m = q.pop()
-                    children = [(name + "." + n, y) for (n, y) in m.named_children()]
-                    q.extend(children)
-                    aggregate_method = config.get(name, "mean")
-                    prefix = name + ":" + aggregate_method
-                    handle = m.register_forward_hook(
-                        partial(
-                            forward_hook,
-                            prefix=prefix,
-                            aggregate_method=aggregate_method,
-                        )
-                    )
-                    if handle:
-                        handles.append(handle)
-                return handles
-
-            x = torch.randn(10, 10, device="cuda")
-            mod = MockModule().to("cuda")
-
-            add_hooks(mod, my_config)
-
-            opt_mod = torch.compile(backend="inductor")(mod)
-            y = opt_mod(x)
-
-            self.assertTrue(torch.allclose(y, mod(x)))
-            # Ensure it works well with backward
-            y.sum().backward()
-            # Ensure the grad is existing
-            self.assertTrue(isinstance(opt_mod.linear.weight.grad, torch.Tensor))
-
-            self.assertEqual(len(recorded_dict), 2)
-            self.assertTrue("MockModule.linear:mean" in recorded_dict)
-            self.assertTrue("MockModule:mean" in recorded_dict)
 
     @skipIfNoDynamoSupport
     def test_effectful_custom_op_with_subclasses(self):
@@ -1014,18 +908,226 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         finally:
             handle.destroy()
 
+    @skipIfTorchDynamo()
+    def test_effect_autograd_function(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            @torch.library.custom_op("mylib::log_grad", mutates_args=())
+            def log_grad(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @torch.library.register_fake("mylib::log_grad")
+            def log_grad_fake(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            log_grad.register_effect(_EffectType.ORDERED)
+
+            class NoOpWithLoggingBackward(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x * x
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    logged_grad = torch.ops.mylib.log_grad(grad_output)
+                    return logged_grad
+
+            def fn(x):
+                y = NoOpWithLoggingBackward.apply(x)
+                return y.sum()
+
+            x = torch.randn(3, 4, requires_grad=True)
+            x_clone = x.detach().clone().requires_grad_(True)
+
+            backend = AotEagerAndRecordGraphs()
+            compiled_fn = torch.compile(fn, backend=backend)
+            loss = compiled_fn(x)
+            loss.backward()
+
+            loss_ref = fn(x_clone)
+            loss_ref.backward()
+            self.assertEqual(loss, loss_ref)
+
+            self.assertExpectedInline(
+                backend.fw_graphs[0].code.strip(),
+                """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1);  primals_1 = None
+    sum_1 = torch.ops.aten.sum.default(mul);  mul = None
+    return (sum_1,)""",
+            )
+
+            self.assertExpectedInline(
+                backend.bw_graphs[0].code.strip(),
+                """\
+def forward(self, tangents_1, tangents_token):
+    expand = torch.ops.aten.expand.default(tangents_1, [3, 4]);  tangents_1 = None
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.mylib.log_grad.default, expand);  tangents_token = expand = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    return (getitem_1, getitem)""",
+            )
+
+    def test_with_effects_through_functional_tensor_mode(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def fn_with_effects(x, y):
+            token = torch.ops.prims._make_token()
+            new_token, result = with_effects(
+                token,
+                torch.ops.aten.add.Tensor,
+                x,
+                y,
+            )
+            return result
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        with (
+            torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            ),
+            FunctionalTensorMode(),
+        ):
+            x_func = FunctionalTensor.to_functional(x)
+            y_func = FunctionalTensor.to_functional(y)
+            result = fn_with_effects(x_func, y_func)
+
+        expected = x + y
+        if isinstance(result, FunctionalTensor):
+            result = torch._from_functional_tensor(result.elem)
+        self.assertEqual(result, expected)
+
+
+class TestWithEffectsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @unittest.skipIf(IS_WINDOWS, "triton")
+    @skipCUDAIf(not SM80OrLater, "triton")
+    @skipIfNoDynamoSupport
+    def test_register_effectful_custom_op(self, device):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch._dynamo.config.capture_scalar_outputs = True
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+            # global variable to store the recorded tensor and prefix.
+            recorded_dict = {}
+
+            # Pytorch custom op implementation
+            @torch.library.custom_op("mylib::record_scalar_tensor", mutates_args=())
+            def record_scalar_tensor(x: torch.Tensor, prefix: str) -> None:
+                recorded_dict[prefix] = x.clone()
+                return
+
+            # Meta function of the custom op
+            @record_scalar_tensor.register_fake
+            def record_scalar_tensor_meta(x, prefix):
+                return
+
+            record_scalar_tensor.register_effect(_EffectType.ORDERED)
+
+            self.assertEqual(_get_effect(record_scalar_tensor), _EffectType.ORDERED)
+
+            my_config = {}
+            my_config["MockModule"] = "mean"
+            my_config["MockModule.linear"] = "mean"
+            my_config["MockModule.relu"] = "mean"
+
+            class MyLinear(torch.nn.Module):
+                def __init__(self, in_features, out_features):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(
+                        torch.randn(out_features, in_features), requires_grad=True
+                    )
+                    self.bias = torch.nn.Parameter(
+                        torch.randn(out_features), requires_grad=True
+                    )
+
+                def forward(self, x):
+                    return torch.nn.functional.linear(x, self.weight, self.bias)
+
+            class MockModule(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = MyLinear(10, 10)
+                    self.register_buffer(
+                        "buf0", torch.randn(10, 10, requires_grad=True)
+                    )
+
+                def forward(self, x):
+                    return torch.nn.functional.relu(self.linear(x) + self.buf0)
+
+            def forward_hook(
+                module: torch.nn.Module,
+                inputs: torch.Tensor,
+                output: torch.Tensor,
+                prefix: str,
+                aggregate_method: str,
+            ) -> torch.Tensor:
+                if aggregate_method == "mean":
+                    torch.ops.mylib.record_scalar_tensor(output.mean(), prefix)
+                elif aggregate_method == "max":
+                    torch.ops.mylib.record_scalar_tensor(output.max(), prefix)
+                else:
+                    # demo purpose, using "min"
+                    torch.ops.mylib.record_scalar_tensor(output.sum(), prefix)
+                return output
+
+            def add_hooks(module, config):
+                handles: list[RemovableHandle] = []
+                q = deque([(module.__class__.__name__, module)])
+                while q:
+                    name, m = q.pop()
+                    children = [(name + "." + n, y) for (n, y) in m.named_children()]
+                    q.extend(children)
+                    aggregate_method = config.get(name, "mean")
+                    prefix = name + ":" + aggregate_method
+                    handle = m.register_forward_hook(
+                        partial(
+                            forward_hook,
+                            prefix=prefix,
+                            aggregate_method=aggregate_method,
+                        )
+                    )
+                    if handle:
+                        handles.append(handle)
+                return handles
+
+            x = torch.randn(10, 10, device=device)
+            mod = MockModule().to(device)
+
+            add_hooks(mod, my_config)
+
+            opt_mod = torch.compile(backend="inductor")(mod)
+            y = opt_mod(x)
+
+            self.assertTrue(torch.allclose(y, mod(x)))
+            # Ensure it works well with backward
+            y.sum().backward()
+            # Ensure the grad is existing
+            self.assertTrue(isinstance(opt_mod.linear.weight.grad, torch.Tensor))
+
+            self.assertEqual(len(recorded_dict), 2)
+            self.assertTrue("MockModule.linear:mean" in recorded_dict)
+            self.assertTrue("MockModule:mean" in recorded_dict)
+
+    @onlyAccelerator
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not TEST_CUDA, "triton")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_export_invoke_subgraph(self):
+    def test_export_invoke_subgraph(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             recorded_list = []
 
             @torch.library.custom_op("mylib::record_memory", mutates_args=())
             def record_memory(prefix: str, module_name: str) -> None:
-                torch.cuda.synchronize()
-                mem_alloc = torch.cuda.memory_allocated() / 1024**2
-                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                torch.accelerator.synchronize()
+                mem_alloc = torch.accelerator.memory_allocated() / 1024**2
+                mem_reserved = torch.accelerator.memory_reserved() / 1024**2
                 memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
                 recorded_list.append(memory_str)
 
@@ -1062,10 +1164,10 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
                     torch.ops.mylib.record_memory("forward", "N")
                     return (x,)
 
-            model = M().to("cuda")
-            torch.cuda.reset_peak_memory_stats()
+            model = M().to(device)
+            torch.accelerator.reset_peak_memory_stats()
 
-            x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+            x = torch.randn(32, 1024, requires_grad=True, device=device)
 
             # Test torch.export
             ep = torch.export.export(model, (x,))
@@ -1161,104 +1263,10 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
-    @skipIfTorchDynamo()
-    def test_effect_autograd_function(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-
-            @torch.library.custom_op("mylib::log_grad", mutates_args=())
-            def log_grad(x: torch.Tensor) -> torch.Tensor:
-                return x.clone()
-
-            @torch.library.register_fake("mylib::log_grad")
-            def log_grad_fake(x: torch.Tensor) -> torch.Tensor:
-                return x.clone()
-
-            log_grad.register_effect(_EffectType.ORDERED)
-
-            class NoOpWithLoggingBackward(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    return x * x
-
-                @staticmethod
-                def backward(ctx, grad_output):
-                    logged_grad = torch.ops.mylib.log_grad(grad_output)
-                    return logged_grad
-
-            def fn(x):
-                y = NoOpWithLoggingBackward.apply(x)
-                return y.sum()
-
-            x = torch.randn(3, 4, requires_grad=True)
-            x_clone = x.detach().clone().requires_grad_(True)
-
-            backend = AotEagerAndRecordGraphs()
-            compiled_fn = torch.compile(fn, backend=backend)
-            loss = compiled_fn(x)
-            loss.backward()
-
-            loss_ref = fn(x_clone)
-            loss_ref.backward()
-            self.assertEqual(loss, loss_ref)
-
-            self.assertExpectedInline(
-                backend.fw_graphs[0].code.strip(),
-                """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1);  primals_1 = None
-    sum_1 = torch.ops.aten.sum.default(mul);  mul = None
-    return (sum_1,)""",
-            )
-
-            self.assertExpectedInline(
-                backend.bw_graphs[0].code.strip(),
-                """\
-def forward(self, tangents_1, tangents_token):
-    expand = torch.ops.aten.expand.default(tangents_1, [3, 4]);  tangents_1 = None
-    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.mylib.log_grad.default, expand);  tangents_token = expand = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1];  with_effects = None
-    return (getitem_1, getitem)""",
-            )
-
-    def test_with_effects_through_functional_tensor_mode(self):
-        from torch._subclasses.functional_tensor import (
-            FunctionalTensor,
-            FunctionalTensorMode,
-        )
-
-        def fn_with_effects(x, y):
-            token = torch.ops.prims._make_token()
-            new_token, result = with_effects(
-                token,
-                torch.ops.aten.add.Tensor,
-                x,
-                y,
-            )
-            return result
-
-        x = torch.randn(3, 3)
-        y = torch.randn(3, 3)
-
-        with (
-            torch._C._ExcludeDispatchKeyGuard(
-                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-            ),
-            FunctionalTensorMode(),
-        ):
-            x_func = FunctionalTensor.to_functional(x)
-            y_func = FunctionalTensor.to_functional(y)
-            result = fn_with_effects(x_func, y_func)
-
-        expected = x + y
-        if isinstance(result, FunctionalTensor):
-            result = torch._from_functional_tensor(result.elem)
-        self.assertEqual(result, expected)
-
+    @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM80OrLater, "triton")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_effectful_op_with_flex_attention(self):
+    @skipCUDAIf(not SM80OrLater, "triton")
+    def test_effectful_op_with_flex_attention(self, device):
         """Test that effectful custom ops work with flex_attention."""
         from torch._library.effects import EffectType
         from torch.nn.attention.flex_attention import flex_attention
@@ -1289,7 +1297,7 @@ def forward(self, tangents_1, tangents_token):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
             k = torch.randn(
@@ -1297,7 +1305,7 @@ def forward(self, tangents_1, tangents_token):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
             v = torch.randn(
@@ -1305,13 +1313,18 @@ def forward(self, tangents_1, tangents_token):
                 num_heads,
                 seq_len,
                 head_dim,
-                device="cuda",
+                device=device,
                 dtype=torch.float16,
             )
 
             compiled_fn = torch.compile(fn)
             out = compiled_fn(q, k, v)
             self.assertEqual(out.shape, (batch_size, num_heads, seq_len, head_dim))
+
+
+instantiate_device_type_tests(
+    TestWithEffectsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

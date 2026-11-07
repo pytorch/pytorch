@@ -441,18 +441,46 @@ void vectorized_inner_sum(
   constexpr int64_t vec_numel = vec_stride / scalar_stride;
   const int64_t vec_size = size0 / vec_numel;
 
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+  constexpr int64_t ilp_factor = 8;
+  constexpr int64_t tail_ilp_factor = 2;
+#else
+  constexpr int64_t ilp_factor = 4;
+  constexpr int64_t tail_ilp_factor = 1;
+#endif
+
+  const int64_t size_ilp = vec_size / ilp_factor;
+
   // Input is contiguous over the first (reduced) dimension
   for (const auto j : c10::irange(size1)) {
     const auto *row_in = data[1] + j * outer_stride;
-    auto vec_acc = row_sum<vacc_t, VecLoadPolicy>(row_in, vec_stride, vec_size);
+
+    // Interpret row as a (-1, ilp_factor) shaped array to find partial sums
+    auto partial_sums = multi_row_sum<vacc_t, ilp_factor, VecLoadPolicy>(
+        row_in, vec_stride * ilp_factor, vec_stride, size_ilp);
+
+    int64_t i = size_ilp * ilp_factor;
+    for (; (i + tail_ilp_factor) <= vec_size; i += tail_ilp_factor) {
+      for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+        partial_sums[h] += VecLoadPolicy::load(row_in, vec_stride, i + h);
+      }
+    }
+
+    for (int64_t k = tail_ilp_factor; k < ilp_factor; k += tail_ilp_factor) {
+      for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+        partial_sums[h] += partial_sums[k + h];
+      }
+    }
 
     acc_t final_acc = 0;
-    for (int64_t k = vec_size * vec_numel; k < size0; ++k) {
+    for (int64_t k = i * vec_numel; k < size0; ++k) {
       final_acc += ScalarLoadPolicy::load(row_in, scalar_stride, k);
     }
 
-    alignas(64) std::array<acc_t, vacc_t::size()> partials{};
-    vec_acc.store(partials.data());
+    alignas(64) std::array<acc_t, vacc_t::size() * tail_ilp_factor> partials{};
+    for (int64_t h = 0; h < tail_ilp_factor; h += 1) {
+      partial_sums[h].store(partials.data() + vacc_t::size() * h);
+    }
     for (const auto& partial : partials) {
       final_acc += partial;
     }
@@ -480,7 +508,12 @@ void vectorized_outer_sum(
   using vacc_t = Vectorized<acc_t>;
   constexpr int64_t scalar_stride = ScalarLoadPolicy::memsize();
   constexpr int64_t vec_stride = VecLoadPolicy::memsize();
+
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+  constexpr int64_t nrows = 8;
+#else
   constexpr int64_t nrows = 4;
+#endif
 
   // Input is contiguous over the second (non-reduced) dimension
   int64_t j = 0;

@@ -72,10 +72,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             tup = (1, "hello", t)
-            return hash(tup), hash(tup)
+            return hash(tup) == hash(tup)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     def test_hash_tuple_with_tensor_as_dict_key(self):
         """Tuple containing a tensor can be used as a dict key."""
@@ -118,10 +119,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             fs = frozenset({1, 2, t})
-            return hash(fs), hash(fs)
+            return hash(fs) == hash(fs)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     # --- Range (RangeVariable) ---
 
@@ -223,10 +225,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         t = torch.tensor([1.0, 2.0])
 
         def fn(x):
-            return hash(t), hash(t)
+            return hash(t) == hash(t)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     def test_hash_tensor_return_graph_breaks(self):
         """Returning hash(tensor) graph-breaks — tensor hash is fake."""
@@ -437,6 +440,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: no graph break
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_hash_equals(row)
 
