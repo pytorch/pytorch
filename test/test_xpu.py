@@ -1400,7 +1400,7 @@ print(torch.xpu.is_initialized())
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
 
-            @torch.jit._script.script
+            @torch.jit.script
             def foo():
                 return torch.rand(311, 411, device="xpu")
 

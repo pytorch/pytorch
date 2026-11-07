@@ -2,6 +2,8 @@ import argparse
 import os
 import sys
 
+import torch
+
 
 # grab modules from test_jit_hooks.cpp
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -78,8 +80,9 @@ def main():
     ]
 
     for name, model in tests:
+        m_scripted = torch.jit.script(model)
         filename = save_name + name + ".pt"
-        model.save(filename)
+        torch.jit.save(m_scripted, filename)
 
     print("OK: completed saving modules with hooks!")
 

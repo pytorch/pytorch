@@ -1,6 +1,7 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import glob
+import io
 import sys
 import math
 import random
@@ -9414,6 +9415,15 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
+
     # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
@@ -13806,7 +13816,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         # Currently, here using torchscript to put None into indices.
         # on C++ it gives indices as a list of 2 optional tensors: first is null and
         # the second is a valid tensor.
-        @torch.jit._script.script
+        @torch.jit.script
         def func(x, i, v):
             idx = [None, i]
             x.index_put_(idx, v, accumulate=True)

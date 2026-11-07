@@ -196,6 +196,7 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 
+# Abstraction on top of counters.
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -2864,10 +2865,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit._trace.trace(model, example_inputs)
+        return torch.jit.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit._script.script(model)
+            return torch.jit.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")

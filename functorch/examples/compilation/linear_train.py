@@ -43,6 +43,8 @@ inp = torch.randn((batch_size, features))
 
 mod = Foo(num_layers, features)
 
+jit_mod = torch.jit.script(mod)
+
 func_model, weights = make_functional(mod)
 lr = 1.0
 
@@ -53,6 +55,19 @@ def functional_step(x, weights):
     out.backward()
     new_weights = [weight - lr * weight.grad for weight in weights]
     return out, new_weights
+
+
+optim = torch.optim.SGD(
+    jit_mod.parameters(), lr=lr, momentum=0, dampening=0, weight_decay=0
+)
+
+
+def jit_step(x, weights):
+    optim.zero_grad()
+    loss = jit_mod(x)
+    loss.backward()
+    optim.step()
+    return loss, None
 
 
 def train(train_step, weights):
@@ -75,3 +90,6 @@ train(grad_pt, weights)
 
 print("Starting NNC training")
 train(grad_nnc, weights)
+
+print("Starting JIT training")
+train(jit_step, None)
