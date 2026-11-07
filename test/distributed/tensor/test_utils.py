@@ -24,10 +24,12 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
 )
 from torch.distributed.tensor._utils import (
+    _compute_global_offsets,
     _compute_local_shape_and_global_offset,
     compute_global_tensor_info,
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
+    compute_local_shape_and_global_offsets,
     compute_local_tensor_info,
     ExplicitRedistributionContext,
 )
@@ -389,6 +391,69 @@ class LocalTest(TestCase):
             self.assertEqual(local_shape, (expected_shard_size, 2))
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
+    def test_compute_global_offsets_strided_shard(self):
+        # The docstring example: 8 rows with [_StridedShard(0, split_factor=2),
+        # Replicate()] on a 2 x 2 mesh. Ranks 0 and 1 hold rows 0, 1, 4, 5.
+        placements = [SS(0, 2), R]
+        self.assertEqual(
+            _compute_global_offsets((8, 2), (2, 2), [0, 1], placements),
+            [torch.tensor([0, 1, 4, 5]), torch.tensor([0, 1])],
+        )
+        # With Shard(0) in place of Replicate(), rank 1 holds rows 4, 5.
+        placements = [SS(0, 2), S(0)]
+        self.assertEqual(
+            _compute_global_offsets((8, 2), (2, 2), [0, 1], placements),
+            [torch.tensor([4, 5]), torch.tensor([0, 1])],
+        )
+
+    def test_compute_local_shape_and_global_offsets_not_in_mesh(self):
+        class MockDeviceMesh:
+            shape = (2,)
+
+            def get_coordinate(self):
+                return None
+
+        mesh: Any = MockDeviceMesh()
+        self.assertEqual(
+            compute_local_shape_and_global_offsets((8, 2), mesh, [S(0)]), ((0,), [])
+        )
+
+    def test_compute_global_offsets_matches_local_data(self):
+        cases = [
+            ((6, 4), (2,), [SS(0, 3)]),
+            ((12, 5), (2,), [SS(0, 3)]),
+            ((7, 3), (2,), [SS(0, 2)]),
+            ((5, 2), (4,), [SS(0, 2)]),
+            ((3, 2), (4,), [S(0)]),
+            ((8, 2), (2, 2), [SS(0, 2), R]),
+            ((16, 2), (2, 2), [SS(0, 2), S(0)]),
+            ((10, 3), (2, 2), [SS(0, 2), S(0)]),
+            ((24, 6), (2, 3), [S(0), SS(0, 2)]),
+            ((12, 12), (2, 2), [SS(0, 3), SS(1, 2)]),
+            ((8, 9), (2, 3), [S(1), SS(0, 2)]),
+            ((4, 18), (2, 3), [R, SS(1, 3)]),
+            ((32, 4), (2, 2, 2), [SS(0, 4), SS(0, 2), S(0)]),
+        ]
+        for global_shape, mesh_shape, placements in cases:
+            full = torch.arange(math.prod(global_shape)).view(global_shape)
+            for coordinate in itertools.product(*(range(n) for n in mesh_shape)):
+                expected = full
+                for mesh_dim, placement in enumerate(placements):
+                    if placement.is_replicate():
+                        continue
+                    shards, _ = placement._split_tensor(
+                        expected, mesh_shape[mesh_dim], with_padding=False
+                    )
+                    expected = shards[coordinate[mesh_dim]]
+                global_offsets = _compute_global_offsets(
+                    global_shape, mesh_shape, list(coordinate), placements
+                )
+                self.assertEqual(
+                    full[torch.meshgrid(*global_offsets, indexing="ij")],
+                    expected,
+                    msg=f"{global_shape=} {mesh_shape=} {placements=} {coordinate=}",
+                )
+
 
 class UtilTest(DTensorContinuousTestBase):
     world_size = 8
@@ -680,6 +745,33 @@ class UtilTest(DTensorContinuousTestBase):
             self.assertEqual(global_offset[0], expected_offsets[rank])
 
         maybe_compute_rankwise(rank, local_shape, global_offset)
+
+    @with_comms
+    def test_compute_local_shape_and_global_offsets(self):
+        # Uneven cases leave ranks with different numbers of indices, and some empty.
+        cases = [
+            ((13, 3), (self.world_size,), [SS(0, 3)]),
+            ((8, 2), (2, 4), [SS(0, 2), R]),
+            ((15, 5), (4, 2), [SS(0, 2), S(0)]),
+            ((13, 2), (4, 2), [SS(0, 2), S(0)]),
+            ((12, 12), (2, 4), [SS(0, 3), SS(1, 2)]),
+            ((5, 7), (2, 2, 2), [SS(0, 2), SS(1, 3), S(0)]),
+            ((3, 2), (self.world_size,), [S(0)]),
+        ]
+        for global_shape, mesh_shape, placements in cases:
+            mesh = init_device_mesh(self.device_type, mesh_shape)
+            full = torch.arange(math.prod(global_shape)).view(global_shape)
+            expected = distribute_tensor(
+                full, mesh, placements, src_data_rank=None
+            ).to_local()
+            local_shape, global_offsets = compute_local_shape_and_global_offsets(
+                global_shape, mesh, placements
+            )
+            msg = f"{global_shape=} {mesh_shape=} {placements=}"
+            self.assertEqual(local_shape, expected.shape, msg=msg)
+            self.assertEqual(
+                full[torch.meshgrid(*global_offsets, indexing="ij")], expected, msg=msg
+            )
 
     @with_comms
     def test_hsdp_tp_meta_compute(self):
