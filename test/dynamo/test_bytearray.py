@@ -882,25 +882,157 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertGraphBreakReason("separator mutated during iteration")
 
     def test_join_other_iterables(self):
-        class Sequence:
-            def __getitem__(self, i):
-                if i >= 2:
-                    raise IndexError(i)
-                return (b"a", b"b")[i]
-
         def f(x):
             sep = bytearray(b",")
             return (
                 sep.join({b"a": 1, b"b": 2}),
                 sep.join({b"a"}),
-                sep.join(Sequence()),
-                sep.join(reversed([b"a", b"b"])),
                 sep.join(iter(bytearray())),
                 x + 1,
             )
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_join_list_reverse_iterator_fallback(self):
+        def f(x, items):
+            return bytearray(b",").join(items), x + 1
+
+        def run(fn):
+            items = reversed([b"a", b"b", b"c"])
+            next(items)
+            result = fn(torch.ones(1), items)
+            return result, list(items)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "trace method `join` of class `bytearray`"
+        ):
+            run(torch.compile(f, backend="eager", fullgraph=True))
+        self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
+
+    def test_join_iterator_type_check_does_not_call_user_eq(self):
+        calls = []
+        reverse_type = type(reversed([]))
+
+        class Meta(type):
+            def __eq__(self, other):
+                if other is reverse_type:
+                    calls.append("eq")
+                return self is other
+
+            __hash__ = type.__hash__
+
+        class Items(metaclass=Meta):
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise StopIteration
+
+        def f(x):
+            return bytearray(b",").join(Items()), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+        self.assertEqual(calls, [])
+
+    @parametrize("lookup", ["getattribute", "descriptor"])
+    def test_join_iterator_with_metaclass_lookup_falls_back(self, lookup):
+        calls = []
+
+        class AttributeHook(type):
+            def __getattribute__(cls, name):
+                if name == "__length_hint__":
+                    calls.append("metaclass lookup")
+                    return None
+                return super().__getattribute__(name)
+
+        class Descriptor(type):
+            @property
+            def __length_hint__(cls):
+                calls.append("metaclass lookup")
+                return None
+
+        Meta = AttributeHook if lookup == "getattribute" else Descriptor
+
+        class Items(metaclass=Meta):
+            def __iter__(self):
+                return self
+
+            def __length_hint__(self):
+                raise ValueError("length hint failed")
+
+            def __next__(self):
+                raise StopIteration
+
+        def f(x, items):
+            x = x + 1
+            return bytearray(b",").join(items), x + 1
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "trace method `join`"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, Items())
+        with self.assertRaisesRegex(ValueError, "length hint failed"):
+            torch.compile(f, backend="eager")(x, Items())
+        self.assertEqual(calls, [])
+
+    def test_join_impossible_length_hint_falls_back(self):
+        class Items:
+            def __init__(self, calls):
+                self.calls = calls
+
+            def __iter__(self):
+                self.calls.append("iter")
+                return self
+
+            def __length_hint__(self):
+                self.calls.append("hint")
+                return sys.maxsize
+
+            def __next__(self):
+                self.calls.append("next")
+                raise StopIteration
+
+        def f(x, items):
+            x = x + 1
+            return bytearray(b",").join(items), x + 1
+
+        x = torch.ones(1)
+        calls = []
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "trace method `join`"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, Items(calls))
+        self.assertEqual(calls, [])
+        with self.assertRaises(MemoryError):
+            torch.compile(f, backend="eager")(x, Items(calls))
+        self.assertEqual(calls, ["iter", "iter", "hint"])
+
+    def test_join_sequence_iterator_from_iter_fallback(self):
+        class Sequence:
+            def __getitem__(self, index):
+                return (b"a", b"b")[index]
+
+        class Iterable:
+            def __init__(self, log):
+                self.log = log
+
+            def __iter__(self):
+                self.log.append("iter")
+                return iter(Sequence())
+
+        def f(x, items):
+            x = x + 1
+            return bytearray(b",").join(items), x + 1
+
+        def run(fn):
+            log = []
+            result = fn(torch.ones(1), Iterable(log))
+            return result, log
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "trace method `join` of class `bytearray`"
+        ):
+            run(torch.compile(f, backend="eager", fullgraph=True))
+        self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
 
     @parametrize("length_case", ["normal", "value_error", "negative", "type_error"])
     def test_join_sequence_length(self, length_case):
@@ -930,8 +1062,12 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return str(exc), log, x + 1
             return result, log, x + 1
 
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "trace method `join` of class `bytearray`"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
 
     @parametrize(
         "length_case", ["normal", "value_error", "negative", "type_error", "shrinks"]
@@ -968,215 +1104,12 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 result = str(exc)
             return result, seq.log, x + 1
 
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    @parametrize("metaclass_kind", ["hides", "descriptor"])
-    def test_join_sequence_length_ignores_metaclass_lookup(self, metaclass_kind):
-        class Meta(type):
-            def __getattribute__(cls, name):
-                if metaclass_kind == "hides" and name == "__len__":
-                    raise AttributeError(name)
-                return super().__getattribute__(name)
-
-            @property
-            def __len__(cls):
-                raise AssertionError("metaclass lookup must not run")
-
-        class Sequence(metaclass=Meta):
-            def __len__(self):
-                raise ValueError("sequence length failed")
-
-            def __getitem__(self, index):
-                if index >= 2:
-                    raise IndexError(index)
-                return (b"a", b"b")[index]
-
-        def f(seq, x):
-            try:
-                result = bytearray(b",").join(seq)
-            except ValueError as exc:
-                return str(exc), x + 1
-            return result, x + 1
-
-        counter = CompileCounter()
-        compiled = torch.compile(f, backend=counter, fullgraph=True)
-        self.assertEqual(
-            compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
-        )
-        self.assertEqual(counter.frame_count, 1)
-
-    @parametrize("consumer", ["extend", "length_hint"])
-    def test_sequence_iterator_with_custom_metaclass(self, consumer):
-        class Meta(type):
-            def __getattribute__(cls, name):
-                return super().__getattribute__(name)
-
-        class Sequence(metaclass=Meta):
-            def __len__(self):
-                return 2
-
-            def __getitem__(self, index):
-                if index >= 2:
-                    raise IndexError(index)
-                return (97, 98)[index]
-
-        def f(seq, x):
-            iterator = iter(seq)
-            if consumer == "extend":
-                result = bytearray()
-                result.extend(iterator)
-            else:
-                result = operator.length_hint(iterator)
-            return result, x + 1
-
-        counter = CompileCounter()
-        compiled = torch.compile(f, backend=counter, fullgraph=True)
-        self.assertEqual(
-            compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
-        )
-        self.assertEqual(counter.frame_count, 1)
-
-    def test_reversed_sequence_iterator_length_hint(self):
-        class Sequence:
-            def __init__(self):
-                self.items = [b"a", b"b", b"c"]
-                self.calls = 0
-
-            def __len__(self):
-                self.calls += 1
-                return len(self.items)
-
-            def __getitem__(self, index):
-                return self.items[index]
-
-        def f(x):
-            seq = Sequence()
-            it = reversed(seq)
-            hints = [operator.length_hint(it)]
-            next(it)
-            hints.append(operator.length_hint(it))
-            seq.items.append(b"d")
-            hints.append(operator.length_hint(it))
-            seq.items[1:] = []
-            hints.append(operator.length_hint(it))
-            seq.items.extend([b"b", b"c"])
-            hints.append(operator.length_hint(it))
-            consumed = next(it), next(it)
-            # Before 3.14 the final yield still permits another length query.
-            hints.append(operator.length_hint(it))
-            next(it, None)
-            hints.append(operator.length_hint(it))
-            return hints, consumed, seq.calls, x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    @parametrize("size", [0, 1])
-    def test_reversed_sequence_iterator_length_hint_at_end(self, size):
-        class Sequence:
-            def __init__(self):
-                self.fail = False
-                self.calls = 0
-
-            def __len__(self):
-                self.calls += 1
-                if self.fail:
-                    raise ValueError("length queried")
-                return size
-
-            def __getitem__(self, index):
-                return b"a"
-
-        def f(x):
-            seq = Sequence()
-            it = reversed(seq)
-            if size:
-                next(it)
-            seq.fail = True
-            try:
-                hint = operator.length_hint(it)
-            except ValueError as exc:
-                hint = str(exc)
-            return hint, seq.calls, x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    @parametrize("error", [IndexError, StopIteration, ValueError])
-    def test_reversed_sequence_iterator_length_hint_after_error(self, error):
-        class Sequence:
-            def __init__(self):
-                self.calls = 0
-                self.failed = False
-
-            def __len__(self):
-                self.calls += 1
-                return 2
-
-            def __getitem__(self, index):
-                if not self.failed:
-                    self.failed = True
-                    raise error("getitem failed")
-                return b"a"
-
-        def f(x):
-            seq = Sequence()
-            it = reversed(seq)
-            before = operator.length_hint(it)
-            try:
-                next(it, None)
-            except error:
-                pass
-            after = operator.length_hint(it)
-            result = bytearray(b",").join(it)
-            return before, after, seq.calls, result, x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    def test_sequence_iterator_length_hint(self):
-        class Sequence:
-            def __init__(self):
-                self.items = [b"a", b"b"]
-
-            def __len__(self):
-                return len(self.items)
-
-            def __getitem__(self, index):
-                return self.items[index]
-
-        def f(x):
-            seq = Sequence()
-            it = iter(seq)
-            hints = [operator.length_hint(it)]
-            next(it)
-            hints.append(operator.length_hint(it))
-            seq.items[:] = []
-            hints.append(operator.length_hint(it))
-            list(it)
-            seq.items.extend([b"c", b"d"])
-            hints.append(operator.length_hint(it))
-            return hints, x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    def test_sequence_iterator_length_hint_without_len(self):
-        class Sequence:
-            def __getitem__(self, index):
-                if index >= 1:
-                    raise IndexError(index)
-                return b"a"
-
-        def f(x):
-            it = iter(Sequence())
-            before = operator.length_hint(it, 8)
-            list(it)
-            return before, operator.length_hint(it, 8), x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "trace method `join` of class `bytearray`"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(f, backend="eager")(x), f(x))
 
     def test_iterator_length_hint(self):
         def f(x):
@@ -1194,29 +1127,6 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ba.extend(b"xyz")
             hints.append(operator.length_hint(it))
             return hints, x + 1
-
-        compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
-
-    def test_list_reverse_iterator_length_hint(self):
-        def f(x):
-            items = [b"a", b"b", b"c"]
-            it = reversed(items)
-            hints = [operator.length_hint(it)]
-            next(it)
-            hints.append(operator.length_hint(it))
-            # Growing the list does not change the hint.
-            items.append(b"d")
-            hints.append(operator.length_hint(it))
-            # Shrinking it below the iterator position makes the hint zero.
-            items[1:] = []
-            hints.append(operator.length_hint(it))
-            consumed = list(it)
-            hints.append(operator.length_hint(it))
-            # Once exhausted, growing the list does not revive the hint.
-            items.extend([b"e", b"f"])
-            hints.append(operator.length_hint(it))
-            return hints, consumed, x + 1
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))

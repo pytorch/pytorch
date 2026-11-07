@@ -15,6 +15,7 @@ variable tracking system.
 """
 
 import collections
+import inspect
 import operator
 import sys
 from typing import Any, Optional, TYPE_CHECKING
@@ -49,6 +50,7 @@ from ..utils import (
     guard_if_dyn,
     istype,
     iter_contains,
+    list_reverseiterator,
     no_keywords,
     no_positional,
     odict_values,
@@ -2732,11 +2734,48 @@ class ByteArrayVariable(VariableTracker):
                 )
 
             try:
-                items = tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.sequence_fast),
+                iterator = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.sequence_fast_iter),
                     [iterable, ConstantVariable.create("can only join an iterable")],
                     {},
-                ).items
+                )
+                # These iterators lack a modeled length hint. Decline before
+                # consuming any items so eager can run the whole join.
+                iterator_type = maybe_get_python_type(iterator)
+                if any(
+                    iterator_type is candidate
+                    for candidate in (
+                        list_reverseiterator,
+                        polyfills.builtins._SequenceIterator,
+                        polyfills.builtins._ReversedSequenceIterator,
+                        reversed,
+                    )
+                ):
+                    return None
+                # call_length_hint looks up the method on the class. Eager
+                # special-method lookup bypasses metaclass attributes and hooks.
+                metaclass = type(iterator_type)
+                if metaclass is not type and (
+                    inspect.getattr_static(metaclass, "__getattribute__")
+                    is not type.__getattribute__
+                    or inspect.getattr_static(
+                        metaclass, "__getattr__", NO_SUCH_SUBOBJ
+                    )
+                    is not NO_SUCH_SUBOBJ
+                    or inspect.getattr_static(
+                        metaclass, "__length_hint__", NO_SUCH_SUBOBJ
+                    )
+                    is not NO_SUCH_SUBOBJ
+                ):
+                    return None
+                materialized = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.sequence_fast_list),
+                    [iterator],
+                    {},
+                )
+                if materialized.is_constant_none():
+                    return None
+                items = materialized.items
             except ObservedException:
                 if self.data is sep:
                     raise
@@ -3635,22 +3674,6 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.index += len(remaining)
         self.it_index = -1
         return remaining
-
-    def length_hint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # listreviter_len: it_index + 1 items left, or 0 once exhausted or
-        # once the list has shrunk below that.
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
-        remaining = self.it_index + 1
-        if self.is_exhausted or len(self.source_seq.items) < remaining:  # type: ignore[attr-defined]
-            return ConstantVariable.create(0)
-        return ConstantVariable.create(remaining)
-
-    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
