@@ -25,11 +25,10 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureMPS,
     expectedFailureXLA,
+    expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
-    onlyOn,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -962,7 +961,7 @@ class TestPoolingNNDevice(NNTestCase):
                 output_size=[1, 1, 1],
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/6031
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -987,7 +986,6 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -999,7 +997,6 @@ class TestPoolingNNDevice(NNTestCase):
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1011,7 +1008,7 @@ class TestPoolingNNDevice(NNTestCase):
                 stride=(1, 1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/6031
     def test_pooling_backward_overflow(self, device):
         input2d = torch.randn(1, 1, 4, 4, device=device)
         grad2d = torch.randn(1, 1, 2, 2, device=device)
@@ -1508,6 +1505,7 @@ torch.{device_type}.synchronize()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @parametrize_test(
         "channels_last",
         [
@@ -1629,7 +1627,7 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @parametrize_test("layout", ["contiguous", "unbatched", "channels_last"])
     @parametrize_test(
@@ -2555,11 +2553,8 @@ torch.{device_type}.synchronize()
         F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
-
-class TestPoolingNNCudaOnly(NNTestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @largeTensorTest("18GB", device="cuda")
+    @onlyAccelerator
+    @largeTensorTest("18GB")
     def test_avg_pool2d_backward_nonoverlapping_large(self, device):
         # Exercise the 64-bit index path (numel > INT_MAX) of the
         # non-overlapping backward fast path. grad_output all-ones makes the
@@ -2589,6 +2584,7 @@ class TestPoolingNNCudaOnly(NNTestCase):
     # output_size=128 overflows the int32 gradInput plane offset; 8192 also overflows
     # the output and indices plane offsets. The last plane is checked against the same
     # plane pooled on its own. See #197461.
+    @onlyAccelerator
     @largeTensorTest(lambda self, device, size: (10 if size == 128 else 36) * 2**30)
     @parametrize_test("size", [128, 8192])
     def test_adaptive_max_pool2d_large_plane_offset(self, device, size):
@@ -2605,7 +2601,8 @@ class TestPoolingNNCudaOnly(NNTestCase):
 
     # A single 46341 x 46341 plane has more than 2^31 elements, so the argmax of the
     # last element does not fit in int32.
-    @largeTensorTest("12GB", device="cuda")
+    @onlyAccelerator
+    @largeTensorTest("12GB")
     def test_adaptive_max_pool2d_large_single_plane(self, device):
         n = 46341
         x = torch.zeros(1, 1, n, n, device=device, dtype=torch.half)
@@ -2617,6 +2614,7 @@ class TestPoolingNNCudaOnly(NNTestCase):
         self.assertEqual(grad[0, 0, -1, -1].item(), 1)
         self.assertEqual(grad.sum(dtype=torch.float).item(), 1024 * 1024)
 
+    @onlyAccelerator
     @parametrize_test("channels_last", [False, True])
     @parametrize_test(
         "shape,pool_kwargs",
@@ -2688,7 +2686,6 @@ instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_parametrized_tests(TestPoolingNN)
-instantiate_device_type_tests(TestPoolingNNCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(
     TestPoolingNNMpsOnly, globals(), only_for="mps", allow_mps=True
 )
