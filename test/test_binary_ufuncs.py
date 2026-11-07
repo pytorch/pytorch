@@ -2832,6 +2832,66 @@ class TestBinaryUfuncsDevice(TestCase):
             ).tangent
         self.assertEqual(tangent, [1.0, float("nan"), float("nan"), 1.0])
 
+    def test_tensor_clamp_subgradient_mixed_bounds(self, device):
+        f32 = partial(torch.tensor, device=device, dtype=torch.float32)
+
+        def grad(lo, hi, inplace=False):
+            x = torch.tensor(
+                [0.5, 0.5], device=device, dtype=torch.float16, requires_grad=True
+            )
+            y = x.clone().clamp_(lo, hi) if inplace else torch.clamp(x, lo, hi)
+            y.sum().backward()
+            return x.grad
+
+        def expected(values):
+            return torch.tensor(values, device=device, dtype=torch.float16)
+
+        self.assertEqual(
+            grad(f32([0.50001, 0.5]), f32([1.0, 1.0])), expected([0.0, 0.5])
+        )
+        self.assertEqual(grad(f32(0.50001), f32([1.0, 1.0])), expected([0.0, 0.0]))
+        self.assertEqual(grad(f32(0.50001), f32(1.0)), expected([0.5, 0.5]))
+        self.assertEqual(
+            grad(f32([0.50001, 0.5]), f32([1.0, 1.0]), inplace=True),
+            expected([0.0, 0.5]),
+        )
+
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_clamp_tensor_backward_matches_decomposition(self, device, dtype):
+        from torch._decomp import decomposition_table
+
+        op = torch.ops.aten._clamp_tensor_backward
+        decomp = decomposition_table[op.default]
+        make = partial(make_tensor, device=device, low=-2, high=2)
+        x = make((5, 6), dtype=dtype)
+        x[0, :3] = -1
+        x[1, :3] = 1
+        x[2, 0] = nan
+        g = make((5, 6), dtype=dtype)
+        lo = torch.full((6,), -1.0, device=device, dtype=dtype)
+        hi = torch.full((5, 1), 1.0, device=device, dtype=dtype)
+        lo_nan = lo.clone()
+        lo_nan[1] = nan
+        cases = [
+            (g, x, lo, hi),
+            (g, x, hi, lo),
+            (g, x, lo_nan, hi),
+            (g, x, lo.float(), hi.double()),
+            (g, x, torch.tensor(-1.0, device=device), torch.tensor(1.0, device=device)),
+            (
+                make((5, 6), dtype=dtype, noncontiguous=True),
+                make((5, 6), dtype=dtype, noncontiguous=True),
+                lo,
+                hi,
+            ),
+        ]
+        for args in cases:
+            expected = decomp(*args)
+            self.assertEqual(op(*args), expected, atol=0, rtol=0)
+            out = torch.empty(0, device=device, dtype=expected.dtype)
+            op.grad_input(*args, grad_input=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+
     @dtypes(torch.float, torch.double)
     def test_min_max_nan_gradients(self, device, dtype):
         for op, a_values in (

@@ -590,6 +590,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   BINARY_SCALAR_3(xlogy, Tensor, Scalar_Other, Scalar_Self);
 
+  POINTWISE_BOXED(_clamp_tensor_backward);
   POINTWISE_BOXED(elu_backward);
   BINARY_POINTWISE(hardsigmoid_backward);
   BINARY_POINTWISE(hardtanh_backward);
