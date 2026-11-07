@@ -29,6 +29,24 @@ if HAS_GPU:
     from torch.testing._internal.triton_utils import add_kernel
 
 
+# exact in float32, rounds to 1 in bfloat16
+_FP32_ONLY = 1 + 2**-8
+
+
+class _Fp32Backward(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad.float() * _FP32_ONLY
+
+
+def _clone_with_fp32_grad(x):
+    return _Fp32Backward.apply(x)
+
+
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
@@ -2186,6 +2204,169 @@ class GraphModule(torch.nn.Module):
                 torch._dynamo.reset()
                 with self.assertRaisesRegex(RuntimeError, eager_error):
                     torch.compile(fn, backend="eager")(x)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("grad_dtype", [torch.bfloat16, torch.float32, None])
+    def test_grad_dtype_compiled_backward_cast(self, backend, grad_dtype):
+        x = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        x.grad_dtype = grad_dtype
+        fn = torch.compile(_clone_with_fp32_grad, backend=backend, fullgraph=True)
+        expected = torch.full((4,), _FP32_ONLY)
+        if grad_dtype is not None:
+            expected = expected.to(grad_dtype)
+        # the second step reuses the graph and accumulates into x.grad
+        for step in (1, 2):
+            fn(x).sum().backward()
+            self.assertEqual(x.grad.dtype, expected.dtype)
+            self.assertEqual(x.grad, expected * step, atol=0, rtol=0)
+
+    def test_grad_dtype_change_recompiles(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        failure_reasons = []
+        fn = torch._dynamo.optimize(
+            cnt, guard_fail_fn=lambda failure: failure_reasons.append(failure[0])
+        )(_clone_with_fp32_grad)
+        x = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        for grad_dtype in (torch.bfloat16, torch.float32, None, torch.float32):
+            x.grad = None
+            x.grad_dtype = grad_dtype
+            fn(x).sum().backward()
+            expected = torch.full((4,), _FP32_ONLY)
+            if grad_dtype is not None:
+                expected = expected.to(grad_dtype)
+            self.assertEqual(x.grad, expected, atol=0, rtol=0)
+        # returning to float32 reuses its graph
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertIn(
+            "tensor 'x' grad_dtype mismatch. expected BFloat16, actual Float",
+            failure_reasons[0],
+        )
+
+    @parametrize("grad_dtype", [torch.float32, None])
+    def test_grad_dtype_existing_grad_does_not_graph_break(self, grad_dtype):
+        x = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        x.grad_dtype = grad_dtype
+        x.grad = torch.ones(4)
+        fn = torch.compile(_clone_with_fp32_grad, backend="aot_eager", fullgraph=True)
+        fn(x).sum().backward()
+        self.assertEqual(x.grad, torch.full((4,), 1 + _FP32_ONLY), atol=0, rtol=0)
+
+    def test_grad_dtype_mismatched_existing_grad_graph_breaks(self):
+        # no grad_dtype override, so swapping .data leaves a float32 grad that
+        # the bfloat16 tensor's grad_dtype does not allow
+        x = torch.ones(4, requires_grad=True)
+        x.grad = torch.ones(4)
+        x.data = x.data.bfloat16()
+        fn = torch.compile(_clone_with_fp32_grad, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "dtype mismatch between tensor and its gradient",
+        ):
+            fn(x)
+
+    def test_grad_dtype_frozen_leaf_with_existing_grad(self):
+        # grad_dtype can be set without requires_grad, and the fake must carry
+        # it before its float32 .grad is attached
+        x = torch.ones(4, dtype=torch.bfloat16)
+        x.grad_dtype = torch.float32
+        x.grad = torch.ones(4)
+        fn = torch.compile(lambda t: t * 2, backend="aot_eager", fullgraph=True)
+        self.assertEqual(fn(x), x * 2)
+
+    def test_grad_dtype_leaf_and_nonleaf(self):
+        """A default leaf and a non-leaf share a graph, but a float32-grad_dtype
+        leaf must not reuse it, which would round its gradient to bfloat16."""
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        fn = torch.compile(_clone_with_fp32_grad, backend=cnt, fullgraph=True)
+        leaf = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        fn(leaf).sum().backward()
+        base = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        fn(base * 1).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(base.grad, torch.ones_like(base), atol=0, rtol=0)
+
+        fp32_leaf = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        fp32_leaf.grad_dtype = torch.float32
+        fn(fp32_leaf).sum().backward()
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fp32_leaf.grad, torch.full((4,), _FP32_ONLY), atol=0, rtol=0)
+
+        base.grad = None
+        fn(base * 1).sum().backward()
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(base.grad, torch.ones_like(base), atol=0, rtol=0)
+
+    def test_grad_dtype_parameter(self):
+        class Scale(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(4, dtype=torch.bfloat16))
+
+            def forward(self, x):
+                return _clone_with_fp32_grad(self.weight) * x
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        mod = Scale()
+        opt_mod = torch.compile(mod, backend=cnt, fullgraph=True)
+        x = torch.ones(4, dtype=torch.bfloat16)
+        opt_mod(x).sum().backward()
+        self.assertEqual(mod.weight.grad, torch.ones_like(mod.weight), atol=0, rtol=0)
+
+        mod.weight.grad = None
+        mod.weight.grad_dtype = torch.float32
+        opt_mod(x).sum().backward()
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(mod.weight.grad, torch.full((4,), _FP32_ONLY), atol=0, rtol=0)
+
+    @torch._dynamo.config.patch(
+        use_recursive_dict_tags_for_guards=True,
+        skip_tensor_guards_with_matching_dict_tags=True,
+    )
+    def test_grad_dtype_parameter_dict_tag_fast_path(self):
+        # setting grad_dtype leaves the module's dict tags unchanged
+        self.test_grad_dtype_parameter()
+
+    def test_grad_dtype_subclass_leaf(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        x = TwoTensor(
+            torch.ones(4, dtype=torch.bfloat16), torch.ones(4, dtype=torch.bfloat16)
+        ).requires_grad_()
+        x.grad_dtype = torch.float32
+        fn = torch.compile(_clone_with_fp32_grad, backend="aot_eager", fullgraph=True)
+        fn(x).sum().backward()
+        self.assertEqual(x.grad.dtype, torch.float32)
+        self.assertEqual(x.grad.a, torch.full((4,), _FP32_ONLY), atol=0, rtol=0)
+        self.assertEqual(x.grad.b, torch.full((4,), _FP32_ONLY), atol=0, rtol=0)
+
+    @requires_gpu
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_grad_dtype_fp32_weight_grad_from_mm_out_dtype(self, backend):
+        class Projection(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, h, w):
+                ctx.save_for_backward(h, w)
+                return h @ w.T
+
+            @staticmethod
+            def backward(ctx, dz):
+                h, w = ctx.saved_tensors
+                return dz @ w, torch.mm(dz.T.contiguous(), h, out_dtype=torch.float32)
+
+        h = torch.full((3, 32), 1.0078125, device=device_type, dtype=torch.bfloat16)
+        w = torch.full((32, 32), 0.125, device=device_type, dtype=torch.bfloat16)
+        w.requires_grad_()
+        w.grad_dtype = torch.float32
+        dz = torch.full_like(h, 1.0078125)
+        expected = dz.float().T @ h.float()
+        self.assertNotEqual(expected, expected.bfloat16().float())
+
+        def fn(h, w):
+            return Projection.apply(h, w)
+
+        torch.compile(fn, backend=backend, fullgraph=True)(h, w).backward(dz)
+        self.assertEqual(w.grad.dtype, torch.float32)
+        self.assertEqual(w.grad, expected, atol=0, rtol=0)
 
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")

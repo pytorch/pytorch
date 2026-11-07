@@ -4061,6 +4061,26 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config, inputs=[torch.ones(2)])
         self.assertNotEqual(c1, c2)
 
+    def test_different_grad_dtype(self):
+        """A warm cache must not reuse a backward traced for another grad_dtype."""
+
+        def fn(x):
+            return x.cos().sin()
+
+        config = self.default_config()
+        for make_input in (
+            lambda: torch.ones(3, dtype=torch.bfloat16),
+            lambda: TwoTensor(
+                torch.ones(3, dtype=torch.bfloat16), torch.ones(3, dtype=torch.bfloat16)
+            ),
+        ):
+            keys = []
+            for grad_dtype in (torch.bfloat16, torch.float32, None):
+                x = make_input().requires_grad_()
+                x.grad_dtype = grad_dtype
+                keys.append(self.gen_cache_key(fn, config, inputs=[x])[0])
+            self.assertEqual(len(set(keys)), 3)
+
     def test_different_global_configs(self):
         def fn(x):
             return x.cos().sin()
