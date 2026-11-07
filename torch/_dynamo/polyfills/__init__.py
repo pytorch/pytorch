@@ -525,6 +525,9 @@ def odict_update(
                 self[key] = data[key]
             data = ()
     for pair in data:
+        if (type(pair) is tuple or type(pair) is list) and len(pair) == 2:
+            self[pair[0]] = pair[1]
+            continue
         # CPython's mutablemapping_add_pairs consumes at most three items per pair.
         pair = iter(pair)
         key = next(pair, missing)

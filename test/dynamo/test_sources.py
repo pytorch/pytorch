@@ -13,6 +13,7 @@ from torch._dynamo.source import (
     GlobalSource,
     is_from_local_source,
     LocalSource,
+    TypeDictSource,
 )
 
 
@@ -21,6 +22,24 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    def test_type_dict_source_bypasses_metaclass_getattribute(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__dict__":
+                    raise AssertionError("type dictionary lookup must bypass metaclass")
+                return type.__getattribute__(cls, name)
+
+        class Key(metaclass=Meta):
+            value = object()
+
+        source = TypeDictSource(LocalSource("cls"))
+        cache = {}
+        scope = {"L": {"cls": Key}}
+        namespace = source.get_value(scope, {}, cache)
+        self.assertIs(type(namespace), dict)
+        self.assertIs(namespace["value"], Key.value)
+        self.assertIs(source.get_value(scope, {}, cache), namespace)
+
     def test_frozendict_items_source(self):
         mapping, key, value = object(), object(), torch.randn(2)
         source = FrozenDictItemsSource(LocalSource("mapping"))
