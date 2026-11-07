@@ -250,7 +250,9 @@ static bool isInputCompliesAddmmCudaLt(
     // !result.is_same(self) and self.dim() == 2, because
     // self needs to be copied into result and the bias ptr
     // will be ignored.
-    && result.dim() == 2 && result.is_contiguous()
+    // A contiguous (1, N) result can have any stride(0), which Lt would take as
+    // its leading dimension; require a valid one.
+    && result.dim() == 2 && result.is_contiguous() && result.stride(0) >= result.size(1)
     && (
       ( // Conditions for bias to be fusable -- implies direct Lt path without copies.
         self.is_contiguous() &&

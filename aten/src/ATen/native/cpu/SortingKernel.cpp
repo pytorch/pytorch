@@ -180,7 +180,9 @@ void sort_kernel(
     return;
   }
 #ifdef USE_FBGEMM
-  if (can_use_radix_sort(values, descending)) {
+  // parallel_sort1d_kernel reads and writes values and indices as dense buffers.
+  if (can_use_radix_sort(values, descending) && values.is_contiguous() &&
+      indices.is_contiguous()) {
     parallel_sort1d_kernel(values, indices);
     return;
   }
