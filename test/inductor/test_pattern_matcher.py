@@ -48,7 +48,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4487,6 +4490,36 @@ class TestPatternMatcherLogging(LoggingTestCase):
             ]
             self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
+
+
+class TestVarStdReductionDedup(TestCase):
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    @parametrize("correction", [0, 1])
+    @parametrize("strided", [False, True])
+    def test_narrowing(self, device, correction, strided):
+        def fn(x):
+            return x.var(dim=-1, correction=correction), x.float().var(
+                dim=-1, correction=correction
+            )
+
+        x = torch.tensor(
+            [[2**30 + i for i in range(4)]], dtype=torch.float64, device=device
+        )
+        if strided:
+            x = x.repeat_interleave(2, dim=-1)[:, ::2]
+        expected = (
+            torch.tensor([5 / (4 - correction)], dtype=torch.float64, device=device),
+            torch.zeros(1, dtype=torch.float32, device=device),
+        )
+        self.assertEqual(fn(x), expected)
+        counters.clear()
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
+
+instantiate_device_type_tests(
+    TestVarStdReductionDedup, globals(), only_for=("cpu", GPU_TYPE), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

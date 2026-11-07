@@ -29,6 +29,7 @@ from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import (
     canonicalize_dim,
+    get_computation_dtype,
     is_boolean_dtype,
     is_expandable_to,
     is_integer_dtype,
@@ -2635,6 +2636,8 @@ def register_var_std_reduction_dedup_pattern():
         keepdim,
         cvt_keepdim,
     ):
+        if cvt_dtype != get_computation_dtype(inp.meta["val"].dtype):
+            return
         for correction in (var_correction, cvt_correction):
             if isinstance(correction, torch.fx.Node):
                 return
