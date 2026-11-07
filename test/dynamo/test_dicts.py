@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.utils._ordered_set import OrderedSet
 
 
 class _BadCmpExc(Exception):
@@ -69,6 +70,143 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("created", [False, True])
+    def test_iterable_attribute_error_metadata(self, created):
+        def fn(x, iterator):
+            obj = zip([1], [2]) if created else next(iterator)
+            missing = hasattr(obj, "missing")
+            if not created:
+                return x + 1, missing
+            try:
+                obj.missing
+            except AttributeError as error:
+                return x + 1, missing, error.name, error.obj is obj
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, iter(("a",))),
+            (x + 1, False, "missing", True) if created else (x + 1, False),
+        )
+
+    @parametrize("container_type", [set, frozenset, OrderedSet])
+    def test_set_family_iterator_type(self, container_type):
+        def fn(x):
+            iterator = iter(container_type([1, 2]))
+            return (
+                x + next(iterator),
+                type(iterator),
+                isinstance(iterator, type(iter({}))),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "kind, destination",
+        [
+            (kind, destination)
+            for kind in ("plain", "getattr", "getattribute")
+            for destination in ("instance", "class", "base")
+        ]
+        + [
+            ("module", "instance"),
+            ("module", "buffer"),
+            ("slot", "instance"),
+            ("slot_getattr", "instance"),
+            ("metaclass", "instance"),
+            ("dict_property", "class"),
+            ("plain", "bases"),
+            ("plain", "delete"),
+            ("plain", "replace"),
+        ],
+    )
+    def test_defaulted_attribute_absence_invalidation(self, kind, destination):
+        class Base:
+            __slots__ = ()
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return 0 if name == "__dictoffset__" else super().__getattribute__(name)
+
+        class Input(Base, metaclass=Meta if kind == "metaclass" else type):
+            if kind == "dict_property":
+
+                @property
+                def __dict__(self):
+                    raise AttributeError("__dict__")
+
+            if kind.startswith("slot"):
+                __slots__ = ("scale", "reads")
+            if kind in ("getattr", "slot_getattr"):
+
+                def __getattr__(self, name):
+                    if kind == "getattr" and name == "scale":
+                        self.reads += 1
+                    raise AttributeError(name)
+            elif kind == "getattribute":
+
+                def __getattribute__(self, name):
+                    return super().__getattribute__(name)
+
+        obj = torch.nn.Identity() if kind == "module" else Input()
+        obj.reads = 0
+        if destination in ("delete", "replace"):
+            obj.scale = 3
+
+        def fn(x, obj):
+            if destination == "delete":
+                del obj.scale
+            elif destination == "replace":
+                obj.__dict__ = {"reads": 0}
+            result = x + getattr(obj, "scale", 1)
+            return result, obj.reads
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, obj), (x + 1, int(kind == "getattr")))
+        self.assertEqual(counter.frame_count, 1)
+        if destination in ("delete", "replace"):
+            self.assertFalse(hasattr(obj, "scale"))
+            obj.scale = 3
+            Input.scale = 3
+            self.assertEqual(compiled(x, obj)[0], x + 3)
+            self.assertEqual(counter.frame_count, 2)
+            return
+        obj.reads = 0
+        if destination == "bases":
+
+            class Other:
+                __slots__ = ()
+                scale = 3
+
+            Input.__bases__ = (Base, Other)
+        elif destination == "buffer":
+            obj.register_buffer("scale", torch.tensor(3))
+        else:
+            target = {"instance": obj, "class": Input, "base": Base}[destination]
+            target.scale = 3
+        self.assertEqual(compiled(x, obj)[0], x + 3)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_slotted_class_missing_attribute_guard(self):
+        class Slotted:
+            __slots__ = ()
+
+        def fn(x, obj):
+            try:
+                return x + obj.extra
+            except AttributeError:
+                return x + 1
+
+        x, obj = torch.ones(1), Slotted()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, obj), x + 1)
+        with patch.object(Slotted, "extra", 7, create=True):
+            self.assertEqual(compiled(x, obj), x + 7)
+        self.assertEqual(counter.frame_count, 2)
+
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])

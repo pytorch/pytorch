@@ -4007,6 +4007,37 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     # Overrides the base __class__ getset to add the cls_source fallback above.
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
+    def guard_attribute_absence(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        cls = type(self.value)
+        if self.cls_source:
+            mro_attr_source(tx, cls, self.cls_source, name, guard_absence=True)
+            if not config.assume_dunder_attributes_remain_unchanged:
+                mro_attr_source(
+                    tx, cls, self.cls_source, "__getattr__", guard_absence=True
+                )
+        effects = tx.output.side_effects
+        if not self.source or any(
+            effects.has_pending_mutation_of_attr(self, attr)
+            for attr in (name, "__dict__")
+        ):
+            return
+        # Guard storage rather than re-running a user getter while building/checking guards.
+        offset = type.__dict__["__dictoffset__"].__get__(cls)
+        if offset and not isinstance(
+            self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+        ):
+            # Preserve the existing presence check when __dict__ is not a storage accessor.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+            return
+        if offset and name not in object.__getattribute__(self.value, "__dict__"):
+            install_not_in_instance_dict_guard(self.source, name)
+
     def generic_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -4116,6 +4147,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         # Step 7: AttributeError.
+        self.guard_attribute_absence(tx, name)
         raise_observed_exception(
             AttributeError,
             tx,
