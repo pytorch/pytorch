@@ -3035,6 +3035,14 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+
+def is_identity_singleton(value: object) -> bool:
+    """Constants whose process-wide identity does not depend on their source."""
+    return any(
+        value is item for item in (None, True, False, Ellipsis, NotImplemented)
+    ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
+
+
 """
     Difference between is_safe_constant and common_constant_types.
     * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
@@ -3374,14 +3382,6 @@ def to_subclass(t: Any, cls: type) -> Any:
 
 
 dict_getitem = dict.__getitem__
-
-
-@torch.fx.wrap
-def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Use dict.keys() to match the iteration order of PyDict_Next used by
-    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
-    # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_base_iter(s: Iterable[T]) -> Iterator[T]:
