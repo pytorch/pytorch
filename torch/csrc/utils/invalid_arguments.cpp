@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace torch {
 
@@ -398,6 +399,7 @@ std::string format_invalid_args(
     std::vector<std::string> unmatched_kwargs;
     if (has_kwargs && mismatch_reasons.empty())
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
+
     if (!unmatched_kwargs.empty()) {
       error_msg += "got unrecognized keyword arguments: ";
       for (auto& kwarg : unmatched_kwargs)
@@ -414,6 +416,13 @@ std::string format_invalid_args(
       error_msg += option_str;
     }
   } else {
+    std::unordered_set<std::string> globally_valid_kwargs;
+    for (const auto& option_str : options) {
+      auto pair = _parseOption(option_str, kwargs);
+      for (const auto& argument : pair.first.arguments)
+        globally_valid_kwargs.insert(argument.name);
+    }
+
     error_msg += "got ";
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
@@ -432,8 +441,24 @@ std::string format_invalid_args(
         }
       } else if (_argcountMatch(option, args, kwargs)) {
         std::vector<std::string> unmatched_kwargs;
-        if (has_kwargs)
+        if (has_kwargs) {
           unmatched_kwargs = _tryMatchKwargs(option, kwargs);
+          unmatched_kwargs.erase(
+              std::remove_if(
+                  unmatched_kwargs.begin(),
+                  unmatched_kwargs.end(),
+                  [&option, &globally_valid_kwargs](const std::string& kwarg) {
+                    const bool defined_in_option = std::any_of(
+                        option.arguments.begin(),
+                        option.arguments.end(),
+                        [&kwarg](const Argument& argument) {
+                          return argument.name == kwarg;
+                        });
+                    return !defined_in_option &&
+                        globally_valid_kwargs.count(kwarg) > 0;
+                  }),
+              unmatched_kwargs.end());
+        }
         if (!unmatched_kwargs.empty()) {
           error_msg +=
               "      didn't match because some of the keywords were incorrect: ";
