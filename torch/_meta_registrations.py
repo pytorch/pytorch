@@ -8267,12 +8267,14 @@ def meta_pixel_shuffle(self, upscale_factor):
     )
     upscale_factor_squared = upscale_factor * upscale_factor
     torch._check(
-        len(self.shape) > 2,
-        lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
+        self.dim() >= 3,
+        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim()} dimension(s)",
     )
     torch._check(
         self.shape[-3] % upscale_factor_squared == 0,
-        lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
+        lambda: f"pixel_shuffle expects its input's 'channel' dimension to be divisible by the "
+        f"square of upscale_factor, but input.size(-3)={self.shape[-3]} is not divisible by "
+        f"{upscale_factor_squared}",
     )
 
     def pick_memory_format():
