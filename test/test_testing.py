@@ -3107,6 +3107,8 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
+                           "torch.distributed.fsdp._flex_shard.layout_adapters.spmd_types",  # depends on spmd_types
+                           "torch.distributed.fsdp._flex_shard.placements._copy_kernels",  # depends on triton
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp

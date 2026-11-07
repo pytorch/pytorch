@@ -37,7 +37,6 @@ from torch.distributed.fsdp._flex_shard import (
     MixedPrecisionPolicy,
     OffloadPolicy,
     Placement,
-    PlacementFn,
     register_optimizer_checkpoint_hook,
     relayout_bucket,
     set_global_layout,
@@ -87,7 +86,6 @@ __all__ = [
     "OffloadPolicy",
     "per_param_placements",
     "Placement",
-    "PlacementFn",
     "register_optimizer_checkpoint_hook",
     "relayout_bucket",
     "set_global_layout",
@@ -95,3 +93,8 @@ __all__ = [
     "set_state_dict_global_layouts",
     "Shard",
 ]
+
+# The public names are defined in the private engine package
+for _name in __all__:
+    globals()[_name].__module__ = __name__
+del _name
