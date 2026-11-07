@@ -9,7 +9,7 @@ from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
-from torch._inductor import config, ir, metrics
+from torch._inductor import config, ir
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
@@ -584,13 +584,15 @@ class PaddingTest(TestCaseBase):
             lambda msg: f"{msg}\n{expected_strides} v.s. {out_strides}",
         )
 
+    @config.patch(comprehensive_padding=True, shape_padding=False)
     def test_pad_3d_tensor(self):
         """
         Constructing this test case guided by the fact that we don't pad
         placeholder or user visible output's strides.
 
         Add a matmul in the beginning and end so we can pad strides for
-        intermediate tensors.
+        intermediate tensors. The intermediate reaches the last matmul through a
+        view, and that matmul's output being user visible shouldn't prevent padding.
         """
 
         def f(x, y):
@@ -600,8 +602,142 @@ class PaddingTest(TestCaseBase):
 
         x = torch.randn(2, 16, 2047)
         y = torch.randn(2047, 2047)
-        self.common_numeric_check(f, x, y, tol=1e-2)
-        self.assertTrue(metrics.num_comprehensive_padding > 0)
+        expected = f(x, y)
+
+        actual, code = run_and_get_code(torch.compile(f), x, y)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertIn(
+            f"empty_strided_{GPU_TYPE}((2, 16, 2047), (32768, 2048, 1), torch.float32)",
+            code[0],
+        )
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("reduction", ("mean", "sum", "amax"))
+    @parametrize("view", ("unsqueeze", "transpose"))
+    def test_view_of_reduction_output_not_padded(self, reduction, view):
+        """
+        Reductions aren't marked dislike_padding even if user visible, so views
+        returning their output rely on the view's marking to keep eager's strides.
+        """
+
+        def f(x):
+            out = getattr(x, reduction)(-1)
+            return out.unsqueeze(1) if view == "unsqueeze" else out.t()
+
+        x = torch.randn((4, 2047, 64) if view == "unsqueeze" else (64, 2047, 4))
+        expected = f(x)
+        actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("producer", ("mean", "chunk", "frexp"))
+    def test_matmul_input_backing_returned_view_not_padded(self, producer):
+        """
+        The matmul's marking only protects its own output, but the buffer it reads
+        also backs a returned view, possibly through a tuple element.
+        """
+
+        def f(x, y):
+            if producer == "mean":
+                out = x.mean(-1)
+            elif producer == "chunk":
+                out = (x + 1).chunk(2, dim=1)[0]
+            else:
+                out = torch.frexp(x).mantissa
+            return torch.matmul(out, y), out.permute(0, 2, 1)
+
+        x = torch.randn((2, 16, 2047, 4) if producer == "mean" else (2, 16, 2047))
+        y = torch.randn(2047, 8)
+        expected = f(x, y)
+        actual = torch.compile(f)(x, y)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
+        self.assertEqual(actual[1].stride(), expected[1].stride())
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("view", ("squeeze", "expand"))
+    @parametrize("use_mm", (False, True))
+    def test_noop_view_backing_output_not_padded(self, view, use_mm):
+        """No-op views can replace a buffer's origin without changing its storage."""
+
+        def f(x, y):
+            p = x + 1
+            q = p.squeeze(1) if view == "squeeze" else p.expand(p.shape)
+            return (q @ y if use_mm else q * 2), p.permute(0, 2, 1)
+
+        x = torch.randn(1, 16, 2047)
+        y = torch.randn(2047, 8)
+        expected = f(x, y)
+        actual, code = run_and_get_code(torch.compile(f), x, y)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            [out.stride() for out in actual], [out.stride() for out in expected]
+        )
+        self.assertNotIn("(32768, 2048, 1)", code[0])
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    @parametrize("num_mutations", (1, 2))
+    def test_index_put_backing_output_not_padded(self, num_mutations):
+        """Reinplaced writes must preserve the storage backing a returned view."""
+
+        def f(x, y, idx, v):
+            p = x + 1
+            out = p @ y
+            for i in range(num_mutations):
+                p[:, idx] = v + i
+            return out, p.transpose(1, 2)
+
+        x = torch.randn(2, 16, 2047)
+        y = torch.randn(2047, 8)
+        idx = torch.tensor([0, 3])
+        v = torch.randn(2, 2, 2047)
+        expected = f(x, y, idx, v)
+        actual, code = run_and_get_code(torch.compile(f), x, y, idx, v)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(
+            [out.stride() for out in actual], [out.stride() for out in expected]
+        )
+        self.assertNotIn("(32768, 2048, 1)", code[0])
+
+    @config.patch(comprehensive_padding=True, shape_padding=False)
+    def test_conv_input_through_view_not_padded(self):
+        """
+        A user-visible matmul freezes a shared conv input through a view.
+        The producer's conv marking keeps it dense, while an intermediate
+        used only by another user-visible matmul can still be padded.
+        """
+
+        def f(x, y, w):
+            p = x + 1
+            mm = p @ y
+            conv = torch.nn.functional.conv2d(p.unsqueeze(1), w)
+            return mm, conv, (p + 2) @ y
+
+        x = torch.randn(2, 16, 2047)
+        y = torch.randn(2047, 8)
+        w = torch.randn(4, 1, 3, 3)
+
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            expected = f(x, y, w)
+            actual, code = run_and_get_code(torch.compile(f), x, y, w)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertIn(
+            f"empty_strided_{GPU_TYPE}((2, 16, 2047), (32752, 2047, 1), torch.float32)",
+            code[0],
+        )
+        self.assertIn(
+            f"empty_strided_{GPU_TYPE}((2, 16, 2047), (32768, 2048, 1), torch.float32)",
+            code[0],
+        )
 
     def test_conv(self):
         """

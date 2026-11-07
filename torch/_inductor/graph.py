@@ -56,6 +56,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Node
 from torch.fx.passes.reinplace import _is_view_op
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
@@ -79,7 +80,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx, get_mutated_storages
+from .fx_utils import count_flops_fx, get_mutated_input_nodes, get_mutated_storages
 from .ir import (
     assign_origin_node,
     Constant,
@@ -229,9 +230,13 @@ def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
 
 def extend_user_visible_output_strides(
     user_visible_outputs: dict[Node, tuple[int, ...]],
+    through_getitem: bool = False,
 ) -> dict[Node, object]:
     """
     Extend user_visible_output_strides to include view ops that lead to user-visible outputs.
+
+    With through_getitem=True, also walk from a tuple element to the node producing
+    the tuple, so the result covers the nodes whose buffers can be returned to the user.
     """
     result: dict[Node, object] = {**user_visible_outputs}
     queue = [*result.keys()]
@@ -239,7 +244,10 @@ def extend_user_visible_output_strides(
     while queue:
         current = queue.pop()
         if (
-            _is_view_op(current.target)
+            (
+                _is_view_op(current.target)
+                or (through_getitem and current.target is operator.getitem)
+            )
             and current.args
             and isinstance(current.args[0], torch.fx.Node)
         ):
@@ -249,6 +257,48 @@ def extend_user_visible_output_strides(
                 visited.add(base)
                 queue.append(base)
     return result
+
+
+def get_user_visible_output_storages(
+    g: Graph, user_visible_output_strides: dict[Node, tuple[int, ...]]
+) -> OrderedSet[StorageWeakRef]:
+    storages: OrderedSet[StorageWeakRef] = OrderedSet()
+    if not config.comprehensive_padding:
+        return storages
+
+    def get_storage(node: Node) -> StorageWeakRef | None:
+        val = node.meta.get("val")
+        if isinstance(val, Tensor) and torch._C._has_storage(val):
+            return StorageWeakRef(val.untyped_storage())
+        return None
+
+    for node in extend_user_visible_output_strides(
+        user_visible_output_strides, through_getitem=True
+    ):
+        if (storage := get_storage(node)) is not None:
+            storages.add(storage)
+
+    # Reinplacing an op can leave its fake output on a different storage from
+    # the input it now mutates. Treat both storages as aliases before lowering,
+    # when a consumer may freeze the buffer before the returned view is lowered.
+    aliases: defaultdict[StorageWeakRef, OrderedSet[StorageWeakRef]] = defaultdict(
+        OrderedSet
+    )
+    for node in g.nodes:
+        if (storage := get_storage(node)) is None:
+            continue
+        for mutated_input in get_mutated_input_nodes(node):
+            if (input_storage := get_storage(mutated_input)) is not None:
+                aliases[storage].add(input_storage)
+                aliases[input_storage].add(storage)
+
+    pending = list(storages)
+    while pending:
+        for storage in aliases.get(pending.pop(), ()):
+            if storage not in storages:
+                storages.add(storage)
+                pending.append(storage)
+    return storages
 
 
 def mark_nodes_dislike_padding(
@@ -343,6 +393,11 @@ def mark_nodes_dislike_padding(
             # step (e.g. is_contiguous_storage_and_layout) already mutated
             # the input layout to padded strides.
             if op not in ops_like_padding:
+                # User-visible marking doesn't propagate, so a flag set by now means
+                # this node or its users want dense inputs. Otherwise the flag only
+                # protects this node's output and says nothing about its inputs.
+                if not cur.meta.get("dislike_padding", False):
+                    cur.meta["dislike_padding_only_for_output"] = True
                 cur.meta["dislike_padding"] = True
 
 
@@ -595,6 +650,9 @@ class GraphLowering(torch.fx.Interpreter):
         self._warned_fallback = OrderedSet(["aten.convolution_backward"])
         self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
+        self.user_visible_output_storages = get_user_visible_output_storages(
+            gm.graph, self.user_visible_output_strides
+        )
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: list[

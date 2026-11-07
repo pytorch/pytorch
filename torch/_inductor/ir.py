@@ -75,6 +75,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.fx.node import Node
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._sympy.functions import (
@@ -7748,7 +7749,7 @@ class ExternKernel(InputsKernel):
             raise AssertionError("Expected buf is not None")
         x_unwrap_view_fx_node = buf.get_origin_node()
         # Prefer channels last format according to how the format is set from eager.
-        if (
+        prefer_channels_last = (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
             and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
@@ -7763,12 +7764,34 @@ class ExternKernel(InputsKernel):
                     memory_format=torch.channels_last_3d,
                 )
             )
-        ):
-            x_unwrap_view.freeze_layout_with_same_order(
-                make_channels_last_strides_for(x_unwrap_view.get_size())
+        )
+        # This freezes an intermediate buffer owned by its producer. If the current
+        # node only protects its own output strides, that says nothing about this
+        # input, so let the producer's marking decide whether it can be padded.
+        padding_fx_node = V.get_current_node()
+        if (
+            x_unwrap_view_fx_node is not None
+            and hasattr(padding_fx_node, "meta")
+            and padding_fx_node.meta.get("dislike_padding_only_for_output", False)
+            # A no-op lowering can overwrite origin_node. Check all origins by
+            # storage so aliases of returned buffers retain the consumer context.
+            and not any(
+                isinstance(node, torch.fx.Node)
+                and isinstance(val := node.meta.get("val"), torch.Tensor)
+                and torch._C._has_storage(val)
+                and StorageWeakRef(val.untyped_storage())
+                in getattr(V.graph, "user_visible_output_storages", ())
+                for node in (x_unwrap_view_fx_node, *buf.get_origins())
             )
-        else:
-            x_unwrap_view.freeze_layout()
+        ):
+            padding_fx_node = x_unwrap_view_fx_node
+        with V.set_current_node(padding_fx_node):
+            if prefer_channels_last:
+                x_unwrap_view.freeze_layout_with_same_order(
+                    make_channels_last_strides_for(x_unwrap_view.get_size())
+                )
+            else:
+                x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
