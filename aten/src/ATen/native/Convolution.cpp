@@ -488,7 +488,26 @@ struct ConvParams {
     }
   }
 
-  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
+  // On ROCm, grouped convolutions with dilation run on PyTorch's own kernels (SlowDilated2d,
+  // CudaDepthwise2d) by default. MIOpen's RDNA solvers for them are faster for inference in these
+  // cases: the forward of 2D (and 1D) convolutions with either at least 16 output channels per
+  // group, or one channel per group (depthwise, at least 32 channels, filters up to 7x7, NCHW).
+  // Backward, 3D, transposed convolutions and other targets keep the native kernels.
+  bool use_miopen_grouped_dilated(const at::Tensor& input, const at::Tensor& weight, bool need_backward) const {
+    if (need_backward || transposed || input.dim() != 4 ||
+        !detail::getCUDAHooks().supportsGroupedDilatedConvolutionWithMIOpen()) {
+      return false;
+    }
+    const auto in_channels = at::symint::size<T>(input, 1);
+    const auto out_channels = at::symint::size<T>(weight, 0);
+    if (in_channels == groups && out_channels == groups) {
+      return groups >= 32 && at::symint::size<T>(weight, 2) <= 7 && at::symint::size<T>(weight, 3) <= 7 &&
+             miopen_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous;
+    }
+    return out_channels >= groups * 16;
+  }
+
+  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined, bool need_backward = true) const  {
     // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API
     // Reference: https://github.com/ROCm/MIOpen/pull/2838
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
@@ -496,7 +515,7 @@ struct ConvParams {
            && input.is_cuda()
            && detail::getCUDAHooks().compiledWithMIOpen()
            && input.dim() <= MIOPEN_DIM_MAX
-           && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
+           && (!(groups > 1 && is_dilated()) || use_miopen_grouped_dilated(input, weight, need_backward))
            ;
   }
 
@@ -507,8 +526,8 @@ struct ConvParams {
   // DepthwiseConv2d.cu range-checks the output as well as the input, which a
   // channel multiplier makes the larger of the two. Channels-last stays on MIOpen,
   // but only when MIOpen is the one asked to suggest NHWC.
-  bool use_miopen_depthwise(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
-    if (!use_miopen(input, weight, bias_defined)) {
+  bool use_miopen_depthwise(const at::Tensor& input, const at::Tensor& weight, bool bias_defined, bool need_backward = true) const  {
+    if (!use_miopen(input, weight, bias_defined, need_backward)) {
       return false;
     }
     if (at::globalContext().cudnnDepthwiseKernel() != at::CuDNNDepthwiseKernel::NATIVE) {
@@ -1337,7 +1356,7 @@ static ConvBackend _select_conv_backend(
   if (params.is_depthwise(input, weight)) {
     if (params.use_cudnn_depthwise(input, weight)) {
       return ConvBackend::Cudnn;
-    } else if (params.use_miopen_depthwise(input, weight, bias_sizes_opt.has_value())) {
+    } else if (params.use_miopen_depthwise(input, weight, bias_sizes_opt.has_value(), need_backward)) {
       return ConvBackend::MiopenDepthwise;
     } else {
       if (input.ndimension() == 4) {
@@ -1354,7 +1373,7 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Cudnn;
     }
-  } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
+  } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value(), need_backward)) {
     if (params.transposed) {
       return ConvBackend::MiopenTranspose;
     } else {
