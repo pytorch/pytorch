@@ -1319,6 +1319,33 @@ def optim_error_inputs_func_sgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid momentum value: -0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=float("nan")),
+                    desc="lr should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid learning rate: nan",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, momentum=float("nan")),
+                    desc="momentum should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid momentum value: nan",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=float("nan")),
+                    desc="weight_decay should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: nan",
+            ),
         ]
     return error_inputs
 
@@ -1973,6 +2000,16 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=(),
         not_og_supported_flags=(),
         supports_complex=False,
+        decorators=(
+            # XPU backend kernels accumulate float32 rounding differently from CPU,
+            # resulting in small but tolerable numerical drift in state_dict parity.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1.3e-6)}),
+                "TestOptimRenewed",
+                "test_state_dict_cross_device",
+                device_type="xpu",
+            ),
+        ),
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
             # which leads to deviations compared to eager mode. In the Newton-Schulz

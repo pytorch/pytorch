@@ -14,12 +14,16 @@ from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops.triton_kernel_wrap import (
-    kernel_side_table,
-    triton_kernel_wrapper_functional,
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_functional_hop,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, is_node_realized
+from torch._inductor.fx_utils import (
+    _same_size_stride_and_storage_offset,
+    get_node_storage,
+    is_node_realized,
+)
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -27,8 +31,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     GuardOnDataDependentSymNode,
-    statically_known_true,
-    sym_eq,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
@@ -274,6 +276,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     return False
 
 
+def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
+    """
+    The symmetric-memory one-shot all-reduce lowering is out-of-place, so
+    reinplacing an all_reduce it may pick only adds a copy back into the input.
+    """
+    if not config._collective.auto_select:
+        return True
+    from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+
+    group_name = cast("torch.distributed.distributed_c10d.GroupName", node.args[2])
+    return not is_symm_mem_enabled_for_group(group_name)
+
+
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
     """Replace _generalized_scatter with normal aten ops"""
     for node in itertools.chain(
@@ -428,7 +443,9 @@ try:
     c10d_functional = torch.ops._c10d_functional
     inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, 0
+            c10d_functional.all_reduce_.default,
+            0,
+            extra_check=should_reinplace_all_reduce,
         ),
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
             c10d_functional.all_reduce_coalesced_.default, 0
@@ -443,9 +460,6 @@ except AttributeError:
 inplaceable_foreach_ops: dict[torch._ops.OpOverload, InplaceableOp] = {}
 for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
-
-
-inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
 # Operators that don't depend on the tensor data
@@ -468,36 +482,18 @@ def _get_view_base(node: torch.fx.Node) -> torch.fx.Node:
     return node
 
 
-def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
-    lhs_val = lhs.meta.get("val")
-    rhs_val = rhs.meta.get("val")
-    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
-        return False
-
-    def same_value(lhs_value, rhs_value) -> bool:
-        return statically_known_true(sym_eq(lhs_value, rhs_value))
-
-    def same_sequence(lhs_values, rhs_values) -> bool:
-        return len(lhs_values) == len(rhs_values) and all(
-            same_value(lhs_value, rhs_value)
-            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
-        )
-
-    return (
-        same_sequence(lhs_val.size(), rhs_val.size())
-        and same_sequence(lhs_val.stride(), rhs_val.stride())
-        and same_value(lhs_val.storage_offset(), rhs_val.storage_offset())
-    )
-
-
 def _is_layout_preserving_view_copy_back(
     dst: torch.fx.Node,
     src: torch.fx.Node,
     mutated_arg: torch.fx.Node,
     src_base: torch.fx.Node,
 ) -> bool:
-    return _same_tensor_metadata(src_base, mutated_arg) and _same_tensor_metadata(
-        src, dst
+    return _same_size_stride_and_storage_offset(
+        cast(torch.Tensor, src_base.meta["val"]),
+        cast(torch.Tensor, mutated_arg.meta["val"]),
+    ) and _same_size_stride_and_storage_offset(
+        cast(torch.Tensor, src.meta["val"]),
+        cast(torch.Tensor, dst.meta["val"]),
     )
 
 
@@ -561,7 +557,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # then skip over it
             if src.target is operator.getitem and (
                 (
-                    src.args[0].target == triton_kernel_wrapper_functional
+                    is_user_kernel_functional_hop(src.args[0].target)
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
@@ -822,7 +818,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output at index size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
-                        # if it was needed for inplaceable_triton_ops?
+                        # if it was needed for user-kernel functional HOPs?
                         if user.target is operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
 
@@ -1030,27 +1026,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                             continue
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
-        elif node.target in inplaceable_triton_ops:
-            kernel_idx = node.kwargs["kernel_idx"]
-            kernel = kernel_side_table.get_kernel(kernel_idx)
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
+        elif user_kernel_hop := get_user_kernel_hop_info(node.target, "functional"):
+            kernel_name = user_kernel_hop.get_kernel_name(node.kwargs)
 
-            if isinstance(kernel, JITFunction):
-                kernel_name = kernel.fn.__name__
-            elif isinstance(kernel, Autotuner):
-                if config.is_fbcode():
-                    # Autotuner has different implementations for AMD and NV
-                    if torch.version.hip is None:
-                        kernel_name = kernel.base_fn.__name__
-                    else:
-                        kernel_name = kernel.fn.__name__
-                else:
-                    kernel_name = kernel.base_fn.__name__
-            else:
-                raise AssertionError("Unknown triton kernel type")
-
-            # inplaceable_triton_ops take an additional argument called
+            # User-kernel functional HOPs take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
@@ -1058,7 +1037,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
                 kernel_name,
-                ReInplaceTrigger.TRITON_OPS,
+                user_kernel_hop.reinplace_trigger,
             )
 
             kwargs = dict(node.kwargs)

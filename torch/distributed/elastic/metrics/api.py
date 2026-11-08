@@ -106,7 +106,7 @@ def _get_metric_name(fn):
 
 def prof(fn=None, group: str = "torchelastic"):
     r"""
-    @profile decorator publishes duration.ms, count, success, failure metrics for the function that it decorates.
+    @prof decorator publishes success, failure and duration.ms metrics for the function that it decorates.
 
     The metric name defaults to the qualified name (``class_name.def_name``) of the function.
     If the function does not belong to a class, it uses the leaf module name instead.

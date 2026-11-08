@@ -41,7 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -1136,13 +1136,23 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
+        # HIP and rocminfo identify a GPU by its KFD unique_id, which is not
+        # always the ASIC serial. Newer amdsmi reports it as hip_uuid.
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
-            return None
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(handler)
+            hip_uuid = str(info.get("hip_uuid", ""))
+        except (AttributeError, amdsmi.AmdSmiException):
+            hip_uuid = ""
+        if hip_uuid.startswith("GPU-"):
+            uuid = hip_uuid.removeprefix("GPU-")
+        else:
+            try:
+                uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                    2:
+                ]  # Removes 0x prefix from serial
+            except amdsmi.AmdSmiException:
+                warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+                return None
         uuids.append(
             str(uuid).lower()
         )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
@@ -1449,10 +1459,18 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 def current_blas_handle():
     r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
 
-    On CUDA, the handle uses cuBLAS's default workspace unless ATen workspace
-    caching is explicitly enabled. When caching is disabled, internal ATen
-    operations may temporarily bind their own workspace, but restore the default
-    workspace before releasing it. ROCm caches workspaces by default.
+    On CUDA, the handle uses the BLAS library's default workspace unless ATen
+    workspace caching is explicitly enabled. When caching is disabled, internal
+    ATen operations may temporarily bind their own workspace to this handle, but
+    restore the default workspace before releasing it.
+
+    On ROCm, this function returns a different handle for each thread and
+    stream, and another one while the current stream is capturing. Run work on
+    a handle only on the stream it was returned for, and inside a capture call
+    this function again rather than use a handle obtained before it. See
+    :ref:`hipblas-workspaces` for the workspace each handle has, how handles
+    pass between threads, how to move one to another stream, and what to call
+    before graph capture begins.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
@@ -1621,14 +1639,15 @@ def _get_amdsmi_temperature(device: Device = None) -> int:
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
+    # AMD SMI reports socket power in watts; power_draw() is documented in mW.
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return socket_power * 1000
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return socket_power * 1000
         else:
             return 0
 
@@ -2183,6 +2202,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
@@ -2256,6 +2276,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",

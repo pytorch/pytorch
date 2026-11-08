@@ -6,6 +6,39 @@
 #include <c10/util/irange.h>
 #include <cmath>
 
+#if defined(__ARM_FEATURE_SVE)
+
+#include <arm_sve.h>
+
+#if defined(__clang__) && (__clang_major__ >= 16)
+
+#include <arm_neon_sve_bridge.h>
+
+static inline svfloat64_t neon_to_sve(float64x2_t v) {
+  return svset_neonq(svundef_f64(), v);
+}
+static inline float64x2_t sve_to_neon(svfloat64_t v) {
+  return svget_neonq(v);
+}
+
+#else
+
+// With -msve-vector-bits=128, svfloat64_t and float64x2_t have identical layout
+// so these conversions compile to zero instructions on GCC.
+static inline svfloat64_t neon_to_sve(float64x2_t v) {
+  svfloat64_t r;
+  __builtin_memcpy(&r, &v, sizeof(v));
+  return r;
+}
+static inline float64x2_t sve_to_neon(svfloat64_t v) {
+  float64x2_t r;
+  __builtin_memcpy(&r, &v, sizeof(r));
+  return r;
+}
+#endif
+
+#endif
+
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -138,13 +171,21 @@ class Vectorized<double> {
     result[1] = f(values[1], second.values[1]);
     return result;
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return vreinterpretq_f64_u64(
+        vorrq_u64(vreinterpretq_u64_f64(values), vreinterpretq_u64_f64(mask)));
+  }
   Vectorized<double> abs() const {
     return vabsq_f64(values);
   }
   Vectorized<double> angle() const {
     auto zero = Vectorized<double>(0.0);
     auto pi = Vectorized<double>(c10::pi<double>);
-    auto tmp = blendv(zero, pi, vreinterpretq_f64_u64(vcltzq_f64(values)));
+    auto tmp = blendv(
+        zero,
+        pi,
+        vreinterpretq_f64_u64(vcltzq_s64(vreinterpretq_s64_f64(values))));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
@@ -566,6 +607,48 @@ inline Vectorized<double> Vectorized<double>::le(
   return (*this <= other) & Vectorized<double>(1.0);
 }
 
+#if defined(__clang__) && defined(__ARM_FEATURE_SVE)
+
+// Clang uses FMAD and FMLA interchangeably, depending on the result register
+
+template <>
+Vectorized<double> inline fmadd(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return sve_to_neon(svmad_f64_x(
+      svptrue_b64(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<double> inline fnmadd(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return sve_to_neon(svmsb_f64_x(
+      svptrue_b64(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<double> inline fmsub(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return sve_to_neon(svnmsb_f64_x(
+      svptrue_b64(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<double> inline fnmsub(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return sve_to_neon(svnmad_f64_x(
+      svptrue_b64(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+#else
+
 template <>
 Vectorized<double> inline fmadd(
     const Vectorized<double>& a,
@@ -597,6 +680,8 @@ Vectorized<double> inline fnmsub(
     const Vectorized<double>& c) {
   return vfmsq_f64(vnegq_f64(c), a, b);
 }
+
+#endif
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

@@ -44,7 +44,12 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    make_dupe_guard,
+)
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -75,7 +80,7 @@ from ..utils import (
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import can_guard_class_function_code, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -181,7 +186,10 @@ def guard_to_detect_forward_monkeypatching(
     # To keep the guard overhead down, we just guard on the `forward` being
     # not present in the mod __dict__. The common case of patching forward
     # method adds `forward` in the instance __dict__, whereas the unpatched
-    # `forward` sits in the type(mod).__dict__
+    # `forward` sits in the type(mod).__dict__. Patching the class's forward is
+    # caught only for UnspecializedNNModuleVariable, by its call_function's code
+    # guard on the type(mod).__dict__ source. The specialized NNModuleVariable
+    # path does not guard the class's forward (known gap).
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, guard on call-relevant structure.
@@ -397,6 +405,8 @@ class NNModuleVariable(VariableTracker):
         obj_source: Source,
     ) -> VariableTracker | None:
         """Check for a __getattr__ and handle it specially if it is implemented"""
+        from .builder import VariableBuilder
+
         if object_has_getattribute(base):
             getattribute_fn = inspect.getattr_static(type(base), "__getattribute__")
             new_source = (
@@ -411,7 +421,7 @@ class NNModuleVariable(VariableTracker):
                     # test_nn_module_tag_overridden_getattr_safe).
                     # Constructing directly records the source and leaves the
                     # guard to whoever consumes it.
-                    variables.UserFunctionVariable(
+                    VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
                     ),
@@ -461,7 +471,7 @@ class NNModuleVariable(VariableTracker):
         return variables.UserMethodVariable(
             # See the note in _custom_getattr_fallback above: off the builder
             # so the accessor guard is not installed eagerly.
-            variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 getattr_fn, source=AttrSource(source, "__func__")
             ),
             self,
@@ -471,6 +481,8 @@ class NNModuleVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -519,6 +531,9 @@ class NNModuleVariable(VariableTracker):
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
                 if result is not None:
+                    # __getattr__ only runs after the normal lookup misses, so a
+                    # later instance dict write would shadow what it returned.
+                    install_not_in_instance_dict_guard(self.source, name)
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise attribute error
                 raise_observed_exception(
@@ -526,6 +541,10 @@ class NNModuleVariable(VariableTracker):
                     tx,
                     args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
+
+        if object_member and name not in base_dict:
+            # A registered entry is only visible while the instance dict lacks it.
+            install_not_in_instance_dict_guard(self.source, name)
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
@@ -549,34 +568,36 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
-                return variables.UserFunctionVariable(
+                # A builder would eagerly resolve this source through the metaclass.
+                return VariableBuilder.create_internal_user_function(
                     subobj.fget,  # pyrefly: ignore[bad-argument-type]
                     source=source,
-                ).call_function(tx, [(self)], {})
+                ).call_function(tx, [self], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    variables.UserFunctionVariable(
+                    VariableBuilder.create_internal_user_function(
                         subobj.__func__,
                         source=source and AttrSource(source, "__func__"),
                     ),
-                    variables.UserDefinedObjectVariable(type(base)),
+                    VariableTracker.build(tx, type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.UserFunctionVariable(
+                # Preserve eager fallback for non-Python staticmethod callables.
+                return VariableBuilder.create_internal_user_function(
                     subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
                     func_source = source and AttrSource(source, "__func__")
-                    fn_vt = variables.WrapperUserFunctionVariable(
+                    fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                         subobj, "_torchdynamo_inline", source=func_source
                     )
-                    return variables.WrapperUserMethodVariable(
+                    return variables.WrapperUserMethodVariable.create(
                         fn_vt, self, source=source
                     )
                 return variables.UserMethodVariable(
-                    variables.UserFunctionVariable(
+                    VariableBuilder.create_internal_user_function(
                         subobj, source=source and AttrSource(source, "__func__")
                     ),
                     self,
@@ -606,6 +627,8 @@ class NNModuleVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(
@@ -706,7 +729,7 @@ class NNModuleVariable(VariableTracker):
                     if not istype(fn, types.FunctionType):
                         raise AssertionError(f"Expected FunctionType, got {type(fn)}")
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
+                    VariableBuilder.create_internal_user_function(fn, source=fn_source),
                     args,
                     kwargs,
                     allow_nested_graph_breaks=True,
@@ -719,6 +742,7 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
+        from .builder import VariableBuilder
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
@@ -751,7 +775,7 @@ class NNModuleVariable(VariableTracker):
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=src),
+                VariableBuilder.create_internal_user_function(fn, source=src),
                 [self, key],
                 {},
                 allow_nested_graph_breaks=True,
@@ -1136,11 +1160,13 @@ class NNModuleVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         module = tx.output.get_submodule(self.module_key)
         fn = getattr(module, name).__func__
         fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
         return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn, source=fn_source),
+            VariableBuilder.create_internal_user_function(fn, source=fn_source),
             [self] + list(args),
             kwargs,
         )
@@ -1368,6 +1394,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):  # type: ignore[arg-type]
@@ -1448,13 +1476,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
-                # Ideally we would have just used VariableTracker.build(tx, fn,
-                # source=source) but that introduces guard on the
-                # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we don't need this guard.
-                return variables.UserFunctionVariable(fn, source=source).call_function(
-                    tx, [self] + list(args), kwargs
-                )
+                # This call skips resolve_type_attr, so guard the class
+                # function's __code__ here the same way (forward, or a
+                # user-defined __call__).
+                if source is not None and can_guard_class_function_code(tx, fn):
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        fn, source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        fn, source=source
+                    )
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -1652,6 +1685,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
+            # noqa: RVT001
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().tp_getattro_impl(tx, name)
 
