@@ -2543,8 +2543,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 raise AssertionError(f"expected {self.device_type} device")
 
     @onlyAccelerator
-    # views nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
+    @skipIfCppFakeTensor("sets the Python fake_device property")
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
