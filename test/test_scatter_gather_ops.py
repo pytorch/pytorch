@@ -96,6 +96,40 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    # scatter allows index.size(d) <= self.size(d) for d != dim, but the
+    # expanded-index fast path is only valid when self and index share their
+    # trailing layout; wider-self inputs must fall back to the generic kernel.
+    # https://github.com/pytorch/pytorch/issues/203078
+    @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16, torch.float16])
+    def test_scatter_expanded_index_wider_self(self, dtype):
+        device = "cpu"
+
+        def helper(input_size, expanded_shape):
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
+            input2 = input.clone()
+
+            shape = [1] * len(input_size)
+            shape[0] = expanded_shape[0]
+            idx = torch.randint(0, input_size[0], shape)
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+            src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
+
+            out = input.scatter_add(0, idx, src)
+            out2 = input2.scatter_add(0, idx2, src)
+            self.assertEqual(out, out2)
+
+            for reduce in ["sum", "prod", "mean", "amax", "amin"]:
+                for include_self in [True, False]:
+                    out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
+                    out2 = input2.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
+                    self.assertEqual(out, out2)
+
+        # 2D: self (50, 17), index/src (100, 16)
+        helper([50, 17], [100, 16])
+        # 3D: self (50, 4, 16), index/src (100, 4, 8)
+        helper([50, 4, 16], [100, 4, 8])
+
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
     def test_gather_expanded_index(self, dtype):
         device = "cpu"

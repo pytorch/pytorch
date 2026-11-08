@@ -2064,8 +2064,11 @@ static bool can_use_expanded_index_path(
 
   // allow only different size on dim 0 for src and index
   // https://github.com/pytorch/pytorch/issues/99595
-  for (const auto dim : c10::irange(1, index.dim())) {
-    if (src.size(dim) != index.size(dim)) {
+  // self must match index on the other dims as well: the expanded-index
+  // kernels compute row offsets from index's trailing width, so a wider
+  // self would be read/written at wrong positions (#203078).
+  for (const auto d : c10::irange(1, index.dim())) {
+    if (src.size(d) != index.size(d) || self.size(d) != index.size(d)) {
       return false;
     }
   }
