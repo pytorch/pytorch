@@ -7249,6 +7249,31 @@ Done""",
                     RuntimeError, "input 0, the output is empty"
                 ):
                     gradcheck(lambda x: fn(x)[:0], (x,), fast_mode=True)
+                self.assertFalse(
+                    gradcheck(
+                        lambda x: fn(x)[:0],
+                        (x,),
+                        fast_mode=True,
+                        raise_exception=False,
+                    )
+                )
+                # A noisy function of a zero-element input has a zero analytical
+                # v^T J u but a nonzero numerical estimate (the backward-mode noise
+                # of https://github.com/pytorch/pytorch/issues/190436): fast mode
+                # must still pass it, including the (ur, ui) tuple branch for
+                # complex inputs.
+                for empty_x in (
+                    torch.ones(0, dtype=torch.double, requires_grad=True),
+                    torch.ones(0, dtype=torch.cdouble, requires_grad=True),
+                ):
+                    self.assertTrue(
+                        gradcheck(
+                            lambda x: x.sum() + 1e-3 * torch.randn((), dtype=x.dtype),
+                            (empty_x,),
+                            fast_mode=True,
+                            check_batched_grad=False,
+                        )
+                    )
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
             with self.assertRaisesRegex(

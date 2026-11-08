@@ -1395,6 +1395,23 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
+def _get_complex_prefix(
+    output_idx, input_idx, complex_indices, test_imag, is_forward_ad
+) -> str:
+    # Complex values are checked twice, once on the real and once on the imaginary
+    # part of the complex inputs (forward mode) or outputs (backward mode); the
+    # prefix records which half failed.
+    out_is_complex = (
+        (not is_forward_ad) and complex_indices and output_idx in complex_indices
+    )
+    inp_is_complex = is_forward_ad and complex_indices and input_idx in complex_indices
+    if not (out_is_complex or inp_is_complex):
+        return ""
+    part = "imaginary" if test_imag else "real"
+    element = "inputs" if is_forward_ad else "outputs"
+    return f"While considering the {part} part of complex {element} only, "
+
+
 def _get_notallclose_msg(
     analytical,
     numerical,
@@ -1404,16 +1421,8 @@ def _get_notallclose_msg(
     test_imag=False,
     is_forward_ad=False,
 ) -> str:
-    out_is_complex = (
-        (not is_forward_ad) and complex_indices and output_idx in complex_indices
-    )
-    inp_is_complex = is_forward_ad and complex_indices and input_idx in complex_indices
-    part = "imaginary" if test_imag else "real"
-    element = "inputs" if is_forward_ad else "outputs"
-    prefix = (
-        ""
-        if not (out_is_complex or inp_is_complex)
-        else f"While considering the {part} part of complex {element} only, "
+    prefix = _get_complex_prefix(
+        output_idx, input_idx, complex_indices, test_imag, is_forward_ad
     )
     mode = "computed with forward mode " if is_forward_ad else ""
     return (
@@ -1919,10 +1928,14 @@ def _check_analytical_numerical_equal(
                 # numerical estimate exactly 0, with no slow-mode jacobian to report; an
                 # empty u makes v^T J u trivially 0 and its estimate noise, as above.
                 if a.count_nonzero() != 0:
+                    prefix = _get_complex_prefix(
+                        j, i, complex_indices, test_imag, is_forward_ad
+                    )
                     mode = "computed with forward mode " if is_forward_ad else ""
                     kind = "input" if is_forward_ad else "output"
                     raise GradcheckError(
-                        f"Jacobian {mode}mismatch for output {j:d} with respect to "
+                        prefix
+                        + f"Jacobian {mode}mismatch for output {j:d} with respect to "
                         f"input {i:d}, the {kind} is empty, expected exactly zero,\n"
                         f"analytical:{a}\n"
                     )
