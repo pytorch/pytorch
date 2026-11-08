@@ -11143,6 +11143,49 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             compile_with_tags(CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_SAVE)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_dropout_in_checkpointed_body(self):
+        # Checkpoint tags dropout for recompute. The backward must still use
+        # the forward's mask, not draw a new one.
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        def region(c, w):
+            return torch.nn.functional.dropout(c @ w, 0.5).sin()
+
+        sac = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        cases = [(c, b) for c in (None, sac) for b in ("aot_eager", "inductor")]
+        for context_fn, backend in cases:
+            kwargs = {"context_fn": context_fn} if context_fn else {}
+
+            def body(c, w):
+                y = checkpoint(region, c, w, use_reentrant=False, **kwargs)
+                return y, y.clone()
+
+            with self.subTest(sac=context_fn is not None, backend=backend):
+                torch._dynamo.reset()
+                init = torch.randn(2, 4, requires_grad=True)
+                xs = torch.randn(3, 4, 4, requires_grad=True)
+                f = torch.compile(scan, backend=backend, fullgraph=True)
+                carry, ys = f(body, init, xs)
+                grads = torch.autograd.grad(carry.sum() + ys.sum(), (init, xs))
+
+                # Eager rerun with the masks read back from ys.
+                c, outs = init, []
+                for t in range(3):
+                    c = (c @ xs[t] * (ys[t] != 0) * 2).sin()
+                    outs.append(c)
+                out = c.sum() + torch.stack(outs).sum()
+                self.assertEqual(grads, torch.autograd.grad(out, (init, xs)))
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
