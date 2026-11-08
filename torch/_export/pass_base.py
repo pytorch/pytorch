@@ -493,7 +493,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     and fake_tensor_mode is not maybe_get_fake_mode(i)
                 ):
                     raise AssertionError("Multiple fake tensor mode detected.")
-                fake_tensor_mode = maybe_get_fake_mode(i)
+                fake_tensor_mode = torch._guards.require_python_fake_mode(
+                    maybe_get_fake_mode(i)
+                )
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
