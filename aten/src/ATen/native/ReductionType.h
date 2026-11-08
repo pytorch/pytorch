@@ -6,6 +6,22 @@ namespace at::native {
 
 enum class ReductionType {MAX, MEAN, MIN, SUM, PROD};
 
+inline const char* get_reduction_name(ReductionType reduction) {
+  switch (reduction) {
+    case ReductionType::MAX:
+      return "max";
+    case ReductionType::MEAN:
+      return "mean";
+    case ReductionType::MIN:
+      return "min";
+    case ReductionType::SUM:
+      return "sum";
+    case ReductionType::PROD:
+      return "prod";
+  }
+  TORCH_CHECK(false, "unsupported reduction");
+}
+
 inline ReductionType get_reduction_enum(const std::string_view& reduce) {
   if (reduce == "max" || reduce == "amax") {
     return ReductionType::MAX;

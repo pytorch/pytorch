@@ -37,17 +37,15 @@ kernel void segment_reduce_forward(
   const ulong data_base = outer * p.axis_size * p.inner + index % p.inner;
   const uint lane = Parallel ? tid % width : 0;
   const uint step = Parallel ? width : 1;
-  float value = Parallel ? Op::identity()
-                         : float(T(p.has_initial ? p.initial : Op::identity()));
+  float value = Parallel || !p.has_initial ? Op::identity() : p.initial;
   for (ulong j = start + lane; j < end; j += step) {
     value = Op::combine(value, float(data[data_base + j * p.inner]));
   }
   if (Parallel) {
-    threadgroup float partial[8];
+    threadgroup float partial[segment_reduce_partials];
     value = Op::threadgroup_reduce(partial, value, lane, width);
     if (p.has_initial) {
-      value = start == end ? float(T(p.initial))
-                           : Op::combine(float(T(p.initial)), value);
+      value = start == end ? p.initial : Op::combine(p.initial, value);
     }
   }
   if (lane == 0) {
@@ -59,8 +57,8 @@ kernel void segment_reduce_forward(
   }
 }
 
-#define REGISTER_SEGMENT_FORWARD(T, I, R, NAME, PARALLEL)                  \
-  template [[host_name("segment_" #NAME "_" #T "_" #I "_" #R)]]            \
+#define REGISTER_SEGMENT_FORWARD(T, I, R, REDUCE, NAME, PARALLEL)          \
+  template [[host_name("segment_" #NAME "_" #T "_" #I "_" #REDUCE)]]       \
   kernel void segment_reduce_forward<T, I, SegmentReduction::R, PARALLEL>( \
       constant T*,                                                         \
       device T*,                                                           \
@@ -71,16 +69,16 @@ kernel void segment_reduce_forward(
       uint,                                                                \
       uint)
 
-#define REGISTER_SEGMENT(T, I, R)                   \
-  REGISTER_SEGMENT_FORWARD(T, I, R, serial, false); \
-  REGISTER_SEGMENT_FORWARD(T, I, R, parallel, true)
+#define REGISTER_SEGMENT(T, I, R, REDUCE)                   \
+  REGISTER_SEGMENT_FORWARD(T, I, R, REDUCE, serial, false); \
+  REGISTER_SEGMENT_FORWARD(T, I, R, REDUCE, parallel, true)
 
 #define REGISTER_SEGMENT_REDUCTIONS(T, I) \
-  REGISTER_SEGMENT(T, I, Max);            \
-  REGISTER_SEGMENT(T, I, Mean);           \
-  REGISTER_SEGMENT(T, I, Min);            \
-  REGISTER_SEGMENT(T, I, Sum);            \
-  REGISTER_SEGMENT(T, I, Prod)
+  REGISTER_SEGMENT(T, I, Max, max);       \
+  REGISTER_SEGMENT(T, I, Mean, mean);     \
+  REGISTER_SEGMENT(T, I, Min, min);       \
+  REGISTER_SEGMENT(T, I, Sum, sum);       \
+  REGISTER_SEGMENT(T, I, Prod, prod)
 
 #define REGISTER_SEGMENT_INDEX(I)        \
   REGISTER_SEGMENT_REDUCTIONS(float, I); \

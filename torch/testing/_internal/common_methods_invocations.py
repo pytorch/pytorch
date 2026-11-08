@@ -23036,12 +23036,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         aten_name='segment_reduce',
         variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        backward_dtypesIfMPS=empty_types(),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_segment_reduce,
         skips=(
+            # TODO: remove when MPS segment_reduce backward is implemented.
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(
@@ -23057,12 +23058,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         aten_name='segment_reduce',
         variant_test_name='offsets',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        backward_dtypesIfMPS=empty_types(),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
         sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
         skips=(
+            # TODO: remove when MPS segment_reduce backward is implemented.
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(

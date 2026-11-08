@@ -149,25 +149,26 @@ template <
 struct SumReductionOp {
   using acc_t =
       ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
+  using Reduce = c10::metal::SumOp<acc_t>;
   static inline acc_t identity() {
-    return c10::metal::SumOp<acc_t>::identity();
+    return Reduce::identity();
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(load_val<MODE>(v));
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return c10::metal::SumOp<acc_t>::combine(a, b);
+    return Reduce::combine(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return c10::metal::simd_sum(v);
+    return Reduce::simd_reduce(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return c10::metal::threadgroup_sum(shared, v, tid, tptg);
+    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float param) {
     return static_cast<TO>(finalize_val<FINAL>(v, param));
@@ -177,25 +178,26 @@ struct SumReductionOp {
 template <typename TO>
 struct ProdReductionOp {
   using acc_t = opmath_t<TO>;
+  using Reduce = c10::metal::ProdOp<acc_t>;
   static inline acc_t identity() {
-    return cast_to<acc_t>(1);
+    return Reduce::identity();
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(v);
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return c10::metal::mul(a, b);
+    return Reduce::combine(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return c10::metal::simd_prod(v);
+    return Reduce::simd_reduce(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return c10::metal::threadgroup_prod(shared, v, tid, tptg);
+    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float) {
     return static_cast<TO>(v);

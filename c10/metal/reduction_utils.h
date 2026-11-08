@@ -440,6 +440,9 @@ struct SumOp {
   static inline T combine(T a, T b) {
     return a + b;
   }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_sum(val);
+  }
   static inline T threadgroup_reduce(
       threadgroup T* shared,
       T val,
@@ -451,11 +454,14 @@ struct SumOp {
 
 template <typename T>
 struct ProdOp {
-  static inline constexpr T identity() {
-    return T(1);
+  static inline T identity() {
+    return c10::metal::cast_to<T>(1);
   }
   static inline T combine(T a, T b) {
     return c10::metal::mul(a, b);
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_prod(val);
   }
   static inline T threadgroup_reduce(
       threadgroup T* shared,

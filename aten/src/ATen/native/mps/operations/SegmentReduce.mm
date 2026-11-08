@@ -29,29 +29,14 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/SegmentReduce_metallib.h>
 #endif
 
-const char* reduction_name(ReductionType reduction) {
-  switch (reduction) {
-    case ReductionType::MAX:
-      return "Max";
-    case ReductionType::MEAN:
-      return "Mean";
-    case ReductionType::MIN:
-      return "Min";
-    case ReductionType::SUM:
-      return "Sum";
-    case ReductionType::PROD:
-      return "Prod";
-  }
-  TORCH_CHECK(false, "segment_reduce(): unsupported reduction");
-}
-
 template <bool IsOffsets>
 Tensor segment_reduce_mps(ReductionType reduction,
                           const Tensor& data,
                           const Tensor& metadata,
                           int64_t axis,
                           const std::optional<Scalar>& initial) {
-  TORCH_CHECK(supportedFloatingType(data), "segment_reduce(): MPS supports float32, float16 and bfloat16 data");
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(data),
+                              "segment_reduce(): MPS supports float32, float16 and bfloat16 data");
   checkScalarTypes("segment_reduce", TensorArg(metadata, IsOffsets ? "offsets" : "lengths", 3), {kInt, kLong});
   Tensor offsets = metadata;
   if constexpr (!IsOffsets) {
@@ -66,6 +51,7 @@ Tensor segment_reduce_mps(ReductionType reduction,
                         0.0f,
                         initial.has_value()};
   if (initial.has_value()) {
+    // Checked conversion preserves CPU/CUDA scalar overflow errors before GPU dispatch.
     if (data.scalar_type() == kHalf) {
       p.initial = static_cast<float>(initial->to<Half>());
     } else if (data.scalar_type() == kBFloat16) {
@@ -84,12 +70,12 @@ Tensor segment_reduce_mps(ReductionType reduction,
     return output;
   }
   // Amortize threadgroup reduction overhead once contiguous segments span a SIMD group.
-  const bool parallel = p.inner == 1 && p.axis_size / p.segments >= 32;
+  const bool parallel = p.inner == 1 && p.axis_size / p.segments >= c10::metal::simdgroup_size;
   const auto name = fmt::format("segment_{}_{}_{}_{}",
                                 parallel ? "parallel" : "serial",
                                 scalarToMetalTypeString(data),
                                 scalarToMetalTypeString(offsets),
-                                reduction_name(reduction));
+                                get_reduction_name(reduction));
   auto* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -100,8 +86,8 @@ Tensor segment_reduce_mps(ReductionType reduction,
         const auto count = std::min<uint64_t>(output.numel() - base, std::numeric_limits<uint32_t>::max());
         mtl_setArgs(encoder, data, output, offsets, p, base);
         if (parallel) {
-          // Eight SIMD groups per segment, with one partial per SIMD group.
-          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1)
+                  threadsPerThreadgroup:MTLSizeMake(c10::metal::segment_reduce_threads, 1, 1)];
         } else {
           mtl_dispatch1DJob(encoder, pipeline, count);
         }

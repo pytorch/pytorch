@@ -483,6 +483,9 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
+            # TODO: remove these expected failures when MPS segment_reduce backward is implemented.
+            "_segment_reducelengths": None,
+            "_segment_reduceoffsets": None,
             # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.
             # TODO: drop this when MPS has 5-D bicubic.
             "nn.functional.grid_sample": [torch.float32],
@@ -527,9 +530,6 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
-            # Native segment_reduce backward is deferred to a follow-up.
-            "_segment_reducelengths": None,
-            "_segment_reduceoffsets": None,
             # topk index gather is flaky on fp16 - whether duplicates appear
             # in the seeded sample input depends on prior test order's RNG
             # draws, so we skip rather than xfail.

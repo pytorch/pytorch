@@ -16460,17 +16460,23 @@ class TestCommon(TestCase):
 
     @dtypes(torch.bfloat16)
     @parametrize("inner", [1, 2])
-    def test_segment_reduce_forward(self, device, dtype, inner):
+    @parametrize("reduce", ["sum", "mean", "min", "max", "prod"])
+    def test_segment_reduce_forward(self, device, dtype, inner, reduce):
         # inner=1 uses threadgroups; inner=2 uses the serial strided reduction.
-        data = torch.ones((2, 4098, inner), dtype=dtype, device=device)[:, ::2]
+        # Long segments exercise multiple iterations per thread and BF16 accumulation.
+        segment_length = 1024
+        axis_size = 1 + 2 * segment_length
+        # A noncontiguous input with a skipped prefix, two long segments and an empty segment.
+        data = torch.ones((2, 2 * axis_size, inner), dtype=dtype, device=device)[:, ::2]
+        # Distinguish the extrema/product from the identity and exercise a zero product.
         data[:, 2] = 2.
-        data[1, 1026] = 0.
-        offsets = torch.tensor([[1, 1025, 1025, 2049]] * 2, dtype=torch.int32, device=device)
+        data[1, segment_length + 2] = 0.
+        boundaries = [1, 1 + segment_length, 1 + segment_length, axis_size]
+        offsets = torch.tensor([boundaries] * 2, dtype=torch.int32, device=device)
         reference = data.cpu().float()
-        for reduce in ("sum", "mean", "min", "max", "prod"):
-            result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
-            expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
-            self.assertEqual(result, expected.to(dtype=dtype))
+        result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
+        expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
+        self.assertEqual(result, expected.to(dtype=dtype))
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
