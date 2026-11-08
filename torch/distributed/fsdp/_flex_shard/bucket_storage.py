@@ -16,6 +16,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
+from torch.distributed.fsdp._fully_shard._fsdp_api import CPUOffloadPolicy
 
 from .placement_contract import (
     get_global_layout,
@@ -29,6 +30,11 @@ from .utils import _get_single_placement, _set_param_on_module
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fully_shard._fsdp_api import (
+        MixedPrecisionPolicy,
+        OffloadPolicy,
+    )
+    from torch.distributed.tensor import Shard as DTensorShard
 
     from .bucket_runtime import BucketCommContext, BucketRuntime
     from .placement_contract import (
@@ -41,105 +47,14 @@ if TYPE_CHECKING:
 
 BucketParamFQNsByIndex = list[list[str]]
 
+# DTensor's Shard(dim) stands for the engine's Shard(dim)
 PlacementFn = Callable[
     [list[tuple[str, nn.Parameter]], "DeviceMesh"],
-    dict[str, tuple["Placement", ...]],
+    Mapping[str, tuple["Placement | DTensorShard", ...]],
 ]
 
 # Called with a bucket's ``(fqn, unsharded param)`` pairs.
 BucketHook = Callable[[list[tuple[str, nn.Parameter]]], None]
-
-
-@dataclass(frozen=True)
-class MixedPrecisionPolicy:
-    """Mixed precision policy for FlexShard buckets.
-
-    Args:
-        param_dtype: Dtype for forward compute. Placements should materialize
-            unsharded parameters in this dtype. If None, use storage dtype.
-        reduce_dtype: Dtype for autograd accumulation and gradient
-            reduction. Eager casts each full-parameter gradient to this dtype
-            before it accumulates on the unsharded parameter; torch.compile
-            casts the accumulated gradient in the reduce-scatter copy-in. If
-            None, each parameter accumulates in its ``grad_dtype`` (its
-            dtype unless explicitly set), independent of param_dtype, and
-            each bucket reduces in the promoted accumulation dtype of its
-            parameters trainable at wrap time, widened in each backward by
-            those trainable then. A parameter with ``grad_dtype`` explicitly
-            None accumulates in whatever dtype its gradients arrive in, which
-            can widen its bucket's reduce dtype. Every rank must produce the
-            same gradient dtypes, or ranks reduce in different dtypes and the
-            collective can hang. Where the parameter is unused, its zero
-            gradient has the forward dtype (param_dtype, else its dtype); set
-            reduce_dtype if its gradients can arrive in another dtype. This only sets the
-            accumulation and communication dtype: the reduced sharded
-            gradient is then cast to the parameter's ``grad_dtype`` when
-            stored in ``.grad``, and ``grad_dtype=None`` skips that cast.
-            flex_shard() keeps an explicit ``grad_dtype`` setting.
-        param_dtype_overrides: Sparse mapping from root-relative parameter FQN
-            to a parameter dtype override. Parameters absent from the mapping
-            use param_dtype. Override values must be param_dtype or the
-            parameter's original dtype. Every key must name a parameter assigned
-            to a bucket that uses this policy (or an equal one).
-    """
-
-    param_dtype: torch.dtype | None = None
-    reduce_dtype: torch.dtype | None = None
-    param_dtype_overrides: Mapping[str, torch.dtype] | None = field(
-        default=None,
-        kw_only=True,
-    )
-
-    def _resolve_param_dtype(
-        self,
-        fqn: str,
-        param: nn.Parameter,
-    ) -> torch.dtype | None:
-        if self.param_dtype_overrides is None or fqn not in self.param_dtype_overrides:
-            return self.param_dtype
-        param_dtype = self.param_dtype_overrides[fqn]
-        if not isinstance(param_dtype, torch.dtype):
-            raise ValueError(
-                "MixedPrecisionPolicy.param_dtype_overrides values must be "
-                f"torch.dtype, but {fqn!r} maps to {type(param_dtype)}."
-            )
-        if param_dtype not in (self.param_dtype, param.dtype):
-            raise ValueError(
-                "MixedPrecisionPolicy.param_dtype_overrides values must be "
-                "param_dtype or the parameter's original dtype, but "
-                f"{fqn!r} maps to {param_dtype} for a parameter with dtype "
-                f"{param.dtype} and param_dtype {self.param_dtype}."
-            )
-        return param_dtype
-
-    def _group_by_unsharded_dtype(
-        self,
-        named_params: list[tuple[str, nn.Parameter]],
-    ) -> list[tuple[str, nn.Parameter]]:
-        if not self.param_dtype_overrides:
-            return named_params
-        groups: dict[torch.dtype, list[tuple[str, nn.Parameter]]] = {}
-        for fqn, param in named_params:
-            dtype = self._resolve_param_dtype(fqn, param) or param.dtype
-            groups.setdefault(dtype, []).append((fqn, param))
-        return [named_param for group in groups.values() for named_param in group]
-
-
-@dataclass(frozen=True)
-class OffloadPolicy:
-    """CPU offload policy for FlexShard buckets.
-
-    This is a placeholder for future CPU offload support. The minimal eager
-    FlexShard path currently rejects non-None offload policies before storage
-    materialization.
-
-    Args:
-        pin_memory: Whether to pin CPU memory for faster H2D/D2H
-            transfers via DMA. Set to False if insufficient CPU memory.
-            Default True.
-    """
-
-    pin_memory: bool = True
 
 
 @dataclass(frozen=True)
@@ -179,15 +94,19 @@ class BucketSpec:
             may use different meshes (e.g. expert params on an expert-parallel
             mesh vs dense params on the data-parallel mesh), but all bucket
             meshes in one ``flex_shard()`` call must share a device type.
-        mp_policy: Mixed precision policy for this bucket. This currently
-            covers parameter and gradient-reduction dtypes only.
-            TODO: add module-boundary input/output casting separately from
-            BucketSpec. FSDP2 exposes cast_forward_inputs and output_dtype, but
-            those apply to a module's forward args/outputs, not to an individual
-            parameter bucket. Keeping them out of BucketSpec avoids ambiguous
-            behavior when multiple buckets share the same hooked module.
-        offload_policy: CPU offload policy for this bucket. TODO: implement
-            and test CPU offload before allowing this in flex_shard().
+        mp_policy: ``fully_shard``'s mixed precision policy, for this bucket's
+            parameters: their unsharded dtypes (``param_dtype``,
+            ``param_dtype_override_fn``) and the dtype their grads accumulate
+            and reduce in (``reduce_dtype``). Eager casts each full-parameter
+            grad to ``reduce_dtype`` before it accumulates on the unsharded
+            parameter; torch.compile casts the accumulated grad in the
+            reduce-scatter copy-in. An unused parameter's zero grad has the
+            forward dtype, so set ``reduce_dtype`` if its grads can arrive in
+            another dtype. ``cast_forward_inputs`` and ``output_dtype`` cast
+            the inputs and outputs of the modules that this bucket hooks; the
+            buckets that hook one module must cast alike.
+        offload_policy: ``fully_shard``'s offload policy. flex_shard() does not
+            support ``CPUOffloadPolicy`` yet.
         gradient_reduce_op: Gradient reduction semantics. ``dist.ReduceOp.AVG``
             preserves FlexShard's historical average-gradient behavior.
             ``dist.ReduceOp.SUM`` matches FSDP2's no-gradient-division mode,
@@ -376,6 +295,7 @@ class ShardedBucketStorage:
         defer_post_backward: bool = False,
         hook_module_fqns: list[str] | None = None,
         fsdp2_compatible: bool = False,
+        mp_policy: MixedPrecisionPolicy | None = None,
     ) -> None:
         if byte_storage.dtype != torch.uint8:
             raise ValueError(f"Expected uint8 storage, got {byte_storage.dtype}")
@@ -391,6 +311,8 @@ class ShardedBucketStorage:
         self._fsdp2_compatible = fsdp2_compatible
         # The modules a bucket of module patterns hooks (BucketSpec.patterns).
         self._hook_module_fqns = hook_module_fqns
+        # Its forward casts at the hooked modules (BucketSpec.mp_policy)
+        self._mp_policy = mp_policy
         # See set_requires_gradient_sync and set_reshard_after_backward.
         self._requires_gradient_sync = True
         self._reshard_after_backward = True
@@ -448,12 +370,13 @@ class ShardedBucketStorage:
         for fqn, other_fqns in (shared_names or {}).items():
             if fqn in param_infos:
                 param_infos[fqn].shared_fqns = tuple(other_fqns)
-        if bucket_spec.offload_policy is not None:
+        offload_policy = bucket_spec.offload_policy
+        if isinstance(offload_policy, CPUOffloadPolicy):
             byte_storage = torch.empty(
                 total_bytes,
                 dtype=torch.uint8,
                 device="cpu",
-                pin_memory=bucket_spec.offload_policy.pin_memory,
+                pin_memory=offload_policy.pin_memory,
             )
             expected_param_device = torch.device("cpu")
         else:
@@ -474,6 +397,7 @@ class ShardedBucketStorage:
             defer_post_backward=bucket_spec.defer_post_backward,
             hook_module_fqns=_hook_module_fqns(module, bucket_spec.patterns),
             fsdp2_compatible=bucket_spec.fsdp2_compatible,
+            mp_policy=bucket_spec.mp_policy,
         )
         bucket_storage.copy_params_from(named_params)
         bucket_storage.install_sharded_params(expected_param_device)
@@ -497,12 +421,25 @@ class ShardedBucketStorage:
         if not named_params:
             return {}, 0
 
+        param_dtypes: dict[str, torch.dtype | None] = dict.fromkeys(
+            fqn for fqn, _ in named_params
+        )
+        if mp_policy is not None:
+            # Resolved once per parameter, as fully_shard calls
+            # param_dtype_override_fn once per parameter
+            for fqn, param in named_params:
+                param_dtypes[fqn] = mp_policy._resolve_for_param(param).param_dtype
+        reduce_dtype = None if mp_policy is None else mp_policy.reduce_dtype
         # Mixed buckets alias one contiguous storage span per (placement, dtype)
         # subgroup, so equal unsharded dtypes must be adjacent in the layout.
         # ParamInfo order must match layout order: FP8 pack plans index infos
         # by position.
-        if mp_policy is not None:
-            named_params = mp_policy._group_by_unsharded_dtype(named_params)
+        if mp_policy is not None and mp_policy.param_dtype_override_fn is not None:
+            groups: dict[torch.dtype, list[tuple[str, nn.Parameter]]] = {}
+            for fqn, param in named_params:
+                dtype = param_dtypes[fqn] or param.dtype
+                groups.setdefault(dtype, []).append((fqn, param))
+            named_params = [named for group in groups.values() for named in group]
         first_fqn = named_params[0][0]
         placement = _get_single_placement(param_placements[first_fqn])
         bucket_layout = placement.bucket_storage_layout(
@@ -515,14 +452,16 @@ class ShardedBucketStorage:
                 named_params,
                 param_placements,
                 bucket_layout,
-                mp_policy,
+                param_dtypes,
+                reduce_dtype,
             )
         else:
             param_infos, total_bytes = cls._create_param_infos_from_local_layouts(
                 named_params,
                 mesh,
                 param_placements,
-                mp_policy,
+                param_dtypes,
+                reduce_dtype,
             )
 
         # One collective per bucket needs one dtype. Like FSDP2, promote over
@@ -549,7 +488,8 @@ class ShardedBucketStorage:
         named_params: list[tuple[str, nn.Parameter]],
         mesh: DeviceMesh,
         param_placements: dict[str, tuple[Placement, ...]],
-        mp_policy: MixedPrecisionPolicy | None,
+        param_dtypes: dict[str, torch.dtype | None],
+        reduce_dtype: torch.dtype | None,
     ) -> tuple[dict[str, ParamInfo], int]:
         rank = mesh.get_local_rank()
         world_size = mesh.size()
@@ -579,7 +519,8 @@ class ShardedBucketStorage:
                 local_numel=local_storage_layout.local_numel,
                 byte_offset=byte_offset,
                 storage_nbytes=local_storage_layout.storage_nbytes,
-                mp_policy=mp_policy,
+                param_dtype=param_dtypes[fqn],
+                reduce_dtype=reduce_dtype,
             )
 
         return param_infos, current_byte_offset
@@ -617,7 +558,8 @@ class ShardedBucketStorage:
         named_params: list[tuple[str, nn.Parameter]],
         param_placements: dict[str, tuple[Placement, ...]],
         bucket_layout: BucketStorageLayout,
-        mp_policy: MixedPrecisionPolicy | None,
+        param_dtypes: dict[str, torch.dtype | None],
+        reduce_dtype: torch.dtype | None,
     ) -> tuple[dict[str, ParamInfo], int]:
         expected_fqns = {fqn for fqn, _ in named_params}
         actual_fqns = set(bucket_layout.param_layouts)
@@ -676,7 +618,8 @@ class ShardedBucketStorage:
                 byte_offset=layout.byte_offset,
                 storage_nbytes=layout.storage_nbytes,
                 bucket_layout=layout.bucket_layout,
-                mp_policy=mp_policy,
+                param_dtype=param_dtypes[fqn],
+                reduce_dtype=reduce_dtype,
             )
 
         return param_infos, bucket_layout.total_bytes
@@ -692,7 +635,8 @@ class ShardedBucketStorage:
         byte_offset: int,
         storage_nbytes: int,
         bucket_layout: BucketLayout | None = None,
-        mp_policy: MixedPrecisionPolicy | None = None,
+        param_dtype: torch.dtype | None = None,
+        reduce_dtype: torch.dtype | None = None,
     ) -> ParamInfo:
         has_explicit_grad_dtype = param._has_grad_dtype_override
         return ParamInfo(
@@ -700,12 +644,8 @@ class ShardedBucketStorage:
             global_shape=param.shape,
             global_stride=tuple(make_contiguous_strides_for(param.shape)),
             dtype=param.dtype,
-            param_dtype=(
-                mp_policy._resolve_param_dtype(fqn, param)
-                if mp_policy is not None
-                else None
-            ),
-            reduce_dtype=mp_policy.reduce_dtype if mp_policy is not None else None,
+            param_dtype=param_dtype,
+            reduce_dtype=reduce_dtype,
             requires_grad=param.requires_grad,
             placements=placements,
             local_shape=local_shape,
@@ -759,7 +699,7 @@ class ShardedBucketStorage:
                 )
             set_sharding_info(
                 new_param,
-                placements=info.placements,
+                placements=tuple(p._api_placement() for p in info.placements),
                 global_shape=info.global_shape,
                 global_stride=info.global_stride,
                 mesh=self._mesh,

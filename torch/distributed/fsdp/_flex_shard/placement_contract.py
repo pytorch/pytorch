@@ -19,6 +19,7 @@ from torch.distributed.checkpoint.protocol import CheckpointableTensor
 if TYPE_CHECKING:
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.tensor import Placement as DTensorPlacement
 
     from .bucket_storage import ParamInfo
 
@@ -222,6 +223,10 @@ class Placement(ABC):
     #: its unsharded parameters at copy-out, so a prefetched bucket holds only
     #: its gather buffer until its hook takes it.
     refills_persistent_buffers_in_finish: ClassVar[bool] = False
+
+    def _api_placement(self) -> Placement | DTensorPlacement:
+        """The placement that flex_shard's API takes and reports for this one."""
+        return self
 
     def bucket_compatibility_key(self) -> object:
         """Return a key shared by placements that can use one bucket collective."""

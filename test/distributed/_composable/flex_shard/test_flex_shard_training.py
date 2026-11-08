@@ -19,12 +19,8 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointWrapper,
 )
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._flex_shard import (
-    bucket_runtime,
-    BucketSpec,
-    flex_shard,
-    MixedPrecisionPolicy,
-)
+from torch.distributed.fsdp import MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard import bucket_runtime, BucketSpec, flex_shard
 from torch.distributed.fsdp._flex_shard.checkpoint import get_flex_shard_global_layouts
 from torch.distributed.fsdp._flex_shard.placements.block_shard import (
     BlockShard,
@@ -1857,6 +1853,7 @@ class TestFlexShardTraining(FSDPTest):
             del mesh
             return {fqn: (mixed_placement.shard0,) for fqn, _ in named_params}
 
+        full_weight = model.full_weight
         flex_shard(
             model,
             buckets=[
@@ -1866,7 +1863,10 @@ class TestFlexShardTraining(FSDPTest):
                     mesh=mesh,
                     mp_policy=MixedPrecisionPolicy(
                         param_dtype=torch.bfloat16,
-                        param_dtype_overrides={"full_weight": torch.float32},
+                        cast_forward_inputs=False,
+                        param_dtype_override_fn=lambda param: (
+                            torch.float32 if param is full_weight else None
+                        ),
                     ),
                     reshard_after_forward=False,
                 )
