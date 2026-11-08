@@ -9590,24 +9590,32 @@ class TestNNDeviceType(NNTestCase):
     })
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
-    # (ih, iw), (oh, ow), (scales_h, scales_w); scales None => size-based scale.
-    @parametrize_test("input_hw, output_hw, scales", [
-        subtest(((6, 8), (24, 32), (None, None)), name="upsample"),          # atomics/addr=16
-        subtest(((7, 5), (13, 11), (None, None)), name="mild_upsample"),
-        subtest(((24, 32), (12, 16), (None, None)), name="downsample"),      # atomics/addr=1
-        subtest(((13, 11), (7, 5), (None, None)), name="mild_downsample"),
-        subtest(((9, 10), (9, 31), (None, None)), name="anisotropic"),
+    # (ih, iw), (oh, ow), (scales_h, scales_w), channels.
+    # scales None => size-based scale. Ratio is 4 * o_numel / i_numel.
+    @parametrize_test("input_hw, output_hw, scales, channels", [
+        subtest(((6, 8), (24, 32), (None, None), 16), name="upsample"),  # ratio 64
+        # 5.06: scatter on gfx950 (cut 6), gather on gfx942 (4) and gfx1250 (2).
+        subtest(((8, 8), (9, 9), (None, None), 16), name="near_cut"),
+        subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
+        subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
+        subtest(((9, 10), (9, 31), (None, None), 16), name="anisotropic"),  # ratio 12.4
         # scales are forward scale_factors; 2.0 matches the 8->16 size-based scale.
-        subtest(((8, 8), (16, 16), (2.0, 2.0)), name="explicit_scales"),
+        subtest(((8, 8), (16, 16), (2.0, 2.0), 16), name="explicit_scales"),  # ratio 16
+        # C=6 is not a multiple of the fp16/fp32 vector width, so the gather
+        # runs with vec_size 1.
+        subtest(((6, 8), (24, 32), (None, None), 6), name="odd_channels"),
+        # ratio 4096, above the bf16/fp32 cap: those dtypes scatter, fp16 gathers.
+        subtest(((2, 2), (64, 64), (None, None), 16), name="high_ratio"),
     ])
     def test_upsamplingBilinear2d_backward_many_channels(
-        self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales
+        self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales, channels
     ):
-        # C=16 so channels_last takes the NHWC backward kernels (threshold is
-        # channels >= 4). Spatial sizes straddle the ROCm gather/scatter
-        # heuristic (K=6 atomics/addr). NaN-prefilled grad_input checks every
-        # element is written (gather) or correctly zeroed then scattered.
-        n, c = 2, 16
+        # channels >= 4 so channels_last takes the NHWC backward. Cuts are per
+        # architecture (gfx950 6, gfx942 4, gfx1250 2). bf16, fp32 and double
+        # also fall back to scatter above the ratio cap; fp16 does not.
+        # NaN-prefilled grad_input checks every element is written (gather) or
+        # correctly zeroed then scattered.
+        n, c = 2, channels
         input_size = [n, c, *input_hw]
         output_size = list(output_hw)
         scales_h, scales_w = scales
