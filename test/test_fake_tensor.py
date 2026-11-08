@@ -2543,8 +2543,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 raise AssertionError(f"expected {self.device_type} device")
 
     @onlyAccelerator
-    # views nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
+    @skipIfCppFakeTensor("sets the Python fake_device property")
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -6364,35 +6363,31 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
 
     def test_fake_fallback_python_impl_predicates(self):
-        # fakeHasPythonFakeImpl selects every aten op an op_implementations
-        # predicate selects
+        # fakeHasPythonFakeImpl selects exactly the aten ops Python runs through
+        # a Python implementation: a Python CompositeImplicitAutograd kernel, or
+        # an op_implementations handler (aten ops are not prims or custom ops)
         from torch._subclasses.fake_impls import op_implementations_checks
 
+        cia = torch._C.DispatchKey.CompositeImplicitAutograd
         # alias's op_impl only keeps the dispatch keys, which the fallback
         # does too, so the C++ side runs its C++ Meta kernel
-        missing = set()
+        mismatched = set()
         for op in _aten_ops():
-            if not any(check(op) for check, _ in op_implementations_checks):
-                continue
+            checks = op_implementations_checks
+            python = cia in op.py_kernels or any(check(op) for check, _ in checks)
             names = (op._schema.name, op._schema.overload_name)
-            if not torch._C._fake_has_python_fake_impl(*names):
-                missing.add(op.name())
-        self.assertEqual(missing, {"aten::alias"})
+            if torch._C._fake_dispatch_has_python_impl(*names) != python:
+                mismatched.add(op.name())
+        self.assertEqual(mismatched, {"aten::alias"})
 
     def test_fake_fallback_static_shape_decomps(self):
         # StaticShapeDecomp records the ops FakeTensorMode decomposes under
         # static shapes
-        from torch._decomp import decomposition_table
-        from torch._meta_registrations import cpp_meta_supports_symint
-        from torch._subclasses.fake_tensor import torch_decomp_decompositions
+        from torch._meta_registrations import decomposes_under_static_shapes
 
         mismatched = set()
         for op in _aten_ops():
-            decomposes = (
-                op in decomposition_table
-                and torch_decomp_decompositions(op)
-                and not cpp_meta_supports_symint(op)
-            )
+            decomposes = decomposes_under_static_shapes(op)
             names = (op._schema.name, op._schema.overload_name)
             contains = torch._C._fake_dispatch_contains_static_shape_decomp(*names)
             if contains != decomposes:
