@@ -8,7 +8,7 @@ import unittest
 import torch
 from torch._dynamo.source import LocalSource
 from torch._environment import is_fbcode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -16,6 +16,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -98,11 +99,13 @@ class SparseActivationCSR(torch.nn.Module):
 
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
 class TestSparseProp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
     def assertEqualMeta(self, x, y):
-        self.assertIsInstance(x, FakeTensor)
+        self.assertTrue(is_fake_tensor(x))
         self.assertIsInstance(y, torch.Tensor)
 
         # Convert expected value to meta for comparison.
