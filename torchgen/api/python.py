@@ -294,6 +294,11 @@ class PythonArgument:
                 default = (
                     "(" + ", ".join(map(str.strip, self.default[1:-1].split(","))) + ")"
                 )
+                if self.default == "{}":
+                    # PythonArgument.argument_str() maps empty-list defaults to None.
+                    # See FunctionParameter::set_default_str() in
+                    # torch/csrc/utils/python_arg_parser.cpp.
+                    type_str = _append_optional_pyi(type_str)
             else:
                 default = {
                     "nullptr": "None",
