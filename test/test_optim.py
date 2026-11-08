@@ -1349,6 +1349,36 @@ class TestOptimRenewed(TestCase):
                         )
                 self.assertEqual(params, params_c)
 
+    @skipMPS  # MPS fused optimizer does not properly handle found_inf
+    @onlyAccelerator
+    def test_fused_sgd_skipped_first_step_zeros_momentum_buffer(self, device):
+        # GradScaler can skip the first fused SGD step via found_inf while still
+        # committing the freshly allocated momentum buffer to optimizer state.
+        # That buffer must be zeros; empty_like left uninitialized memory that
+        # poisoned the next real step (#201615).
+        dtype = torch.float32
+        p = Parameter(torch.ones(4, device=device, dtype=dtype))
+        opt = SGD([p], lr=1.0, momentum=0.9, fused=True)
+        p.grad = torch.ones_like(p)
+        opt.grad_scale = torch.ones((), dtype=dtype, device=device)
+        opt.found_inf = torch.ones((), dtype=dtype, device=device)
+        opt.step()
+        buf = opt.state[p]["momentum_buffer"]
+        self.assertEqual(buf, torch.zeros_like(buf))
+        p.grad = torch.ones_like(p)
+        opt.found_inf = torch.zeros((), dtype=dtype, device=device)
+        opt.step()
+        self.assertTrue(torch.isfinite(p).all())
+        # dampening=0: a zeros buffer after a skipped first step matches a run
+        # whose first step was never attempted.
+        p2 = Parameter(torch.ones(4, device=device, dtype=dtype))
+        opt2 = SGD([p2], lr=1.0, momentum=0.9, fused=True)
+        p2.grad = torch.ones_like(p2)
+        opt2.grad_scale = torch.ones((), dtype=dtype, device=device)
+        opt2.found_inf = torch.zeros((), dtype=dtype, device=device)
+        opt2.step()
+        self.assertEqual(p, p2)
+
     @parametrize("impl", ["fused", "capturable"])
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
