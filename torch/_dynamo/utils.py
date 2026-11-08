@@ -4836,8 +4836,13 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
     if (
-        type(tensor) is torch.nn.Parameter
-        or is_from_unspecialized_param_buffer_source(tensor_source)
+        (
+            type(tensor) is torch.nn.Parameter
+            or is_from_unspecialized_param_buffer_source(tensor_source)
+        )
+        and not getattr(tensor, "_dynamo_dynamic_indices", None)
+        and not getattr(tensor, "_dynamo_unbacked_indices", None)
+        and not getattr(tensor, "_dynamo_strict_unbacked_indices", None)
     ) and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
