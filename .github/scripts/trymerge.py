@@ -1040,6 +1040,7 @@ class GitHubPR:
         self.comments: list[GitHubComment] | None = None
         self._authors: list[tuple[str, str]] | None = None
         self._reviews: list[tuple[str, str]] | None = None
+        self._requested_reviewers: frozenset[str] | None = None
         self.merge_base: str | None = None
         self.submodules: list[str] | None = None
 
@@ -1181,8 +1182,40 @@ class GitHubPR:
         }
         return list(reviews.items())
 
+    def get_requested_reviewers(self) -> frozenset[str]:
+        """Lowercased logins with a pending review request on this PR.
+
+        GitHub keeps a reviewer's earlier APPROVED review when they are asked to
+        review again (https://github.com/pytorch/test-infra/issues/5543), so
+        `get_approved_by` uses this to stop counting those approvals. Read over REST,
+        not GH_GET_PR_INFO_QUERY, because that query's text is the cache key for
+        test_trymerge.py's recorded GraphQL fixtures. If GitHub cannot be asked, the
+        result is empty, which keeps the previous behavior instead of blocking merges.
+        """
+        if self._requested_reviewers is None:
+            try:
+                info = gh_fetch_json_dict(
+                    f"{GITHUB_API_URL}/repos/{self.org}/{self.project}"
+                    f"/pulls/{self.pr_num}/requested_reviewers"
+                )
+                self._requested_reviewers = frozenset(
+                    str(user["login"]).lower() for user in info.get("users", [])
+                )
+            except Exception as e:
+                print(
+                    f"Warning: failed to read requested reviewers for PR #{self.pr_num}: {e}"
+                )
+                self._requested_reviewers = frozenset()
+        return self._requested_reviewers
+
     def get_approved_by(self) -> list[str]:
-        return [login for (login, state) in self._get_reviews() if state == "APPROVED"]
+        approved = [
+            login for (login, state) in self._get_reviews() if state == "APPROVED"
+        ]
+        if not approved:
+            return approved
+        requested = self.get_requested_reviewers()
+        return [login for login in approved if login.lower() not in requested]
 
     def get_changes_requested_by(self) -> list[str]:
         return [
