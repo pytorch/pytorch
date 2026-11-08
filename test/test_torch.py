@@ -7203,6 +7203,12 @@ class TestTorchDeviceType(TestCase):
         guard = torch.full((16,), -1.0, device=device)
         check(x, [1], 1, [guard[:4].view(2, 1, 2)])
         self.assertEqual(guard[4:], torch.full((12,), -1.0, device=device))
+        # Channels-last dim-0 split into channels-last or contiguous outputs
+        x = torch.randn(4, 3, 2, 5, device=device).to(memory_format=torch.channels_last)
+        for memory_format in (torch.channels_last, torch.contiguous_format):
+            out = [torch.empty(2, 3, 2, 5, device=device, memory_format=memory_format) for _ in range(2)]
+            check(x, [2, 2], 0, out)
+        check(x, [4, 0], 0, [torch.empty_like(x), torch.empty(0, 3, 2, 5, device=device)])
 
     def test_copy_float16(self, device):
         # Check that fbgemm code no longer reads memory out of bounds, see
