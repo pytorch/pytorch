@@ -4110,6 +4110,21 @@ class TestTorchDeviceType(TestCase):
                                               [0, 0, 0, 0]], device=device, dtype=torch.float32))
 
     # FIXME: port to test_scatter_gather_ops.py
+    @onlyCPU
+    def test_scatter_add_expanded_index_wider_self(self, device):
+        # CPU expanded-index fast path used index width K as self's row stride.
+        # When self is wider than index (allowed by the size rule), row r was
+        # written at offset r*K instead of r*self.size(1) (#203078).
+        self_ = torch.zeros(3, 32, device=device)
+        index = torch.tensor([[0], [2]], device=device).expand(2, 16)
+        src = torch.ones(2, 16, device=device)
+        out = self_.scatter_add(0, index, src)
+        self.assertEqual(out.sum(1), torch.tensor([16.0, 0.0, 16.0], device=device))
+        self.assertEqual(out, self_.scatter_add(0, index.contiguous(), src))
+        out_reduce = self_.scatter_reduce(0, index, src, "sum")
+        self.assertEqual(out_reduce.sum(1), torch.tensor([16.0, 0.0, 16.0], device=device))
+
+    # FIXME: port to test_scatter_gather_ops.py
     def test_scatter_bool(self, device):
         x = torch.tensor([[True, True, True], [True, True, True]], device=device)
         res = torch.zeros(3, 3, dtype=torch.bool, device=device)

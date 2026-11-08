@@ -914,7 +914,11 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   const int64_t M = ensure_nonempty_size(self, 0);
   const int64_t nnz = ensure_nonempty_size(index, 0);
+  // K is the trailing width of index/src. self may be wider (index.size(d) <=
+  // self.size(d) for d != dim); use self's row stride so row r lands at r *
+  // self_stride, not r * K (#203078).
   const int64_t K = index.numel() / nnz;
+  const int64_t self_stride = self.numel() / M;
 
   const int64_t index_upper_bound = M;
 
@@ -1019,7 +1023,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       int64_t row = row_index[m];
       int64_t off_start = row_index_offset[m];
       int64_t off_end = row_index_offset[m + 1];
-      scalar_t* self_ptr = self_data + row * K;
+      scalar_t* self_ptr = self_data + row * self_stride;
       if constexpr (need_acc) {
         buffer_ptr = buffer_data + tid * K;
       } else {
