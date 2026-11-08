@@ -9,6 +9,7 @@ the kernel object: how to launch it, how to find its write set, and how to captu
 call to it (the HOPifier).
 """
 
+import collections
 import copy
 import dataclasses
 import enum
@@ -68,6 +69,19 @@ def _has_slot_state(value: object) -> bool:
     return False
 
 
+def _has_builtin_state(cls: type) -> bool:
+    """Whether ``cls`` derives from a built-in type other than object and
+    types.SimpleNamespace that has a __new__ of its own (set, bytearray, deque,
+    array.array, numpy.ndarray, random.Random, BaseException, ...): its instances keep
+    state outside __dict__, such as their items, an RNG's state or an exception's
+    args."""
+    return any(
+        c not in (object, types.SimpleNamespace)
+        and isinstance(c.__dict__.get("__new__"), types.BuiltinMethodType)
+        for c in cls.__mro__
+    )
+
+
 def _float_component_keys(value: Any) -> tuple[object, ...] | None:
     """For a complex value (Python or numpy) or a numpy floating scalar that is not a
     Python float (np.float32, np.longdouble, ...), the key of each float component
@@ -114,19 +128,21 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     (attributes set ad hoc or in __post_init__), or the __dict__ of a plain object
     (one with no __slots__ attributes that is not callable or a module, of a class
     that does not hash by value), such as a mutable config object. None for any other
-    value, the DSL's own values included.
+    value, the DSL's own values included, and for an object, a dataclass instance
+    too, whose class has a built-in base keeping state outside __dict__ (see
+    _has_builtin_state).
 
     Limitation: an object with state in __slots__ attributes that are not dataclass
-    fields, or a callable object other than a dataclass instance (a functor), is
-    keyed as itself, by identity unless its class defines equality and hashing (a
-    dataclass's compares its fields alone), and refused if it is unhashable (as a
-    dataclass with eq=True that is not frozen is): a mutation of it leaves its key
-    as it was, and a new object with the same contents gets a key of its own. Such an
-    object also stays in memory, with anything it holds, a tensor included
-    (constant_key does not look inside it): a side-table entry holds it for the life
-    of the process (see KernelSideTable)."""
+    fields or in a built-in base (see _has_builtin_state), or a callable object other
+    than a dataclass instance (a functor), is keyed as itself, by identity unless its
+    class defines equality and hashing (a dataclass's compares its fields alone), and
+    refused if it is unhashable (as a dataclass with eq=True that is not frozen is): a
+    mutation of it leaves its key as it was, and a new object with the same contents
+    gets a key of its own. Such an object also stays in memory, with anything it holds,
+    a tensor included (constant_key does not look inside it): a side-table entry holds
+    it for the life of the process (see KernelSideTable)."""
     cls = type(value)
-    if rules.is_dsl_value(value) or _has_slot_state(value):
+    if rules.is_dsl_value(value) or _has_slot_state(value) or _has_builtin_state(cls):
         return None
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         state = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
@@ -134,10 +150,8 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
             (k, v) for k, v in getattr(value, "__dict__", {}).items() if k not in state
         )
         return state
-    # TODO(zoranzhao): key a list, tuple or dict subclass by all its state, not by its
-    # items alone (its attributes, a defaultdict's default_factory), and refuse a set,
-    # bytearray, deque, array.array or numpy.ndarray subclass, now keyed by its
-    # __dict__ alone (not its contents): either can get another value's constant.
+    # TODO(zoranzhao): key a list, tuple or dict subclass by its attributes too, not by
+    # its items alone, so that it cannot get another value's constant.
     if (
         (cls.__hash__ is None or cls.__hash__ is object.__hash__)
         and hasattr(value, "__dict__")
@@ -155,8 +169,9 @@ def constant_key(value: object, rules: ConstantRules) -> object:
     same), numpy floats and complex values by type and the hex() of each float
     component (see _float_component_keys), a DSL scalar by its type and Python value
     (see ConstantRules), other values by their own equality. Any other unhashable
-    value, and a tensor, as the value or anywhere inside it, are refused with a
-    TypeError, and a value that contains itself with a ValueError."""
+    value, a tensor, and a defaultdict with a default_factory (which the key would
+    leave out), as the value or anywhere inside it, are refused with a TypeError,
+    and a value that contains itself with a ValueError."""
     return _ContentWalk(rules).key(value)
 
 
@@ -224,6 +239,13 @@ class _ContentWalk:
                 "a constant kernel argument holds a tensor"
                 + (f" at {where}" if where else "")
                 + ": pass each tensor as its own argument"
+            )
+        if isinstance(value, collections.defaultdict) and (
+            value.default_factory is not None
+        ):
+            raise TypeError(
+                f"a constant kernel argument of type {type(value).__name__} has a "
+                "default_factory, which its key would leave out: pass a dict"
             )
         if isinstance(value, (tuple, list)):
             items = self.visit(value, enumerate(value), "[{!r}]", self.key)
