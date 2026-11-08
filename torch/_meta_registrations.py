@@ -9577,7 +9577,7 @@ def cpp_meta_supports_symint(op: OpOverload) -> bool:
 def _register_static_shape_decomps() -> None:
     # Records in the C++ fake dispatch tables the ops FakeTensorMode decomposes
     # under static shapes (the meta_table and sparse checks are made at
-    # dispatch), which the C++ fake fallback is to reject. The torch._decomp
+    # dispatch), which the C++ fake fallback rejects. The torch._decomp
     # decompositions are all registered by now.
     from torch._decomp import decomposition_table
     from torch._subclasses.fake_tensor import torch_decomp_decompositions

@@ -5826,9 +5826,10 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
-        # allocate do not dispatch to the installed mode. With no Fake kernel
-        # registered yet, they would fail; once the fake fallback is, it would
-        # make meta fakes of them, which this mode's allow_meta rejects.
+        # allocate do not dispatch to the installed mode. If they did, the fake
+        # fallback would reject them, as they pass a device; and once it takes
+        # those, their fakes would be meta fakes, which this mode's allow_meta
+        # rejects.
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode = self._make_mode()
         layouts = (torch.sparse_coo, torch.sparse_csr)
@@ -6398,6 +6399,140 @@ class TestCppFakeTensorModeBindings(TestCase):
             if contains != decomposes:
                 mismatched.add(op.name())
         self.assertEqual(mismatched, set())
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback(self):
+        from torch._subclasses.fake_tensor import (
+            allow_non_fake_inputs_temporarily,
+            CppFakeTensorMode,
+        )
+
+        self.addCleanup(self._restore_fake_mode_state)
+        mode = CppFakeTensorMode()
+        real = torch.randn(2, 3)
+        x = mode.from_tensor(real)
+
+        def check(out, shape, device=real.device):
+            self.assertIs(torch._C._maybe_get_fake_mode(out), mode)
+            self.assertEqual(out.device, device)
+            self.assertEqual(out.shape, shape)
+
+        # An op on fakes runs their Meta kernel, under the mode or, as Python's
+        # FakeTensor dispatch enters the fakes' mode, outside it
+        with mode:
+            check(x + x, (2, 3))
+        check(x.sum(0), (3,))
+        check(x * 2, (2, 3))
+        check(x.t(), (3, 2))
+        # Outputs are on the inputs' fake device, also for a view that inherits
+        # only the Fake key from its input
+        cuda = torch.device("cuda")
+        meta = torch.empty(2, 3, device="meta", dtype=torch.complex64)
+        on_cuda = torch._C._from_meta_and_device(meta, cuda, mode)
+        check(on_cuda + on_cuda, (2, 3), on_cuda.device)
+        check(torch.view_as_real(on_cuda), (2, 3, 2), on_cuda.device)
+        # isinf's Meta kernel views such a view (it selects from view_as_real)
+        isinf = torch.isinf(on_cuda)
+        check(isinf, (2, 3), on_cuda.device)
+        self.assertEqual(isinf.dtype, torch.bool)
+        # In-place and out= ops return their input. Called boxed below
+        # ADInplaceOrView, whose unboxed kernels would return their own
+        # argument, so that what the fallback leaves on the stack is returned.
+        out = mode.from_tensor(torch.empty(2, 3))
+        with torch._C._AutoDispatchBelowADInplaceOrView():
+            self.assertIs(torch.ops.aten.add_.Tensor(x, 1), x)
+            self.assertIs(torch.ops.aten.add.out(x, x, out=out), out)
+        # As in Python, the outputs of alias and detach keep the recorded
+        # dispatch keys, and those of other views do not
+        keys = torch._C._dispatch_keys(real)
+        torch._C._set_fake_dispatch_keys(x, keys)
+        self.assertEqual(maybe_get_fake_dispatch_keys(torch.ops.aten.alias(x)), keys)
+        self.assertEqual(maybe_get_fake_dispatch_keys(x.detach()), keys)
+        transposed = x.t()
+        check(transposed, (3, 2))
+        self.assertIsNone(maybe_get_fake_dispatch_keys(transposed))
+        # nor those of a new output that is a shallow copy of an input, which
+        # inherits the input's recorded keys
+        inherited = []
+
+        def detached_meta(t):
+            out = t.detach()
+            inherited.append(maybe_get_fake_dispatch_keys(out))
+            return out
+
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("detached(Tensor x) -> Tensor")
+            lib.impl("detached", detached_meta, "Meta")
+            detached = torch.ops._test_fake_fallback.detached(x)
+        self.assertEqual(inherited, [keys])
+        check(detached, (2, 3))
+        self.assertIsNone(maybe_get_fake_dispatch_keys(detached))
+
+        meta = torch.eye(2).to_sparse().to("meta")
+        sparse = torch._C._from_meta_and_device(meta, real.device, mode)
+        # Python runs silu's Python Meta registration rather than its
+        # decomposition, as the fallback does
+        check(torch.ops.aten.silu(x), (2, 3))
+        other = CppFakeTensorMode().from_tensor(real)
+        constant = mode.fake_tensor_converter.from_real_tensor(
+            mode, torch.ones(2, 3), make_constant=True
+        )
+        with_real = mode.from_tensor(torch.randn(2, 3))
+        torch._C._set_real_tensor(with_real, real)
+        no_mode = torch.empty(2, 3, device="meta")
+        torch._C._set_fake_device(no_mode, real.device)
+
+        def under_python_dispatcher():
+            with enable_python_dispatcher():
+                return x + x
+
+        def non_fake_input():
+            with allow_non_fake_inputs_temporarily(mode):
+                return x + real
+
+        unsupported = {
+            # Even with allow_non_fake_inputs
+            "non-fake tensor inputs": non_fake_input,
+            # Under mode, the active mode is used rather than the inputs'
+            "fake tensors of another mode": lambda: other + other,
+            "fake tensors without a mode": lambda: x + no_mode,
+            "propagate_real_tensors": lambda: with_real + with_real,
+            "constant inputs": lambda: x + constant,
+            "device arguments": lambda: torch.ops.aten._to_copy(x, device="cpu"),
+            "ops with a Python fake implementation": lambda: x.view(6),
+            "CompositeImplicitAutograd ops below autograd": lambda: x.reshape(6),
+            "the Python dispatcher": under_python_dispatcher,
+            "sparse inputs": lambda: sparse + sparse,
+            # Its decomposition checks the device, which reads meta here
+            "ops Python decomposes": lambda: torch.ops.aten.log_sigmoid_forward(x),
+        }
+        for what, fn in unsupported.items():
+            msg = re.escape(f"fallback does not support {what} yet")
+            with self.subTest(what=what):
+                with self.assertRaisesRegex(NotImplementedError, msg), mode:
+                    # A CompositeImplicitAutograd op only reaches the fallback
+                    # below autograd
+                    with torch.inference_mode():
+                        fn()
+
+        # Outside a mode, fakes without one have no mode to run under
+        msg = "fallback does not support fake tensors without a mode yet"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            no_mode + no_mode
+
+        # Python decomposes most ops for symbolic sizes
+        symbolic_mode = CppFakeTensorMode(shape_env=ShapeEnv())
+        symbolic = symbolic_mode.from_tensor(real)
+        self.assertIsInstance(symbolic.shape[0], torch.SymInt)
+        msg = "fallback does not support symbolic shapes yet"
+        with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
+            symbolic + symbolic
+        # including a symbolic scalar argument with static inputs
+        static = symbolic_mode.from_tensor(torch.randn(2, 3), static_shapes=True)
+        self.assertEqual(static.shape, (2, 3))
+        self.assertFalse(static._has_symbolic_sizes_strides)
+        with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
+            static.expand(symbolic.shape[0], 3)
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
