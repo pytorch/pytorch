@@ -22,7 +22,6 @@ from ._all_gather_layout import (
     AllGatherLayout,
     AllGatherParamMetadata,
     DEFAULT_ALL_GATHER_LAYOUT,
-    DefaultAllGatherLayout,
 )
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import _to_dtype_if_needed
@@ -392,21 +391,18 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
-        if isinstance(layout, DefaultAllGatherLayout):
-            # It always packs with its copy_in into rank-major output
-            copy_in, call_layout, output_metadata = layout.copy_in, layout, None
-        else:  # copies, since copy_in and the default copy-out read these lists
-            copy_in, call_layout, output_metadata = layout.prepare(
-                AllGatherInputMetadata(
-                    input_split_sizes=list(inp_split_sizes),
-                    input_outer_sizes=list(outer_sizes),
-                    input_numel=all_gather_input_numel,
-                    world_size=world_size,
-                    dtype=dtype,
-                    device=device,
-                )
+        # Copies, since copy_in and the default copy-out read these lists
+        copy_in, call_layout, output_metadata = layout.prepare(
+            AllGatherInputMetadata(
+                input_split_sizes=list(inp_split_sizes),
+                input_outer_sizes=list(outer_sizes),
+                input_numel=all_gather_input_numel,
+                world_size=world_size,
+                dtype=dtype,
+                device=device,
             )
-        if not isinstance(call_layout, DefaultAllGatherLayout):
+        )
+        if output_metadata is not None:  # the layout finalizes the output
             _check_custom_layout_outputs(fsdp_params, world_size)
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
@@ -656,7 +652,7 @@ def foreach_all_gather_copy_out(
     all_gather_output = all_gather_result.all_gather_output
     if persistent_buffers is not None:
         persistent_buffers.alloc()
-    if isinstance(layout, DefaultAllGatherLayout):
+    if all_gather_result.output_metadata is None:
         # Rank-major output, from the default layout or a custom layout's fallback
         plan = _prepare_default_all_gather_outputs(
             fsdp_params, all_gather_result, world_size
