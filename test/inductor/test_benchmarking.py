@@ -726,6 +726,75 @@ class TestBenchmarker(TestCase):
         self.assertEqual(cuda_graph_calls, 1)
         self.assertEqual(callable_calls, [])
 
+    @parametrize(
+        "device_type, properties, cached_size, expected",
+        (
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": 4096},
+                None,
+                5120,
+            ),
+            ("cuda", {"L2_cache_size": 1024}, None, 1024),
+            ("xpu", {"last_level_cache_size": 4096}, None, 4096),
+            ("cuda", {"L2_cache_size": 1024, "last_level_cache_size": 0}, None, 1024),
+            ("cuda", {}, None, 256 * 1024 * 1024),
+            ("cuda", {"L2_cache_size": 1024, "last_level_cache_size": 4096}, 512, 512),
+            (
+                "cuda",
+                {"L2_cache_size": 8388608, "last_level_cache_size": 67108864},
+                None,
+                75497472,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 4096, "last_level_cache_size": 1024},
+                None,
+                4096,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": 1024},
+                None,
+                1024,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": None},
+                None,
+                1024,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 0, "last_level_cache_size": 0},
+                None,
+                256 * 1024 * 1024,
+            ),
+        ),
+    )
+    def test_get_device_cache_size(
+        self, device_type, properties, cached_size, expected
+    ):
+        benchmarker = InductorBenchmarker()
+        if cached_size is not None:
+            benchmarker.__dict__["L2_cache_size"] = cached_size
+        device_interface = unittest.mock.Mock()
+        device_interface.current_device.return_value = 0
+        device_interface.get_device_properties.return_value = types.SimpleNamespace(
+            **properties
+        )
+        with patch(
+            "torch._inductor.runtime.benchmarking.get_interface_for_device",
+            return_value=device_interface,
+        ) as get_interface:
+            self.assertEqual(benchmarker.get_device_cache_size(device_type), expected)
+
+        if cached_size is not None:
+            get_interface.assert_not_called()
+        else:
+            get_interface.assert_called_once_with(device_type)
+            device_interface.get_device_properties.assert_called_once_with(0)
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",

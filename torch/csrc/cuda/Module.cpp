@@ -22,6 +22,7 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/detail/LastLevelCache.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/core/AllocatorConfig.h>
@@ -1256,6 +1257,18 @@ static void registerCudaDeviceProperties(PyObject* module) {
       // compute partition; the ROCm 7.0 header documents it as the device's
       // XCC count. None on CUDA builds and on ROCm before 7.0.
       .def_property_readonly("xcc_count", &deviceXccCount)
+      .def_property_readonly(
+          "last_level_cache_size",
+          [](const cudaDeviceProp& prop) -> int64_t {
+#if defined(USE_ROCM)
+            const auto size =
+                at::cuda::detail::getLastLevelCacheSize(prop.uuid.bytes);
+            if (size > 0) {
+              return size;
+            }
+#endif
+            return prop.l2CacheSize;
+          })
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
 #if USE_ROCM

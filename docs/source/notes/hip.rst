@@ -388,3 +388,24 @@ your model actually uses::
         q2, k2, v2 = (x.transpose(1, 2).contiguous() for x in (q, k, v))
         out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
         return out.transpose(1, 2)
+
+.. _hip-last-level-cache:
+
+Last-level cache (Infinity Cache / MALL)
+----------------------------------------
+
+Some AMD GPUs have a memory-side last-level cache, called Infinity Cache or
+MALL, beyond L2. For example, Radeon AI PRO R9700 reports 8 MiB of L2 and
+64 MiB of MALL.
+
+:func:`torch.cuda.get_device_properties` exposes ``last_level_cache_size`` in
+bytes. On ROCm, this uses the outermost GPU cache beyond L2 reported by HSA.
+If that value is zero or unavailable, it falls back to ``L2_cache_size``.
+On CUDA it returns ``L2_cache_size``. ``L2_cache_size`` retains its existing
+meaning on both backends.
+
+This is a sizing hint, not a cache reservation or an eviction guarantee.
+A value equal to L2 does not distinguish an absent cache from an unavailable
+query. When this value exceeds ``L2_cache_size``, Inductor sizes benchmark
+cache-flush buffers and CUDA-graph input pools for both levels; otherwise it
+uses the single reported size.
