@@ -312,7 +312,10 @@ static inline const char* index_kernel_suffix(bool use_32bit_index) {
 static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
+  TORCH_CHECK(out_.scalar_type() == kLong,
+              max_elements ? "nonzero_static" : "nonzero",
+              ": Expected out tensor to have scalar type Long but got scalar type ",
+              out_.scalar_type());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
               out_.device(),
@@ -336,7 +339,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // The block-scan running count is bounded by numel, so it fits uint32 (and can
   // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
   // genuinely >2^32-element tensors need the 64-bit scan.
-  const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
+  const bool count_fits_u32 = std::in_range<uint32_t>(numel);
   auto pso_step2 =
       lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
@@ -860,14 +863,17 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
-  // Atomic prod/mean are non-associative for floating-point; alert unless we're
-  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
-  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
-  // actually produce non-deterministic output on MPS.
-  const auto dtype = self.scalar_type();
-  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
-      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
-    at::globalContext().alertNotDeterministic("index_reduce_mps");
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
+      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
+  if (serial && (self.scalar_type() != kFloat || index.scalar_type() != kLong)) {
+    result.copy_(self.to(kFloat).index_reduce(dim, index.to(kLong), source.to(kFloat), reduce, include_self));
+    return;
   }
 
   if (!result.is_same(self)) {
@@ -900,12 +906,18 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   MPSStream* stream = getCurrentMPSStream();
 
   auto num_threads = source.numel();
+  if (num_threads > 0 && serial) {
+    num_threads /= source.size(dim);
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format("index_reduce_{}_{}_{}{}",
+                                                                         reduce,
+                                                                         mps::scalarToMetalTypeString(result),
+                                                                         mps::scalarToMetalTypeString(index),
+                                                                         serial ? "_serial" : ""));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
@@ -938,7 +950,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
-  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(self.numel()),
               "masked_fill not supported for tensors of more than 2**32 elements");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
@@ -990,12 +1002,13 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
               " and ",
               source.scalar_type());
 
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_scatter_ only supports boolean masks, but got mask with dtype ",
+              mask.scalar_type());
+
   if (self.numel() == 0) {
     return self;
   }
-
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_scatter: expected BoolTensor or ByteTensor for mask");
 
   bool was_scalar = self.dim() == 0;
 

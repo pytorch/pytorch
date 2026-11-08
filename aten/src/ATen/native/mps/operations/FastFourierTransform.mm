@@ -183,6 +183,14 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   TORCH_CHECK(self.is_complex(), "Input must be complex");
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
+  // All public callers resize the input to last_dim_size / 2 + 1; any other size aborts in HermiteanToRealFFT
+  TORCH_INTERNAL_ASSERT(self.size(dim.back()) == last_dim_size / 2 + 1,
+                        "_fft_c2r: expected ",
+                        last_dim_size / 2 + 1,
+                        " elements in dim ",
+                        dim.back(),
+                        ", but got ",
+                        self.size(dim.back()));
   const auto in_sizes = self.sym_sizes();
   SymDimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;

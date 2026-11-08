@@ -65,7 +65,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "resnet152",
                 "resnet18",
                 "resnet50",
-                "stable_diffusion_unet",
                 "torchrec_dlrm",
                 "shufflenet_v2_x1_0",
                 "vgg16",
