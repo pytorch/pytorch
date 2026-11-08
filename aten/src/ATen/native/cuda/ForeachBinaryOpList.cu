@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
@@ -167,13 +168,19 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
 
 namespace {
 
-template <typename T, typename src_t>
+template <
+    typename T,
+    typename src_t,
+    int depth,
+    int r_args_depth,
+    int res_arg_index>
 struct BinaryOpListAlphaMixedFunctor {
+  static_assert(depth == 2 && r_args_depth == 2 && res_arg_index == 0);
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int64_t chunk_size,
-      TensorListMetadata<2>& tl,
+      TensorListMetadata<depth>& tl,
       Op op,
       opmath_t alpha) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -234,18 +241,30 @@ inline bool is_mixed_dtype_fused_type(ScalarType t) {
 
 // In-place add_/sub_ where each list has one dtype but the lists differ, e.g.
 // fp32 params updated with bf16 buffers. Every float/half/bfloat16 pair
-// computes in float, the same as the per-tensor slow path.
+// computes in float, the same as the per-tensor slow path. Bool alpha and
+// partially overlapping pairs fall back so the slow path raises its errors.
 bool can_use_mixed_dtype_fast_route(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha) {
-  return is_mixed_dtype_fused_type(tensors1[0].scalar_type()) &&
-      is_mixed_dtype_fused_type(tensors2[0].scalar_type()) &&
-      check_fast_path_restrictions(
-             {tensors1, tensors2},
-             alpha,
-             /* does_op_promote_integer_inputs_to_float */ false,
-             /* skip_cross_list_dtype_check */ true);
+  const auto self_dtype = tensors1[0].scalar_type();
+  const auto other_dtype = tensors2[0].scalar_type();
+  if (self_dtype == other_dtype || !is_mixed_dtype_fused_type(self_dtype) ||
+      !is_mixed_dtype_fused_type(other_dtype) || alpha.isBoolean() ||
+      !check_fast_path_restrictions(
+          {tensors1, tensors2},
+          alpha,
+          /* does_op_promote_integer_inputs_to_float */ false,
+          /* skip_cross_list_dtype_check */ true)) {
+    return false;
+  }
+  for (const auto i : c10::irange(tensors1.size())) {
+    const auto overlap = at::get_overlap_status(tensors1[i], tensors2[i]);
+    if (overlap != MemOverlapStatus::No && overlap != MemOverlapStatus::Full) {
+      return false;
+    }
+  }
+  return true;
 }
 
 template <template <class> class Op>
@@ -267,9 +286,17 @@ void foreach_tensor_list_op_mixed_dtype_(
               if constexpr (!std::is_same_v<self_t, scalar_t>) {
                 multi_tensor_apply<2>(
                     tensor_lists,
-                    BinaryOpListAlphaMixedFunctor<self_t, scalar_t>(),
+                    BinaryOpListAlphaMixedFunctor<
+                        self_t,
+                        scalar_t,
+                        /* depth */ 2,
+                        /* r_args_depth */ 2,
+                        /* res_arg_index */ 0>(),
                     Op<opmath_t>(),
                     alpha.to<opmath_t>());
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false, "mixed-dtype foreach path got matching dtypes");
               }
             }),
             kFloat,
