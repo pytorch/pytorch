@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -40,7 +41,11 @@
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors);
-//  - sparse inputs;
+//  - outputs a sparse input holds (such as _values'), which Python returns as
+//    the same fake on each call;
+//  - sparse inputs while sparse invariant checks are enabled, which read index
+//    data meta tensors lack. Python turns the process-wide setting off around
+//    the op, which races with other threads;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
 //    backend fallback does for an op without one), which Python then runs
 //    through maybe_run_unsafe_fallback (a Python Meta kernel's
@@ -226,6 +231,7 @@ void fakeFallback(
   // an output (by in-place and out= ops) from a new tensor
   std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
+  c10::DispatchKeySet meta_keyset;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
@@ -246,9 +252,6 @@ void fakeFallback(
         // Their Meta kernels would make tensors of the wrong TensorImpl type
         if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
           unsupported(op, "quantized, nested or mkldnn inputs");
-        }
-        if (impl->is_sparse() || impl->is_sparse_compressed()) {
-          unsupported(op, "sparse inputs");
         }
         if (impl->has_symbolic_sizes_strides()) {
           unsupported(op, "symbolic shapes");
@@ -282,15 +285,34 @@ void fakeFallback(
                   *fake_device,
                   ")"));
         }
+        switch (t.layout()) {
+          case c10::Layout::Sparse:
+            meta_keyset = meta_keyset.add(c10::DispatchKey::SparseMeta);
+            break;
+          case c10::Layout::SparseCsr:
+          case c10::Layout::SparseCsc:
+          case c10::Layout::SparseBsr:
+          case c10::Layout::SparseBsc:
+            meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
+            break;
+          default:
+            break;
+        }
       });
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
-  if (at::impl::fakeDispatchCategoriesHave(
-          categories, FakeDispatchCategory::StaticShapeDecomp) &&
-      !at::impl::fakeDispatchCategoriesHave(
-          categories, FakeDispatchCategory::Meta)) {
-    unsupported(op, "ops Python decomposes");
+  if (meta_keyset.empty()) {
+    // Python decomposes these only without sparse inputs
+    if (at::impl::fakeDispatchCategoriesHave(
+            categories, FakeDispatchCategory::StaticShapeDecomp) &&
+        !at::impl::fakeDispatchCategoriesHave(
+            categories, FakeDispatchCategory::Meta)) {
+      unsupported(op, "ops Python decomposes");
+    }
+    meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
+  } else if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
+    unsupported(op, "sparse inputs with sparse invariant checks enabled");
   }
 
   // As in Python, the outputs of alias and detach of a fake keep its recorded
@@ -310,7 +332,7 @@ void fakeFallback(
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
   try {
-    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::Meta), stack);
+    op.redispatchBoxed(meta_keyset, stack);
   } catch (const c10::NotImplementedError& e) {
     // Python runs these through maybe_run_unsafe_fallback
     unsupported(
@@ -339,9 +361,14 @@ void fakeFallback(
     }
     std::optional<at::Tensor> out;
     if (c10::raw::intrusive_ptr::use_count(impl) > 1) {
-      // A tensor held elsewhere: a Python Meta kernel's output, which its
-      // Python object refers to, is new on each call; it is not changed, and a
-      // shallow copy becomes the fake
+      // A tensor held elsewhere. Python memoizes the fake it makes of a meta
+      // output, so the values _values returns from a sparse tensor are the
+      // same fake on each call, which this does not do yet.
+      if (!meta_keyset.has(c10::DispatchKey::Meta)) {
+        unsupported(op, "outputs held by a sparse input");
+      }
+      // A Python Meta kernel's output, which its Python object refers to, is
+      // new on each call; it is not changed, and a shallow copy becomes the fake
       out = at::Tensor(impl->shallow_copy_and_detach(
           impl->version_counter(), impl->allow_tensor_metadata_change()));
       replaced.emplace(impl, *out);
