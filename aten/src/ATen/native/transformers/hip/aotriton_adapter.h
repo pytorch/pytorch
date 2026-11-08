@@ -182,6 +182,16 @@ constexpr aotriton::v3::flash::VarlenBits mk_varlen_bits_seqused_k()
     .kmode = mk_varlen_mode(VarlenLength::INDIVIDUAL, VarlenPosition::ARRAY),
   };
 }
+
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+// Numeric windows are shifted per sequence by (seqlen_k - seqlen_q), i.e.
+// measured from the bottom-right diagonal. Sentinel windows are not shifted.
+constexpr aotriton::v3::flash::VarlenBits with_bottom_right_diagonal(aotriton::v3::flash::VarlenBits bits)
+{
+  bits.principal_diagonal_choice = aotriton::v3::flash::VarlenPrincipalDiagonal::BOTTOM_RIGHT;
+  return bits;
+}
+#endif // AOTRITON_PRINCIPAL_DIAGONAL_API
 #endif // AOTRITON_VARLEN_BITS_API
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)

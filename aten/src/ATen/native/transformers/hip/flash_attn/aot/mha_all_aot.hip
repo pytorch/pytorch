@@ -84,13 +84,22 @@ calculate_swa(std::optional<int64_t> window_size_left,
               std::optional<int64_t> window_size_right,
               int max_seqlen_q,
               int max_seqlen_k,
-              bool is_causal) {
+              bool is_causal,
+              bool is_varlen) {
 #if AOTRITON_V3_API  // SWA is exposed through V3 API
   bool needs_swa = false;
   using aotriton::v3::flash::WindowValue;
   // Default values when std::optional window_size_left/right have no value
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  // Varlen callers set principal_diagonal_choice, which shifts numeric windows
+  // (defaults included) per sequence by seqlen_k - seqlen_q, so the defaults
+  // must stay "unbounded" for any shift.
+  int window_left = max_seqlen_q + max_seqlen_k;
+  int window_right = max_seqlen_q + max_seqlen_k;
+#else
   int window_left = max_seqlen_q;
   int window_right = max_seqlen_k;
+#endif
   if (is_causal) {
     window_left = WindowValue::BottomRightAligned;
     window_right = WindowValue::BottomRightAligned;
@@ -99,6 +108,20 @@ calculate_swa(std::optional<int64_t> window_size_left,
     needs_swa = true;
     window_left = window_size_left.value_or(window_left);
     window_right = window_size_right.value_or(window_right);
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+    if (!is_varlen) {
+      // Dense: measure user-given numeric windows from the bottom-right diagonal
+      // by shifting on the host; the principal_diagonal_choice bit is meant for
+      // varlen where the shift differs per sequence.
+      const int diag = max_seqlen_k - max_seqlen_q;
+      if (window_size_left.has_value()) {
+        window_left -= diag;
+      }
+      if (window_size_right.has_value()) {
+        window_right += diag;
+      }
+    }
+#endif
   }
   return std::make_tuple(needs_swa, window_left, window_right);
 #else
@@ -238,7 +261,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
                                                               window_size_right,
                                                               seqlen_q,
                                                               seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              false);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -443,7 +467,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                                                               window_size_right,
                                                               max_seqlen_q,
                                                               max_seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              true);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -533,6 +558,11 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     } else {
       params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
       params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+    }
+#endif
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+    if (needs_swa) {
+      params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
     }
 #endif
     params.window_left = window_left;
@@ -651,7 +681,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
                                                               window_size_right,
                                                               seqlen_q,
                                                               seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              false);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -859,7 +890,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                                                               window_size_right,
                                                               max_seqlen_q,
                                                               max_seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              true);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -908,6 +940,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     params.varlen_bits = mk_varlen_bits_packed();
 #else
     params.varlen_type = VarlenType::CompactVarlen;
+#endif
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+    if (needs_swa) {
+      params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
+    }
 #endif
     params.window_left = window_left;
     params.window_right = window_right;
