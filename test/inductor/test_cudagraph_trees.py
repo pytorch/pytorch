@@ -5295,15 +5295,17 @@ if HAS_CUDA_AND_TRITON:
                 file_check.check(check)
             file_check.check_not("assert_size_stride").run(code)
 
-            # Bypass Dynamo's stride guards to feed inputs the kernels were not compiled for.
-            decomps = torch._inductor.decomposition.select_decomp_table()
-            gm = make_fx(f, decomposition_table=decomps)(*inps)
-            compiled = compile_fx_inner(gm, inps, cudagraphs=True)
+            # standalone_compile output has no Dynamo guards, so an input with
+            # unexpected strides reaches the compiled code and its input asserts.
+            gm = torch.fx.symbolic_trace(f)
+            compiled = torch._inductor.standalone_compile(
+                gm, inps, dynamic_shapes="from_example_inputs"
+            )
             for i in range(3 if split else 2):
                 bad = list(inps)
                 bad[i] = bad[i].t().contiguous().t()
                 with self.assertRaisesRegex(AssertionError, "expected size"):
-                    compiled(bad)
+                    compiled(*bad)
 
         @torch._inductor.config.patch("graph_partition", True)
         @lowering.force_fallback(torch.ops.prims.device_put.default)
