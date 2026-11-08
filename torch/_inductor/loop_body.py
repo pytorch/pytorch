@@ -6,13 +6,14 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeVar
 
 import sympy
 
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import SymT
 
@@ -90,6 +91,10 @@ class MemoryUsageType(Enum):
     INDEX_EXPR = auto()
     CHECK_BOUNDS = auto()
     BUCKETIZE = auto()
+
+
+# Ops a JaggedRange bound may use.
+_JAGGED_BOUND_OPS = OrderedSet(["load", "constant", "index_expr", "add", "sub", "mul"])
 
 
 class LoopBody:
@@ -180,6 +185,7 @@ class LoopBody:
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
         eliminate_redundant_lowp_round_trips(self)
+        self._check_jagged_bounds()
 
     def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
         """
@@ -211,6 +217,39 @@ class LoopBody:
 
     def has_op(self, name: str):
         return self.op_counts.get(name, 0) > 0
+
+    def _check_jagged_bounds(self) -> None:
+        """Each register_jagged_range bound may only use _JAGGED_BOUND_OPS."""
+        graph = self.root_block.graph
+        for register in graph.find_nodes(
+            op="call_method", target="register_jagged_range"
+        ):
+            _, bound, _ = register.args
+            pending = [bound]
+            visited: OrderedSet[torch.fx.Node] = OrderedSet()
+            while pending:
+                node = pending.pop()
+                if not isinstance(node, torch.fx.Node) or node in visited:
+                    continue
+                visited.add(node)
+                pending.extend(node.all_input_nodes)
+                if node.op == "call_module" and node.target == "get_index":
+                    # indirect_indexing adds no FX edge: lengths[perm[b]] loads
+                    # get_index(indirect0), and only set_indirect0 links
+                    # indirect0 to the load of perm. Follow that link so an
+                    # indirect access cannot hide from this check.
+                    expr = self.indexing_exprs[cast(str, node.args[0])]
+                    for var in expr.free_symbols & self.indirect_var_ranges.keys():
+                        pending.extend(
+                            graph.find_nodes(op="call_module", target=f"set_{var}")
+                        )
+                elif node.op != "placeholder" and not (
+                    node.op == "call_method" and node.target in _JAGGED_BOUND_OPS
+                ):
+                    raise AssertionError(
+                        f"register_jagged_range bound uses {node.target}; "
+                        f"only {', '.join(_JAGGED_BOUND_OPS)} are allowed"
+                    )
 
     def merge_loops(self) -> LoopBody:
         """
@@ -897,6 +936,12 @@ class CaptureIndexing(WrapperHandler):
             {},
         )
         return var
+
+    def register_jagged_range(self, bound, jagged_range):
+        # FX passes the JaggedRange symbol through the existing index registry.
+        index = self._add_index(jagged_range, MemoryUsageType.INDEX_EXPR)
+        self._inner.register_jagged_range(bound, index)
+        return jagged_range
 
     def output(self, *result):
         self.tracer.create_proxy("output", "output", result, {})

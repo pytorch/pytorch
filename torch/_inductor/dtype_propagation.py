@@ -334,6 +334,12 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
+    def register_jagged_range(
+        bound: DTypeArg, jagged_range: sympy.Symbol
+    ) -> torch.dtype:
+        return promote_types([bound])
+
+    @staticmethod
     def randn(seed: int, offset: int) -> torch.dtype:
         return torch.float
 

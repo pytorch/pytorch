@@ -19,7 +19,7 @@ from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self
+from ..utils import cache_on_self, JaggedRange
 from ..virtualized import V
 
 
@@ -211,6 +211,10 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
+        # A jagged extent has no size hint to prove that int32 indexing is safe.
+        if self.reduction_numel.has(JaggedRange):
+            return torch.int64
+
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.indexing_scheduler_nodes():

@@ -112,6 +112,32 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class JaggedRange(sympy.Dummy):
+    """A reduction range whose extent is computed by the Reduction's inner_fn.
+
+    For ranges=[M] and reduction_ranges=[J], inner_fn calls
+    ops.register_jagged_range(lengths[i], J):
+
+        for i in range(M):
+            for j in range(lengths[i]):  # empty when lengths[i] <= 0
+                acc[i] = combine(acc[i], body(i, j))
+
+    The bound may only use load, constant, index_expr, add, sub and mul
+    (loop_body._JAGGED_BOUND_OPS); LoopBody rejects any other op.
+
+    A JaggedRange is not a tensor shape. Its bound is defined per node, so two
+    nodes sharing a JaggedRange are not assumed to have the same bound.
+    """
+
+    def __new__(cls, name, dummy_index=None, **assumptions):
+        return super().__new__(
+            cls,
+            name,
+            dummy_index,
+            **{**assumptions, "integer": True, "nonnegative": True},
+        )
+
+
 # Defined before the torch._dynamo import below to avoid a circular import
 # when pulled in from dynamo; hence the lazy registry imports in the bodies.
 def _gpu_types() -> list[str]:

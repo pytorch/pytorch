@@ -1293,6 +1293,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
         )
 
+    def register_jagged_range(self, bound: OpVarT, jagged_range: sympy.Symbol) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: register_jagged_range should be handled by CSEProxy"
+        )
+
     def load(self, name: str, index: sympy.Expr) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: load should be handled by CSEProxy"
@@ -2511,6 +2516,13 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
+    def register_jagged_range(
+        self, bound: CSEVariable, jagged_range: sympy.Symbol
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support jagged ranges"
+        )
+
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """A load that depends on an index we have read"""
         prior = self.loads
@@ -3138,6 +3150,9 @@ class CSEProxy(DefaultHandler):
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
         return self.kernel.check_bounds(expr, size, lower, upper)
+
+    def register_jagged_range(self, bound, jagged_range) -> None:
+        self.kernel.register_jagged_range(bound, jagged_range)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.kernel.cse.invalidated_stores:

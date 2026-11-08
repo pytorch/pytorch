@@ -117,6 +117,7 @@ from .utils import (
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
+    JaggedRange,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -458,6 +459,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        # Offsets and their JaggedRange, keyed by how a lowering derives the
+        # bags from a buffer (e.g. ("offsets", buffer name)), so reductions
+        # over the same bags share one range and can fuse horizontally.
+        self.jagged_offsets: dict[
+            tuple[object, ...], tuple[TensorBox, JaggedRange]
+        ] = {}
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}

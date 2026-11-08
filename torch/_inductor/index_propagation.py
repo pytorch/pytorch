@@ -250,6 +250,9 @@ class IndexPropagation(DefaultHandler):
     def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
         return self.wrap(self._inner.value_expr(expr, dtype))
 
+    def register_jagged_range(self, bound, jagged_range):
+        return self._inner.register_jagged_range(self.unwrap(bound), jagged_range)
+
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
             return tuple(self.unwrap(v) for v in a)

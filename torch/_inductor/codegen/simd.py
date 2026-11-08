@@ -67,6 +67,7 @@ from ..utils import (
     expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
+    JaggedRange,
     Placeholder,
     prefix_is_reduction,
     sympy_index_symbol,
@@ -6116,6 +6117,11 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
+
+        # The jagged axis is only read through an indirect index, so 2-D tiling
+        # scores it 0 and caps R0_BLOCK at 4. Keep one flat pointwise axis.
+        if isinstance(reduction_numel, sympy.Expr) and reduction_numel.has(JaggedRange):
+            return _TilingSelection(default_tiling, None, None)
 
         # Force tiling compatible with matmul dimensions
         # when natively generating matmul without template calls.
