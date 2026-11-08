@@ -31,7 +31,7 @@ from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
-from torch._subclasses.meta_utils import _live_view_base, _plain_live_view_base
+from torch._subclasses.meta_utils import _live_view_base, MetaTensorDescriber
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -4650,13 +4650,11 @@ class FakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
-
 class TestLiveViewBase(TestCase):
-    """Direct coverage for ``torch._subclasses.meta_utils._live_view_base``.
+    """Direct coverage for live-base selection and stale-base metadata.
 
-    The exemption list has broken this PR twice already (nested tensors, then
-    sparse ``values()``), both times inside tests that only ran end to end
-    through ``torch.compile``. These pin the rule and each exemption directly.
+    Exercises storage identity and the exemptions reachable through public
+    tensor APIs, without requiring an end-to-end compile for each case.
     """
 
     def _stale_pair(self):
@@ -4670,9 +4668,50 @@ class TestLiveViewBase(TestCase):
     def test_stale_base_is_not_a_live_view_base(self):
         dest, src, storage = self._stale_pair()
         self.assertIsNotNone(dest._base)
-        self.assertIs(_live_view_base(dest), None)
+        self.assertIsNone(_live_view_base(dest))
         # The un-rebound case is still a view base.
         self.assertIs(_live_view_base(storage[:3]), storage)
+
+    def test_stale_base_fake_tensor_cache_crosscheck(self):
+        with FakeTensorMode():
+            base = torch.arange(5.0)
+            dest = base[:3]
+            src = torch.full((3,), 7.0)
+            dest.set_(src)
+            dest.add_(1)
+            dest.add_(1)
+
+    def test_tensor_exemptions_are_independent_of_the_base(self):
+        dest, _src, storage = self._stale_pair()
+        self.assertIsNone(_live_view_base(dest))
+        # Public vmap transforms can erase _base. Replace only each type
+        # predicate to isolate the tensor-side exemption from the base-side one.
+        for predicate in (
+            "is_traceable_wrapper_subclass",
+            "is_functorch_wrapped_tensor",
+            "is_legacy_batchedtensor",
+        ):
+            with self.subTest(predicate=predicate):
+                with patch(
+                    f"torch._subclasses.meta_utils.{predicate}",
+                    side_effect=lambda value: value is dest,
+                ):
+                    self.assertIs(_live_view_base(dest), storage)
+        with patch.object(
+            torch.Tensor, "is_nested", new=property(lambda value: value is dest)
+        ):
+            self.assertIs(_live_view_base(dest), storage)
+
+    def test_stale_base_describer_clears_view_fields(self):
+        storage = torch.arange(5.0)
+        dest = storage[:3]
+        src = torch.full((3,), 7.0, requires_grad=True)
+        dest.set_(src)
+        self.assertIsNotNone(torch._C._autograd._get_creation_meta(dest))
+        desc = MetaTensorDescriber().describe_tensor(dest)
+        self.assertFalse(desc.is_view)
+        self.assertIsNone(desc.base)
+        self.assertIsNone(desc.creation_meta)
 
     def test_stale_base_is_described_standalone_and_aliases_src(self):
         dest, src, storage = self._stale_pair()
@@ -4701,7 +4740,6 @@ class TestLiveViewBase(TestCase):
         )
         # The nested-base exemption applies even when its layout is strided.
         self.assertIs(_live_view_base(values), nt)
-        self.assertIs(_plain_live_view_base(values), nt)
 
     def test_live_view_base_keeps_traceable_wrapper_subclass_view(self):
         class _FreshViewTwoTensor(TwoTensor):
@@ -4752,14 +4790,12 @@ class TestLiveViewBase(TestCase):
             child.untyped_storage()._cdata, wrapped.untyped_storage()._cdata
         )
         self.assertIs(_live_view_base(child), wrapped)
-        self.assertIs(_plain_live_view_base(child), wrapped)
 
     def test_live_view_base_keeps_sparse_compressed_values(self):
         base = torch.randn(4, 4).to_sparse_csr()
         values = base.values()
-        self.assertIsNotNone(values._base)
+        self.assertIs(values._base, base)
         self.assertIs(_live_view_base(values), values._base)
-        self.assertIs(_plain_live_view_base(values), values._base)
 
     def test_live_view_base_skips_non_traceable_wrapper_subclass(self):
         # Non-traceable wrappers do not get the traceable protocol exemption:

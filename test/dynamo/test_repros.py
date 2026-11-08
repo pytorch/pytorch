@@ -4810,7 +4810,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y1, y2)
 
     def test_set_stale_base_not_aliased(self):
-        # https://github.com/pytorch/pytorch/issues/199229
+        # Regression guard for set_() inside the compiled region. The
+        # entry-stale reproducers below own the #199229 failure evidence.
         def fn(dest, src, storage):
             dest.set_(src)
             storage[0] = 10.0
@@ -4827,6 +4828,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
     def test_stale_base_at_entry_not_merged(self):
+        # https://github.com/pytorch/pytorch/issues/199229
         # The input is already stale when the compiled function is called:
         # dest.set_(src) runs before compile, so dest._base still points at
         # `storage` while dest now owns src's storage. Fakification must
@@ -4871,7 +4873,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
                 self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
 
-    def test_synthetic_base_rebound_between_calls_raises(self):
+    def test_synthetic_base_rebound_between_calls_recompiles_static(self):
         def fn(a, b):
             b[0] = 10.0
             return a[0].clone()
@@ -4879,14 +4881,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.arange(5, dtype=torch.float32)
         a = x[:3]
         b = x
-        compiled = torch.compile(fn, backend="aot_eager", dynamic=False)
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, dynamic=False)
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
 
-        a.set_(torch.full((3,), 7.0))
-        # Static-shape AOT has no storage-identity guard that can recompile here.
-        # Report the whole alias group without attributing the change to one member.
-        with self.assertRaisesRegex(RuntimeError, r"flat input indices \[0, 1\]"):
-            compiled(a, b)
+        a.set_(torch.tensor([3.0, 4.0, 5.0]))
+        self.assertEqual(compiled(a, b), torch.tensor(3.0))
+        self.assertEqual(b, torch.tensor([10.0, 1.0, 2.0, 3.0, 4.0]))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
@@ -4923,7 +4925,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertNotIn("_base", guard_str)
 
     def test_set_new_base_stays_aliased(self):
-        # After dest.set_(src), dest must alias src, not its old base.
+        # Regression guard for aliasing the new source after set_(), not the old base.
         def fn(dest, src):
             dest.set_(src)
             src[0] = 42.0

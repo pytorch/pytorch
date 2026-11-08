@@ -180,13 +180,14 @@ def assert_metadata_eq(
             if not skip_symbolic:
                 assert_eq(m1.stride, m2.stride())
                 assert_eq(m1.storage_offset, m2.storage_offset())
-            assert_eq(m1.is_view, m2._is_view())
+            m2_live_base = _live_view_base(m2) if m2._is_view() else None
+            assert_eq(m1.is_view, m2_live_base is not None)
             if m1.is_view:
                 if m1.base is None:
                     raise AssertionError("m1.base must not be None for a view tensor")
-                if m2._base is None:
-                    raise AssertionError("m2._base must not be None for a view tensor")
-                go(m1.base, m2._base)
+                if m2_live_base is None:
+                    raise AssertionError("m2.base must not be None for a view tensor")
+                go(m1.base, m2_live_base)
         # TODO: test if is resizable (no direct query for this atm)
         # TODO: audit AutogradMeta to see if it matches
         # TODO: test forward AD
@@ -237,52 +238,23 @@ def _set_real_storage(
 def _live_view_base(t: torch.Tensor, t_cdata: int | None = None) -> torch.Tensor | None:
     """Return ``t._base`` only when it is still a real alias of ``t``.
 
-    ``Tensor.set_()`` rebinds a tensor to a new storage without clearing the
-    autograd ``_base`` link, so ``_base`` alone does not prove that ``t`` is
-    still a view of it. A real view shares its base's storage; a rebound tensor
-    does not, and must be described as standalone rather than merged with a base
-    it no longer aliases.
+    ``Tensor.set_()`` can rebind storage without clearing the autograd ``_base``
+    link. For plain strided tensors, compare storage identity through
+    ``untyped_storage()._cdata``. A mismatch means the base is stale and the
+    tensor must be treated as standalone.
 
-    This is the single answer to "is ``_base`` still a live view base?".
-    Fakification, the AOTAutograd synthetic-base wrapper and dynamo all route
-    through here, so the compile-time and runtime alias choices are made by one
-    rule rather than two that can drift apart. That guarantee is per call: the
-    answer is recomputed every time, so a tensor that is rebound between two
-    calls can still be treated as a live view on the first and not the second.
-    ``AOTSyntheticBaseWrapper`` asserts the consequence of that at runtime
-    rather than relying on the guard to keep the two calls consistent.
+    Nested tensors, traceable wrapper subclasses, non-strided layouts,
+    functorch-wrapped tensors, and legacy batched tensors are exempt because
+    their outer storage does not reliably describe aliasing. Non-traceable
+    wrapper subclasses still use the storage check.
 
-    Storage identity is compared with ``untyped_storage()._cdata``, which is
-    the same comparison ``StorageWeakRef.__eq__`` performs. ``StorageWeakRef``
-    additionally takes and releases a weak reference per construction, which is
-    too much for a helper that runs per input per call, and the identity it
-    yields is exactly this pointer.
-
-    The storage test only has meaning for plain strided tensors, so ``_base`` is
-    kept for everything else:
-
-    * a nested tensor repacks values/offsets, so a real nested view need not
-      share its base's storage;
-    * a wrapper subclass built with ``_make_wrapper_subclass`` gets a fresh
-      null-data storage even when it is a real view, so its outer storage says
-      nothing about aliasing. The exemption is keyed on the traceable protocol,
-      which is the only wrapper shape with a cheap discriminator: there is no
-      predicate for "any wrapper subclass", and testing ``type(t) is not
-      torch.Tensor`` would also exempt ``_make_subclass`` tensors, which do
-      share their base's storage and would then hide genuinely stale bases. A
-      non-traceable wrapper subclass is therefore still subject to the storage
-      test and is described standalone when its outer storage differs, which is
-      the pre-existing behaviour for anything with a fresh outer storage and is
-      pinned by ``test_live_view_base_skips_non_traceable_wrapper_subclass``;
-    * sparse, mkldnn, functorch-wrapped and legacy batched tensors either throw
-      on ``untyped_storage()`` or do not expose a storage that identifies the
-      tensor's aliasing.
+    Some readers, including ``merge_view_inputs`` and
+    ``collect_metadata_analysis``, still read raw ``_base`` directly.
+    TODO(#199229): Evaluate clearing stale view links in ``set_()``.
     """
     base = t._base
     if base is None:
         return None
-    # Cheap structural exclusions first: they are the common answer for exotic
-    # tensors, and the storage test below allocates two UntypedStorage objects.
     if (
         t.is_nested
         or base.is_nested
@@ -297,8 +269,6 @@ def _live_view_base(t: torch.Tensor, t_cdata: int | None = None) -> torch.Tensor
         or is_functorch_wrapped_tensor(base)
         or is_legacy_batchedtensor(t)
         or is_legacy_batchedtensor(base)
-        or t.is_mkldnn
-        or base.is_mkldnn
     ):
         return base
     if t_cdata is None:
@@ -306,18 +276,6 @@ def _live_view_base(t: torch.Tensor, t_cdata: int | None = None) -> torch.Tensor
     if t_cdata == base.untyped_storage()._cdata:
         return base
     return None
-
-
-def _plain_live_view_base(
-    t: torch.Tensor, t_cdata: int | None = None
-) -> torch.Tensor | None:
-    """Apply the shared live-base rule with a saved storage identity.
-
-    Synthetic-base inputs are plain tensors, but their ``_base`` objects need
-    not be. Keep the base-side structural exemptions in ``_live_view_base``
-    rather than duplicating an incomplete storage-only rule here.
-    """
-    return _live_view_base(t, t_cdata)
 
 
 # Don't use id() directly, because those can get reallocated over time.
@@ -422,9 +380,10 @@ class MetaTensorDescriber:
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
-            storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
+            storage_obj = t.untyped_storage()
+            storage = self.describe_storage(storage_obj, data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
-            if is_view and _live_view_base(t) is None:
+            if is_view and _live_view_base(t, storage_obj._cdata) is None:
                 # set_() can leave _base pointing at a tensor this one no longer
                 # aliases, so it is stale and the tensor must be built standalone
                 # from its own storage instead of being merged with that base.
@@ -786,6 +745,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_batchedtensor: bool = False
     is_legacy_batchedtensor: bool = False
     is_gradtrackingtensor: bool = False
+    # Whether this is a view of a live base, not merely raw autograd _is_view().
     is_view: bool = False
     is_nested: bool = False
     # We eagerly symbolicize the associated nested int for e.g. offsets / lengths

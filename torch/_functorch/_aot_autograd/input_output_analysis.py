@@ -18,7 +18,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageOverlap
+from torch._guards import StorageIdentity, StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -388,11 +388,10 @@ def compute_overlapping_inputs(
         }
 
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
-    # dynamo sources inside AOTAutograd.
+    # dynamo sources inside AOTAutograd. Static-shape graphs need the same storage
+    # protection so a rebind triggers recompilation instead of reusing stale aliases.
     if (
         tracing_context is not None
-        # Make sure dynamic shapes is currently being used.
-        and symbolic
         # We check that we have more than 1 aliased tensor, which should be true at
         # this point, anyway.
         and num_aliases > 1
@@ -409,6 +408,9 @@ def compute_overlapping_inputs(
 
         tracing_context.guards_context.aotautograd_guards.append(
             StorageOverlap(overlapping_sources, non_overlapping_sources)
+        )
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageIdentity(overlapping_sources)
         )
 
     return actual_aliased_indices

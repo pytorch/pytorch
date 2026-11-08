@@ -9871,6 +9871,8 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("def _synthetic_base_wrapper(", source)
         self.assertIn("_bases", source)
+        self.assertNotIn("_member_cdata", source)
+        self.assertNotIn("for _i in", source)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_correctness(self):
@@ -9890,7 +9892,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(a, a_ref * 2)
 
     @xfailIfTorchDynamo
-    def test_synthetic_base_storage_mismatch_reports_indices_without_set_(self):
+    def test_synthetic_base_storage_mismatch_is_actionable(self):
         from functorch.compile import nop
         from torch._functorch.aot_autograd import aot_function
 
@@ -9904,11 +9906,9 @@ def forward(self, primals_1, tangents_1):
         compiled_f = aot_function(f, nop)
         compiled_f(a, b)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"flat input indices \[0, 1\]"
-        ) as ctx:
+        with self.assertRaisesRegex(RuntimeError, r"storage groups .*Recompile") as ctx:
             compiled_f(a, torch.randn(6))
-        self.assertNotIn("set_()", str(ctx.exception))
+        self.assertNotIn("flat input indices", str(ctx.exception))
 
     def test_synthetic_base_no_codegen_when_not_needed(self):
         with capture_codegen_source("synthetic_base_wrapper") as captured:
@@ -9943,6 +9943,31 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("as_strided_", source)
         self.assertIn("_meta_mut", source)
+
+    def test_synthetic_base_single_member_skips_storage_group_check(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        wrapper = AOTSyntheticBaseWrapper(
+            trace_joint=False,
+            base_groups={0: [0]},
+            base_group_names={0: ["a"]},
+        )
+        base = torch.randn(4)
+        view = base[:3]
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled = wrapper.post_compile(
+                lambda args: args[0],
+                SimpleNamespace(),
+                runtime_metadata=SimpleNamespace(),
+            )
+            result = compiled([view])
+
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("_storage_groups", captured[0])
+        self.assertIs(result, base)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_multiple_base_groups(self):

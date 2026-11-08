@@ -50,7 +50,7 @@ from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
-from torch._subclasses.meta_utils import _plain_live_view_base
+from torch._subclasses.meta_utils import _live_view_base
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
@@ -1850,6 +1850,19 @@ class AOTDedupeWrapper(CompilerWrapper):
         return debugged_compiled_fn
 
 
+def _format_aot_input_name(
+    idx: int, aot_config: AOTConfig, fwd_inputs_descs: list[AOTInput]
+) -> str:
+    if (
+        aot_config.aot_autograd_arg_pos_to_source is not None
+        and idx < len(aot_config.aot_autograd_arg_pos_to_source)
+        and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
+    ):
+        source = aot_config.aot_autograd_arg_pos_to_source[idx]
+        return getattr(source, "local_name", source.name)
+    return fwd_inputs_descs[idx].expr()
+
+
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
 # We need to take special care to ensure that the mutation is applied to the other aliases in the graph.
@@ -1869,6 +1882,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    base_group_names: dict[int, list[str]] = field(default_factory=dict)
 
     def pre_compile(
         self,
@@ -1954,6 +1968,13 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 self.base_groups[base_idx].append(orig_idx)
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
+        self.base_group_names = {
+            base_idx: [
+                _format_aot_input_name(orig_idx, aot_config, flat_args_descs)
+                for orig_idx in group
+            ]
+            for base_idx, group in self.base_groups.items()
+        }
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -2062,56 +2083,48 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         buf.bind(
             torch=torch,
             _compiled_fn_=compiled_fn,
-            _plain_live_view_base=_plain_live_view_base,
+            _live_view_base=_live_view_base,
         )
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
-            buf.writeline("_member_cdata = [None] * len(args)")
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
+                group_names = self.base_group_names[base_idx]
                 first_orig = group[0]
-                indices_str = ", ".join(str(i) for i in group)
                 buf.writeline("_b = None")
-                buf.writeline("_b_cdata = None")
-                buf.writeline(f"for _i in [{indices_str}]:")
-                with buf.indent():
+                for orig_idx in group:
                     buf.writeline(
-                        "_member_cdata[_i] = args[_i].untyped_storage()._cdata"
+                        f"_cdata_{orig_idx} = args[{orig_idx}].untyped_storage()._cdata"
                     )
-                buf.writeline(f"for _i in [{indices_str}]:")
-                with buf.indent():
-                    buf.writeline(
-                        "_b = _plain_live_view_base(args[_i], _member_cdata[_i])"
-                    )
-                    buf.writeline("if _b is not None:")
+                for orig_idx in group:
+                    buf.writeline("if _b is None:")
                     with buf.indent():
-                        buf.writeline("_b_cdata = _member_cdata[_i]")
-                        buf.writeline("break")
+                        buf.writeline(
+                            f"_b = _live_view_base(args[{orig_idx}], _cdata_{orig_idx})"
+                        )
                 buf.writeline("if _b is None:")
                 with buf.indent():
                     buf.writeline(
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
-                    buf.writeline(f"_b_cdata = _member_cdata[{first_orig}]")
-                # Direct AOT callers have no Dynamo guard/recompile path, and
-                # Dynamo guards need not retain every member's storage identity.
-                # Check this shared runtime boundary rather than silently running
-                # a graph specialized for a different set of aliases. Reuse the
-                # member identity so exempt bases need no outer-storage access.
-                buf.writeline(
-                    f"_bad_indices = [_i for _i in [{indices_str}] "
-                    "if _member_cdata[_i] != _b_cdata]"
-                )
-                buf.writeline("if _bad_indices:")
-                with buf.indent():
+                if len(group) > 1:
+                    # Direct AOT callers have no Dynamo recompile path. Name the
+                    # current storage groups so the caller can repair the aliasing.
+                    buf.writeline("_storage_groups = {}")
+                    for orig_idx, name in zip(group, group_names):
+                        buf.writeline(
+                            f"_storage_groups.setdefault(_cdata_{orig_idx}, []).append({name!r})"
+                        )
                     buf.writeline(
-                        "raise RuntimeError("
-                        f'"synthetic base group at flat input indices [{indices_str}] '
-                        "no longer shares one storage; input storage aliasing "
-                        'changed after compilation")'
+                        "_current_storage_groups = list(_storage_groups.values())"
                     )
+                    buf.writeline("if len(_current_storage_groups) > 1:")
+                    with buf.indent():
+                        buf.writeline(
+                            'raise RuntimeError("input storage aliasing changed after compilation: one compiled alias group now splits into storage groups %s. Recompile for the new aliasing pattern or restore the original storage sharing before calling." % _current_storage_groups)'
+                        )
                 buf.writeline(f"_bases[{base_idx}] = _b")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
@@ -2246,15 +2259,7 @@ def merge_view_inputs(
         return True
 
     def _format_input(idx: int) -> str:
-        if (
-            aot_config.aot_autograd_arg_pos_to_source is not None
-            and idx < len(aot_config.aot_autograd_arg_pos_to_source)
-            and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
-        ):
-            source = aot_config.aot_autograd_arg_pos_to_source[idx]
-            name = getattr(source, "local_name", source.name)
-        else:
-            name = fwd_inputs_descs[idx].expr()
+        name = _format_aot_input_name(idx, aot_config, fwd_inputs_descs)
         return f"input {idx} ({name})"
 
     if len(fwd_inputs) != len(mutated_input_info):

@@ -493,6 +493,20 @@ class StorageOverlap(GuardEnvExpr):
 
 
 """
+A class representing storage identity relations among inputs.
+
+Every source in aliased_sources must continue to reference the same storage.
+This is distinct from StorageOverlap, which compares memory ranges after assuming
+that the inputs already share a storage.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageIdentity(GuardEnvExpr):
+    aliased_sources: list[Source]
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
