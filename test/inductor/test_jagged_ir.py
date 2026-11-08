@@ -499,6 +499,29 @@ class TestJaggedReductionIR(TestCase):
         self.assertEqual("\n".join(codes).count(".run("), 2)
         self.assertEqual(actual, fn(*args), atol=1e-2, rtol=1e-2)
 
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @parametrize("reduce", ["sum", "mean", "max", "min", "prod"])
+    def test_segment_reduce_backward(self, reduce):
+        # test_simple_1d of test_segment_reductions.py, plus ties for min, two
+        # zeros for prod and a negative grad for the tied segment.
+        data = torch.tensor([1, float("nan"), 3, 5, 0, 5, 0], device="cuda")
+        lengths = torch.tensor([1, 2, 4, 0], device="cuda")
+        weight = torch.tensor([1.0, 1.0, -1.0, 1.0], device="cuda")
+        initial = {"min": 1000, "prod": 2}.get(reduce, 0)
+
+        def fn(data, lengths):
+            out = torch.segment_reduce(data, reduce, lengths=lengths, initial=initial)
+            return (out * weight).sum()
+
+        x = data.clone().requires_grad_()
+        (expected,) = torch.autograd.grad(fn(x, lengths), x)
+        compiled = torch.compile(fn)
+        actual, codes = run_and_get_code(
+            lambda: torch.autograd.grad(compiled(x, lengths), x)[0]
+        )
+        self.assertNotIn("aten._segment_reduce_backward.default(", "\n".join(codes))
+        self.assertEqual(actual, expected)
+
 
 instantiate_parametrized_tests(TestJaggedReductionIR)
 

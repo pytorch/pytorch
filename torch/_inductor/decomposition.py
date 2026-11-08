@@ -1529,6 +1529,148 @@ def repeat_interleave_Tensor(
     return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
+class _Segments:
+    """The segments that segment_reduce offsets give along axis.
+
+    segment[*o, p] is the s with offsets[*o, s] <= p < offsets[*o, s + 1]. The
+    binary search for it is one pointwise kernel:
+        tmp2 = triton_helpers.bucketize_binary_search(tmp1, in_ptr0, ...)
+        tl.store(out_ptr0 + (x0), tmp2, xmask)  # segment[p] + 1
+    """
+
+    def __init__(self, offsets: torch.Tensor, axis: int, data: torch.Tensor) -> None:
+        num_segments = offsets.shape[-1] - 1
+        num_elements = data.shape[axis]
+        positions = torch.arange(
+            num_elements, device=data.device, dtype=offsets.dtype
+        ).expand(*offsets.shape[:-1], num_elements)
+        segment = torch.searchsorted(offsets, positions, right=True) - 1
+        self.offsets = offsets
+        self.axis = axis
+        self.inner = (1,) * (data.dim() - axis - 1)
+        # Elements that the offsets do not cover get 0, as in eager. The clamp
+        # keeps their reads in bounds; without it they read at -1 or
+        # num_segments:
+        #   index out of bounds: 0 <= tmp2 < 3
+        inside = (segment >= 0) & (segment < num_segments)
+        self.inside = inside.view(*inside.shape, *self.inner)
+        self.segment = segment.clamp(0, num_segments - 1)
+
+    def broadcast(self, x: torch.Tensor) -> torch.Tensor:
+        """x[*o, s, *i] -> x[*o, segment[*o, p], *i]"""
+        shape = self.segment.shape
+        if x.dim() == len(shape):
+            return torch.gather(x, self.axis, self.segment).view(*shape, *self.inner)
+        index = self.segment.view(*shape, *self.inner)
+        index = index.expand(*shape, *x.shape[self.axis + 1 :])
+        return torch.gather(x, self.axis, index)
+
+    def reduce(self, x: torch.Tensor, reduce: str) -> torch.Tensor:
+        """x[*o, p, *i] reduced over the p of each segment: a jagged reduction"""
+        return torch.segment_reduce(x, reduce, offsets=self.offsets, axis=self.axis)
+
+
+def _segment_sum_backward(segments: _Segments, grad: torch.Tensor) -> torch.Tensor:
+    # out[s] = data[p] summed over p in s, so g_data[p] = grad[s]. That is a
+    # gather of grad at the segment from the binary search:
+    #   tmp0 = tl.load(in_ptr0 + (x1))  # segment[p] + 1
+    #   tmp10 = tl.minimum(tl.maximum(tmp0 - 1, 0), 3)
+    #   tmp14 = tl.load(in_ptr2 + (x0 + 3*tmp10))  # grad[segment[p], d]
+    return segments.broadcast(grad)
+
+
+def _segment_mean_backward(segments: _Segments, grad: torch.Tensor) -> torch.Tensor:
+    # out[s] = data[p] summed over p in s, divided by length[s], so
+    # g_data[p] = grad[s] / length[s].
+    lengths = segments.offsets[..., 1:] - segments.offsets[..., :-1]
+    return segments.broadcast(grad) / segments.broadcast(lengths)
+
+
+def _segment_max_min_backward(
+    segments: _Segments, grad: torch.Tensor, output: torch.Tensor, data: torch.Tensor
+) -> torch.Tensor:
+    # Each data[p] in s that is nan or equals out[s], a tie, gets grad[s]
+    # divided by the number of ties:
+    #   g_data[p] = tie[p] * grad[s] / count[s], count[s] = tie[q] summed over q in s
+    # Eager divides only positive grads (pytorch#201633): four tied maxima
+    # get 0.25 each for grad 1, but -1 each for grad -1.
+    tie = torch.isnan(data) | (data == segments.broadcast(output))
+    count = segments.broadcast(segments.reduce(tie.float(), "sum"))
+    g = segments.broadcast(grad)
+    return torch.where(tie, torch.where(g > 0, g / count, g), 0)
+
+
+def _segment_prod_backward(
+    segments: _Segments,
+    grad: torch.Tensor,
+    output: torch.Tensor,
+    data: torch.Tensor,
+    initial: torch.types.Number | None,
+) -> torch.Tensor:
+    # out[s] = initial * data[q] multiplied over q in s, so
+    #   g_data[p] = grad[s] * initial * (data[q] multiplied over q in s, q != p)
+    # Eager computes that as grad[s] * out[s] / data[p], or with a loop over q
+    # where data[p] is 0 or nan. Here the product over q != p is rest[s], the
+    # product of the elements that are neither, times the product of the other
+    # 0 and nan elements: 1 if there are none, nan if one is nan, else 0.
+    # Without that second factor, each 0 in [0, 0, 2] gets 2 * grad, not 0.
+    nan = torch.isnan(data)
+    special = nan | (data == 0)
+    rest = segments.reduce(torch.where(special, 1, data), "prod")
+    if initial is not None:
+        rest = rest * initial
+    others = segments.broadcast(segments.reduce(special.float(), "sum"))
+    other_nans = segments.broadcast(segments.reduce(nan.float(), "sum"))
+    others = others - special.float()
+    other_nans = other_nans - nan.float()
+    others_product = torch.where(
+        others == 0, 1.0, torch.where(other_nans > 0, math.nan, 0.0)
+    )
+    g = segments.broadcast(grad)
+    return torch.where(
+        special,
+        g * segments.broadcast(rest) * others_product,
+        g * segments.broadcast(output) / data,
+    )
+
+
+@register_decomposition(aten._segment_reduce_backward.default)
+def _segment_reduce_backward(
+    grad: torch.Tensor,
+    output: torch.Tensor,
+    data: torch.Tensor,
+    reduce: str,
+    lengths: torch.Tensor | None = None,
+    offsets: torch.Tensor | None = None,
+    axis: int = 0,
+    initial: torch.types.Number | None = None,
+) -> torch.Tensor:
+    axis = utils.canonicalize_dim(data.dim(), axis)
+    if offsets is None:
+        if lengths is None:
+            raise AssertionError(
+                "segment_reduce(): Either lengths or offsets must be defined"
+            )
+        zero = lengths.new_zeros((*lengths.shape[:-1], 1))
+        offsets = torch.cat([zero, lengths.cumsum(-1)], -1)
+    if guard_or_false(offsets.shape[-1] == 1):
+        # No segments: grad is empty, so any read of it fails:
+        #   index out of bounds: 0 <= tmp9 < 0
+        return torch.zeros_like(data, dtype=grad.dtype)
+    segments = _Segments(offsets, axis, data)
+    if reduce == "sum":
+        result = _segment_sum_backward(segments, grad)
+    elif reduce == "mean":
+        result = _segment_mean_backward(segments, grad)
+    elif reduce in ("max", "min", "amax", "amin"):
+        result = _segment_max_min_backward(segments, grad, output, data)
+    elif reduce == "prod":
+        result = _segment_prod_backward(segments, grad, output, data, initial)
+    else:
+        raise AssertionError(f"unexpected reduce for segment_reduce: {reduce}")
+    return torch.where(segments.inside, result, 0).to(grad.dtype)
+
+
 # intentionally not registered
 def conv1d_to_conv2d(
     input: torch.Tensor,
