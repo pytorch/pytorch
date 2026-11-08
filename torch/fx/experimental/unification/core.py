@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from functools import partial
 from typing import TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 from .dispatch import dispatch
 from .unification_tools import assoc  # type: ignore[import]
@@ -31,7 +31,7 @@ def _reify(t: Iterator[object], s: dict[Var, object]) -> Iterator[object]:
 
 
 @dispatch(tuple, dict)  # type: ignore[no-redef]
-def _reify(t: tuple[Unpack[_Ts]], s: dict[Var, object]) -> tuple[Unpack[_Ts]]:
+def _reify(t: tuple[*_Ts], s: dict[Var, object]) -> tuple[*_Ts]:
     return tuple(reify(iter(t), s))  # pyrefly: ignore[bad-argument-type, bad-return]
 
 

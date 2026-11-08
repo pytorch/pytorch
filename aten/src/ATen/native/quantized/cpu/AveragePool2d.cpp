@@ -18,6 +18,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 
 #include <algorithm>
 #include <cmath>
@@ -49,7 +50,7 @@ void avg_pool2d_out_frame(
     std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
   auto input_data = input_contig.const_data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
+  auto output_data = output.mutable_data_ptr<scalar_t>();
   const auto scale_factor = input.q_scale() / output.q_scale();
   const auto input_zero_point = input.q_zero_point();
   const auto output_zero_point = output.q_zero_point();
@@ -120,10 +121,10 @@ inline std::pair<int, int> get_kernel(IntArrayRef kernel_size) {
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 2,
       "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
   const int kW = kernel_size.size() == 1
       ? kH
-      : c10::checked_convert<int>(kernel_size[1], "int");
+      : c10::safe_conv<int>(kernel_size[1], "kernel_size");
   return std::make_pair(kW, kH);
 }
 
@@ -131,10 +132,10 @@ inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
   const int dW = stride.empty()
       ? kW
-      : stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+      : stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
   return std::make_pair(dW, dH);
 }
 
@@ -142,9 +143,9 @@ inline std::pair<int, int> get_padding(IntArrayRef padding) {
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
       "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::checked_convert<int>(padding[0], "int");
+  const int padH = c10::safe_conv<int>(padding[0], "padding");
   const int padW =
-      padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
   return std::make_pair(padW, padH);
 }
 
@@ -331,7 +332,7 @@ Tensor qnnpack_avg_pool2d(
           inW,
           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
-          (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
+          reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()) /* output data */,
           outC,
           nullptr /* thread pool */);
   CAFFE_ENFORCE(

@@ -16,6 +16,6 @@ core framework, report and fix bugs, improve documentation, and much more.
 :glob:
 :maxdepth: 1
 
-The Ultimate Guide to PyTorch Contributions <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>
+Contributing to PyTorch <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>
 *
 ```

@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Sequence
 from typing import Any
+from typing_extensions import override
 
 import sympy
 
 import torch
 import torch._inductor.async_compile
 import torch._ops
+from torch._prims_common import _is_non_overlapping_and_dense_or_false
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
@@ -16,7 +18,9 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
@@ -254,6 +258,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                 )
                 if is_constant_buffer:
+                    # See NOTE(arrayref_constant_output) in generate_return.
                     code.splice(
                         f"""
                         AtenTensorHandle {cached_output_name}_tmp;
@@ -612,6 +617,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
+    @override
     def generate_return(self, output_refs: list[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
@@ -707,6 +713,24 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # assuming they are not updated at runtime Basically, we
                         # cannot release or transfer the ownership of any original
                         # constant to the user.
+                        #
+                        # NOTE(arrayref_constant_output): unlike the output_handles
+                        # path below, this copy is a dense aoti_torch_clone, not
+                        # aoti_torch_clone_preserve_strides. The copy is wrapped in an
+                        # ArrayRefTensor, which carries its data as a flat buffer of
+                        # numel() elements and cannot represent a non-dense view, so
+                        # we reject non-dense constant outputs rather than silently
+                        # returning different strides.
+                        size = V.graph.sizevars.guard_int_seq(output_buffer.get_size())
+                        stride = V.graph.sizevars.guard_int_seq(
+                            output_buffer.get_stride()
+                        )
+                        if not _is_non_overlapping_and_dense_or_false(size, stride):
+                            raise NotImplementedError(
+                                f"Returning a non-dense constant {output} (size={size}, "
+                                f"stride={stride}) is not supported with "
+                                "aot_inductor.use_minimal_arrayref_interface"
+                            )
                         self.wrapper_call.writeline(
                             f"AtenTensorHandle {cached_output_name}_tmp;"
                         )
@@ -727,10 +751,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     )
                 else:
                     if is_constant_buffer:
-                        # See NOTE(return_constant) above.
+                        # See NOTE(return_constant) above. A constant-folding output
+                        # can be a non-dense view that kernels were compiled
+                        # against, so the clone must keep its strides.
                         self.wrapper_call.writeline(
                             "AOTI_TORCH_ERROR_CODE_CHECK("
-                            f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                            f"aoti_torch_clone_preserve_strides({output}, &output_handles[{idx}]));"
                         )
                     else:
                         if output in output2idx:
@@ -806,6 +832,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
             elif isinstance(line, ExitSubgraphLine):
+                past_planning_states.append(planning_states.pop())
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A profiling block is a C++ scope, so a buffer reused across
+                # one of its braces would be declared on the wrong side of it.
+                # This mirrors the base wrapper; the two loops differ only in
+                # what they do with the resulting states.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
@@ -1127,6 +1161,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
+
+    def records_profiling_args(self) -> bool:
+        # An ArrayRefTensor is not an AtenTensorHandle, so the ivalue
+        # conversion the metadata is built from cannot be called on one. The
+        # record is emitted without it, and nothing is built here -- deriving
+        # it would make a reinterpret view mint a handle with no owner.
+        return False
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

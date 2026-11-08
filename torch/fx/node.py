@@ -11,6 +11,7 @@ from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
+from torch._functorch.predispatch import _functorch_predispatch_functions
 from torch.fx.operator_schemas import (
     ArgsKwargsPair,
     normalize_function,
@@ -115,6 +116,7 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     torch.autograd.grad_mode._enter_inference_mode,
     torch.autograd.grad_mode._exit_inference_mode,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
+    *_functorch_predispatch_functions,
 }
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
@@ -677,6 +679,7 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
+            from torch._subclasses.meta_utils import is_sparse_compressed_layout
 
             def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
@@ -686,16 +689,12 @@ class Node(_NodeBase):
                 self.meta.get("tensor_meta", self.meta.get("example_value", None)),
             )
             type_annotation = ""
-            if (
-                include_tensor_metadata
-                and isinstance(meta_val, torch.Tensor)
-                and meta_val.layout
-                not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
+            if include_tensor_metadata and isinstance(meta_val, torch.Tensor):
+                stride_annotation = (
+                    ""
+                    if is_sparse_compressed_layout(meta_val.layout)
+                    else stringify_shape(meta_val.stride())
                 )
-            ):
-                stride_annotation = f"{stringify_shape(meta_val.stride())}"
                 device_annotation = _device_annotation(meta_val.device)
                 type_annotation = (
                     f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
