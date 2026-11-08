@@ -444,7 +444,7 @@ class BaseHeuristicSingleton(type):
                 instance = super().__call__()
                 # Remember the list __init__ chose so a later reassignment
                 # (e.g. inst.mm_configs = [...]) can be detected.
-                instance._constructed_mm_configs = instance.mm_configs
+                instance._constructed_mm_configs = getattr(instance, "mm_configs", None)
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
@@ -2492,7 +2492,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
     mm_configs: list[BaseConfig]
-    _constructed_mm_configs: list[BaseConfig]
+    _constructed_mm_configs: list[BaseConfig] | None
     uses_tdm_configs: bool
     blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
@@ -2545,7 +2545,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     def _origami_may_select(self) -> bool:
         """Origami picks from exhaustive_configs, not mm_configs, so use it only for
         in-tree heuristics whose mm_configs was not replaced after construction,
-        and not when max_mm_configs is set."""
+        and not when max_mm_configs is set. Overrides must reassign mm_configs;
+        in-place edits of the list are not detected."""
         return (
             type(self).__module__ == __name__
             and self.mm_configs is self._constructed_mm_configs
@@ -2684,7 +2685,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             except _ORIGAMI_ERRORS as err:
                 _log_origami_fallback(err)
                 origami_error = True
-                selector = None
+                selector = None  # unused; keeps pyrefly from flagging it unbound
                 topk_results = []
 
             for result in topk_results:

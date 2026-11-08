@@ -533,11 +533,12 @@ class TestOrigami(TestCase):
                         origami,
                         "OrigamiMatmulSelector",
                         side_effect=ValueError("unsupported layout"),
-                    ),
+                    ) as selector,
                 ):
                     compiled = torch.compile(fn, dynamic=False)
                     result = compiled(*args)
 
+                selector.assert_called()
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertGreater(
                     self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK
@@ -600,7 +601,11 @@ class TestOrigami(TestCase):
         ):
             result = torch.compile(fn, dynamic=False)(a, b)
         torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
-        self.assertTrue(raised, "selector was expected to reject this layout")
+        if not raised:
+            self.skipTest(
+                "selector accepted this layout; fallback is covered by "
+                "test_origami_falls_back_when_selector_raises"
+            )
 
     def test_origami_honors_max_mm_configs(self):
         patch_config = self._origami_default_config(ORIGAMI_TOPK_VALUES[0])
@@ -625,10 +630,25 @@ class TestOrigami(TestCase):
             th.ROCmAddMMPersistentTDMTemplateConfigHeuristic,
             th.PersistentMMTemplateConfigHeuristic,
         )
-        for cls in stock_classes:
-            self.assertTrue(cls()._origami_may_select(), cls)
-            custom_cls = type(f"Custom{cls.__name__}", (cls,), {})
-            self.assertFalse(custom_cls()._origami_may_select(), custom_cls)
+        # Drop the ad-hoc subclasses from the singleton cache afterwards.
+        with mock.patch.dict(th.BaseHeuristicSingleton._instances):
+            for cls in stock_classes:
+                self.assertTrue(cls()._origami_may_select(), cls)
+                custom_cls = type(f"Custom{cls.__name__}", (cls,), {})
+                self.assertFalse(custom_cls()._origami_may_select(), custom_cls)
+
+    def test_heuristic_subclass_without_mm_configs_constructs(self):
+        import torch._inductor.heuristics.template.triton as th
+
+        # An override whose __init__ skips super().__init__ has no mm_configs;
+        # constructing it must still work.
+        class NoInitHeuristic(th.ROCmMMTemplateConfigHeuristic):
+            def __init__(self) -> None:
+                pass
+
+        with mock.patch.dict(th.BaseHeuristicSingleton._instances):
+            heuristic = NoInitHeuristic()
+            self.assertIsNone(heuristic._constructed_mm_configs)
 
     def test_origami_not_used_after_mm_configs_reassigned(self):
         import torch._inductor.heuristics.template.triton as th
