@@ -185,6 +185,8 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
     # oneDNN includes the Accelerate.h umbrella header, whose global bfloat16_t from arm_bf16.h clashes
     # with dnnl::impl::bfloat16_t, so shadow it with a header that only provides the CBLAS interface
+    # TODO: Replace the shim with -DACCELERATE_NEW_LAPACK once the oneDNN submodule includes
+    # https://github.com/uxlfoundation/oneDNN/pull/6436
     SET(ONEDNN_ACCELERATE_SHIM_DIR "${CMAKE_BINARY_DIR}/onednn_accelerate_shim")
     FILE(WRITE "${ONEDNN_ACCELERATE_SHIM_DIR}/Accelerate.h"
       "#pragma once\n#define ACCELERATE_NEW_LAPACK\n#include <vecLib/cblas_new.h>\n")
