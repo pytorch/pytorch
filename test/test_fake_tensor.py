@@ -5521,12 +5521,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
-            torch._C._CppFakeTensorMode(None, None, traceback.StackSummary())
+            torch._C._CppFakeTensorMode(None, None)
         # A mode's Python object is set once, and is a CppFakeTensorMode
         with self.assertRaisesRegex(RuntimeError, "already has a Python object"):
             mode._attach_python_object()
-        stack = traceback.StackSummary()
-        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None, stack)
+        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None)
         with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
             bare._attach_python_object()
         with self.assertRaisesRegex(TypeError, "expects a CppFakeTensorMode"):
@@ -6043,6 +6042,14 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
+        # The stack is captured where the mode is created: in
+        # CppFakeTensorMode.__init__, called from here
+        *_, caller, init = mode._creation_traceback.summary()
+        self.assertEqual(init.name, "__init__")
+        init_file = init.filename.replace("\\", "/")
+        self.assertTrue(init_file.endswith("torch/_subclasses/fake_tensor.py"))
+        self.assertIn("test_cpp_fake_tensor_mode_init", caller.name)
+        self.assertTrue(mode.stack.endswith("".join(traceback.format_list([init]))))
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
@@ -6091,12 +6098,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
+        def make_mode():
+            return CppFakeTensorMode()
+
         def make_other():
             return CppFakeTensorMode()
 
         self.addCleanup(self._restore_fake_mode_state)
-        mode, other = CppFakeTensorMode(), make_other()
+        mode, other = make_mode(), make_other()
         # Each mode records the stack it was created at
+        self.assertIn("in make_mode", mode.stack)
         self.assertNotIn("in make_other", mode.stack)
         self.assertIn("in make_other", other.stack)
         cpu = torch.device("cpu")
@@ -6115,10 +6126,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(active_fake_mode(), mode)
             self.assertIs(detect_fake_mode(), mode)
             # As for a Python mode, the inputs' mode must match the active one
-            only_mode = r"(?:(?!in make_other)[\s\S])*"
+            not_other = r"(?:(?!in make_other)[\s\S])*"
+            not_mode = r"(?:(?!in make_mode)[\s\S])*"
             msg = (
-                rf"from active fake mode allocated at:\n  File {only_mode}"
-                r"from fake tensor input 0 allocated at:\n[\s\S]*in make_other"
+                rf"from active fake mode 0 allocated at:\n{not_other}in make_mode"
+                rf"{not_other}from fake tensor input 0 allocated at:\n"
+                rf"{not_mode}in make_other{not_mode}\Z"
             )
             with self.assertRaisesRegex(AssertionError, msg):
                 detect_fake_mode([other_fake])
