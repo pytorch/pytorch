@@ -130,10 +130,13 @@ class AllGatherOutputs:
     Payload ``j``'s output must be a contiguous 1-D tensor of
     ``input_numels[j] * world_size`` elements of ``input_dtypes[j]`` that holds
     the ranks' chunks, viewed as ``(outer_sizes[j], -1)``, concatenated along
-    dim 1, since FSDP views the unsharded parameter from it. On the group's
-    first unshard FSDP checks those sizes and dtypes and adopts ``tensors`` as
-    the parameters' outputs and ``buffers`` as the FSDP-owned buffers behind
-    them; every nonempty output must view one of the buffers, without overlapping
+    dim 1, since FSDP views the unsharded parameter from it. A parameter sharded
+    unevenly on a nonzero dim without an all-gather extension has such an output
+    too, whose rows hold padding: FSDP copies its data out after finalize into
+    storage of its own that backs the unsharded parameter. On the group's first
+    unshard FSDP checks those sizes and dtypes and adopts ``tensors`` as the
+    parameters' outputs and ``buffers`` as the FSDP-owned buffers behind them;
+    every nonempty output must view one of the buffers, without overlapping
     another output, and should have its own version counter, e.g. a ``.data``
     view, like a separately allocated output. FSDP frees and re-allocates each
     buffer's whole storage on the current stream, outside any memory pool, so
@@ -678,17 +681,8 @@ def foreach_all_gather_copy_out(
         layout._copy_out(
             all_gather_output, plan, world_size, _default_all_gather_output_fn
         )
+        _copy_out_unpadded(params)
         return persistent_buffers
-    for param in params:
-        if param.drops_row_padding:
-            # The contract cannot express outputs that drop the padding inside
-            # each row. The condition is the same on every rank, so every rank
-            # raises.
-            raise NotImplementedError(
-                f"Custom all-gather layouts do not support {param.name}, which is "
-                f"unevenly sharded on dim {param.shard_dim}; use "
-                "DefaultAllGatherLayout or an all-gather extension"
-            )
     first_unshard = not any(p.all_gather_outputs for p in params)
     buffers: list[torch.Tensor] = []
     if not first_unshard:
@@ -733,6 +727,19 @@ def foreach_all_gather_copy_out(
             )
         )
     if first_unshard:
-        return _adopt_layout_outputs(params, outputs, all_gather_result, world_size)
-    _check_layout_refill(params, outputs)
+        persistent_buffers = _adopt_layout_outputs(
+            params, outputs, all_gather_result, world_size
+        )
+    else:
+        _check_layout_refill(params, outputs)
+    _copy_out_unpadded(params)
     return persistent_buffers
+
+
+def _copy_out_unpadded(params: list[ParamAllGather]) -> None:
+    """Copy the data of params whose outputs keep the padding inside their rows
+    (unevenly sharded Shard(i), i > 0, params under a custom layout) into the
+    unpadded storage behind their unsharded params."""
+    for param in params:
+        if param.outputs_keep_row_padding:
+            param.copy_out_unpadded()

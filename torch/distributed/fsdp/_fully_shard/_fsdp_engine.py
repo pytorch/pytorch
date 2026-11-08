@@ -392,14 +392,6 @@ class FullyShardBucket:
         )
         # Re-read at lazy init, as FSDP2 reads extensions then (see refresh)
         self.has_extensions = self.own_storage
-        shard_world_size = (
-            mesh_info.shard_mesh_size if isinstance(mesh_info, FSDPMeshInfo) else 1
-        )
-        self.has_uneven_nonzero_dim_shards = any(
-            (dim := fsdp_param.fsdp_placement.dim) != 0
-            and fsdp_param._orig_size[dim] % shard_world_size != 0
-            for fsdp_param in self.fsdp_params
-        )
         # FSDP2's set_reduce_scatter_max_input_buffers; the root's engine context
         # keeps the largest of its groups'
         self.max_input_buffers = 1
@@ -555,16 +547,14 @@ class FullyShardBucket:
 
     def param_driven_unshard(self) -> bool:
         """Whether the all-gather needs ``ParamDrivenShard``: parameters with
-        their own all-gather, parameters unevenly sharded on a nonzero dim,
-        whose all-gather inputs ``FSDPParam`` pads, or a layout other than the
-        native rank-major one."""
+        their own all-gather, or a layout other than the native rank-major
+        one."""
         from ..experimental import all_gather_output_fn_with_native_copy
 
         layout = self.all_gather_layout
         return (
             self.own_storage
             or self.has_extensions
-            or self.has_uneven_nonzero_dim_shards
             or not (
                 type(layout) is DefaultAllGatherLayout
                 and layout.output_fn in (None, all_gather_output_fn_with_native_copy)
@@ -629,8 +619,8 @@ class FullyShardBucket:
         )
 
     def _home(self) -> None:
-        """Keep the parameters' sharded data in one byte buffer, each in a slot
-        of its ``stored_size`` in its dtype: the shard each took of its
+        """Keep the parameters' sharded data in one byte buffer, each at the
+        start of a slot of its ``slot_numel`` elements in its dtype: the shard each took of its
         parameter at construction, and the data of sharded parameters replaced
         since, in new storage if their dtypes or device changed. Parameters
         with storage of their own (``own_storage``) keep it."""
@@ -648,7 +638,7 @@ class FullyShardBucket:
             for fsdp_param in fsdp_params
         ]
         slots = [
-            (fsdp_param.stored_size.numel(), cast(torch.Tensor, source).dtype)
+            (fsdp_param.slot_numel, cast(torch.Tensor, source).dtype)
             for fsdp_param, source in zip(fsdp_params, sources, strict=True)
         ]
         offsets = _aligned_offsets(slots)

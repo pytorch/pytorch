@@ -3315,6 +3315,43 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
             for p, q in zip(model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to_local(), q.grad.to_local())
 
+    def test_delegating_layout_uneven_shard_dim1(self, device):
+        # Under a custom layout, Shard(1) weights that split unevenly (7 and 5
+        # columns over 4 ranks) get padded outputs like any other, and FSDP
+        # copies their data into the storage behind their unsharded params at
+        # every unshard. The reference uses the engine's own all-gather.
+        mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
+        torch.manual_seed(42)
+        ref_model = nn.Sequential(
+            nn.Linear(7, 5, device=device), nn.Linear(5, 3, device=device)
+        )
+        model = copy.deepcopy(ref_model)
+
+        class Delegating(AllGatherLayout):
+            def prepare_output(self, metadata):
+                return metadata.input_outer_sizes
+
+            def finalize_outputs(self, metadata):
+                return DefaultAllGatherLayout().finalize_outputs(metadata)
+
+        for module in (model, ref_model):
+            for layer in module:
+                fully_shard(
+                    layer, mesh=mesh, shard_placement_fn=lambda p: Shard(p.ndim - 1)
+                )
+            fully_shard(module, mesh=mesh)
+        model.set_all_gather_layout(Delegating())
+        for _ in range(2):
+            inp = torch.randn(4, 7, device=device)
+            self.assertEqual(model(inp), ref_model(inp))
+            for module in (model, ref_model):
+                module(inp).sum().backward()
+            for p, q in zip(model.parameters(), ref_model.parameters()):
+                self.assertEqual(p.grad.to_local(), q.grad.to_local())
+        weight = model[0]._get_fsdp_state()._engine_buckets[0].all_gather.params[0]
+        self.assertTrue(weight.outputs_keep_row_padding)
+        self.assertEqual(weight.unpadded_output.numel(), 35)
+
 
 class TestFullyShardLayoutParityNCCL(FSDPTestContinuous):
     @property

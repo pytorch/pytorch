@@ -7,6 +7,7 @@
 
 import copy
 import dataclasses
+import functools
 import weakref
 from collections import Counter
 from unittest import mock
@@ -702,6 +703,58 @@ class TestFlexShardTraining(FSDPTest):
                 self.rank,
                 self.world_size,
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_uneven_shard_dim1_matches_unsharded_reference(self):
+        # Shard(1) splits the 3- and 5-column weights unevenly over 2 ranks, in
+        # one bucket with Shard(0) params: the all-gather copies the weights out
+        # of the ranks' compact chunks, and the reduce-scatter pads them
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        def shard_dim(param: torch.nn.Parameter) -> int:
+            return 1 if param.ndim > 1 else 0
+
+        def placement_fn(named_params, mesh):
+            return {fqn: (Shard(shard_dim(param)),) for fqn, param in named_params}
+
+        torch.manual_seed(42)
+        model = _UnevenMLPStack(device=device_type)
+        reference = copy.deepcopy(model)
+        flex_shard(
+            model, buckets=[BucketSpec(["*"], placement_fn=placement_fn, mesh=mesh)]
+        )
+
+        def check_parity() -> None:
+            for ref_param, param in zip(
+                reference.parameters(), model.parameters(), strict=True
+            ):
+                shard = functools.partial(
+                    expected_shard,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    dim=shard_dim(ref_param),
+                )
+                self.assertEqual(param.detach(), shard(ref_param.detach()))
+                if ref_param.grad is not None:
+                    self.assertEqual(param.grad, shard(ref_param.grad))
+
+        optimizer = make_test_sgd(model.parameters(), lr=0.1)
+        reference_optimizer = make_test_sgd(reference.parameters(), lr=0.1)
+        torch.manual_seed(43 + self.rank)
+        for _ in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            reference_optimizer.zero_grad(set_to_none=True)
+            inputs = torch.randn(4, 3, device=device_type)
+            output = model(inputs)
+            reference_output = reference(inputs)
+            self.assertEqual(output, reference_output)
+            output.square().sum().backward()
+            reference_output.square().sum().backward()
+            _average_reference_grads(reference)
+            check_parity()
+            optimizer.step()
+            reference_optimizer.step()
+            check_parity()
 
     @skip_if_lt_x_gpu(2)
     def test_copy_free_matches_reference(self):

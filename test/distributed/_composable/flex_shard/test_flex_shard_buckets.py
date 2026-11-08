@@ -450,21 +450,29 @@ class TestBucketPlacementValidation(TestCase):
                 self.assertEqual(param, expected[name])
                 self.assertIs(get_mesh(param), mesh)
 
-    def test_rejects_uneven_shard_on_nonzero_dim(self):
-        """As in FSDP2, only Shard(0) pads; Shard(1) must split evenly."""
+    def test_uneven_shard_on_nonzero_dim_reserves_first_chunk(self):
+        """Every rank reserves the first chunk's elements for a Shard(1) param
+        that splits unevenly, so that the ranks' slots line up in the
+        collectives, and stores its own chunk compactly at the start."""
 
         class TwoRankMesh:
+            def __init__(self, rank: int) -> None:
+                self.rank = rank
+
             def get_local_rank(self) -> int:
-                return 0
+                return self.rank
 
             def size(self) -> int:
                 return 2
 
         weight = nn.Parameter(torch.empty(2, 3))
-        with self.assertRaisesRegex(NotImplementedError, "split evenly"):
-            Shard(1).bucket_storage_layout(
-                [("weight", weight)], {"weight": (Shard(1),)}, TwoRankMesh()
+        for rank, local_shape in ((0, (2, 2)), (1, (2, 1))):
+            layout = Shard(1).bucket_storage_layout(
+                [("weight", weight)], {"weight": (Shard(1),)}, TwoRankMesh(rank)
             )
+            param_layout = layout.param_layouts["weight"]
+            self.assertEqual(param_layout.local_shape, torch.Size(local_shape))
+            self.assertEqual(param_layout.storage_nbytes, 4 * weight.element_size())
 
     def test_fsdp2_compatible_orders_params_as_fully_shard(self):
         """FSDP2 takes a module's own params after its children's."""

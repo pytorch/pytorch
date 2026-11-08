@@ -96,10 +96,15 @@ class ParamAllGather:
         # Output layouts of the inputs last flattened
         self.output_layouts: tuple[_AllGatherOutputLayout, ...] = ()
         self.from_extension = False
-        # Whether the outputs drop the padding inside the rows of an unevenly
-        # sharded Shard(i), i > 0, parameter without an all-gather extension,
-        # which then has its unpadded numel (see init_all_gather_outputs)
+        # Whether the unsharded param drops the padding inside the rows of an
+        # unevenly sharded Shard(i), i > 0, parameter without an all-gather
+        # extension, so that it has its unpadded numel. The default layout's
+        # output drops it (see init_all_gather_outputs); a custom layout's
+        # keeps it, as for other params, and copy_out_unpadded copies the data
+        # into unpadded_output, which then backs the unsharded param.
         self.drops_row_padding = False
+        self.outputs_keep_row_padding = False
+        self.unpadded_output: torch.Tensor | None = None
         self.shard_dim = 0
         self.unpadded_numel = 0
         # Extension layouts checked against the allocated outputs, which never
@@ -120,7 +125,7 @@ class ParamAllGather:
         if self.all_gather_outputs:
             return  # already initialized
         output_numels = [numel * world_size for numel in all_gather_input_numels]
-        if self.drops_row_padding:
+        if self.drops_row_padding and not self.outputs_keep_row_padding:
             # The copy-out drops the padding (see _default_all_gather_output_fn),
             # while extensions receive it, as for Shard(0)
             output_numels = [self.unpadded_numel]
@@ -136,10 +141,42 @@ class ParamAllGather:
             _alloc_storage(tensor)
 
     def free_all_gather_outputs(self) -> None:
+        if self.unpadded_output is not None:
+            _free_storage(self.unpadded_output)
         if self.outputs_view_layout_buffers:
             return
         for tensor in self.all_gather_outputs:
             _free_storage(tensor)
+
+    @property
+    def unsharded_outputs(self) -> tuple[torch.Tensor, ...]:
+        """The outputs that the unsharded param is built from: an extension's
+        in the layouts of its inputs, else the one output with the data."""
+        if self.from_extension:
+            return self.unflatten_all_gather_outputs()
+        if self.outputs_keep_row_padding:
+            return (cast(torch.Tensor, self.unpadded_output),)
+        return tuple(self.all_gather_outputs)
+
+    @torch.no_grad()
+    def copy_out_unpadded(self) -> None:
+        """Copy the data of the output that keeps the row padding into
+        ``unpadded_output``: each row of the gathered param holds its data
+        first, before the padding of the short chunk and the empty ranks'
+        chunks (see _default_all_gather_output_fn)."""
+        (output,) = self.all_gather_outputs
+        if self.unpadded_output is None:
+            self.unpadded_output = output.new_empty(self.unpadded_numel)
+        unpadded = self.unpadded_output
+        _alloc_storage(unpadded)
+        rows = unpadded.view(self.output_layouts[0].outer_size, -1)
+        # Refills write into the storage behind the unsharded param
+        with (
+            torch.autograd._unsafe_preserve_version_counter(unpadded)
+            if not unpadded.is_inference()
+            else contextlib.nullcontext()
+        ):
+            rows.copy_(output.view(rows.size(0), -1)[:, : rows.size(1)])
 
     def unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
@@ -156,12 +193,14 @@ class ParamAllGather:
         global_shape: torch.Size,
         padded_sharded_size: torch.Size,
         uneven: bool,
+        custom_layout: bool,
     ) -> list[torch.Tensor]:
         """Record the output layouts of ``inputs``, which must fit the
         parameter's sharding and any allocated outputs, and return them
         flattened."""
         self.from_extension = inputs.from_extension
         self.drops_row_padding = shard_dim != 0 and uneven and not self.from_extension
+        self.outputs_keep_row_padding = self.drops_row_padding and custom_layout
         self.shard_dim = shard_dim
         self.unpadded_numel = global_shape.numel()
         if not inputs.from_extension:
@@ -334,6 +373,9 @@ class ParamDrivenShard(Shard):
                     global_shape=info.global_shape,
                     padded_sharded_size=torch.Size(padded_sharded_size),
                     uneven=uneven,
+                    custom_layout=not isinstance(
+                        all_gather.layout, DefaultAllGatherLayout
+                    ),
                 )
             )
         state = _ParamDrivenUnshardState(
@@ -487,13 +529,7 @@ class ParamDrivenShard(Shard):
         for index, (param, info) in enumerate(
             zip(all_gather.params, infos, strict=True)
         ):
-            # Only an extension's outputs have the layouts of its inputs; the
-            # default output may drop the padding of its single input
-            outputs = (
-                param.unflatten_all_gather_outputs()
-                if param.from_extension
-                else tuple(param.all_gather_outputs)
-            )
+            outputs = param.unsharded_outputs
             if param.unsharded_param is not None:
                 for tensor in param.inner_tensors:
                     if tensor.untyped_storage().size() == 0:
@@ -503,12 +539,11 @@ class ParamDrivenShard(Shard):
                 built = representation.post_all_gather(index, outputs, None)
                 if built is None:
                     # The output gives the unsharded data directly
-                    if len(param.all_gather_outputs) != 1:
+                    if len(outputs) != 1:
                         raise AssertionError(
-                            "Expected 1 all_gather_output, got "
-                            f"{len(param.all_gather_outputs)}"
+                            f"Expected 1 all_gather_output, got {len(outputs)}"
                         )
-                    tensor, inner_tensors = param.all_gather_outputs[0], []
+                    tensor, inner_tensors = outputs[0], []
                 else:
                     tensor, inner_tensors = built[0], list(built[1])
                     if param.outputs_view_layout_buffers:
@@ -546,7 +581,8 @@ class ParamDrivenShard(Shard):
             )
         persistent: dict[int, torch.Tensor] = {}
         for param in all_gather.params:
-            for tensor in (*param.all_gather_outputs, *param.inner_tensors):
+            unpadded = [] if param.unpadded_output is None else [param.unpadded_output]
+            for tensor in (*param.all_gather_outputs, *unpadded, *param.inner_tensors):
                 persistent.setdefault(id(tensor), tensor)
         if all_gather.layout_buffers is not None:
             for tensor in all_gather.layout_buffers.tensors:

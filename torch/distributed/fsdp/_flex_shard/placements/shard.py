@@ -46,14 +46,18 @@ if TYPE_CHECKING:
 class Shard(Placement):
     """Symmetric sharding — parameter split along dim across all ranks.
 
-    Parameters sharded on different dims share one bucket. As in FSDP2, a
-    ``Shard(i)`` parameter with ``i > 0`` must split evenly; its chunks are
-    reordered to dim 0 around the collectives, and only ``Shard(0)`` pads uneven
-    chunks. A bucket copies its parameters directly between their layouts and
-    the collective buffers with FSDP's native collective copies, as FSDP2's
+    Parameters sharded on different dims share one bucket. Ranks hold
+    ``torch.chunk`` chunks (full chunks, at most one short chunk, then empty
+    ones), each stored compactly at the start of a slot of the first chunk's
+    size, so that the ranks' slots line up in the collectives. ``Shard(i)``
+    chunks with ``i > 0`` are reordered to dim 0 for the reduce-scatter, uneven
+    ones padded there, and the all-gather copies uneven ones out row by row. A
+    bucket copies its parameters directly between their layouts and the
+    collective buffers with FSDP's native collective copies, as FSDP2's
     ``with_native_copy`` functions do: ``fsdp::_all_gather_copy_out_`` from
     pytorch/pytorch#197204 and ``fsdp::chunk_cat_mixed_dtype`` with
-    ``num_leading_dims`` from pytorch/pytorch#200179.
+    ``num_leading_dims`` from pytorch/pytorch#200179; a bucket with uneven
+    ``Shard(i)``, ``i > 0``, parameters copies each parameter separately.
     """
 
     # Finish copies the gathered values into a refill's persistent buffers;
@@ -114,16 +118,10 @@ class Shard(Placement):
     def bucket_compatibility_key(self) -> object:
         return type(self)
 
-    def _check_shardable(self, fqn: str, shape: torch.Size, world_size: int) -> None:
+    def _check_shardable(self, fqn: str, shape: torch.Size) -> None:
         if not 0 <= self.dim < len(shape):
             raise ValueError(
                 f"{self!r} is invalid for parameter {fqn!r} with shape {tuple(shape)}."
-            )
-        if self.dim > 0 and shape[self.dim] % world_size != 0:
-            raise NotImplementedError(
-                f"{self!r} requires parameter {fqn!r} with shape {tuple(shape)} to "
-                f"split evenly over {world_size} ranks, as in FSDP2; only Shard(0) "
-                "supports uneven sharding."
             )
 
     @override
@@ -183,7 +181,7 @@ class Shard(Placement):
             placement = _get_single_placement(param_placements[fqn])
             if not isinstance(placement, Shard):
                 raise AssertionError(f"Expected Shard for {fqn!r}, got {placement!r}")
-            placement._check_shardable(fqn, param.shape, world_size)
+            placement._check_shardable(fqn, param.shape)
             local_shape = placement.compute_local_shape(param.shape, rank, world_size)
             local_numel = local_shape.numel()
             # Rank 0 has the largest chunk; reserve its capacity on every rank.
@@ -278,7 +276,7 @@ class Shard(Placement):
                 persistent_buffers[idx]
                 if persistent_buffers is not None
                 else torch.empty(
-                    world_size * padded_local_numel,
+                    _full_param_numel(info, padded_local_numel, world_size),
                     dtype=info.unsharded_dtype,
                     device=gathered.device,
                 )
@@ -296,6 +294,15 @@ class Shard(Placement):
             foreach_copy_(
                 padded_full_params,
                 list(gathered.split(list(layout.padded_local_numels))),
+            )
+            return full_params, padded_full_params
+        if any(_has_uneven_chunks(info, world_size) for info in infos):
+            slots, offset = [], 0
+            for numel in layout.padded_local_numels:
+                slots.append((offset, numel))
+                offset += numel
+            _copy_out_rank_chunks(
+                padded_full_params, gathered.view(world_size, -1), slots, infos
             )
             return full_params, padded_full_params
         # One copy places every rank's chunk: each padded param is a
@@ -599,7 +606,9 @@ class Shard(Placement):
                 persistent_buffers[idx]
                 if persistent_buffers is not None
                 else torch.empty(
-                    state.world_size * numel, dtype=info.unsharded_dtype, device=device
+                    _full_param_numel(info, numel, state.world_size),
+                    dtype=info.unsharded_dtype,
+                    device=device,
                 )
             )
             padded_full_params.append(padded_full_param)
@@ -621,6 +630,14 @@ class Shard(Placement):
         slots = layout.slots
         if slots is None:
             raise AssertionError("The native copy-out needs the slots of its layout")
+        if any(_has_uneven_chunks(info, state.world_size) for info in state.infos):
+            _copy_out_rank_chunks(
+                outputs,
+                prepared.buffers[1].view(state.world_size, -1),
+                list(slots),
+                state.infos,
+            )
+            return full_params, padded_full_params
         keep = [i for i, (_, size) in enumerate(slots) if size]
         if keep:
             torch.ops.fsdp._all_gather_copy_out_(
@@ -822,6 +839,81 @@ def _reduce_scatter_copy_in_layout(
             ) * world_size
         padded_sizes.append(torch.Size(padded_size))
     return tensors, num_leading_dims, padded_sizes
+
+
+def _has_uneven_chunks(info: ParamInfo, world_size: int) -> bool:
+    """Whether ``info``'s parameter splits unevenly on a nonzero shard dim, so
+    that the ranks' compact chunks are not rows of one padded layout."""
+    dim = _shard_dim(info)
+    return dim != 0 and info.global_shape[dim] % world_size != 0
+
+
+def _full_param_numel(info: ParamInfo, padded_local_numel: int, world_size: int) -> int:
+    """The elements of the buffer behind a full param: every rank's slot, or,
+    for uneven chunks on a nonzero dim, only the param, which then needs no
+    padding inside its rows."""
+    if _has_uneven_chunks(info, world_size):
+        return info.global_numel
+    return world_size * padded_local_numel
+
+
+def _copy_out_rank_chunks(
+    outputs: list[torch.Tensor],
+    rank_major: torch.Tensor,
+    slots: list[tuple[int, int]],
+    infos: list[ParamInfo],
+) -> None:
+    """Copy each param's chunks out of ``rank_major``, whose row r holds rank
+    r's slots, into its output (both in the gather buffer's dtype, bytes for a
+    uint8 buffer), one param at a time: the native copy-out reads every slot,
+    while uneven chunks on a nonzero dim are not rows of one padded layout.
+
+    For example, a (2, 5) param on Shard(1) over 4 ranks stores chunks of 2, 2,
+    1 and 0 columns compactly, written here as p13 for P[1, 3] and .. for
+    padding. One copy moves the full chunks and one the short chunk:
+
+        rank_major (its slot)      output
+        rank 0   p00 p01 p10 p11   p00 p01 p02 p03 p04
+        rank 1   p02 p03 p12 p13   p10 p11 p12 p13 p14
+        rank 2   p04 p14 ..  ..
+        rank 3   ..  ..  ..  ..
+    """
+    world_size = rank_major.size(0)
+    dsts: list[torch.Tensor] = []
+    srcs: list[torch.Tensor] = []
+    for output, (offset, size), info in zip(outputs, slots, infos, strict=True):
+        if size == 0 or output.numel() == 0:
+            continue
+        chunks = rank_major[:, offset : offset + size]
+        dim = _shard_dim(info)
+        shape = info.global_shape
+        outer = math.prod(shape[:dim])
+        if not _has_uneven_chunks(info, world_size):
+            # Each rank's chunk is [outer, size / outer], as for the native copy
+            row = size // outer
+            dsts.append(output[: world_size * size].view(outer, world_size, row))
+            srcs.append(chunks.view(world_size, outer, row).transpose(0, 1))
+            continue
+        dim_size = shape[dim]
+        chunk_size = -(-dim_size // world_size)
+        num_full, short_size = divmod(dim_size, chunk_size)
+        # Output elements per index of the shard dim
+        inner = output.numel() // (outer * dim_size)
+        rows = output.view(outer, dim_size, inner)
+        if num_full:
+            full = chunks[:num_full, : outer * chunk_size * inner]
+            dsts.append(
+                rows[:, : num_full * chunk_size].view(
+                    outer, num_full, chunk_size, inner
+                )
+            )
+            srcs.append(full.view(num_full, outer, chunk_size, inner).transpose(0, 1))
+        if short_size:
+            short = chunks[num_full, : outer * short_size * inner]
+            dsts.append(rows[:, num_full * chunk_size :])
+            srcs.append(short.view(outer, short_size, inner))
+    if dsts:
+        torch._foreach_copy_(dsts, srcs)
 
 
 def _shard_dim(info: ParamInfo) -> int:

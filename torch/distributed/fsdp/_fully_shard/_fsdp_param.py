@@ -201,7 +201,8 @@ class FSDPParam:
     # (bind_storage(None)) rather than in its group's engine bucket
     owns_storage: bool
     _requires_grad: bool  # of the parameter passed to fully_shard
-    _sharded_param_data: torch.Tensor  # 1D, stored_size elements
+    # 1D, slot_numel elements: the stored data (stored_size) first, then zeros
+    _sharded_param_data: torch.Tensor
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
@@ -355,18 +356,24 @@ class FSDPParam:
         """The size of the sharded data in storage. Shard(0) data is stored
         padded, so that the all-gather needs no copy to pad it. For Shard(i),
         i > 0, padding would sit between the rows of the dims before i, so the
-        shard is stored as is and padded in all_gather_inputs if uneven."""
+        shard is stored as is."""
         if self.fsdp_placement.dim == 0:
             return self.padded_sharded_param_size
         return self.sharded_size
+
+    @property
+    def slot_numel(self) -> int:
+        """The elements of this parameter's storage slot, the padded shard's on
+        every rank, so that the ranks' slots line up in the collectives."""
+        return self.padded_sharded_param_size.numel()
 
     @torch.no_grad()
     def bind_storage(
         self, data: torch.Tensor | None, *, holds_param: bool = True
     ) -> None:
-        """Keep the sharded data in ``data``, this parameter's slot of its
-        group's bucket storage (``stored_size`` elements), or, for ``None``, in
-        storage of its own, for tensor subclasses and parameters with an
+        """Keep the sharded data at the start of ``data``, this parameter's slot
+        of its group's bucket storage (``slot_numel`` elements), or, for
+        ``None``, in storage of its own, for tensor subclasses and parameters with an
         all-gather extension at init. Copies the shard taken at init, or the
         local tensor of a sharded parameter replaced since (to_empty,
         load_state_dict(assign=True), a dtype change), and points the sharded
@@ -378,16 +385,16 @@ class FSDPParam:
             raise AssertionError(f"{self._display_name} has no sharded data to bind")
         self.owns_storage = data is None
         if data is None:
-            data = source.new_zeros(self.stored_size)
+            data = source.new_zeros(self.slot_numel)
             if self.offload_to_cpu and not data.is_meta:
                 data = data.cpu()
                 if self.pin_memory:
                     data = data.pin_memory()
-        else:
-            data = data.view(self.stored_size)
+        stored_numel = self.stored_size.numel()
+        stored = data if data.numel() == stored_numel else data[:stored_numel]
         shard_dim = self.fsdp_placement.dim
         length = self.sharded_size[shard_dim]
-        local = data.narrow(shard_dim, 0, length)
+        local = stored.view(self.stored_size).narrow(shard_dim, 0, length)
         if not local.is_meta and local.numel() > 0:
             # A replaced Shard(0) local tensor may hold the padding too
             local.copy_(source.narrow(shard_dim, 0, length))
@@ -1007,7 +1014,7 @@ class FSDPParam:
                 self.padded_sharded_param_size, dtype=self.param_dtype
             )
             padded.narrow(dim, 0, self.sharded_size[dim]).copy_(
-                sharded_param_data.view(self.sharded_size)
+                sharded_param_data[: self.sharded_size.numel()].view(self.sharded_size)
             )
             return ParamAllGatherInputs([padded.view(-1)])
         return ParamAllGatherInputs(

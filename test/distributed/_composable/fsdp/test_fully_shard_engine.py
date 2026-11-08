@@ -33,6 +33,23 @@ class _Net(nn.Module):
         return self.out(torch.relu(self.inner(x) + frozen)).float()
 
 
+class _UnevenNet(nn.Module):
+    """Weights with 33 columns, which Shard(1) splits unevenly over 2 or 4
+    ranks; the frozen bf16 weight beside fp32 ones makes its group's dtypes
+    differ, so that it all-gathers bytes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.inner = nn.Linear(33, 33)
+        self.frozen = nn.Linear(33, 33, dtype=torch.bfloat16)
+        self.frozen.requires_grad_(False)
+        self.out = nn.Linear(33, 5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        frozen = self.frozen(x.to(torch.bfloat16)).to(x.dtype)
+        return self.out(torch.relu(self.inner(x) + frozen))
+
+
 class TestFullyShardEngine(FSDPTest):
     """``fully_shard`` runs on the FlexShard engine: each group's sharded
     parameters live in one engine bucket, also after meta-device init."""
@@ -66,6 +83,37 @@ class TestFullyShardEngine(FSDPTest):
         optim.step()
         results += [p.to_local() for p in model.parameters()]
         return results
+
+    @skip_if_lt_x_gpu(2)
+    def test_uneven_shard_dim1_matches_unsharded_reference(self):
+        # The engine's Shard all-gathers the uneven Shard(1) weights itself:
+        # in the out group as its dtype, in the root group as bytes
+        torch.manual_seed(0)
+        model = _UnevenNet().to(device_type)
+        reference = copy.deepcopy(model)
+        for module in (model.out, model):
+            fully_shard(
+                module, shard_placement_fn=lambda p: Shard(1 if p.ndim > 1 else 0)
+            )
+            infos = module._get_fsdp_state()._engine_buckets[0].storage.param_infos
+            for info in infos.values():
+                self.assertIs(type(info.placement), EngineShard)
+        torch.manual_seed(1 + self.rank)
+        for _ in range(2):
+            inp = torch.randn(4, 33, device=device_type)
+            output, ref_output = model(inp), reference(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            for param, ref_param in zip(
+                model.parameters(), reference.parameters(), strict=True
+            ):
+                if ref_param.grad is None:
+                    continue
+                dist.all_reduce(ref_param.grad)
+                ref_param.grad.div_(self.world_size)
+                self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+                param.grad = ref_param.grad = None
 
     @skip_if_lt_x_gpu(2)
     def test_backward_prefetch_skips_buckets_without_unshard_in_backward(self):
