@@ -10,9 +10,9 @@ and alignment of every tensor; for every runtime scalar, the cutlass Numeric
 annotation of its parameter, or the Python type python_scalar converts it to (bool,
 int or float) if the parameter is unannotated; and the constant_key of every
 constant, which keys lists, tuples, dicts, dataclass instances and plain objects by
-type and content, and an object with state in __slots__ (dataclass fields aside) or a
-callable object other than a dataclass instance as itself, by identity unless its
-class hashes by value (see _object_state in user_kernel_hop.py).
+type and content, and an object with state in __slots__ (dataclass fields aside) or in
+a built-in base, or a callable object other than a dataclass instance, as itself, by
+identity unless its class hashes by value (see _object_state in user_kernel_hop.py).
 
 The signature has no device index: devices of one capability share a compile.
 cute.compile returns a CudaDialectJitCompiledFunction, which loads its cubin as a
@@ -21,21 +21,20 @@ it is first called (its ``to`` and ``_load_cuda_library`` in
 cutlass/cutlass_dsl/cuda_jit_executor.py, in nvidia-cutlass-dsl 4.4 and 4.8).
 """
 
-import weakref
 from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Any
 
 import torch
 
 
-# host function -> {argument signature -> compiled function}. Nothing is evicted: a
-# compile's CUDA library is unloaded once it is freed, while a CUDA graph that
-# captured a launch of it still runs its kernel. A constant keyed by identity (see
-# _object_state in user_kernel_hop.py) made for each launch therefore compiles each
-# time and stays in memory, with its compile, as long as the host function does.
-_compiled: weakref.WeakKeyDictionary[Callable[..., Any], dict[tuple[Any, ...], Any]] = (
-    weakref.WeakKeyDictionary()
-)
+# host function -> {argument signature -> compiled function}. Nothing is evicted,
+# and the host functions are held too: a compile's CUDA library is unloaded once it
+# is freed, while a CUDA graph that captured a launch of it still runs its kernel.
+# So a host function made for each launch (a closure, a kernel object), or a
+# constant keyed by identity (see _object_state in user_kernel_hop.py) made for each
+# launch, compiles each time and stays in memory, with its compile, for the life of
+# the process.
+_compiled: dict[Callable[..., Any], dict[tuple[Any, ...], Any]] = {}
 
 
 def _launch_device(name: str, values: Iterable[Any]) -> torch.device:
