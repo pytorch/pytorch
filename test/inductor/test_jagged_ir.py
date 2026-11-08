@@ -204,7 +204,7 @@ class TestJaggedReductionIR(TestCase):
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-    @parametrize("reduce", ["sum", "mean", "max", "min", "prod"])
+    @parametrize("reduce", ["sum", "mean", "max", "min", "prod", "amax", "amin"])
     @parametrize("shape", [(1030,), (1030, 3)])
     def test_segment_reduce_offsets(self, reduce, shape):
         offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
@@ -254,9 +254,34 @@ class TestJaggedReductionIR(TestCase):
             return torch.segment_reduce(data, "max", lengths=lengths, unsafe=unsafe)
 
         actual, codes = run_and_get_code(torch.compile(fn), data, lengths)
-        # Eager checks lengths on the host unless unsafe=True.
-        self.assertEqual("r0_bound" in "\n".join(codes), unsafe)
+        code = "\n".join(codes)
+        self.assertIn("r0_bound", code)
+        # Without unsafe=True, eager's host checks become device asserts.
+        self.assertEqual("lengths contains negative value" in code, not unsafe)
         self.assertEqual(actual, fn(data, lengths))
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @parametrize("segments", ["offsets", "lengths", "unsafe_lengths"])
+    def test_segment_reduce_negative_axis(self, segments):
+        offsets = torch.tensor([[0, 3, 3, 7], [0, 0, 5, 7]], device="cuda")
+        data = torch.randn(2, 7, 4, device="cuda")
+        if segments != "offsets":
+            offsets = offsets.diff()
+
+        def fn(data, offsets):
+            if segments == "offsets":
+                return torch.segment_reduce(data, "sum", offsets=offsets, axis=-2)
+            return torch.segment_reduce(
+                data,
+                "sum",
+                lengths=offsets,
+                axis=-2,
+                unsafe=segments == "unsafe_lengths",
+            )
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data, offsets))
 
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize(
