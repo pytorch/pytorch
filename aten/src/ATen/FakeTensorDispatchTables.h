@@ -2,6 +2,13 @@
 
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+
+#include <cstdint>
+
+namespace c10 {
+class OperatorHandle;
+} // namespace c10
 
 namespace at::impl {
 
@@ -9,7 +16,7 @@ namespace at::impl {
 // these are updated at Python registration sites
 //
 // The tables are kept in sync by hooks at the Python registration sites, which
-// call fakeDispatchTableAdd/Remove:
+// call fakeDispatchTableAdd/Remove, except StaticShapeDecomp, filled once:
 //   - Decomp:   torch._decomp.decomposition_table (post-autograd
 //   decompositions),
 //               via torch._decomp._add_op_to_registry
@@ -24,6 +31,14 @@ namespace at::impl {
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl
+//   - StaticShapeDecomp: the Decomp ops that FakeTensorMode decomposes under
+//                static shapes when they are not in Meta and have no sparse
+//                input (torch_decomp_decompositions, minus
+//                cpp_meta_supports_symint), filled by torch._meta_registrations
+//                once the decompositions are registered (torch._decomp
+//                imports them all). Later registrations and removals are not
+//                mirrored; test_fake_fallback_static_shape_decomps checks the
+//                table against the predicates.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
@@ -34,8 +49,17 @@ enum class FakeDispatchCategory {
   PythonCIA,
   // for custom op handling registered through
   // torch.library.custom_op(...).register_fake
-  CustomOpImpl
+  CustomOpImpl,
+  StaticShapeDecomp,
+  NumCategories
 };
+
+static_assert(static_cast<int>(FakeDispatchCategory::NumCategories) <= 32);
+
+inline uint32_t fakeDispatchCategoryBit(FakeDispatchCategory category) {
+  TORCH_INTERNAL_ASSERT(category < FakeDispatchCategory::NumCategories);
+  return 1u << static_cast<int>(category);
+}
 
 // Record/erase that `name` belongs to `category`. Called from the Python
 // registration hooks listed above.
@@ -50,5 +74,20 @@ TORCH_API void fakeDispatchTableRemove(
 TORCH_API bool fakeDispatchTableContains(
     FakeDispatchCategory category,
     const c10::OperatorName& name);
+
+// The categories `name` is registered under, read at once, as a bitmask to
+// test with fakeDispatchCategoriesHave
+TORCH_API uint32_t fakeDispatchTableCategories(const c10::OperatorName& name);
+
+inline bool fakeDispatchCategoriesHave(
+    uint32_t categories,
+    FakeDispatchCategory category) {
+  return categories & fakeDispatchCategoryBit(category);
+}
+
+// Whether Python's FakeTensorMode runs op through a Python implementation (a
+// registry mirrored in these tables, or an op_implementations handler matched
+// by a predicate), which the C++ fake fallback must reject
+TORCH_API bool fakeHasPythonFakeImpl(const c10::OperatorHandle& op);
 
 } // namespace at::impl
