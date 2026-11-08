@@ -1,10 +1,11 @@
 import torch
 from torch import Tensor
+from torch.types import Device
 
-from ._utils import _device_t, _get_device_index
+from ._utils import _get_device_index
 
 
-def initial_seed(device: _device_t = None, /) -> int:
+def initial_seed(device: Device = None, /) -> int:
     r"""Return the initial seed of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
     on the specified device.
 
@@ -23,7 +24,7 @@ def initial_seed(device: _device_t = None, /) -> int:
     return default_generator.initial_seed()
 
 
-def get_rng_state(device: _device_t = None, /) -> Tensor:
+def get_rng_state(device: Device = None, /) -> Tensor:
     r"""Return the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
     as a `torch.Tensor` of dtype `torch.uint8` for the specified accelerator device.
 

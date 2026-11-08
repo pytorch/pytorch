@@ -36,7 +36,7 @@ from typing import Any, cast, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from typing_extensions import Self
+    from typing import Self
 
 from .bytecode_transformation import convert_instruction, Instruction, instruction_size
 

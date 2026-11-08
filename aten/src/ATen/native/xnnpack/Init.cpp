@@ -1,9 +1,18 @@
 #ifdef USE_XNNPACK
 
+#include <ATen/Context.h>
 #include <ATen/native/xnnpack/Common.h>
 #include <c10/util/Exception.h>
 
 namespace at::native::xnnpack {
+namespace {
+
+[[maybe_unused]] const bool backend_registered_ = []() {
+  internal::register_backend();
+  return true;
+}();
+
+} // namespace
 namespace internal {
 namespace {
 
