@@ -8315,19 +8315,20 @@ def segment_reduce(
     out[*o, s, *i] = reduce(data[*o, p, *i] for p in range(start[*o, s], end[*o, s]))
     """
     axis = _validate_dim(data, axis)
+    # Eager treats amax/amin (what PyG passes) as max/min.
+    reduce = {"amax": "max", "amin": "min"}.get(reduce, reduce)
     segments = offsets if offsets is not None else lengths
-    # Fall back for lengths without unsafe=True (eager validates them on the
-    # host), lengths with offsets (meta and eager disagree on which wins), and
-    # wrappers that cannot pass the jagged numel. Eager adds initial to the
-    # accumulator first, in the data dtype; max and min apply it afterwards,
-    # which gives the same result, but sum, mean and prod lower only their
-    # identity. fp16/bf16 accumulate in fp32, unlike eager.
+    # Fall back for lengths with offsets (meta and eager disagree on which
+    # wins) and wrappers that cannot pass the jagged numel. Eager adds initial
+    # to the accumulator first, in the data dtype; max and min apply it
+    # afterwards, which gives the same result, but sum, mean and prod lower
+    # only their identity. fp16/bf16 accumulate in fp32, unlike eager.
     identity = {"sum": 0, "mean": 0, "prod": 1}.get(reduce)
     if (
         segments is None
         or indices is not None
         or (initial is not None and identity is not None and initial != identity)
-        or (lengths is not None and (offsets is not None or not unsafe))
+        or (lengths is not None and offsets is not None)
         or reduce not in ("sum", "mean", "max", "min", "prod")
         or not is_triton(data)
         or V.graph.cpp_wrapper
@@ -8371,6 +8372,42 @@ def segment_reduce(
     dtype = data.get_dtype()
     size = data.get_size()
     out_size = [*size[:axis], offsets.get_size()[-1] - 1, *size[axis + 1 :]]
+
+    if lengths is not None and not unsafe:
+        # Eager checks lengths with a host sync. Here each check reduces to one
+        # flag on the device that the assert reads, e.g. for the totals:
+        #     tmp0 = tl.load(in_ptr0 + (7 + 8*r0_0), r0_mask, other=0.0)
+        #     tmp2 = tmp0 != 275  # offsets[b, -1] != data.size(axis)
+        #     tmp6 = triton_helpers.any(tl.where(r0_mask, tmp2, False), 1)
+        #     tl.device_assert(tmp6 == 0, 'segment_reduce(): Expected all ...')
+        # Without it, lengths summing to less than data.size(axis) silently
+        # drop the tail. Asserting per element instead would also test masked
+        # lanes, which load 0 and fail the totals check.
+        lengths_loader = lengths.make_loader()
+
+        def negative(index):
+            return ops.lt(lengths_loader(index), ops.constant(0, lengths.get_dtype()))
+
+        def wrong_total(index):
+            total = offsets_loader([*index, out_size[axis]])
+            return ops.ne(total, ops.index_expr(size[axis], offsets.get_dtype()))
+
+        for invalid, ranges, msg in [
+            (negative, lengths.get_size(), "lengths contains negative value!"),
+            (
+                wrong_total,
+                size[:axis],
+                "segment_reduce(): Expected all rows of lengths along axis to "
+                "sum to data.size(lengths.dim()-1) when !unsafe.",
+            ),
+        ]:
+            flags = Pointwise.create(
+                device=data.get_device(),
+                dtype=torch.bool,
+                inner_fn=invalid,
+                ranges=list(ranges),
+            )
+            _assert_async(logical_not(reduce_any(flags)), msg)
 
     def inner_fn(index, rindex):
         outer, s, inner = index[:axis], index[axis], index[axis + 1 :]
