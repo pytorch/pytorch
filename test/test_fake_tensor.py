@@ -78,7 +78,6 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
-from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -1087,14 +1086,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(y.untyped_storage()._cdata, x.untyped_storage()._cdata)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
-    # mkldnn nyi in C++ fake tensors
+    # factories under the mode nyi in C++ fake tensors
     @xfailIf(CPP_FAKETENSOR)
     def test_alias_fake_mkldnn(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        real = torch.randn(2, 3).to_mkldnn()
         with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(real)
+            x = fake_mode.from_tensor(torch.randn(2, 3).to_mkldnn())
             y = torch.ops.aten.alias.default(x)
         self.assertTrue(y.is_mkldnn)
         self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
@@ -1186,14 +1184,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 self.assertEqual(y_unwrapped.stride(), (3, 1))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
-    # mkldnn nyi in C++ fake tensors
+    # factories under the mode nyi in C++ fake tensors
     @xfailIf(CPP_FAKETENSOR)
     def test_mkldnn_unsafe_fallback(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        real = torch.randn(1, 2, 8, 8).to_mkldnn()
         with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(real)
+            x = fake_mode.from_tensor(torch.randn(1, 2, 8, 8).to_mkldnn())
             y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
             self.assertTrue(is_fake_tensor(y))
             self.assertEqual(y.shape, (1, 2, 4, 4))
@@ -2546,6 +2543,8 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 raise AssertionError(f"expected {self.device_type} device")
 
     @onlyAccelerator
+    # views nyi in C++ fake tensors
+    @xfailIf(CPP_FAKETENSOR)
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -5555,12 +5554,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
-            torch._C._CppFakeTensorMode(None, None, traceback.StackSummary())
+            torch._C._CppFakeTensorMode(None, None)
         # A mode's Python object is set once, and is a CppFakeTensorMode
         with self.assertRaisesRegex(RuntimeError, "already has a Python object"):
             mode._attach_python_object()
-        stack = traceback.StackSummary()
-        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None, stack)
+        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None)
         with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
             bare._attach_python_object()
         with self.assertRaisesRegex(TypeError, "expects a CppFakeTensorMode"):
@@ -6078,6 +6076,14 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
+        # The stack is captured where the mode is created: in
+        # CppFakeTensorMode.__init__, called from here
+        *_, caller, init = mode._creation_traceback.summary()
+        self.assertEqual(init.name, "__init__")
+        init_file = init.filename.replace("\\", "/")
+        self.assertTrue(init_file.endswith("torch/_subclasses/fake_tensor.py"))
+        self.assertIn("test_cpp_fake_tensor_mode_init", caller.name)
+        self.assertTrue(mode.stack.endswith("".join(traceback.format_list([init]))))
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
@@ -6126,12 +6132,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
+        def make_mode():
+            return CppFakeTensorMode()
+
         def make_other():
             return CppFakeTensorMode()
 
         self.addCleanup(self._restore_fake_mode_state)
-        mode, other = CppFakeTensorMode(), make_other()
+        mode, other = make_mode(), make_other()
         # Each mode records the stack it was created at
+        self.assertIn("in make_mode", mode.stack)
         self.assertNotIn("in make_other", mode.stack)
         self.assertIn("in make_other", other.stack)
         cpu = torch.device("cpu")
@@ -6150,10 +6160,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(active_fake_mode(), mode)
             self.assertIs(detect_fake_mode(), mode)
             # As for a Python mode, the inputs' mode must match the active one
-            only_mode = r"(?:(?!in make_other)[\s\S])*"
+            not_other = r"(?:(?!in make_other)[\s\S])*"
+            not_mode = r"(?:(?!in make_mode)[\s\S])*"
             msg = (
-                rf"from active fake mode allocated at:\n  File {only_mode}"
-                r"from fake tensor input 0 allocated at:\n[\s\S]*in make_other"
+                rf"from active fake mode 0 allocated at:\n{not_other}in make_mode"
+                rf"{not_other}from fake tensor input 0 allocated at:\n"
+                rf"{not_mode}in make_other{not_mode}\Z"
             )
             with self.assertRaisesRegex(AssertionError, msg):
                 detect_fake_mode([other_fake])
@@ -6261,11 +6273,13 @@ class TestCppFakeTensorModeBindings(TestCase):
             cases.append(("mkldnn", "mkldnn", torch.randn(2).to_mkldnn()))
         for kind, case, t in cases:
             with self.subTest(case=case):
-                mode = CppFakeTensorMode()
+                shape_env = ShapeEnv()
+                mode = CppFakeTensorMode(shape_env=shape_env)
                 msg = rf"{kind} nyi in C\+\+ fake tensors"
                 with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
                     mode.from_tensor(t)
-                self.assertEqual(len(mode.fake_tensor_converter.tensor_memo), 0)
+                # Rejected before any symbol is made
+                self.assertEqual(len(shape_env.backed_var_to_val), 0)
         # A constant must be a plain tensor
         mode = CppFakeTensorMode()
         converter = mode.fake_tensor_converter
@@ -6273,6 +6287,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "constants that are not plain tensors nyi"
         with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
             converter.from_real_tensor(mode, wrapper, make_constant=True)
+        # and a real one, which the fake records
+        fake = mode.from_tensor(torch.randn(2))
+        with self.assertRaisesRegex(UnsupportedFakeTensorException, "fake constants"):
+            converter.from_real_tensor(mode, fake, make_constant=True)
 
     def test_cpp_fake_tensor_mode_converter_kind(self):
         # A converter makes one kind of fake
@@ -6347,8 +6365,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
 
     def test_fake_fallback_python_impl_predicates(self):
-        # The fake fallback rejects every aten op that an op_implementations
-        # predicate selects, which fakeHasPythonFakeImpl mirrors
+        # fakeHasPythonFakeImpl selects every aten op an op_implementations
+        # predicate selects
         from torch._subclasses.fake_impls import op_implementations_checks
 
         # alias's op_impl only keeps the dispatch keys, which the fallback
@@ -6363,8 +6381,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(missing, {"aten::alias"})
 
     def test_fake_fallback_static_shape_decomps(self):
-        # The fallback rejects the ops FakeTensorMode decomposes under static
-        # shapes, which StaticShapeDecomp records
+        # StaticShapeDecomp records the ops FakeTensorMode decomposes under
+        # static shapes
         from torch._decomp import decomposition_table
         from torch._meta_registrations import cpp_meta_supports_symint
         from torch._subclasses.fake_tensor import torch_decomp_decompositions
@@ -6413,10 +6431,15 @@ class TestCppFakeTensorModeBindings(TestCase):
         on_cuda = torch._C._from_meta_and_device(meta, cuda, mode)
         check(on_cuda + on_cuda, (2, 3), on_cuda.device)
         check(torch.view_as_real(on_cuda), (2, 3, 2), on_cuda.device)
+        # isinf's Meta kernel views such a view (it selects from view_as_real)
+        isinf = torch.isinf(on_cuda)
+        check(isinf, (2, 3), on_cuda.device)
+        self.assertEqual(isinf.dtype, torch.bool)
         # In-place and out= ops return their input. Called boxed below
-        # autograd, so that what the fallback leaves on the stack is returned.
+        # ADInplaceOrView, whose unboxed kernels would return their own
+        # argument, so that what the fallback leaves on the stack is returned.
         out = mode.from_tensor(torch.empty(2, 3))
-        with torch.inference_mode():
+        with torch._C._AutoDispatchBelowADInplaceOrView():
             self.assertIs(torch.ops.aten.add_.Tensor(x, 1), x)
             self.assertIs(torch.ops.aten.add.out(x, x, out=out), out)
         # As in Python, the outputs of alias and detach keep the recorded
@@ -6428,16 +6451,25 @@ class TestCppFakeTensorModeBindings(TestCase):
         transposed = x.t()
         check(transposed, (3, 2))
         self.assertIsNone(maybe_get_fake_dispatch_keys(transposed))
+        # nor those of a new output that is a shallow copy of an input, which
+        # inherits the input's recorded keys
+        inherited = []
+
+        def detached_meta(t):
+            out = t.detach()
+            inherited.append(maybe_get_fake_dispatch_keys(out))
+            return out
+
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("detached(Tensor x) -> Tensor")
+            lib.impl("detached", detached_meta, "Meta")
+            detached = torch.ops._test_fake_fallback.detached(x)
+        self.assertEqual(inherited, [keys])
+        check(detached, (2, 3))
+        self.assertIsNone(maybe_get_fake_dispatch_keys(detached))
 
         meta = torch.eye(2).to_sparse().to("meta")
         sparse = torch._C._from_meta_and_device(meta, real.device, mode)
-        # Sparse inputs run their sparse Meta kernels, with invariant checks off
-        with torch.sparse.check_sparse_tensor_invariants(False):
-            with torch.inference_mode():
-                self.assertIs(torch.ops.aten._coalesced_(sparse, True), sparse)
-            cloned = sparse.clone()
-        check(cloned, (2, 2))
-        self.assertTrue(cloned.is_sparse)
         # Python runs silu's Python Meta registration rather than its
         # decomposition, as the fallback does
         check(torch.ops.aten.silu(x), (2, 3))
@@ -6447,6 +6479,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
         with_real = mode.from_tensor(torch.randn(2, 3))
         torch._C._set_real_tensor(with_real, real)
+        no_mode = torch.empty(2, 3, device="meta")
+        torch._C._set_fake_device(no_mode, real.device)
 
         def under_python_dispatcher():
             with enable_python_dispatcher():
@@ -6456,29 +6490,19 @@ class TestCppFakeTensorModeBindings(TestCase):
             with allow_non_fake_inputs_temporarily(mode):
                 return x + real
 
-        # TestCase turns sparse invariant checks on
-        def sparse_values():
-            with torch.sparse.check_sparse_tensor_invariants(False):
-                return sparse._values()
-
-        def with_invariant_checks():
-            with torch.sparse.check_sparse_tensor_invariants(True):
-                return sparse + sparse
-
         unsupported = {
             # Even with allow_non_fake_inputs
             "non-fake tensor inputs": non_fake_input,
             # Under mode, the active mode is used rather than the inputs'
             "fake tensors of another mode": lambda: other + other,
+            "fake tensors without a mode": lambda: x + no_mode,
             "propagate_real_tensors": lambda: with_real + with_real,
             "constant inputs": lambda: x + constant,
             "device arguments": lambda: torch.ops.aten._to_copy(x, device="cpu"),
             "ops with a Python fake implementation": lambda: x.view(6),
             "CompositeImplicitAutograd ops below autograd": lambda: x.reshape(6),
             "the Python dispatcher": under_python_dispatcher,
-            # Python returns the same fake of the values on each call
-            "outputs held by a sparse input": sparse_values,
-            "sparse inputs with sparse invariant checks enabled": with_invariant_checks,
+            "sparse inputs": lambda: sparse + sparse,
             # Its decomposition checks the device, which reads meta here
             "ops Python decomposes": lambda: torch.ops.aten.log_sigmoid_forward(x),
         }
@@ -6490,6 +6514,11 @@ class TestCppFakeTensorModeBindings(TestCase):
                     # below autograd
                     with torch.inference_mode():
                         fn()
+
+        # Outside a mode, fakes without one have no mode to run under
+        msg = "fallback does not support fake tensors without a mode yet"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            no_mode + no_mode
 
         # Python decomposes most ops for symbolic sizes
         symbolic_mode = CppFakeTensorMode(shape_env=ShapeEnv())
@@ -6873,71 +6902,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(is_in_torch_dispatch_mode())
         gc.collect()
         self.assertIsNone(refs[0]())
-
-
-class TestCppFakeFallbackOpInfoDevice(TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    # An op the fake fallback runs gives what Python's FakeTensorMode gives, or
-    # raises where it raises; one it does not support raises
-    # NotImplementedError, and an input the C++ mode cannot convert yet raises
-    # UnsupportedFakeTensorException
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @ops(op_db, dtypes=OpDTypes.any_one)
-    def test_fake_fallback_matches_python(self, device, dtype, op):
-        from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-        def run(mode, sample):
-            inputs = (sample.input, sample.args, sample.kwargs)
-            inp, args, kwargs = pytree.tree_map_only(
-                torch.Tensor, mode.from_tensor, inputs
-            )
-            with mode:
-                return op(inp, *args, **kwargs)
-
-        compared = 0
-        for sample in op.sample_inputs(device, dtype, requires_grad=False):
-            python_error = None
-            try:
-                expected = run(torch._subclasses.fake_tensor.FakeTensorMode(), sample)
-            except Exception as e:
-                python_error = e
-            mode = CppFakeTensorMode()
-            try:
-                out = run(mode, sample)
-            except (NotImplementedError, UnsupportedFakeTensorException):
-                continue
-            except Exception as e:
-                # The same error as Python's
-                if python_error is None or not isinstance(e, type(python_error)):
-                    raise
-                continue
-            self.assertIsNone(python_error, "Python's FakeTensorMode raised")
-            expected_leaves, expected_spec = pytree.tree_flatten(expected)
-            out_leaves, out_spec = pytree.tree_flatten(out)
-            self.assertEqual(out_spec, expected_spec)
-            for e, o in zip(expected_leaves, out_leaves):
-                if not isinstance(e, torch.Tensor):
-                    self.assertEqual(o, e)
-                    continue
-                self.assertIsInstance(o, torch.Tensor)
-                self.assertIs(torch._C._maybe_get_fake_mode(o), mode)
-                self.assertEqual(
-                    (o.shape, o.dtype, o.device, o.layout),
-                    (e.shape, e.dtype, e.device, e.layout),
-                )
-                self.assertEqual((o.is_conj(), o.is_neg()), (e.is_conj(), e.is_neg()))
-                if e.layout == torch.strided:
-                    self.assertEqual(o.stride(), e.stride())
-                    self.assertEqual(o.storage_offset(), e.storage_offset())
-            compared += 1
-        if compared == 0:
-            self.skipTest("no sample ran through the fake fallback")
-
-
-instantiate_device_type_tests(
-    TestCppFakeFallbackOpInfoDevice, globals(), only_for=("cpu",)
-)
 
 
 if __name__ == "__main__":

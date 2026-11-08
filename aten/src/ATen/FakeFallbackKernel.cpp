@@ -1,17 +1,17 @@
-#include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
 #include <algorithm>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
@@ -40,15 +40,12 @@
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors);
-//  - outputs a sparse input holds (such as _values'), which Python returns as
-//    the same fake on each call;
-//  - sparse inputs while sparse invariant checks are enabled, which read index
-//    data meta tensors lack. Python turns the process-wide setting off around
-//    the op, which races with other threads;
+//  - sparse inputs;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
 //    backend fallback does for an op without one), which Python then runs
 //    through maybe_run_unsafe_fallback (a Python Meta kernel's
-//    NotImplementedError is not caught here, so it propagates as is);
+//    NotImplementedError is not caught here, so it propagates as is, without
+//    the message callers match below);
 //  - and the input checks below.
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
@@ -84,13 +81,16 @@ void for_each_tensor(
 
 [[noreturn]] void unsupported(
     const c10::OperatorHandle& op,
-    std::string_view what) {
+    std::string_view what,
+    std::string_view cause = {}) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "The C++ fake tensor fallback does not support ",
       what,
       " yet, found in ",
-      op.operator_name());
+      op.operator_name(),
+      cause.empty() ? "" : ": ",
+      cause);
 }
 
 // Whether ivalue is or holds a symbolic number
@@ -224,9 +224,8 @@ void fakeFallback(
 
   // The op's tensor inputs, so output wrapping can tell an input returned as
   // an output (by in-place and out= ops) from a new tensor
-  c10::SmallVector<const c10::TensorImpl*, 8> input_impls;
+  std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
-  c10::DispatchKeySet meta_keyset;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
@@ -248,10 +247,17 @@ void fakeFallback(
         if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
           unsupported(op, "quantized, nested or mkldnn inputs");
         }
+        if (impl->is_sparse() || impl->is_sparse_compressed()) {
+          unsupported(op, "sparse inputs");
+        }
         if (impl->has_symbolic_sizes_strides()) {
           unsupported(op, "symbolic shapes");
         }
-        if (impl->fake_tensor_mode() != mode) {
+        const auto input_mode = impl->fake_tensor_mode();
+        if (input_mode == nullptr) {
+          unsupported(op, "fake tensors without a mode");
+        }
+        if (input_mode != mode) {
           unsupported(op, "fake tensors of another mode");
         }
         if (impl->real_tensor() != nullptr) {
@@ -260,7 +266,7 @@ void fakeFallback(
         if (mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
-        input_impls.push_back(impl);
+        input_impls.insert(impl);
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
@@ -276,34 +282,15 @@ void fakeFallback(
                   *fake_device,
                   ")"));
         }
-        switch (t.layout()) {
-          case c10::Layout::Sparse:
-            meta_keyset = meta_keyset.add(c10::DispatchKey::SparseMeta);
-            break;
-          case c10::Layout::SparseCsr:
-          case c10::Layout::SparseCsc:
-          case c10::Layout::SparseBsr:
-          case c10::Layout::SparseBsc:
-            meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
-            break;
-          default:
-            break;
-        }
       });
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
-  if (meta_keyset.empty()) {
-    // Python decomposes these only without sparse inputs
-    if (at::impl::fakeDispatchCategoriesHave(
-            categories, FakeDispatchCategory::StaticShapeDecomp) &&
-        !at::impl::fakeDispatchCategoriesHave(
-            categories, FakeDispatchCategory::Meta)) {
-      unsupported(op, "ops Python decomposes");
-    }
-    meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
-  } else if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
-    unsupported(op, "sparse inputs with sparse invariant checks enabled");
+  if (at::impl::fakeDispatchCategoriesHave(
+          categories, FakeDispatchCategory::StaticShapeDecomp) &&
+      !at::impl::fakeDispatchCategoriesHave(
+          categories, FakeDispatchCategory::Meta)) {
+    unsupported(op, "ops Python decomposes");
   }
 
   // As in Python, the outputs of alias and detach of a fake keep its recorded
@@ -323,12 +310,16 @@ void fakeFallback(
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
   try {
-    op.redispatchBoxed(meta_keyset, stack);
-  } catch (const c10::NotImplementedError&) {
+    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::Meta), stack);
+  } catch (const c10::NotImplementedError& e) {
     // Python runs these through maybe_run_unsafe_fallback
-    unsupported(op, "ops without a working Meta kernel");
+    unsupported(
+        op, "ops without a working Meta kernel", e.what_without_backtrace());
   }
 
+  // The fakes that replaced outputs, so that a tensor returned twice gets the
+  // same fake, as Python's memo of the fakes it makes of meta outputs gives
+  std::unordered_map<const c10::TensorImpl*, at::Tensor> replaced;
   // Returns the fake that replaces t on the stack, if t is not itself made one
   auto wrap_output = [&](const at::Tensor& t,
                          bool is_alias) -> std::optional<at::Tensor> {
@@ -336,26 +327,24 @@ void fakeFallback(
       return std::nullopt;
     }
     auto* impl = t.unsafeGetTensorImpl();
+    if (const auto it = replaced.find(impl); it != replaced.end()) {
+      return it->second;
+    }
     // An input returned as an output (by in-place and out= ops, or an op that
     // returns its input without an alias annotation) is kept as is, as Python
     // does. Its stored fake device is read, as device() reports meta here.
-    if (std::find(input_impls.begin(), input_impls.end(), impl) !=
-        input_impls.end()) {
+    if (input_impls.contains(impl)) {
       TORCH_INTERNAL_ASSERT(impl->fake_device() == device);
       return std::nullopt;
     }
     std::optional<at::Tensor> out;
     if (c10::raw::intrusive_ptr::use_count(impl) > 1) {
-      // A tensor held elsewhere. Python memoizes the fake it makes of a meta
-      // output, so the values _values returns from a sparse tensor are the
-      // same fake on each call, which this does not do yet.
-      if (!meta_keyset.has(c10::DispatchKey::Meta)) {
-        unsupported(op, "outputs held by a sparse input");
-      }
-      // A Python Meta kernel's output, which its Python object refers to, is
-      // new on each call; it is not changed, and a shallow copy becomes the fake
+      // A tensor held elsewhere: a Python Meta kernel's output, which its
+      // Python object refers to, is new on each call; it is not changed, and a
+      // shallow copy becomes the fake
       out = at::Tensor(impl->shallow_copy_and_detach(
           impl->version_counter(), impl->allow_tensor_metadata_change()));
+      replaced.emplace(impl, *out);
       impl = out->unsafeGetTensorImpl();
     } else if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy

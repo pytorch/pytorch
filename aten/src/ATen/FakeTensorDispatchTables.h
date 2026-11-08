@@ -87,7 +87,7 @@ inline bool fakeDispatchCategoriesHave(
 
 // Whether Python's FakeTensorMode runs op through a Python implementation (a
 // registry mirrored in these tables, or an op_implementations handler matched
-// by a predicate), which the fake fallback (FakeFallbackKernel.cpp) rejects
+// by a predicate), which the C++ fake fallback must reject
 TORCH_API bool fakeHasPythonFakeImpl(const c10::OperatorHandle& op);
 
 } // namespace at::impl

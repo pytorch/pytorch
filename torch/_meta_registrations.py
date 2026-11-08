@@ -9582,10 +9582,13 @@ def _register_static_shape_decomps() -> None:
     from torch._decomp import decomposition_table
     from torch._subclasses.fake_tensor import torch_decomp_decompositions
 
+    # Uncached, so that FakeTensorMode still decides each op at its first
+    # dispatch, as before
+    decomposes = torch_decomp_decompositions.__wrapped__
     for op in decomposition_table:
         if (
             isinstance(op, OpOverload)
-            and torch_decomp_decompositions(op)
+            and decomposes(op)
             and not cpp_meta_supports_symint(op)
         ):
             schema = op._schema

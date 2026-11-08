@@ -3056,7 +3056,7 @@ Call this whenever a new thread is created in order to propagate values from
       .def(
           py::init([](const py::object& converter,
                       const py::object& shape_env,
-                      const py::object& stack_trace) {
+                      const py::object& creation_traceback) {
             TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
             std::shared_ptr<c10::SafePyObject> shape_env_obj;
             if (!shape_env.is_none()) {
@@ -3073,13 +3073,16 @@ Call this whenever a new thread is created in order to propagate values from
                 functorch_config
                     .attr("fake_tensor_allow_unsafe_data_ptr_access")
                     .cast<bool>());
-            mode->stack_trace_ = std::make_shared<c10::SafePyObject>(
-                stack_trace.inc_ref().ptr(), getPyInterpreter());
+            if (!creation_traceback.is_none()) {
+              mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(
+                  creation_traceback.inc_ref().ptr(), getPyInterpreter());
+            }
             return mode;
           }),
           py::arg("converter"),
           py::arg("shape_env"),
-          py::arg("stack_trace"))
+          py::kw_only(),
+          py::arg("creation_traceback") = py::none())
       // Adopts an existing mode, to rebuild its collected Python object; see
       // Note [C++ FakeTensorMode Python object lifetime]
       .def(py::init(&torch::fake_tensor::cpp_fake_mode_from_capsule))
@@ -3142,13 +3145,13 @@ Call this whenever a new thread is created in order to propagate values from
             mode.epoch_ = value;
           })
       .def_property_readonly(
-          "_stack_trace",
+          "_creation_traceback",
           [](const c10::FakeTensorMode& mode) -> py::object {
-            if (!mode.stack_trace_) {
+            if (!mode.creation_traceback_) {
               return py::none();
             }
             return py::reinterpret_borrow<py::object>(
-                mode.stack_trace_->ptr(getPyInterpreter()));
+                mode.creation_traceback_->ptr(getPyInterpreter()));
           })
       .def_property_readonly(
           "fake_tensor_converter",
