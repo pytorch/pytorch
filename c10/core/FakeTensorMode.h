@@ -24,6 +24,13 @@ struct TensorImpl;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Where the mode's Python object was created, a
+  // torch.utils._traceback.CapturedTraceback (_CppFakeTensorMode's
+  // _creation_traceback, which CppFakeTensorMode.stack formats), kept here so
+  // that a rebuilt object still reports it. Like the two above, set by the
+  // binding's constructor before the mode is shared and never changed; unset
+  // for a mode made in C++ or without one.
+  std::shared_ptr<c10::SafePyObject> creation_traceback_;
   // Owns a Python weakref to this mode's Python object (a CppFakeTensorMode,
   // which subclasses the mode's binding), not the object itself. See
   // Note [C++ FakeTensorMode Python object lifetime] in
