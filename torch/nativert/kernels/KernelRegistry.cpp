@@ -116,7 +116,7 @@ static Tensor& c2_argmin_out(
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             auto v = std::min_element(
                 in_ptr + i * n,
                 in_ptr + (i + 1) * n,
@@ -145,10 +145,10 @@ static Tensor& c2_argmin_out(
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             const scalar_t* cur_in_ptr = in_ptr + i * n * next_size + next_size;
             for (int k = 1; k < n; ++k) {
-              for (int j = 0; j < next_size; ++j) {
+              for (const auto j : c10::irange(next_size)) {
                 int64_t* cur_out_ptr = out_ptr + i * next_size + j;
                 if (less_or_nan(
                         *cur_in_ptr,
@@ -215,7 +215,7 @@ static at::Tensor& mul_out(
         const void* self_ptr = self.data_ptr();
 
         at::parallel_for(0, num_elements, 1, [&](int64_t start, int64_t end) {
-          for (int64_t i = start; i < end; ++i) {
+          for (const auto i : c10::irange(start, end)) {
             AT_DISPATCH_ALL_TYPES_AND3(
                 kHalf,
                 kBFloat16,
@@ -1460,7 +1460,34 @@ REGISTER_CPU_KERNEL(
         output_size = KernelInput(3).toInt();
       }
 
-      KernelOutput(0) = at::repeat_interleave(self, repeats, dim, output_size);
+      const bool isSingletonCpuFastPath = self.device().is_cpu() &&
+          repeats.device().is_cpu() && self.layout() == c10::kStrided &&
+          repeats.layout() == c10::kStrided && self.is_contiguous() &&
+          repeats.is_contiguous() && self.dim() == 1 && self.numel() == 1 &&
+          repeats.dim() == 1 && repeats.numel() == 1 &&
+          (!dim.has_value() || dim.value() == 0 || dim.value() == -1) &&
+          !output_size.has_value() && !self.is_conj() && !self.is_neg() &&
+          (at::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
+           at::isFloatingType(self.scalar_type())) &&
+          (repeats.scalar_type() == at::kInt ||
+           repeats.scalar_type() == at::kLong);
+      if (isSingletonCpuFastPath) [[likely]] {
+        const auto repeatCount = repeats.item<int64_t>();
+        TORCH_CHECK(repeatCount >= 0, "repeats can not be negative");
+        if (KernelOutput(0).isNone() ||
+            KernelOutput(0).toTensor().scalar_type() != self.scalar_type() ||
+            KernelOutput(0).toTensor().device() != self.device() ||
+            KernelOutput(0).toTensor().layout() != self.layout()) [[unlikely]] {
+          executionFrame.setPersistentIValue(
+              node_->outputs()[0]->id(), at::empty({0}, self.options()));
+        }
+        auto& repeatOutput = KernelOutput(0).toTensor();
+        repeatOutput.resize_({repeatCount});
+        repeatOutput.fill_(self.item());
+      } else {
+        KernelOutput(0) =
+            at::repeat_interleave(self, repeats, dim, output_size);
+      }
     })
 
 } // namespace torch::nativert

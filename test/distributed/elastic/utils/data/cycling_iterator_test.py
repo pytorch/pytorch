@@ -9,9 +9,12 @@
 import unittest
 
 from torch.distributed.elastic.utils.data import CyclingIterator
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class CyclingIteratorTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def generator(self, epoch, stride, max_epochs):
         # generate an continuously incrementing list each epoch
         # e.g. [0,1,2] [3,4,5] [6,7,8] ...

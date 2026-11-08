@@ -14,8 +14,14 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    mix_order_reduction_max_num_stages,
+    ReductionHint,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
+)
+from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -189,6 +195,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate non-persistent reduction autotuning configs."""
         from torch._inductor.runtime.triton_heuristics import (
+            _enforce_native_matmul_config_min_xblock,
             get_total_reduction_numel,
             make_matmul_triton_config,
             triton_config_reduction,
@@ -210,29 +217,32 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
-        # Kernels with per-row online-softmax state have room for larger
-        # reduction blocks than the contiguous default.
-        scalar_online_softmax = AutotuneHint.SCALAR_ONLINE_SOFTMAX in inductor_meta.get(
+        # Kernels with per-row accumulators have room for larger reduction
+        # blocks than the contiguous default.
+        scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
             "autotune_hints", ()
         )
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+        MAX_R0_BLOCK = self._max_r0_block(device_major)
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
 
         if triton_meta.get("native_matmul"):
             if len(size_hints) == 3:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_mm_configs
                 ]
             elif len(size_hints) == 4:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_bmm_configs
                 ]
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            return _enforce_native_matmul_config_min_xblock(
+                configs, inductor_meta.get("min_xblock")
+            )
 
         def make_config(
             x,
@@ -271,7 +281,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 )
 
         contiguous_rblock = (
-            4096 if scalar_online_softmax and "y" in size_hints else MAX_R0_BLOCK
+            4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
         )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
@@ -322,7 +332,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         scalar_acc_configs: list[Config] = []
-        if scalar_online_softmax and "y" not in size_hints:
+        if scalar_accumulators and "y" not in size_hints:
             scalar_acc_configs = [
                 make_config(1, min(rnumel, 4096)),
                 make_config(1, min(rnumel, 8192), num_warps=4),
@@ -347,6 +357,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            configs.extend(
+                self._get_inner_extra_configs(make_config, register_intensive)
+            )
             inner_configs = scalar_acc_configs or [contiguous_config]
             if sm103_config is not None:
                 # Adding B300/GB300 config as autotuning option
@@ -390,6 +403,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             triton_config_tiled_reduction,
             triton_native_persistent_bmm_configs,
             triton_native_persistent_mm_configs,
+            unique_configs,
         )
 
         inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -413,6 +427,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             from torch._inductor.runtime.hints import native_matmul_persistent_rblock
             from torch._inductor.runtime.triton_heuristics import (
                 _cap_native_matmul_configs,
+                _enforce_native_matmul_config_min_xblock,
             )
 
             native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
@@ -424,15 +439,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             elif len(size_hints) == 4:
                 configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            configs = _cap_native_matmul_configs(configs, native_matmul_rblock)
+            return _enforce_native_matmul_config_min_xblock(
+                configs,
+                inductor_meta.get("min_xblock"),
+                r0_block=native_matmul_rblock,
+            )
 
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
             "max_autotune_pointwise"
@@ -484,32 +503,35 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             )
         ]
 
+        max_autotune_configs = list(configs)
+
         # Defer to more autotuning for 3d tiling
         if "y" in size_hints:
             pass
-        elif not max_autotune_enabled:
-            if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-                if (
-                    rnumel > 1024
-                    or xnumel // 8 < 128
-                    or inductor_meta.get("RSPLIT_SIZE")
-                ):
-                    configs = configs[:1]
-                else:
-                    configs = self._persistent_inner_config(
-                        size_hints,
-                        rnumel,
-                        xnumel,
-                        inductor_meta,
-                        reduction_hint,
-                        warp_size,
-                    )
-            elif reduction_hint == ReductionHint.OUTER:
-                configs = configs[-1:]
-            elif reduction_hint == ReductionHint.OUTER_TINY:
-                configs = tiny_configs
-        else:
-            configs = self._persistent_max_autotune_extras(configs, tiny_configs)
+        elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
+                configs = configs[:1]
+            else:
+                configs = self._persistent_inner_config(
+                    size_hints,
+                    rnumel,
+                    xnumel,
+                    inductor_meta,
+                    reduction_hint,
+                    warp_size,
+                )
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+
+        if max_autotune_enabled and "y" not in size_hints:
+            configs = unique_configs(
+                configs
+                + self._persistent_max_autotune_extras(
+                    max_autotune_configs, tiny_configs
+                )
+            )
 
         for c in configs:
             for p in size_hints:
@@ -521,6 +543,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     # ------------------------------------------------------------------
     # Hook methods for device-specific overrides
     # ------------------------------------------------------------------
+
+    def _max_r0_block(self, device_major: int | None) -> int:
+        """Architecture cap on R0_BLOCK, before workload-specific limits."""
+        # SM100+ (B200/GB200) needs the smaller cap.
+        return 1024 if device_major is not None and device_major >= 10 else 2048
 
     def _get_outer_config(
         self,
@@ -544,6 +571,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         """Post-process non-persistent configs."""
         return configs
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        """Extra candidate configs to try for the INNER reduction hint."""
+        return []
 
     def _persistent_xblock_vals(self) -> list[int]:
         """XBLOCK values for persistent reduction."""
@@ -589,7 +620,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:
@@ -648,7 +678,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             required_x_block = max(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
-        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        x_block = last_power_of_2(
+            min(
+                max(rsplit_size // 32, min_x_block, required_x_block),
+                TRITON_MAX_MIX_ORDER_XBLOCK,
+            )
+        )
+        while rsplit_size % x_block != 0:
+            x_block //= 2
+        if x_block < required_x_block:
+            raise ValueError(
+                f"RSPLIT_SIZE={rsplit_size} is incompatible with the required "
+                f"XBLOCK={required_x_block}"
+            )
 
         new_configs: list[Config] = []
         for c in configs:
@@ -657,16 +699,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
             num_iters = rsplit_size // x_block
 
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
-                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
-            else:
-                MAX_NUM_STAGES = 1
-            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
-            # emitted by device-side descriptors.
-            if inductor_meta.get("uses_device_tma"):
-                MAX_NUM_STAGES = 1
+            max_num_stages = mix_order_reduction_max_num_stages(
+                rnumel_hint, inductor_meta
+            )
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
-                max(num_iters // 4, 1), MAX_NUM_STAGES
+                max(num_iters // 4, 1), max_num_stages
             )
 
             if rnumel_hint <= 1024:
@@ -722,6 +759,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 class ROCmReductionHeuristic(ReductionHeuristic):
     """Reduction configs for ROCm/HIP devices."""
 
+    def _max_r0_block(self, device_major: int | None) -> int:
+        # gfx major is not an NVIDIA SM version, so keep the default cap.
+        return 2048
+
     def _get_outer_config(
         self,
         make_config,
@@ -771,6 +812,12 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 @register_codegen_heuristic("reduction", "xpu", register=torch.xpu._is_compiled())
 class XPUReductionHeuristic(ReductionHeuristic):
     """Reduction configs for XPU devices."""
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        # We see performance regression on xpu in some models because the
+        # default INNER config lacks a high-num_warps candidate. Add one back
+        # for XPU to recover the regressed performance.
+        return [make_config(64, 64, num_warps=16)]
 
     def _persistent_inner_config(
         self,
