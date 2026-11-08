@@ -3,6 +3,8 @@
 import torch
 import numpy as np
 import torch._C._te as te
+import platform
+import sys
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -404,6 +406,51 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         f = te.construct_codegen("llvm", nest.simplify(), [a, b])
         ta, tb = (torch.ones(1) for _ in range(2))
         f.call([ta.data_ptr(), tb.data_ptr()])
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    @unittest.skipIf(
+        platform.machine() != "aarch64" or sys.platform != "linux",
+        "Sleef aliases are registered for aarch64 Linux only",
+    )
+    def test_llvm_sleef_aarch64(self):
+        # 20 elements = two 8-lane bodies plus one 4-lane tail and no scalar
+        # residue, so both the split (8 -> 2x4 or 4x2) and the exact-width
+        # paths are emitted and no scalar libm call is legitimately needed.
+        n = 20
+        # A bare Python int binds to the first matching ExprHandle constructor
+        # (uint8), which the LLVM verifier rejects in index arithmetic.
+        dim = te.ExprHandle.int(n)
+        cases = [
+            ("log", te.log, torch.log, 1),
+            ("atan2", te.atan2, torch.atan2, 2),
+        ]
+        for dtype, suffix, width in [
+            (torch.float32, "f", 4),
+            (torch.float64, "d", 2),
+        ]:
+            for name, te_op, torch_op, arity in cases:
+                with self.subTest(op=name, dtype=dtype):
+                    inputs = [te.BufHandle(f"A{k}", [dim], dtype) for k in range(arity)]
+                    C = te.Compute(
+                        "C", [dim], lambda i: te_op(*[a.load([i]) for a in inputs])
+                    )
+                    loopnest = te.LoopNest([C])
+                    loopnest.vectorize_inner_loops()
+                    loopnest.prepare_for_codegen()
+                    stmt = te.simplify(loopnest.root_stmt())
+                    cg = te.construct_codegen("llvm", stmt, [*inputs, C])
+
+                    ir = cg.get_code_text()
+                    sleef = f"Sleef_{name}{suffix}{width}"
+                    self.assertRegex(ir, rf"call [^\n]*@{sleef}\(")
+                    scalar = name + ("f" if dtype == torch.float32 else "")
+                    self.assertNotRegex(ir, rf"@{scalar}\(")
+                    self.assertNotRegex(ir, rf"@llvm\.{name}\.")
+
+                    args = [torch.rand(n, dtype=dtype) + 0.5 for _ in range(arity)]
+                    res = torch.empty(n, dtype=dtype)
+                    cg.call([*args, res])
+                    torch.testing.assert_close(res, torch_op(*args))
 
 
 class TestExprHandlePyBind(JitTestCase):

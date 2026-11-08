@@ -7,8 +7,7 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import Self
+from typing import Any, Optional, overload, Self, TypeVar, Union
 
 import torch
 from torch import device, dtype, memory_format, Tensor
@@ -1789,7 +1788,7 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        forward_call = (self._slow_forward if torch._C._is_tracing() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks

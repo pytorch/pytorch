@@ -423,7 +423,6 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
 
   const Tensor& grad_y_r = grad_y_opt.value_or(Tensor());
   const Tensor& grad_hy_r = grad_hy_opt.value_or(Tensor());
@@ -596,10 +595,8 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
           // dropout, the scaled masks follow after entry num_layers - 2, so
           // index from the front rather than the end.
           iterationInputTensor_ = [mpsGraph sliceTensor:layersOutputsTensor dimension:0 start:i - 1 length:1 name:nil];
-          if (is_macos_14_4_or_newer) {
-            // Prevents shape optimization bug in kernel when num_layers > 2
-            iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
-          }
+          // Prevents shape optimization bug in kernel when num_layers > 2
+          iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
           iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_ axis:0 name:nil];
         }
 
@@ -629,9 +626,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                        start:(num_layers - 1) + (i - 1)
                                                       length:1
                                                         name:nil];
-          if (is_macos_14_4_or_newer) {
-            maskTensor = [mpsGraph identityWithTensor:maskTensor name:nil];
-          }
+          maskTensor = [mpsGraph identityWithTensor:maskTensor name:nil];
           maskTensor = [mpsGraph squeezeTensor:maskTensor axis:0 name:nil];
           gradientTensor_ = [mpsGraph multiplicationWithPrimaryTensor:gradientTensor_
                                                       secondaryTensor:maskTensor

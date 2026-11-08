@@ -1,5 +1,5 @@
-# Driver project that builds NCCL's contrib/nccl_ep against a prebuilt NCCL
-# (the Makefile-built tree in NCCL_HOME). contrib/nccl_ep is written to be
+# Driver project that builds nccl-extensions/nccl_ep against a prebuilt NCCL
+# (the Makefile-built tree in NCCL_HOME). nccl_ep is written to be
 # add_subdirectory'd, so it has no project()/languages of its own and expects
 # CUDA_MAJOR/CUDA_MINOR (mirroring NCCL's root CMakeLists); this driver supplies
 # them. Invoked by the nccl_ep_external ExternalProject in
@@ -14,4 +14,6 @@ string(REPLACE "." ";" __cuda_ver_parts "${CUDAToolkit_VERSION}")
 list(GET __cuda_ver_parts 0 CUDA_MAJOR)
 list(GET __cuda_ver_parts 1 CUDA_MINOR)
 
+# Remove the old build-tree copy so it cannot shadow include/nccl_ep/ep_enums.h.
+file(REMOVE "${NCCL_EP_BUILDDIR}/include/ep_enums.h")
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
