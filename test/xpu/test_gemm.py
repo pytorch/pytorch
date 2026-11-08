@@ -1990,6 +1990,7 @@ def forward(self, x_1, w_1):
         self.assertEqual(b_cow2, b_copy2)
         self.assertEqual(scales_cow2, scales_copy2)
         self.assertEqual(zeros_cow2, zeros_copy2)
+
     def _fp8_block_quantize(self, w, block_n, block_k):
         N, K = w.shape
         w_blocked = w.float().reshape(N // block_n, block_n, K // block_k, block_k)
@@ -2026,7 +2027,7 @@ def forward(self, x_1, w_1):
     @parametrize("m", [0, 128])
     @parametrize("compile", [False, True])
     def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias, m, compile):
-        from torch.nn.functional import ScalingType
+        from torch.nn.functional import _enum_list_as_int_list, ScalingType
 
         torch.manual_seed(0)
         M, K, N = m, 256, 256
@@ -2055,7 +2056,7 @@ def forward(self, x_1, w_1):
 
         def woq_scaled_mm(mat_a, mat_b, scale_b, bias):
             return torch.ops.onednn.woq_scaled_mm(
-                mat_a, mat_b, [scale_b], [scale_recipe], bias
+                mat_a, mat_b, [scale_b], _enum_list_as_int_list(scale_recipe), bias
             )
 
         if compile:
