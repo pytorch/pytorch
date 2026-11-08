@@ -395,8 +395,10 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
-        # change. No code currently fills in a SymFloat's hint later, so this
-        # can be decided now.
+        # change. The descriptor checks the hint on every read, but a SymNode's
+        # hint is computed when it is created, and the only later write
+        # (guarding_hint_or_throw) is for ints and bools, so a SymFloat's hint
+        # cannot change after this and checking it once here is equivalent.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
@@ -684,44 +686,28 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
 
 
 @typing.final
-class CppFakeTensorMode:
-    # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
-    # which the Python parts of fake dispatch run against. The mode's state
-    # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
-    # equivalent. See Note [C++ FakeTensorMode Python wrapper lifetime] in
+class CppFakeTensorMode(torch._C._CppFakeTensorMode):
+    # The Python object of a C++ FakeTensorMode, which the Python parts of fake
+    # dispatch run against. The mode's state lives on the C++ mode, so an object
+    # rebuilt by _from_cpp_mode is equivalent. See
+    # Note [C++ FakeTensorMode Python object lifetime] in
     # torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ("_cpp_mode", "__weakref__")
+    __slots__ = ()
 
     def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        converter = FakeTensorConverter(copy_data=copy_data)
-        self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
+        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self._attach_python_object()
 
     @classmethod
-    def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
-        # Rebuilds a collected wrapper around the same C++ mode, for
-        # getCppFakeTensorModePyObj.
+    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
+        # Rebuilds a collected CppFakeTensorMode around the same C++ mode, which
+        # getCppFakeTensorModePyObj passes in a capsule
         self = cls.__new__(cls)
-        self._cpp_mode = cpp_mode
+        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
         return self
-
-    @property
-    def fake_tensor_converter(self) -> FakeTensorConverter:
-        return self._cpp_mode.fake_tensor_converter
-
-    @property
-    def shape_env(self) -> ShapeEnv | None:
-        return self._cpp_mode.shape_env
-
-    @property
-    def epoch(self) -> int:
-        return self._cpp_mode.epoch
-
-    @epoch.setter
-    def epoch(self, value: int) -> None:
-        self._cpp_mode.epoch = value
 
 
 @functools.cache

@@ -259,8 +259,10 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
+    LruCacheWrapperVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
     SkipFunctionVariable,
@@ -1063,7 +1065,13 @@ class VariableBuilder:
             raise AssertionError(
                 f"Expected function or wrapper, got {type(wrapper_obj)}"
             )
-        return WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, source=source)
+        if is_lru_cache_wrapped_function(wrapper_obj):
+            wrapper_cls = LruCacheWrapperVariable
+        elif isinstance(wrapper_obj, types.FunctionType):
+            wrapper_cls = FunctionWrapperVariable
+        else:
+            wrapper_cls = WrapperUserFunctionVariable
+        return wrapper_cls(wrapper_obj, attr_to_trace, source=source)
 
     @staticmethod
     def create_internal_torch_function_mode_stack_entry(
@@ -2148,27 +2156,24 @@ class VariableBuilder:
             "__script_if_tracing_wrapper", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = FunctionWrapperVariable(value, "__original_fn", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = LruCacheWrapperVariable(value, "__wrapped__", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
+            wrapper_cls = (
+                FunctionWrapperVariable
+                if isinstance(value, types.FunctionType)
+                else WrapperUserFunctionVariable
+            )
+            return wrapper_cls(
                 value,
                 "_torchdynamo_inline",
                 source=self.source,
@@ -2309,16 +2314,29 @@ class VariableBuilder:
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
-            # Method-wrappers are written in C, and they are not guaranteed to
-            # return the same object on attribute lookup. Therefore, we cannot
-            # insert a ID_MATCH guard here. method-wrappers are very
-            # unlikely to change, so its ok to skip the guard here.
+            # Attribute lookup can create a fresh method-wrapper. For descriptor
+            # receivers, guard the receiver and operation instead of wrapper identity.
             descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
             if not isinstance(descriptor, types.WrapperDescriptorType):
                 raise AssertionError(
                     f"expected WrapperDescriptorType, got {type(descriptor)}"
                 )
             obj_source = self.source and AttrSource(self.source, "__self__")
+            if (
+                obj_source is not None
+                and not is_constant_source(obj_source)
+                and isinstance(
+                    value.__self__,
+                    (types.GetSetDescriptorType, types.MemberDescriptorType),
+                )
+            ):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                install_guard(
+                    AttrSource(self.source, "__name__").make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+                install_guard(obj_source.make_guard(GuardBuilder.ID_MATCH))
             obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
             return MethodWrapperVariable(descriptor, obj_vt)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
