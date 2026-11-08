@@ -535,7 +535,7 @@ void block_sparse_mm(
 class CuSparseSpMatCooFromCsrDescriptor
     : public at::cuda::sparse::CuSparseSpMatDescriptor {
  public:
-  explicit CuSparseSpMatCooFromCsrDescriptor(const Tensor& input)
+  explicit CuSparseSpMatCooFromCsrDescriptor(const Tensor& input, bool is_vector)
       : col_indices_(input.col_indices().contiguous()),
         values_(input.values().contiguous()) {
     auto nnz = col_indices_.size(-1);
@@ -545,6 +545,14 @@ class CuSparseSpMatCooFromCsrDescriptor
                        col_indices_,
                        /*out_int32=*/col_indices_.scalar_type() == kInt)
                        .select(0, -2);
+#if CUDA_VERSION < 13010
+    // SpMM with one output column can use SpMV, which requires aligned COO
+    // row indices before CUDA 13.1 (gh-167901).
+    if (is_vector &&
+        reinterpret_cast<uintptr_t>(row_indices_.data_ptr()) % 16 != 0) {
+      row_indices_ = row_indices_.clone();
+    }
+#endif
 
     cusparseSpMatDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
@@ -632,7 +640,7 @@ void spmm(
         at::cuda::ScalarTypeToCudaDataType(mat1.scalar_type()),
         /*batched=*/mat1.dim() == 3);
     if (algorithm == CUSPARSE_SPMM_COO_ALG2) {
-      descA_coo.emplace(mat1);
+      descA_coo.emplace(mat1, /*is_vector=*/mat2.size(-1) == 1);
       spmatA = descA_coo->descriptor();
     }
 #else

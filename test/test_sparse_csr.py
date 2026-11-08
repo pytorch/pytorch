@@ -1809,6 +1809,23 @@ class TestSparseCSRDevice(TestCase):
                                                   device=device, index_dtype=index_dtype)
                 self.assertEqual(torch.bmm(batched, b), torch.bmm(batched.to_dense(), b))
 
+    @onlyAccelerator
+    @skipCUDAIfRocm
+    @skipMPS
+    @skipXPU
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("nrows", [291104, 291105])
+    @deterministiconoff
+    def test_bmm_coo_row_index_alignment(self, device, dtype, index_dtype, nrows):
+        # An odd nnz offsets the converted COO row indices from 16-byte alignment.
+        crow = torch.arange(nrows + 1, dtype=index_dtype, device=device).unsqueeze(0)
+        col = torch.zeros((1, nrows), dtype=index_dtype, device=device)
+        values = make_tensor((1, nrows), dtype=dtype, device=device)
+        a = torch.sparse_csr_tensor(crow, col, values, size=(1, nrows, 1))
+        b = make_tensor((1, 1, 1), dtype=dtype, device=device)
+        self.assertEqual(torch.bmm(a, b), values.unsqueeze(-1) * b)
+
     def run_test_block_addmm_addmv(self,
                                    addmv_addmm,
                                    c,
