@@ -38,6 +38,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -246,6 +247,9 @@ def register_op_impl(
                 raise AssertionError(
                     f"run_impl_check must be callable, got {type(run_impl_check)}"
                 )
+            # fakeHasPythonFakeImpl in aten/src/ATen/FakeFallbackKernel.cpp
+            # re-implements these predicates; keep the two in sync
+            # (test_fake_fallback_python_impl_predicates checks it)
             op_implementations_checks.append((run_impl_check, op_impl))
 
         return op_impl
@@ -2617,13 +2621,14 @@ def make_fast_binary_impl(
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
     if (
         not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         or fake_mode is None
+        or isinstance(fake_mode, CppFakeTensorMode)
     ):
         raise AssertionError(
             "type widening added for cpp faketensor but this is not used yet"

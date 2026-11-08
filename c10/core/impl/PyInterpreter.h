@@ -238,7 +238,9 @@ struct C10_API PyInterpreterVTable {
   // not the device being modeled, and data-dependent sizes need fake-mode
   // state such as the ShapeEnv.
   //
-  // The C++ Fake fallback draws on several distinct Python implementations:
+  // The callbacks below have no caller yet; Note [C++ fake fallback] in
+  // aten/src/ATen/FakeFallbackKernel.cpp says what the C++ fake fallback does
+  // without them. They are the Python implementations it is to draw on:
   //  - Decompositions (fake_try_decomp) express an op in terms of other ops,
   //    which then run on fake tensors. They come from the decomposition_table
   //    and from Python CompositeImplicitAutograd overrides. A decomposition
