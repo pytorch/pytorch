@@ -160,12 +160,15 @@ class AllGatherLayout(ABC):
     state must not be shared across groups; FSDP passes each call's metadata to
     finalize and to a comm of ``comm_type`` instead. ``DefaultAllGatherLayout`` is
     stateless and may be shared. ``comm_type`` is the all-gather comm type that
-    this layout requires, if any. FSDP calls ``prepare`` and ``copy_in`` on its
+    this layout requires, if any, and ``output_fn`` copies out the calls whose
+    output is rank-major (``None`` for FSDP's default copy-out; see
+    ``DefaultAllGatherLayout``). FSDP calls ``prepare`` and ``copy_in`` on its
     all-gather copy-in stream and ``finalize_outputs`` on the current stream,
     which allocates the buffers.
     """
 
     comm_type: type[AllGather] | None = None
+    output_fn: Callable | None = None
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
@@ -209,6 +212,30 @@ class AllGatherLayout(ABC):
             all_gather_inputs,
         )
         return all_gather_input, all_gather_output
+
+    def _copy_out(
+        self,
+        all_gather_output: torch.Tensor,
+        plan: _DefaultAllGatherCopyPlan,
+        world_size: int,
+        default_output_fn: Callable,
+    ) -> None:
+        """Copy a rank-major output into the parameters' outputs with ``output_fn``."""
+        if all_gather_output.numel() == 0:
+            return  # nothing was gathered
+        output_fn = default_output_fn if self.output_fn is None else self.output_fn
+        outputs = [output for param_outputs in plan.outputs for output in param_outputs]
+        non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
+        # Views share their base's version counter
+        with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
+            # See Note [All-gather output fn]
+            output_fn(
+                all_gather_output,
+                outputs,
+                split_sizes=plan.split_sizes,
+                outer_sizes=plan.outer_sizes,
+                world_size=world_size,
+            )
 
     @abstractmethod
     def finalize_outputs(self, metadata: AllGatherFinalizeMetadata) -> AllGatherOutputs:
@@ -293,29 +320,6 @@ class DefaultAllGatherLayout(AllGatherLayout):
         self._copy_out(all_gather_output, plan, world_size, default_fn)
         buffers = metadata.buffers or new_buffers
         return AllGatherOutputs(tensors=plan.outputs, buffers=buffers)
-
-    def _copy_out(
-        self,
-        all_gather_output: torch.Tensor,
-        plan: _DefaultAllGatherCopyPlan,
-        world_size: int,
-        default_output_fn: Callable,
-    ) -> None:
-        if all_gather_output.numel() == 0:
-            return  # nothing was gathered
-        output_fn = default_output_fn if self.output_fn is None else self.output_fn
-        outputs = [output for param_outputs in plan.outputs for output in param_outputs]
-        non_inference_outputs = tuple([t for t in outputs if not t.is_inference()])
-        # Views share their base's version counter
-        with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-            # See Note [All-gather output fn]
-            output_fn(
-                all_gather_output,
-                outputs,
-                split_sizes=plan.split_sizes,
-                outer_sizes=plan.outer_sizes,
-                world_size=world_size,
-            )
 
 
 DEFAULT_ALL_GATHER_LAYOUT = DefaultAllGatherLayout()
