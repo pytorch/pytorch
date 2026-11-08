@@ -266,10 +266,9 @@ struct C10_API FakeTensorMode {
   // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
-  // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
-  // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
-  // mode's Python wrapper, which must expose epoch as a property forwarding
-  // here.
+  // The mode's epoch (FakeTensorMode.epoch), which code that retraces bumps. A
+  // fake's memos are kept only for the epoch they were set in, unless kept
+  // across epochs; the memo bindings read it through the fake's mode.
   uint64_t epoch_ = 0;
 
   FakeTensorMode(

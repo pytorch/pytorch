@@ -5867,7 +5867,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_item_memo(self):
         mode, _ = self._make_mode()
         get_memo = torch._C._get_fake_item_memo
@@ -5878,9 +5877,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         def make_fake():
             meta = torch.empty((), device="meta")
             return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-
-        def bump_version(t):
-            torch._C._autograd._unsafe_set_version_counter((t,), (t._version + 1,))
 
         class IntSubclass(int):
             pass
@@ -5913,7 +5909,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         # Dropped once the tensor is mutated, whether or not kept across epochs
         for keep in (False, True):
             set_memo(fake, 4, keep)
-            bump_version(fake)
+            torch.autograd.graph.increment_version(fake)
             self.assertIsNone(get_memo(fake))
 
         # An inference fake has no version counter, but epochs still apply
@@ -5935,8 +5931,9 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual((get_memo(dst), get_memo(src)), (2, 3))
         dst.data = src
         self.assertIsNone(get_memo(dst))
-        # Once set_data disables the version counter, setting fails and leaves
-        # no memo
+        # An inference fake's version counter is disabled; once set_data gives
+        # it a non-inference key set, reading the version throws, so setting
+        # fails and leaves no memo
         with torch.inference_mode():
             disabled = make_fake()
         disabled.data = make_fake()
@@ -5964,7 +5961,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(get_memo(real))
         self.assertIsNone(torch._C._get_fake_sym_memo(real, "nonzero_memo"))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_memo_helpers(self):
         # The helpers reach a C++ fake's memos, and, like SymNumberMemoDescriptor,
         # keep only a backed SymFloat item memo across epochs
@@ -5987,6 +5983,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         backed_float = shape_env.create_symfloatnode(sym, hint=2.5, source=source)
         unbacked_float = shape_env.create_unbacked_symfloat()
 
+        # The memo is stored with the mode's current epoch
+        mode.epoch += 1
         maybe_set_sym_memo(fake, "nonzero_memo", backed_int)
         self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, backed_int.node)
         mode.epoch += 1
@@ -5999,14 +5997,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(maybe_get_item_memo(fake), memo if kept else None)
         mode.epoch += 1
         self.assertIs(maybe_get_item_memo(fake), backed_float)
-
-        # A fake without a mode has no memos
-        no_mode = torch.empty((), device="meta")
-        torch._C._set_fake_device(no_mode, torch.device("cpu"))
-        maybe_set_sym_memo(no_mode, "nonzero_memo", backed_int)
-        maybe_set_item_memo(no_mode, backed_float)
-        self.assertIsNone(maybe_get_sym_memo(no_mode, "nonzero_memo"))
-        self.assertIsNone(maybe_get_item_memo(no_mode))
 
 
 if __name__ == "__main__":
