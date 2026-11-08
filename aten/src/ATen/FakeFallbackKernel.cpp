@@ -155,7 +155,8 @@ bool has_python_fake_impl(const c10::OperatorHandle& op, uint32_t categories) {
   return op.hasTag(at::Tag::dynamic_output_shape) ||
       op.hasTag(at::Tag::data_dependent_output) ||
       is_tensor_constructor(op.schema()) ||
-      op.operator_name().name.starts_with("aten::_foreach_");
+      (op.operator_name().name.starts_with("aten::_foreach_") &&
+       op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
 }
 
 } // namespace

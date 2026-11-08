@@ -21,6 +21,7 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -2793,11 +2794,12 @@ PyObject* initModule() {
               c10::OperatorName(name, overload));
         });
     py_module.def(
-        "_fake_has_python_fake_impl",
+        "_fake_dispatch_has_python_impl",
         [](const std::string& name, const std::string& overload) {
           const c10::OperatorName op_name(name, overload);
           const auto op = c10::Dispatcher::singleton().findSchema(op_name);
-          TORCH_CHECK_VALUE(op.has_value(), "no operator ", op_name);
+          TORCH_CHECK_VALUE(
+              op.has_value(), "operator ", op_name, " does not exist");
           return at::impl::fakeHasPythonFakeImpl(*op);
         });
     py_module.def(

@@ -1200,12 +1200,13 @@ ActiveFakeMode get_active_fake_mode() {
 //
 // This mirrors the decomposition-selection block in
 // FakeTensorMode._dispatch_impl (torch/_subclasses/fake_tensor.py) and must be
-// kept in sync with it. This callback handles the meta_table exclusion, the
-// decomposition_table lookup with its symbolic/static-shape and sparse
-// eligibility, and the Python CompositeImplicitAutograd lookup. It has no
-// caller yet; a caller must handle the cpp_meta_supports_symint and
-// _unbacked_special_fake_handling_ops exclusions, and afterwards the native
-// CompositeImplicitAutograd fallback.
+// kept in sync with it, as must decomposes_under_static_shapes in
+// torch/_meta_registrations.py for its static shape case. This callback handles
+// the meta_table exclusion, the decomposition_table lookup with its
+// symbolic/static-shape and sparse eligibility, and the Python
+// CompositeImplicitAutograd lookup. It has no caller yet; a caller must handle
+// the cpp_meta_supports_symint and _unbacked_special_fake_handling_ops
+// exclusions, and afterwards the native CompositeImplicitAutograd fallback.
 bool ConcretePyInterpreterVTable::fake_try_decomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1431,8 +1432,9 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
     // describer then reads the source's fake device, which Fake exclusion no
     // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
-    // must only query the source's metadata and build outputs with an explicit
-    // meta device.
+    // must only query the source's metadata, build outputs with an explicit
+    // meta device, and run ops on the fakes it makes only under
+    // in_kernel_invocation_manager (as its set_ for a shared storage does).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
