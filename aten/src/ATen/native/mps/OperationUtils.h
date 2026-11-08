@@ -20,6 +20,7 @@
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -601,7 +602,7 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      NSUInteger length) {
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
   // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
-  TORCH_CHECK(length <= std::numeric_limits<uint32_t>::max(), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
+  TORCH_CHECK(std::in_range<uint32_t>(length), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
@@ -621,7 +622,7 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger inner_len,
                                      NSUInteger outer_len) {
-  TORCH_CHECK(inner_len <= std::numeric_limits<uint32_t>::max() && outer_len <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(inner_len) && std::in_range<uint32_t>(outer_len),
               "MPS 2D dispatch of ",
               inner_len,
               "x",
@@ -640,8 +641,7 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
                                      NSUInteger dim0,
                                      NSUInteger dim1,
                                      NSUInteger dim2) {
-  constexpr NSUInteger max_dim = std::numeric_limits<uint32_t>::max();
-  TORCH_CHECK(dim0 <= max_dim && dim1 <= max_dim && dim2 <= max_dim,
+  TORCH_CHECK(std::in_range<uint32_t>(dim0) && std::in_range<uint32_t>(dim1) && std::in_range<uint32_t>(dim2),
               "MPS 3D dispatch of ",
               dim0,
               "x",
