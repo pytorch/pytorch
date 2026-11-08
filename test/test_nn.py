@@ -7833,6 +7833,26 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    # Shapes cover each fused MPS backward path: for dim=0 rows packed into a simdgroup, one threadgroup per row and
+    # rows split into chunks, and for the last dim narrow, wide and tall column tiles
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("shape", [(1000, 4), (64, 3, 3, 3), (300, 129), (128, 768), (2, 20001)])
+    @parametrize_test("last_dim", [False, True])
+    def test_weight_norm_backward_shapes(self, device, dtype, shape, last_dim):
+        dim = len(shape) - 1 if last_dim else 0
+        v, grad_w = torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype)
+        v[v == 0] = 1
+        g = torch.randn([s if d == dim else 1 for d, s in enumerate(shape)], dtype=dtype)
+        v_dev, g_dev = v.to(device), g.to(device)
+        _, norms = torch._weight_norm_interface(v_dev, g_dev, dim)
+        grads = torch.ops.aten._weight_norm_interface_backward(grad_w.to(device), v_dev, g_dev, norms, dim)
+        ref = torch.ops.aten._weight_norm_interface_backward(
+            grad_w.double(), v.double(), g.double(), norms.cpu().double(), dim)
+        tol = {torch.float32: 1e-5, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        for grad, expected in zip(grads, ref):
+            self.assertEqual(grad.cpu().double(), expected, atol=tol * expected.abs().max().item(), rtol=0)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_rmsnorm_epsilon(self, device, dtype):

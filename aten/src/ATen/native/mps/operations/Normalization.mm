@@ -7,6 +7,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/BatchNorm.h>
+#include <ATen/native/mps/operations/NormBackward.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -498,40 +499,48 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   const auto gamma = weight.defined() ? std::make_optional(weight.to(dtype).contiguous()) : std::nullopt;
   const auto rows = c10::safe_conv<uint32_t>(M, "layer_norm rows");
   const auto row_size = c10::safe_conv<uint32_t>(N, "layer_norm normalized size");
-  const auto threads =
-      std::min(c10::metal::ceil_div(row_size, c10::metal::ILP_PER_THREAD), c10::metal::max_threadgroup_size);
-  const auto variant = threads * c10::metal::ILP_PER_THREAD < row_size ? "looped"sv : "single_row"sv;
-  const auto col_groups = c10::metal::ceil_div(row_size, c10::metal::simdgroup_size);
-  const auto splits = std::clamp<uint32_t>(
-      occupancy_threadgroups() / col_groups, 1, c10::metal::ceil_div(rows, c10::metal::simdgroup_size));
+  const auto dx_plan = grad_input.defined() ? std::make_optional<NormBackwardRows>(M, N, X->options()) : std::nullopt;
   const auto has_affine_grads = grad_weight.defined() || grad_bias.defined();
   const auto dgamma = grad_weight.defined() ? std::make_optional(grad_weight) : std::nullopt;
   const auto dbeta = grad_bias.defined() ? std::make_optional(grad_bias) : std::nullopt;
+  const NormBackwardColumns tiles(M, N);
+  const auto splits = tiles.splits;
+  const auto& affine = grad_weight.defined() ? grad_weight : grad_bias;
+  // With a single split the tile kernel writes dgamma/dbeta itself, if it is instantiated for their dtype
+  const bool direct =
+      splits == 1 && has_affine_grads && (affine.scalar_type() == dtype || affine.scalar_type() == kFloat);
   constexpr int64_t affine_grads = 2;
-  const auto partials = has_affine_grads ? at::empty({splits, N, affine_grads}, X->options().dtype(kFloat)) : Tensor();
+  const auto partials =
+      has_affine_grads && !direct ? at::empty({splits, N, affine_grads}, X->options().dtype(kFloat)) : Tensor();
   const auto type_str = scalarToMetalTypeString(*X);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto enc = stream->commandEncoder();
-      if (grad_input.defined()) {
-        auto pso = lib.getPipelineStateForFunc(fmt::format("layer_norm_backward_{}_{}", variant, type_str));
-        [enc setComputePipelineState:pso];
-        mtl_setArgs(enc, *dOut, *X, mean_c, rstd_c, grad_input, row_size, gamma);
-        [enc dispatchThreadgroups:MTLSizeMake(1, rows, 1) threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+      if (dx_plan) {
+        dx_plan->encode(enc, lib, "layer_norm_backward", *dOut, *X, mean_c, rstd_c, grad_input, gamma);
       }
       if (has_affine_grads) {
-        auto pso = lib.getPipelineStateForFunc(fmt::format("layer_norm_backward_affine_{}", type_str));
+        auto pso = lib.getPipelineStateForFunc(fmt::format(
+            "layer_norm_backward_affine_tiled_{}_{}", type_str, direct ? scalarToMetalTypeString(affine) : "float"));
         [enc setComputePipelineState:pso];
-        mtl_setArgs(enc, *dOut, *X, partials, std::array<uint32_t, 2>{rows, row_size}, mean_c, rstd_c);
-        [enc dispatchThreadgroups:MTLSizeMake(col_groups, splits, 1)
-            threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, c10::metal::simdgroup_size, 1)];
-        const auto& affine = grad_weight.defined() ? grad_weight : grad_bias;
-        pso = lib.getPipelineStateForFunc(
-            fmt::format("layer_norm_backward_affine_combine_{}", scalarToMetalTypeString(affine)));
-        [enc setComputePipelineState:pso];
-        mtl_setArgs(enc, partials, dgamma, dbeta, std::array<uint32_t, 2>{splits, row_size});
-        mtl_dispatch1DJob(enc, pso, row_size);
+        mtl_setArgs(enc,
+                    *dOut,
+                    *X,
+                    mean_c,
+                    rstd_c,
+                    direct ? std::nullopt : std::make_optional(partials),
+                    direct ? dgamma : std::nullopt,
+                    direct ? dbeta : std::nullopt,
+                    std::array<uint32_t, 2>{rows, row_size});
+        tiles.dispatch(enc);
+        if (!direct) {
+          pso = lib.getPipelineStateForFunc(
+              fmt::format("layer_norm_backward_affine_combine_{}", scalarToMetalTypeString(affine)));
+          [enc setComputePipelineState:pso];
+          mtl_setArgs(enc, partials, dgamma, dbeta, std::array<uint32_t, 2>{static_cast<uint32_t>(splits), row_size});
+          mtl_dispatch1DJob(enc, pso, row_size);
+        }
       }
     }
   });

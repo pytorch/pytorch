@@ -4769,6 +4769,11 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((1,), (1,), {}),
         ((1, 2), (2,), {}),
         ((0, 1), (1,), {}),
+        # Large enough to take the other backward kernels on MPS: few long rows (split into chunks), one
+        # threadgroup per row, and tall or wide column tiles for weight and bias grads
+        ((2, 20001), (20001,), {}),
+        ((100, 256), (256,), {}),
+        ((300, 33), (33,), {}),
     )
 
     for input_shape, normalized_shape, kwargs in cases:
@@ -4803,6 +4808,11 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
         ((1,), (1,), 1e-5),
         ((1, 2), (2,), 1e-5),
         ((0, 1), (1,), 1e-5),
+        # Large enough to take the other backward kernels on MPS: few long rows (split into chunks), one
+        # threadgroup per row, and tall or wide column tiles for weight and bias grads
+        ((2, 20001), (20001,), 1e-5),
+        ((100, 256), (256,), 1e-5),
+        ((300, 33), (33,), 1e-5),
     )
 
     for input_shape, normalized_shape, eps in cases:

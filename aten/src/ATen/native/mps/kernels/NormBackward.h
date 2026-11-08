@@ -110,39 +110,214 @@ kernel void norm_backward_looped(
   }
 }
 
-template <typename T, typename Op>
+// Column sums of Op::column_term over a tsize.x (columns) by tsize.y (rows, a
+// power of two) tile. Partial sums go to part[split][col], or with a single
+// split and no part buffer straight to the outputs through Op::store.
+template <typename T, typename Op, typename A>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
-kernel void norm_backward_column_partials(
+kernel void norm_backward_column_tiled(
     device const T* grad_out [[buffer(0)]],
     device const T* input [[buffer(1)]],
-    device typename Op::acc_t* part [[buffer(2)]],
-    constant uint2& rows_cols [[buffer(3)]],
-    device const T* stat_a [[buffer(4)]],
-    device const T* stat_b [[buffer(5)]],
+    device const T* stat_a [[buffer(2)]],
+    device const T* stat_b [[buffer(3)]],
+    device typename Op::acc_t* part [[buffer(4)]],
+    device A* out_a [[buffer(5)]],
+    device A* out_b [[buffer(6)]],
+    constant uint2& rows_cols [[buffer(7)]],
     uint2 tg [[threadgroup_position_in_grid]],
     uint2 ntg [[threadgroups_per_grid]],
-    uint2 pos [[thread_position_in_threadgroup]]) {
+    uint2 pos [[thread_position_in_threadgroup]],
+    uint2 tsize [[threads_per_threadgroup]]) {
   using opmath = opmath_t<T>;
   using acc_t = typename Op::acc_t;
   const uint rows = rows_cols.x, cols = rows_cols.y;
-  const uint col = tg.x * simdgroup_size + pos.x;
-  const uint row0 = tg.y * simdgroup_size + pos.y;
-  const uint row_step = ntg.y * simdgroup_size;
+  const uint col = tg.x * tsize.x + pos.x;
+  const uint row_step = ntg.y * tsize.y;
   acc_t acc = 0;
   if (col < cols) {
-    ulong idx = ulong(row0) * cols + col;
+    // Count iterations so a 32-bit r cannot wrap; a 64-bit counter is ~20%
+    // slower on cache-resident shapes
+    uint r = tg.y * tsize.y + pos.y;
+    const uint steps = r < rows ? (rows - r - 1) / row_step + 1 : 0;
     const ulong idx_step = ulong(row_step) * cols;
-    for (uint i = row0; i < rows; i += row_step, idx += idx_step) {
+    ulong idx = ulong(r) * cols + col;
+    for (uint i = 0; i < steps; ++i, r += row_step, idx += idx_step) {
       acc += Op::column_term(
-          opmath(grad_out[idx]), opmath(input[idx]), stat_a, stat_b, i);
+          opmath(grad_out[idx]), opmath(input[idx]), stat_a, stat_b, r);
     }
   }
-  threadgroup acc_t buf[simdgroup_size][simdgroup_size];
-  buf[pos.y][pos.x] = acc;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  const acc_t total = c10::metal::simd_sum(buf[pos.x][pos.y]);
-  const uint out_col = tg.x * simdgroup_size + pos.y;
-  if (pos.x == 0 && out_col < cols) {
-    part[tg.y * cols + out_col] = total;
+  threadgroup acc_t buf[c10::metal::max_threadgroup_size];
+  const uint lid = pos.y * tsize.x + pos.x;
+  buf[lid] = acc;
+  for (uint s = tsize.y / 2; s > 0; s /= 2) {
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (pos.y < s) {
+      acc += buf[lid + s * tsize.x];
+      buf[lid] = acc;
+    }
+  }
+  if (pos.y != 0 || col >= cols) {
+    return;
+  }
+  if (part != nullptr) {
+    part[tg.y * cols + col] = acc;
+  } else {
+    Op::store(acc, out_a, out_b, col);
   }
 }
+
+// Rows of at most simdgroup_size * ILP_PER_THREAD elements: each row is owned
+// by `width` (a power of two) lanes of a simdgroup and reduced with shuffles,
+// so one threadgroup covers many rows.
+template <typename T, typename Op>
+kernel void norm_backward_packed(
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
+    device const T* stat_a [[buffer(2)]],
+    device const T* stat_b [[buffer(3)]],
+    device T* grad_input [[buffer(4)]],
+    constant uint3& dims [[buffer(5)]],
+    device typename Op::extra_t* extra [[buffer(6)]],
+    uint gid [[thread_position_in_grid]]) {
+  using opmath = opmath_t<T>;
+  constexpr int reads = ILP_PER_THREAD;
+  const uint rows = dims.x, row_size = dims.y, width = dims.z;
+  const uint row = gid / width, lane = gid % width, base = lane * reads;
+  const bool active = row < rows;
+  const uint stat_row = min(row, rows - 1);
+  const ulong offset = ulong(row) * row_size + base;
+  const int count = active ? min(reads, max(0, int(row_size) - int(base))) : 0;
+  const Op op{opmath(stat_a[stat_row]), opmath(stat_b[stat_row]), extra};
+  opmath grad[reads], dir[reads];
+  opmath sum_grad = 0, sum_prod = 0;
+#pragma unroll
+  for (int i = 0; i < reads; i++) {
+    if (i < count) {
+      grad[i] = op.grad(opmath(grad_out[offset + i]), base + i);
+      dir[i] = op.dir(opmath(input[offset + i]));
+      sum_grad += grad[i];
+      sum_prod += grad[i] * dir[i];
+    }
+  }
+  for (ushort delta = width / 2; delta > 0; delta /= 2) {
+    sum_grad += simd_shuffle_xor(sum_grad, delta);
+    sum_prod += simd_shuffle_xor(sum_prod, delta);
+  }
+  const auto c =
+      op.finish(sum_grad, sum_prod, row_size, row, active && lane == 0);
+#pragma unroll
+  for (int i = 0; i < reads; i++) {
+    if (i < count) {
+      grad_input[offset + i] =
+          static_cast<T>(c.scale * (grad[i] - c.shift - dir[i] * c.slope));
+    }
+  }
+}
+
+// Rows too few to fill the GPU are split into chunks: threadgroup (chunk, row)
+// reduces its slice into part[row][chunk], then norm_backward_apply adds up the
+// row's partials and writes grad_input over the same slice.
+template <typename T, typename Op>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void norm_backward_row_partials(
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
+    device const T* stat_a [[buffer(2)]],
+    device const T* stat_b [[buffer(3)]],
+    device float2* part [[buffer(4)]],
+    constant uint2& dims [[buffer(5)]],
+    device typename Op::extra_t* extra [[buffer(6)]],
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint2 ntg [[threadgroups_per_grid]],
+    uint2 pos [[thread_position_in_threadgroup]],
+    uint2 tsize [[threads_per_threadgroup]]) {
+  using opmath = opmath_t<T>;
+  constexpr int reads = ILP_PER_THREAD;
+  const uint row = tg.y, tid = pos.x, lsize = tsize.x;
+  const uint row_size = dims.x, start = tg.x * dims.y;
+  const uint len = min(dims.y, row_size - start);
+  const ulong offset = ulong(row) * row_size + start;
+  const Op op{opmath(stat_a[row]), opmath(stat_b[row]), extra};
+  opmath sum_grad = 0, sum_prod = 0;
+  for (uint r = tid * reads; r < len; r += lsize * reads) {
+#pragma unroll
+    for (int i = 0; i < reads; i++) {
+      if (r + i < len) {
+        const opmath grad =
+            op.grad(opmath(grad_out[offset + r + i]), start + r + i);
+        sum_grad += grad;
+        sum_prod += grad * op.dir(opmath(input[offset + r + i]));
+      }
+    }
+  }
+  threadgroup opmath tg_a[simdgroup_size], tg_b[simdgroup_size];
+  const auto sums =
+      threadgroup_sum2(tg_a, tg_b, sum_grad, sum_prod, tid, lsize);
+  if (tid == 0) {
+    part[ulong(row) * ntg.x + tg.x] = float2(sums[0], sums[1]);
+  }
+}
+
+template <typename T, typename Op>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void norm_backward_apply(
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
+    device const T* stat_a [[buffer(2)]],
+    device const T* stat_b [[buffer(3)]],
+    device T* grad_input [[buffer(4)]],
+    device const float2* part [[buffer(5)]],
+    constant uint2& dims [[buffer(6)]],
+    device typename Op::extra_t* extra [[buffer(7)]],
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint2 ntg [[threadgroups_per_grid]],
+    uint2 pos [[thread_position_in_threadgroup]],
+    uint2 tsize [[threads_per_threadgroup]]) {
+  using opmath = opmath_t<T>;
+  constexpr int reads = ILP_PER_THREAD;
+  const uint row = tg.y, tid = pos.x, lsize = tsize.x;
+  threadgroup float2 total;
+  if (tid < simdgroup_size) {
+    float2 acc = 0;
+    for (uint c = tid; c < ntg.x; c += simdgroup_size) {
+      acc += part[ulong(row) * ntg.x + c];
+    }
+    acc = simd_sum(acc);
+    if (tid == 0) {
+      total = acc;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint row_size = dims.x, start = tg.x * dims.y;
+  const uint len = min(dims.y, row_size - start);
+  const ulong offset = ulong(row) * row_size + start;
+  const Op op{opmath(stat_a[row]), opmath(stat_b[row]), extra};
+  const auto c =
+      op.finish(total.x, total.y, row_size, row, tg.x == 0 && tid == 0);
+  for (uint r = tid * reads; r < len; r += lsize * reads) {
+#pragma unroll
+    for (int i = 0; i < reads; i++) {
+      if (r + i < len) {
+        const opmath grad =
+            op.grad(opmath(grad_out[offset + r + i]), start + r + i);
+        const opmath dir = op.dir(opmath(input[offset + r + i]));
+        grad_input[offset + r + i] =
+            static_cast<T>(c.scale * (grad - c.shift - dir * c.slope));
+      }
+    }
+  }
+}
+
+#define REGISTER_NORM_BACKWARD_ROWS(PREFIX, T, OP)                         \
+  template [[host_name(PREFIX "_single_row_" #T)]] [[kernel]]              \
+  decltype(norm_backward_single_row<T, OP<T>>)                             \
+      norm_backward_single_row<T, OP<T>>;                                  \
+  template [[host_name(PREFIX "_looped_" #T)]] [[kernel]]                  \
+  decltype(norm_backward_looped<T, OP<T>>) norm_backward_looped<T, OP<T>>; \
+  template [[host_name(PREFIX "_packed_" #T)]] [[kernel]]                  \
+  decltype(norm_backward_packed<T, OP<T>>) norm_backward_packed<T, OP<T>>; \
+  template [[host_name(PREFIX "_row_partials_" #T)]] [[kernel]]            \
+  decltype(norm_backward_row_partials<T, OP<T>>)                           \
+      norm_backward_row_partials<T, OP<T>>;                                \
+  template [[host_name(PREFIX "_apply_" #T)]] [[kernel]]                   \
+  decltype(norm_backward_apply<T, OP<T>>) norm_backward_apply<T, OP<T>>

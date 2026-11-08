@@ -2,6 +2,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/NormBackward.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -69,11 +70,12 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   const auto len = c10::checked_convert<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
   const auto dtype = scalarToMetalTypeString(saved_v);
   constexpr auto simd = c10::metal::simdgroup_size;
-  const auto col_groups = at::ceil_div(slices, simd);
-  const auto splits = std::clamp<uint32_t>(occupancy_threadgroups() / col_groups, 1, at::ceil_div(len, simd));
+  const NormBackwardColumns tiles(len, slices);
+  const auto splits = static_cast<uint32_t>(tiles.splits);
   const auto partial = dim == 0
       ? Tensor()
       : at::empty({splits, slices}, saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type())));
+  const auto rows_plan = dim == 0 ? std::make_optional<NormBackwardRows>(slices, len, saved_v.options()) : std::nullopt;
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -86,29 +88,22 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
         [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
         getMPSProfiler().endProfileKernel(pso, stream);
       };
-      if (dim == 0) {
-        constexpr auto ilp = c10::metal::ILP_PER_THREAD;
-        const auto threads = std::min(at::ceil_div(len, ilp), c10::metal::max_threadgroup_size);
-        const auto variant = threads * ilp < len ? "looped"sv : "single_row"sv;
-        run(fmt::format("weight_norm_backward_{}_{}", variant, dtype),
-            MTLSizeMake(threads, slices, 1),
-            MTLSizeMake(threads, 1, 1),
-            grad_w,
-            saved_v,
-            saved_g,
-            saved_norms,
-            grad_v,
-            len,
-            grad_g);
+      if (rows_plan) {
+        rows_plan->encode(encoder, lib, "weight_norm_backward", grad_w, saved_v, saved_g, saved_norms, grad_v, grad_g);
       } else {
         const auto tile = MTLSizeMake(simd, simd, 1);
         const std::array<uint32_t, 2> rows_cols = {len, slices};
+        const std::optional<Tensor> unused;
         run(fmt::format("weight_norm_backward_cols_dot_{}", dtype),
-            MTLSizeMake(col_groups * simd, splits * simd, 1),
-            tile,
+            MTLSizeMake(tiles.col_groups * tiles.tx, splits * tiles.ty, 1),
+            MTLSizeMake(tiles.tx, tiles.ty, 1),
             grad_w,
             saved_v,
+            unused,
+            unused,
             partial,
+            unused,
+            unused,
             rows_cols);
         run("weight_norm_backward_cols_sum",
             MTLSizeMake(slices, 1, 1),
