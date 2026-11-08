@@ -490,6 +490,44 @@ class TestCuteDSLHOPHelpers(TestCase):
         with self.assertRaisesRegex(TypeError, msg):
             add(EqSlotBaseCfg(1.0))
 
+    def test_constants_with_builtin_state_are_keyed_as_themselves(self):
+        # A set subclass or an exception keeps state outside its __dict__ (its items,
+        # its args), so it is keyed as itself, not by its __dict__ (or, for a
+        # dataclass such as NamedTags, by its fields): refused if it is unhashable, by
+        # identity otherwise. Keyed by their equal __dict__s, Tags({1}) and Tags({2}),
+        # or ValueError("a") and ValueError("b"), would share an entry.
+        rules = CUTEDSL_CONSTANT_RULES
+
+        class Tags(set):
+            pass
+
+        @dataclasses.dataclass
+        class NamedTags(set):
+            name: str
+
+        with self.assertRaisesRegex(TypeError, "of type Tags is unhashable"):
+            constant_key(Tags({1}), rules)
+        with self.assertRaisesRegex(TypeError, "of type NamedTags is unhashable"):
+            constant_key(NamedTags("a"), rules)
+        table = KernelSideTable(constant_rules=rules)
+        idx = table.add_constant_args({"e": ValueError("a")})
+        self.assertNotEqual(table.add_constant_args({"e": ValueError("b")}), idx)
+
+    def test_defaultdicts_with_a_default_factory_are_refused(self):
+        # A dict is keyed by its items, which leave out a defaultdict's
+        # default_factory: defaultdict(int) and defaultdict(list) with equal items
+        # would share an entry. One without a default_factory is keyed as a dict is.
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+
+        def add(c):
+            return table.add_constant_args({"c": c})
+
+        msg = "^a constant kernel argument of type defaultdict has a default_factory"
+        with self.assertRaisesRegex(TypeError, msg):
+            add({"tiles": collections.defaultdict(list, a=[1])})
+        plain = collections.defaultdict(None, a=1)
+        self.assertEqual(add(plain), add(collections.defaultdict(None, a=1)))
+
     def test_cyclic_constants_are_refused(self):
         # constant_key and _snapshot walk a constant's contents, so a constant that
         # refers to itself is refused with a ValueError naming the cycle, instead of
@@ -978,6 +1016,18 @@ class TestCuteDSLHOPHelpers(TestCase):
             with self.assertRaisesRegex(ValueError, msg):
                 register_user_kernel_hop(dataclasses.replace(info, dsl="toy"))
             self.assertEqual(_user_kernel_hops, {})
+
+    def test_cutedsl_layout_constraint_ignores_triton_config(self):
+        # Inductor keeps the traced strides of a CuTeDSL kernel's tensors, whatever
+        # Triton's layout config says.
+        from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
+        from torch._inductor import config
+
+        info = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        for layout in ("needs_fixed_stride_order", "flexible_layout"):
+            with config.patch(triton_kernel_default_layout_constraint=layout):
+                constraint = info.get_layout_constraint()
+            self.assertEqual(constraint, "needs_fixed_stride_order")
 
 
 instantiate_parametrized_tests(TestCuteDSLHOPHelpers)
