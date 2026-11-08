@@ -423,14 +423,18 @@ def _with_subgraphs(graph: GraphLowering) -> Iterator[GraphLowering]:
             yield from _with_subgraphs(subgraph.graph)
 
 
-def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule]:
+def _with_fx_subgraphs(
+    module: torch.nn.Module, seen: OrderedSet[torch.fx.GraphModule] | None = None
+) -> Iterator[torch.fx.GraphModule]:
     # Also covers higher-order ops whose bodies aren't lowered as subgraphs,
     # e.g. the control_deps wrapping stream ops.
-    if not isinstance(module, torch.fx.GraphModule):
+    seen = OrderedSet() if seen is None else seen
+    if not isinstance(module, torch.fx.GraphModule) or module in seen:
         return
+    seen.add(module)
     yield module
     for node in module.graph.find_nodes(op="get_attr"):
-        yield from _with_fx_subgraphs(operator.attrgetter(node.target)(module))
+        yield from _with_fx_subgraphs(operator.attrgetter(node.target)(module), seen)
 
 
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
