@@ -6465,6 +6465,16 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         meta = torch.eye(2).to_sparse().to("meta")
         sparse = torch._C._from_meta_and_device(meta, real.device, mode)
+        # Sparse inputs run their sparse Meta kernels, with invariant checks off
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            with torch._C._AutoDispatchBelowADInplaceOrView():
+                self.assertIs(torch.ops.aten._coalesced_(sparse, True), sparse)
+            cloned = sparse.clone()
+            # add's Meta kernel would make a dense output
+            added = sparse + sparse
+        for out in (cloned, added):
+            check(out, (2, 2))
+            self.assertTrue(out.is_sparse)
         # Python runs silu's Python Meta registration rather than its
         # decomposition, as the fallback does
         check(torch.ops.aten.silu(x), (2, 3))
@@ -6485,6 +6495,19 @@ class TestCppFakeTensorModeBindings(TestCase):
             with allow_non_fake_inputs_temporarily(mode):
                 return x + real
 
+        # TestCase turns sparse invariant checks on
+        def sparse_values():
+            with torch.sparse.check_sparse_tensor_invariants(False):
+                return sparse._values()
+
+        def with_invariant_checks():
+            with torch.sparse.check_sparse_tensor_invariants(True):
+                return sparse + sparse
+
+        def without_sparse_kernel():
+            with torch.sparse.check_sparse_tensor_invariants(False):
+                return torch.ops.aten.log_sigmoid_forward(sparse)
+
         unsupported = {
             # Even with allow_non_fake_inputs
             "non-fake tensor inputs": non_fake_input,
@@ -6497,7 +6520,10 @@ class TestCppFakeTensorModeBindings(TestCase):
             "ops with a Python fake implementation": lambda: x.view(6),
             "CompositeImplicitAutograd ops below autograd": lambda: x.reshape(6),
             "the Python dispatcher": under_python_dispatcher,
-            "sparse inputs": lambda: sparse + sparse,
+            # Python returns the same fake of the values on each call
+            "outputs held by a sparse input": sparse_values,
+            "sparse inputs with sparse invariant checks enabled": with_invariant_checks,
+            "sparse inputs to ops without a sparse Meta kernel": without_sparse_kernel,
             # Its decomposition checks the device, which reads meta here
             "ops Python decomposes": lambda: torch.ops.aten.log_sigmoid_forward(x),
         }
