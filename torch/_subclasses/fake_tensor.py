@@ -777,7 +777,9 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        converter = FakeTensorConverter(copy_data=copy_data)
+        tb = CapturedTraceback.extract()
+        super().__init__(converter, shape_env, creation_traceback=tb)
         self._attach_python_object()
         self._init_enter_state()
         self.allow_non_fake_inputs = allow_non_fake_inputs
@@ -793,6 +795,16 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
     def _init_enter_state(self) -> None:
         self.enter_stack: list[_FakeModeEnterRecord] = []
+
+    # Where the mode was created: the frames FakeTensorMode.stack shows, in its
+    # format (empty for a mode made in C++). Unlike FakeTensorMode.stack it is
+    # formatted on each access (only error messages read it), and its source
+    # lines are looked up then, without the module's globals, so they can be
+    # missing for a module loaded through a loader (e.g. from a zip).
+    @property
+    def stack(self) -> str:
+        tb = self._creation_traceback
+        return "" if tb is None else "".join(tb.format())
 
     # Same as FakeTensorMode.avoid_device_init
     @property

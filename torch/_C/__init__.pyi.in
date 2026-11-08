@@ -75,6 +75,7 @@ from torch.types import (
     Storage,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._traceback import CapturedTraceback as PyCapturedTraceback
 from torch.utils.checkpoint import GraphExecGroup
 from torch.xpu import _POOL_HANDLE as XPU_POOL_HANDLE
 
@@ -2311,6 +2312,8 @@ class _CppFakeTensorMode:
     allow_non_fake_inputs: _bool
     epoch: _int
     @property
+    def _creation_traceback(self) -> PyCapturedTraceback | None: ...
+    @property
     def fake_tensor_converter(self) -> FakeTensorConverter: ...
     @property
     def shape_env(self) -> ShapeEnv | None: ...
@@ -2319,6 +2322,8 @@ class _CppFakeTensorMode:
         self,
         converter: FakeTensorConverter,
         shape_env: ShapeEnv | None,
+        *,
+        creation_traceback: PyCapturedTraceback | None = None,
     ) -> None: ...
     @overload
     def __init__(self, cpp_mode: object, /) -> None: ...
