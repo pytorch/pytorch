@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <utility>
 
 namespace at::native {
 namespace {
@@ -56,7 +57,12 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
               other.scalar_type(),
               " and ",
               out.scalar_type());
-  if (!out.is_contiguous() || !input.is_contiguous() || !other.is_contiguous()) {
+  // numThreads = number of cross triplets = numel / 3
+  const auto numThreads = out.numel() / 3;
+  // The dense kernel runs one dispatch, so contiguous inputs with more triplets than a grid holds are split
+  // by the iterator path like strided ones.
+  if (!out.is_contiguous() || !input.is_contiguous() || !other.is_contiguous() ||
+      !std::in_range<uint32_t>(numThreads)) {
     auto iter = TensorIteratorConfig()
                     .add_output(out)
                     .add_const_input(input)
@@ -72,8 +78,6 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
   // The dense kernel handles any contiguous layout: it uses dim_stride and a
   // closed-form index mapping that works for outermost, innermost, and any dim.
-  // numThreads = number of cross triplets = numel / 3
-  const auto numThreads = out.numel() / 3;
   const auto mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
