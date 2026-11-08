@@ -400,6 +400,38 @@ def kldivloss_no_reduce_log_target_test():
     )
 
 
+def kldivloss_masked_zero_test():
+    t = torch.tensor([0.0, 1.0, 0.0], dtype=torch.double)
+    return dict(
+        fullname='KLDivLoss_masked_zero',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none')),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone))',
+        input_fn=lambda: torch.tensor([float('-inf'), 0.0, float('-inf')]),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_: torch.zeros_like(i),
+        supports_forward_ad=False,
+        pickle=False,
+        default_dtype=torch.double,
+    )
+
+
+def kldivloss_masked_log_target_test():
+    t = torch.tensor([float('-inf'), 0.0, float('-inf')], dtype=torch.double)
+    return dict(
+        fullname='KLDivLoss_masked_log_target',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduction='none', log_target=True)),
+        cpp_function_call='F::kl_div(i, t.to(i.options()), F::KLDivFuncOptions().reduction(torch::kNone).log_target(true))',
+        input_fn=lambda: torch.tensor([float('-inf'), 0.0, float('-inf')]),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_: torch.zeros_like(i),
+        supports_forward_ad=False,
+        pickle=False,
+        default_dtype=torch.double,
+    )
+
+
 def kldivloss_no_reduce_scalar_log_target_test():
     t = torch.rand((), dtype=torch.double).log()
     return dict(
@@ -1101,6 +1133,8 @@ def get_new_module_tests():
         kldivloss_no_reduce_scalar_test(),
         kldivloss_with_log_target_no_reduce_test(),
         kldivloss_no_reduce_log_target_test(),
+        kldivloss_masked_zero_test(),
+        kldivloss_masked_log_target_test(),
         kldivloss_no_reduce_scalar_log_target_test(),
         l1loss_no_reduce_test(),
         l1loss_no_reduce_complex_test(),
