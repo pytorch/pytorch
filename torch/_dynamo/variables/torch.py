@@ -83,6 +83,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -235,6 +236,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch._C._functorch.get_dynamic_layer_stack_depth,
+    torch.utils._python_dispatch._is_cpp_fake_mode_active,
     torch.accelerator.current_device_index,
     torch.accelerator.current_accelerator,
     torch.cuda.current_device,
@@ -587,8 +589,10 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value) or isinstance(
-            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        elif (
+            inspect.isbuiltin(value)
+            or (inspect.ismethoddescriptor(value) and not is_constant_source(source))
+            or isinstance(value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(

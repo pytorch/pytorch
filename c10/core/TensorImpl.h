@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -243,16 +244,19 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
-  // not the wrapper itself. See
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
-  // only getCppFakeTensorModePyObj accesses it, under a lock.
-  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
-  // Where the mode's Python wrapper was created (CppFakeTensorMode.stack, a
-  // traceback.StackSummary). Kept here rather than on the wrapper so that a
-  // rebuilt wrapper still reports it. Set once, when the wrapper is created.
+  // Where the mode's Python object was created, a traceback.StackSummary
+  // (_CppFakeTensorMode._stack_trace, which CppFakeTensorMode.stack formats),
+  // kept here so that a rebuilt object still reports it. Like the two above,
+  // set by the binding's constructor before the mode is shared and never
+  // changed; unset for a mode made in C++.
   std::shared_ptr<c10::SafePyObject> stack_trace_;
+  // Owns a Python weakref to this mode's Python object (a CppFakeTensorMode,
+  // which subclasses the mode's binding), not the object itself. See
+  // Note [C++ FakeTensorMode Python object lifetime] in
+  // torch/csrc/FakeTensorMode.cpp. Accessed only under fake_mode_pyobj_mutex_,
+  // by _CppFakeTensorMode._attach_python_object and getCppFakeTensorModePyObj.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  std::mutex fake_mode_pyobj_mutex_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
@@ -267,9 +271,10 @@ struct C10_API FakeTensorMode {
   bool allow_non_fake_inputs_ = false;
 
   // CppFakeTensorMode.static_shapes, which only Python reads: whether
-  // from_tensor makes fakes with static shapes when not told. Kept here so a
-  // rebuilt wrapper sees it. The constructor sets it to shape_env_ == nullptr,
-  // as FakeTensorMode.static_shapes defaults to shape_env is None.
+  // from_tensor makes fakes with static shapes when its static_shapes argument
+  // is None. Kept here so a rebuilt Python object sees it. The constructor
+  // sets it to shape_env_ == nullptr, as FakeTensorMode.static_shapes defaults
+  // to shape_env is None.
   bool static_shapes_ = true;
 
   // Whether reading the mutable data pointer of a fake made afterwards only
@@ -277,10 +282,9 @@ struct C10_API FakeTensorMode {
   // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
-  // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
-  // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
-  // mode's Python wrapper, which must expose epoch as a property forwarding
-  // here.
+  // The mode's epoch (FakeTensorMode.epoch), which code that retraces bumps. A
+  // fake's memos are kept only for the epoch they were set in, unless kept
+  // across epochs; the memo bindings read it through the fake's mode.
   uint64_t epoch_ = 0;
 
   FakeTensorMode(
