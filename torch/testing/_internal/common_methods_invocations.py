@@ -23043,6 +23043,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         skips=(
             # TODO: remove when MPS segment_reduce backward is implemented.
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(
@@ -23065,6 +23067,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         skips=(
             # TODO: remove when MPS segment_reduce backward is implemented.
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(
