@@ -10,10 +10,12 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import gc
 import inspect
 import logging
 import re
 import unittest
+import weakref
 from unittest import mock
 
 import numpy as np
@@ -456,6 +458,7 @@ class CuteDSLHOPTests(TestCase):
         # The eager compile cache keys an object of a class from a module merely
         # named like the cutlass package by its attributes, not by a numeric .value
         # like a cutlass Numeric's (test/test_hop_infra.py has the side table's part).
+        # Equal objects share a compile; objects with equal .values do not.
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         class Cfg:
@@ -465,11 +468,14 @@ class CuteDSLHOPTests(TestCase):
                 vars(self).update(attrs)
 
         x = _rand(1000)
-        for alpha in (2.0, 3.0):
-            out = torch.empty_like(x)
-            args = {"mX": x, "mOut": out, "n": 1000, "cfg": Cfg(value=1, alpha=alpha)}
-            launch_cutedsl_kernel(mul_cfg_kernel, args)
-            self.assertEqual(out, x * alpha)
+        with _counting_compiles() as compile_spy:
+            for alpha in (2.0, 3.0, 2.0):
+                out = torch.empty_like(x)
+                cfg = Cfg(value=1, alpha=alpha)
+                args = {"mX": x, "mOut": out, "n": 1000, "cfg": cfg}
+                launch_cutedsl_kernel(mul_cfg_kernel, args)
+                self.assertEqual(out, x * alpha)
+        self.assertEqual(compile_spy.call_count, 2)
 
     def test_constants_from_the_cutlass_package_are_keyed_as_themselves(self):
         # Equal values of a class from the cutlass package get their own eager
@@ -687,6 +693,32 @@ class CuteDSLHOPTests(TestCase):
             add_one_2d(short)
             add_one_2d(tall)
             self.assertEqual(compile_spy.call_count, 7)
+
+    def test_launch_keeps_host_functions_made_for_a_launch(self):
+        # Freeing a compile unloads its CUDA library, whose kernel a CUDA graph that
+        # captured the launch still runs: the cache keeps a host function made for
+        # one launch, and so its compiles, after the caller drops it.
+        from torch._native.cutedsl import user_kernel as cutedsl_user_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        def make_host_fn():
+            @cute.jit
+            def add_one(mX: cute.Tensor, mOut: cute.Tensor, stream: cuda.CUstream):
+                add_one_2d_kernel(mX, mOut, stream)
+
+            return add_one
+
+        x = _rand(4, 8)
+        out = torch.empty_like(x)
+        fn = make_host_fn()
+        fn_ref = weakref.ref(fn)
+        # Not _counting_compiles: its spy would keep fn alive through its call_args.
+        with mock.patch.dict(cutedsl_user_kernel._compiled, clear=True):
+            launch_cutedsl_kernel(fn, {"mX": x, "mOut": out})
+            del fn
+            gc.collect()
+            self.assertIsNotNone(fn_ref())
+        self.assertEqual(out, x + 1)
 
     def test_launch_on_the_given_stream(self):
         # stream= is the raw stream to launch on: queued behind a sleep on a side
@@ -948,7 +980,9 @@ class CuteDSLHOPTests(TestCase):
     def test_numpy_scalars_reach_the_dsl_as_python_values(self):
         # A numpy bool, integer or floating scalar for an unannotated parameter is a
         # runtime scalar, passed or as a default, so other values of the same types
-        # share a compile; one for a cutlass float parameter reaches it as a float.
+        # share a compile; one for a cutlass float parameter reaches it as a float,
+        # and so does an int, even 2**64, which nvidia-cutlass-dsl 4.8 refuses to
+        # compile as an int: it comes first, so the compile sees it.
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         x = _rand(1000)
@@ -964,7 +998,7 @@ class CuteDSLHOPTests(TestCase):
                 launch_cutedsl_kernel(add_numpy_defaults_kernel, args)
                 self.assertEqual(args["mOut"], x + total)
             self.assertEqual(compile_spy.call_count, 1)
-            for c in (np.float16(0.5), np.int64(2)):
+            for c in (2**64, np.float16(0.5), np.int64(2)):
                 args = {"mX": x, "mOut": torch.empty_like(x), "n": 1000, "c": c}
                 launch_cutedsl_kernel(add_c_kernel, args)
                 self.assertEqual(args["mOut"], x + float(c))
@@ -1013,11 +1047,11 @@ class CuteDSLHOPTests(TestCase):
             cutedsl_kernel_wrapper_mutation(
                 kernel_idx=kidx, constant_args_idx=cidx, kwargs=kwargs
             )
+            self.assertEqual(kwargs["mOut"], x * 3.0)
             self.assertEqual(constant_key.call_count, 0)
             launch_cutedsl_kernel(mul_const_kernel, {**kwargs, "alpha": 3.0})
             self.assertEqual(constant_key.call_count, 1)
         self.assertEqual(compile_spy.call_count, 1)
-        self.assertEqual(kwargs["mOut"], x * 3.0)
 
     def test_side_table_records(self):
         r1 = CuteDSLKernel(add_kernel, ("mOut",))
@@ -1684,20 +1718,6 @@ def forward(self, x_1, y_1):
         # torch._dynamo.reset() resets Triton's table, not this one.
         torch._dynamo.reset()
         self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
-
-    def test_cutedsl_layout_constraint_ignores_triton_config(self):
-        # Inductor keeps the traced strides of a CuTeDSL kernel's tensors, whatever
-        # Triton's layout config says.
-        # TODO: move to TestCuteDSLHOPHelpers in test/test_hop_infra.py (GENERIC):
-        # this needs neither CUDA nor nvidia-cutlass-dsl.
-        from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
-        from torch._inductor import config
-
-        info = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
-        for layout in ("needs_fixed_stride_order", "flexible_layout"):
-            with config.patch(triton_kernel_default_layout_constraint=layout):
-                constraint = info.get_layout_constraint()
-            self.assertEqual(constraint, "needs_fixed_stride_order")
 
 
 instantiate_parametrized_tests(CuteDSLHOPTests)
