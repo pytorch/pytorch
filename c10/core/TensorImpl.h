@@ -5,7 +5,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/FakeTensorMode.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -235,6 +234,75 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
+// same as Python's FakeTensorMode
+// storing shape env and converter from Python, we'll use these later
+// to implement sym ints, real tensor conversion, etc
+// this doesn't have caching because we're not implementing it
+// no in_kernel_invocation flag; that state is thread-local in C++
+// (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
+struct C10_API FakeTensorMode {
+  std::shared_ptr<c10::SafePyObject> shape_env_;
+  std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
+  // not the wrapper itself. See
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+
+  // The fields below are plain, like a Python FakeTensorMode's attributes, and
+  // must not be changed while another thread is using the mode.
+
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
+
+  // When true, real tensor inputs to an op are converted to fakes instead of
+  // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
+  // thread-local override used by dynamo's nonstrict_trace, takes precedence,
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
+  bool allow_non_fake_inputs_ = false;
+
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
+  bool allow_unsafe_data_ptr_access_ = true;
+
+  FakeTensorMode(
+      std::shared_ptr<c10::SafePyObject> shape_env,
+      std::shared_ptr<c10::SafePyObject> converter,
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
+      : shape_env_(std::move(shape_env)),
+        fake_tensor_converter_(std::move(converter)),
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
+
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
+  // setting to nullptr to clear it
+  void set_constant(
+      c10::TensorImpl* fake_impl,
+      c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(c10::TensorImpl* fake_impl) noexcept;
+
+  // return the real constant a fake tensor was created from, or nullptr
+  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
+      c10::TensorImpl* fake_impl) const;
+  // drop constant tracking for fake tensors aliasing this mutated storage
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+  // drop non-CPU constants, keeping cheap CPU ones for constant folding
+  void clear_non_cpu_constants();
+
+ private:
+  // key = constant storage, values = all fake tensors that share this storage
+  // (aliases)
+  struct ConstantAliases {
+    c10::weak_intrusive_ptr<c10::StorageImpl> storage;
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
+  };
+  std::unordered_map<c10::StorageImpl*, ConstantAliases>
+      constant_storage_mapping_;
+};
+
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
@@ -257,17 +325,6 @@ struct C10_API ExtraMeta {
     uint64_t epoch = 0;
   };
   std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
-  // The item memo of a C++ fake (Python FakeTensor.item_memo); see
-  // TensorImpl::set_fake_item_memo. Held as the Python object that was set, so
-  // that every read returns that same object, as SymNumberMemoDescriptor does.
-  // Like fake_sym_memos_, the copy constructor does not copy it.
-  struct FakeItemMemo {
-    std::shared_ptr<c10::SafePyObject> value;
-    std::optional<uint32_t> version;
-    // nullopt for a memo kept across epochs
-    std::optional<uint64_t> epoch;
-  };
-  std::optional<FakeItemMemo> fake_item_memo_;
   // See TensorImpl::symbolic_wrapped_number.
   c10::SymNode symbolic_wrapped_number_ = nullptr;
 
@@ -1539,22 +1596,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::optional<c10::SymInt> fake_sym_memo(
       const std::string& name,
       uint64_t epoch);
-
-  // Records memo as this fake's item memo, set in fake mode epoch `epoch`, or
-  // kept across epochs if `epoch` is nullopt. The caller decides which memos
-  // are kept (a backed SymFloat, see SymNumberMemoDescriptor); this does not
-  // check. Like set_fake_sym_memo, safe to call concurrently. memo must not be
-  // or refer to a Tensor (see SafePyObject): the GC does not traverse
-  // ExtraMeta, so such a reference cycle would leak.
-  void set_fake_item_memo(
-      std::shared_ptr<c10::SafePyObject> memo,
-      std::optional<uint64_t> epoch);
-
-  // The item memo, or nullptr if there is none or it is stale: the tensor was
-  // mutated since (not checked for inference tensors, which track no version),
-  // or it was set in an epoch other than `epoch` (a memo kept across epochs is
-  // only dropped on mutation). A stale memo is dropped.
-  std::shared_ptr<c10::SafePyObject> fake_item_memo(uint64_t epoch);
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
