@@ -473,11 +473,15 @@ option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
                        ON "CPU_INTEL" OFF)
-# Ensure that an MKLDNN build is the default for x86 CPUs but optional for
-# AArch64 (dependent on -DUSE_MKLDNN).
+# Ensure that an MKLDNN build is the default for x86 and AArch64 CPUs
+if(CPU_INTEL OR CPU_AARCH64)
+  set(USE_MKLDNN_DEFAULT ON)
+else()
+  set(USE_MKLDNN_DEFAULT OFF)
+endif()
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
+  "${USE_MKLDNN_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
