@@ -1335,8 +1335,13 @@ static void maybe_copy_fake_tensor_metadata(
   if (!self.is_fake()) {
     return;
   }
+  // A view of a view that inherited only the Fake key (see at::init_cpp_fake)
+  // has no fake state to copy either; the fake fallback makes the op's outputs
+  // fakes
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
-  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  if (!fake_device.has_value()) {
+    return;
+  }
   at::set_and_normalize_fake_device(result, *fake_device);
   result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
 }

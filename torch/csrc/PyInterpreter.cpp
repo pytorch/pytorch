@@ -1202,8 +1202,8 @@ ActiveFakeMode get_active_fake_mode() {
 // FakeTensorMode._dispatch_impl (torch/_subclasses/fake_tensor.py) and must be
 // kept in sync with it. This callback handles the meta_table exclusion, the
 // decomposition_table lookup with its symbolic/static-shape and sparse
-// eligibility, and the Python CompositeImplicitAutograd lookup. The C++ Fake
-// fallback that calls it handles the cpp_meta_supports_symint and
+// eligibility, and the Python CompositeImplicitAutograd lookup. It has no
+// caller yet; a caller must handle the cpp_meta_supports_symint and
 // _unbacked_special_fake_handling_ops exclusions, and afterwards the native
 // CompositeImplicitAutograd fallback.
 bool ConcretePyInterpreterVTable::fake_try_decomp(
@@ -1414,8 +1414,8 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       "infer_fake_from_real_out");
 }
 
-// Convert a real tensor to a meta tensor via the mode's converter, then stamp
-// it as a C++ fake on the real tensor's device.
+// Convert a real tensor to a C++ fake of the active mode through the mode's
+// converter (FakeTensorConverter.from_real_tensor).
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
