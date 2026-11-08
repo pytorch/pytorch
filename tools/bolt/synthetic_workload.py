@@ -66,6 +66,16 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
     cpu_ids = torch.randint(0, 4096, (1, 512), dtype=torch.long)
     cpu_gather_idx = torch.randint(0, 256, (64,), dtype=torch.long)
     ckpt_state = {"weight": torch.randn(128, 128), "bias": torch.randn(128)}
+    # fp32 decoder inputs, so the bf16 autocast wrappers actually cast.
+    dec_q = torch.randn(4, 8, 64, device=device, dtype=torch.float32)
+    dec_k = torch.randn(4, 48, 64, device=device, dtype=torch.float32)
+    dec_mask = torch.ones(4, 48, device=device, dtype=torch.int32)
+    dec_mask[:, 40:] = 0
+    dec_ln = (torch.ones(64, device=device), torch.zeros(64, device=device))
+    dec_conv_w = torch.randn(64, 64, 3, device=device, dtype=torch.float32)
+    emb = nn.Embedding(4096, 64, device=device)
+    emb_ids = torch.randint(0, 4096, (16, 32), device=device)
+    cpu_cat_parts = [torch.randn(16, 8) for _ in range(4)]
     # Rare ops run every Nth step to keep the instrumented step time low.
     rotate = [0]
     rare_every = 8
@@ -165,6 +175,21 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
         _ = big.type()
         if i % 32 == 0:
             torch.save(ckpt_state, io.BytesIO())
+        # Eager decoder ops under autocast: TorchScript bypasses both wrappers.
+        for _ in range(4):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                scores = torch.matmul(dec_q, dec_k.transpose(1, 2))
+                scores.masked_fill_((dec_mask == 0).unsqueeze(1), -1e4)
+                probs = F.softmax(scores, dim=-1)
+                ctx = F.layer_norm(torch.matmul(probs, dec_k), (64,), *dec_ln)
+                _ = F.conv1d(ctx.transpose(1, 2), dec_conv_w, padding=1)
+            _ = torch.multinomial(probs[:, 0, :].float(), 1)
+        # Embedding without grad, CPU cat and reductions, fp32 GEMM outside autocast.
+        with torch.no_grad():
+            _ = emb(emb_ids)
+        feats = torch.cat(cpu_cat_parts, dim=1)
+        _ = (feats.max(), feats.unbind(0), cpu_lengths.ge(8))
+        _ = torch.mm(dec_q[0], dec_k[0].t())
         return c
 
     return step
@@ -315,6 +340,18 @@ class _IdentityWithGrad(torch.autograd.Function):
         return grad_outputs[0] * (1.0 + 0.0 * saved_x.sum())
 
 
+class _TwoOutputs(torch.autograd.Function):
+    """Two outputs, one unused: the engine materializes its undefined grad."""
+
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone(), x * 2.0
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        return grad_outputs[0] + 2.0 * grad_outputs[1]
+
+
 def _training_variant(device: torch.device, dtype: torch.dtype):
     """Autograd engine, AMP GradScaler and multi-tensor (foreach) Adam."""
     # fp32 params under fp16 autocast: GradScaler takes neither fp16 grads nor bf16.
@@ -337,8 +374,13 @@ def _training_variant(device: torch.device, dtype: torch.dtype):
     tok_ids = torch.randint(0, 4096, (64,), device=device)
     tok_mod = torch.full((64,), 1000, device=device, dtype=torch.long)
     side_stream = torch.cuda.Stream()
+    wn_conv = nn.utils.parametrizations.weight_norm(nn.Conv1d(32, 32, 3, device=device))
+    wn_x = torch.randn(2, 32, 64, device=device, dtype=f32)
+    wn_thresh = torch.zeros(1, 32, 1, device=device, dtype=f32)
+    rope_x = nn.Parameter(torch.randn(4, 64, device=device, dtype=f32))
+    adam_params = [*params, emb_w, mm_w, *wn_conv.parameters(), rope_x]
     # fused=True would skip multi_tensor_apply entirely.
-    optim = torch.optim.Adam([*params, emb_w, mm_w], lr=1e-3, foreach=True, fused=False)
+    optim = torch.optim.Adam(adam_params, lr=1e-3, foreach=True, fused=False)
     scaler = torch.amp.GradScaler("cuda", enabled=True)
     # For the list + list _foreach_add_, which Adam does not use.
     foreach_a = [torch.randn(128, 128, device=device, dtype=f32) for _ in range(8)]
@@ -368,6 +410,24 @@ def _training_variant(device: torch.device, dtype: torch.dtype):
                 proj = _IdentityWithGrad.apply(proj)
             extra = rows.float().pow(2).mean() + proj.float().pow(2).mean()
             loss = loss + 1e-3 * extra
+            # A side-stream op, so the backward crosses streams; softmax with grad.
+            side_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side_stream):
+                proj_side = proj * 0.5
+            torch.cuda.current_stream().wait_stream(side_stream)
+            att = F.softmax(proj_side.view(32, 4, 64), dim=-1)
+            # weight_norm, replicate pad, leaky_relu, masked_fill on <= and cumsum.
+            m = F.leaky_relu(F.pad(wn_conv(wn_x), (1, 1), mode="replicate"), 0.1)
+            m = m.masked_fill(m <= wn_thresh, 0.0)
+            dur = torch.cumsum(m.float().abs().mean(dim=1), dim=-1)
+            # Rotary-embedding chain: many cheap graph nodes for the engine.
+            r = rope_x
+            for _ in range(8):
+                x1, x2 = r.chunk(2, dim=-1)
+                r = r * rope_x.cos() + torch.cat((-x2, x1), dim=-1) * rope_x.sin()
+            r, _ = _TwoOutputs.apply(r)
+            extra = att.float().pow(2).mean() + dur.mean() + r.float().pow(2).mean()
+            loss = loss + 1e-3 * extra
         optim.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.step(optim)
@@ -387,7 +447,7 @@ def _training_variant(device: torch.device, dtype: torch.dtype):
 
 
 def _distributed_variant(device: torch.device, dtype: torch.dtype):
-    """Host-side ProcessGroupNCCL dispatch of the usual collectives on one rank."""
+    """Host-side ProcessGroupNCCL dispatch of collectives and a DDP step on one rank."""
     # Flight recorder as large training jobs run it; set before init_process_group.
     os.environ.setdefault("TORCH_FR_BUFFER_SIZE", "2000")
     os.environ.setdefault("TORCH_NCCL_DUMP_ON_TIMEOUT", "1")
@@ -430,6 +490,11 @@ def _distributed_variant(device: torch.device, dtype: torch.dtype):
         lambda: dist.all_to_all_single(uneq_out, uneq_in, [200], [200], async_op=True),
         lambda: dist.all_to_all(a2a_list_out, a2a_list_in, async_op=True),
     ]
+    # DDP with a parameter forward never uses: the reducer searches every step.
+    ddp_mod = nn.Linear(64, 64, device=device)
+    ddp_mod.register_parameter("unused", nn.Parameter(torch.zeros(64, device=device)))
+    ddp = nn.parallel.DistributedDataParallel(ddp_mod, find_unused_parameters=True)
+    ddp_x = torch.randn(16, 64, device=device)
     dump_counter = [0]
 
     def step():
@@ -442,6 +507,8 @@ def _distributed_variant(device: torch.device, dtype: torch.dtype):
             with dist._coalescing_manager():
                 for in_t, out_t in ag_coal_pairs:
                     dist.all_gather_into_tensor(out_t, in_t)
+        ddp.zero_grad(set_to_none=True)
+        ddp(ddp_x).sum().backward()
         dist.barrier()
         if dump_nccl_trace is not None and dump_counter[0] % 16 == 0:
             try:
