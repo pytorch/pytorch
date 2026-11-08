@@ -793,7 +793,11 @@ class TestModule(TestCase):
                                 )
 
                             # === Check mem format of grad_inputs. ===
-                            _check_out_mem_format(grad_inputs, input_mem_format, module_mem_format)
+                            if module_cls == torch.nn.AdaptiveAvgPool1d and m.output_size == 1:
+                                # Global average pooling uses mean backward's expanded gradient.
+                                self.assertEqual(grad_inputs[0].stride(-1), 0)
+                            else:
+                                _check_out_mem_format(grad_inputs, input_mem_format, module_mem_format)
 
     # Test whether train and eval modes differ for each module. Use to verify
     # that the ModuleInfo entry flag is correct.

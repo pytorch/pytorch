@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import override, ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
     _get_torch_rocm_version,
+    IS_MIG,
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
@@ -379,6 +380,18 @@ class DeviceTypeTestBase(TestCase):
     # If None (default), all ops in the @ops decorator's op_list generate variants.
     op_allowlist = None  # type: Optional[Collection[str]]
 
+    # Decorators and skips to apply to tests that are parametrized by modules.
+    # Keys are ModuleInfo.name (e.g. "nn.Linear", "nn.Conv2d"). Unlike OpInfo,
+    # ModuleInfo has no variant concept, so there is no "full_name" distinction.
+    module_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
+
+    # An optional mechanism to limit which modules generate test variants.
+    # When set, only modules whose name is in this collection will generate tests.
+    # Keys are ModuleInfo.name (e.g. "nn.Linear", "nn.Conv2d").
+    # If None (default), all modules in the @modules decorator's module_info_list
+    # generate variants.
+    module_allowlist = None  # type: Optional[Collection[str]]
+
     # An optional skip mechanism built upon instantiate_device_type_tests(),
     # designed to filter generated tests at different granularities.
     #
@@ -456,32 +469,62 @@ class DeviceTypeTestBase(TestCase):
         self._tls.rel_tol = prec
 
     @classmethod
-    def _apply_op_overrides(cls, ops, test=None):
+    def _resolved_device_type(cls):
+        # PrivateUse1TestBase.device_type stays "privateuse1" until its first
+        # setUpClass(), which runs after the first variant is parametrized.
+        if cls.device_type == "privateuse1":
+            return torch._C._get_privateuse1_backend_name()
+        return cls.device_type
+
+    @classmethod
+    def _apply_class_overrides(cls, info_dict, class_overrides):
+        """Stamps each class_overrides decorator's device_type to this test
+        base's device type and appends it to the matching entry of info_dict
+        (keyed by OpInfo.full_name or ModuleInfo.name).
+        """
+        for name, decorators in class_overrides.items():
+            for decorator in decorators:
+                decorator.device_type = cls._resolved_device_type()
+                # name may not be in info_dict if @ops()/@modules() has
+                # restricted the list to a smaller set than overrides covers.
+                if name in info_dict:
+                    info_dict[name].decorators += (decorator,)
+
+    @classmethod
+    def _apply_op_overrides(cls, op_list, test=None):
         class_overrides = cls.op_overrides or {}
         test_overrides = {} if test is None else getattr(test, "_op_overrides", {})
 
         if not class_overrides and not test_overrides:
-            return
+            return op_list
 
-        op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
+        op_dict = {op.full_name: op for op in copy.deepcopy(op_list)}
+        if len(op_dict) != len(op_list):
+            raise AssertionError("Duplicate op full_names in @ops op_list")
 
-        for op_name, decorators in class_overrides.items():
-            for decorator in decorators:
-                if cls.device_type == "privateuse1":
-                    decorator.device_type = torch._C._get_privateuse1_backend_name()
-                else:
-                    decorator.device_type = cls.device_type
-                # op_name may not be in op_dict if @ops() has restricted the
-                # OpInfo list to a smaller set than op_overrides covers.
-                if op_name in op_dict:
-                    op_dict[op_name].decorators += (decorator,)
+        cls._apply_class_overrides(op_dict, class_overrides)
 
         for op_name, decorators in test_overrides.items():
             for decorator in decorators:
                 if op_name in op_dict:
                     op_dict[op_name].decorators += (decorator,)
 
-        ops.op_list = list(op_dict.values())
+        return list(op_dict.values())
+
+    @classmethod
+    def _apply_module_overrides(cls, module_info_list):
+        class_overrides = cls.module_overrides or {}
+
+        if not class_overrides:
+            return module_info_list
+
+        module_dict = {m.name: m for m in copy.deepcopy(module_info_list)}
+        if len(module_dict) != len(module_info_list):
+            raise AssertionError("Duplicate module names in @modules module_info_list")
+
+        cls._apply_class_overrides(module_dict, class_overrides)
+
+        return list(module_dict.values())
 
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
@@ -554,21 +597,38 @@ class DeviceTypeTestBase(TestCase):
         return _check_dtype()
 
     @classmethod
-    def _apply_op_allowlist(cls, ops):
-        """Filters ops.op_list to only include ops declared in op_allowlist.
+    def _apply_op_allowlist(cls, op_list):
+        """Filters op_list to only include ops declared in op_allowlist.
 
         If op_allowlist is None (default), no filtering is applied.
         If op_allowlist is set, only ops whose full_name is in the collection
         will generate test variants.
 
         Args:
-            ops: The ops decorator instance whose op_list will be filtered.
+            op_list: The list of OpInfo entries to filter.
         """
         if cls.op_allowlist is None:
-            return
+            return op_list
 
         supported_set = set(cls.op_allowlist)
-        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
+        return [op for op in op_list if op.full_name in supported_set]
+
+    @classmethod
+    def _apply_module_allowlist(cls, module_info_list):
+        """Filters module_info_list to only include modules in module_allowlist.
+
+        If module_allowlist is None (default), no filtering is applied.
+        If module_allowlist is set, only modules whose name is in the collection
+        will generate test variants.
+
+        Args:
+            module_info_list: The list of ModuleInfo entries to filter.
+        """
+        if cls.module_allowlist is None:
+            return module_info_list
+
+        supported_set = set(cls.module_allowlist)
+        return [m for m in module_info_list if m.name in supported_set]
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -627,6 +687,8 @@ class DeviceTypeTestBase(TestCase):
         *,
         op_overrides=None,
         op_allowlist=None,
+        module_overrides=None,
+        module_allowlist=None,
         test_exclusions=None,
     ):
         """
@@ -639,6 +701,8 @@ class DeviceTypeTestBase(TestCase):
         """
         cls.op_overrides = op_overrides
         cls.op_allowlist = op_allowlist
+        cls.module_overrides = module_overrides
+        cls.module_allowlist = module_allowlist
         cls.test_exclusions = test_exclusions
 
     # Creates device-specific tests.
@@ -743,11 +807,7 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            cls_device_type = (
-                cls.device_type
-                if cls.device_type != "privateuse1"
-                else torch._C._get_privateuse1_backend_name()
-            )
+            cls_device_type = cls._resolved_device_type()
             device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
@@ -901,6 +961,23 @@ class MPSTestBase(DeviceTypeTestBase):
         return False
 
     @classmethod
+    @override
+    def _get_dtypes(cls, test):
+        dtypes = super()._get_dtypes(test)
+        # MPS has no float64, so drop double-precision variants unless the test
+        # asks for them explicitly with @dtypesIfMPS.
+        if dtypes is None or cls.device_type in test.dtypes:
+            return dtypes
+        unsupported = (torch.float64, torch.complex128)
+        return tuple(
+            d
+            for d in dtypes
+            if not any(
+                x in unsupported for x in (d if isinstance(d, (tuple, list)) else (d,))
+            )
+        )
+
+    @classmethod
     def _capabilities(cls):
         return {
             Capability.dtype.fp8: lambda: False,
@@ -1038,6 +1115,21 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def _get_device_type_normalizer() -> Callable[[str], str]:
+    """Returns a function that normalizes a device type name for test filtering.
+
+    Replaces your privateuse1 backend name with 'privateuse1'. This handles the case
+    where PrivateUse1TestBase.device_type has been changed from "privateuse1" to the
+    actual backend name (e.g., "openreg") by setUpClass being called during previous
+    instantiate_device_type_tests calls.
+    """
+    if not _is_privateuse1_backend_available():
+        return lambda x: x
+
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    return lambda x: x.replace(privateuse1_backend_name, "privateuse1")
+
+
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
     intersect = set(except_for if except_for else []) & set(
@@ -1048,30 +1140,18 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             f"device ({intersect}) appeared in both except_for and only_for"
         )
 
-    # Replace your privateuse1 backend name with 'privateuse1'
-    # This handles the case where PrivateUse1TestBase.device_type has been
-    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
-    # by setUpClass being called during previous instantiate_device_type_tests calls
-    if _is_privateuse1_backend_available():
-        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    func_replace = _get_device_type_normalizer()
 
-        def func_replace(x: str) -> str:
-            return x.replace(privateuse1_backend_name, "privateuse1")
-
-        except_for = (
-            ([func_replace(x) for x in except_for] if except_for is not None else None)
-            if not isinstance(except_for, str)
-            else func_replace(except_for)
-        )
-        only_for = (
-            ([func_replace(x) for x in only_for] if only_for is not None else None)
-            if not isinstance(only_for, str)
-            else func_replace(only_for)
-        )
-    else:
-
-        def func_replace(x: str) -> str:
-            return x
+    except_for = (
+        ([func_replace(x) for x in except_for] if except_for is not None else None)
+        if not isinstance(except_for, str)
+        else func_replace(except_for)
+    )
+    only_for = (
+        ([func_replace(x) for x in only_for] if only_for is not None else None)
+        if not isinstance(only_for, str)
+        else func_replace(only_for)
+    )
 
     if except_for:
         device_type_test_bases = filter(
@@ -1158,8 +1238,14 @@ def get_desired_device_type_test_bases(
         os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, "")
     )
     if env_custom_only_for:
+        # Replace privateuse1 backend name with 'privateuse1' to ensure
+        # consistent device type filtering
+        func_replace = _get_device_type_normalizer()
+
+        normalized_custom = [func_replace(x) for x in env_custom_only_for]
         desired_device_type_test_bases += filter(
-            lambda x: x.device_type in env_custom_only_for, test_bases
+            lambda x: func_replace(x.device_type) in normalized_custom,
+            test_bases,
         )
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
@@ -1302,7 +1388,9 @@ def instantiate_device_type_tests(
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             # Ports non-test member. Setup / teardown have already been handled above
             elif name not in device_type_test_class.__dict__:
-                nontest = getattr(generic_test_class, name)
+                # Copy the raw attribute: getattr would unwrap staticmethod and
+                # classmethod descriptors.
+                nontest = generic_test_class.__dict__[name]
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
@@ -1503,34 +1591,43 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        if not self.op_list:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
+            raise ValueError(
+                f"{test.__name__}: An empty op_list was passed to @ops. "
+                "Note that this may result from reuse of a generator."
+            )
+
         # Order matters: op_allowlist filters first, then op_overrides adds decorators
         # This ensures op_overrides only applies to ops that passed the op_allowlist filter
-        device_cls._apply_op_allowlist(self)
-        device_cls._apply_op_overrides(self, test)
-        op = check_exhausted_iterator = object()
-        for op in self.op_list:
+        op_list = device_cls._apply_op_allowlist(self.op_list)
+        op_list = device_cls._apply_op_overrides(op_list, test)
+
+        device_type = device_cls._resolved_device_type()
+        for op in op_list:
             # Determine the set of dtypes to use.
             dtypes: set[torch.dtype] | set[None]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
                 dtypes = set(get_all_dtypes()).difference(
-                    op.supported_backward_dtypes(device_cls.device_type)
+                    op.supported_backward_dtypes(device_type)
                 )
             elif self.opinfo_dtypes == OpDTypes.supported_backward:
-                dtypes = op.supported_backward_dtypes(device_cls.device_type)
+                dtypes = op.supported_backward_dtypes(device_type)
             elif self.opinfo_dtypes == OpDTypes.unsupported:
                 dtypes = set(get_all_dtypes()).difference(
-                    op.supported_dtypes(device_cls.device_type)
+                    op.supported_dtypes(device_type)
                 )
             elif self.opinfo_dtypes == OpDTypes.supported:
-                dtypes = set(op.supported_dtypes(device_cls.device_type))
+                dtypes = set(op.supported_dtypes(device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
-                supported = set(op.supported_dtypes(device_cls.device_type))
-                supported_backward = op.supported_backward_dtypes(
-                    device_cls.device_type
-                )
+                supported = set(op.supported_dtypes(device_type))
+                supported_backward = op.supported_backward_dtypes(device_type)
                 supported_both = supported.intersection(supported_backward)
                 dtype_set = supported_both if len(supported_both) > 0 else supported
                 for dtype in ANY_DTYPE_ORDER:
@@ -1568,7 +1665,7 @@ class ops(_TestParametrizer):
                 sample_skips_and_xfails = [
                     rule
                     for rule in sample_skips_and_xfails
-                    if rule.op_match_fn(device_cls.device_type, op)
+                    if rule.op_match_fn(device_type, op)
                 ]
 
             for dtype in dtypes:
@@ -1616,7 +1713,7 @@ class ops(_TestParametrizer):
                         op.get_decorators,
                         generic_cls.__name__,
                         test.__name__,
-                        device_cls.device_type,
+                        device_type,
                         dtype,
                     )
 
@@ -1628,15 +1725,6 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
-        if op is check_exhausted_iterator:
-            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
-            # per-test op lists legitimately become empty -don't fail collection.
-            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
-                return
-            raise ValueError(
-                "An empty op_list was passed to @ops. "
-                "Note that this may result from reuse of a generator."
-            )
 
 
 # Decorator that skips a test if the given condition is true.
@@ -1733,6 +1821,70 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
+def _cgroup_available_memory():
+    """Memory still usable inside this process's cgroup, or None if uncapped.
+
+    psutil reports the host's memory. In a container that is not the ceiling the
+    OOM killer enforces, and the two can differ by an order of magnitude: a 41GiB
+    CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
+    largeTensorTest asking for 180GB is admitted and then killed mid-test.
+    """
+    # (limit, usage, stat, stat-key prefix), cgroup v2 first then v1. These fixed
+    # paths are this process's own cgroup under a private cgroup namespace, which
+    # is what Kubernetes and Docker on cgroup v2 give us. Under a host namespace
+    # they are the root's, which reads as uncapped, and the host figure stands --
+    # the same answer as before this check existed.
+    for limit_path, usage_path, stat_path, prefix in (
+        (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            "",
+        ),
+        (
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            "total_",
+        ),
+    ):
+        try:
+            with open(limit_path) as f:
+                raw = f.read().strip()
+            # v2 spells "no limit" as "max"; v1 uses a value at least as large as
+            # physical memory, which cannot constrain us either way.
+            if raw == "max":
+                return None
+            limit = int(raw)
+            if limit >= psutil.virtual_memory().total:
+                return None
+            with open(usage_path) as f:
+                usage = int(f.read().strip())
+            stat = {}
+            with open(stat_path) as f:
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    stat[key] = int(value)
+        except (OSError, ValueError):
+            continue
+
+        # Page cache counts towards usage but is reclaimed under pressure rather
+        # than triggering a kill, so charging it would understate what is free.
+        # A shard that has read a lot of test data can hold gigabytes of it.
+        cache = stat.get(f"{prefix}inactive_file", 0)
+        return max(limit - max(usage - cache, 0), 0)
+    return None
+
+
+def _available_cpu_memory():
+    """Host memory available, clamped to what this cgroup will actually allow."""
+    available = psutil.virtual_memory().available
+    cgroup_available = _cgroup_available_memory()
+    if cgroup_available is None:
+        return available
+    return min(available, cgroup_available)
+
+
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
@@ -1788,14 +1940,14 @@ def _has_sufficient_memory(device, size):
     if IS_S390X:
         effective_size = effective_size * 2
 
-    if psutil.virtual_memory().available < effective_size:
+    if _available_cpu_memory() < effective_size:
         gc.collect()
         # Sync and cleanup MPS memory before checking available memory
         if device_type == "mps":
             torch.mps.synchronize()
             torch.mps.empty_cache()
 
-    return psutil.virtual_memory().available >= effective_size
+    return _available_cpu_memory() >= effective_size
 
 
 def _parse_size(size):
@@ -2358,20 +2510,28 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 
-# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
-def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
-    if has_cusolver() or has_hipsolver():
-        return fn
-    else:
-        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
-        return skipCUDAIfNoMagma(fn)
-
-
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipCUDAIfRocm: {msg}"
         return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+
+# Skips a test on CUDA when the device is a MIG slice, which has a fraction of a
+# full GPU's SMs and memory.
+def skipCUDAIfMIG(func=None, *, msg="test doesn't work on a MIG slice"):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if self.device_type == "cuda" and IS_MIG:
+                raise unittest.SkipTest(f"skipCUDAIfMIG: {msg}")
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
 
     if func:
         return dec_fn(func)

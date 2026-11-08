@@ -16,10 +16,16 @@ from torch.distributed.elastic.multiprocessing.api import (
     PContext,
     SignalException,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class SignalHandlingTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Save original environment variable if it exists

@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+import warnings
 from collections import namedtuple
 from functools import partial
 from threading import Event, Lock
@@ -44,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     load_tests,
+    set_warn_always_context,
     skip_but_pass_in_sandcastle_if,
     TemporaryFileName,
 )
@@ -589,7 +591,7 @@ def async_cuda_sleep_and_set_to_one(t):
     new_stream = torch.cuda.Stream(device)
     new_stream.wait_stream(original_stream)
     with torch.cuda.stream(new_stream):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         t.fill_(1)
         fut = Future(devices=[device])
         fut.set_result(t)
@@ -599,7 +601,7 @@ def async_cuda_sleep_and_set_to_one(t):
 @rpc.functions.async_execution
 def async_cuda_nested_add(to, x, y, z):
     def cb(fut):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         return fut.value() + z
 
     return rpc.rpc_async(to, torch.add, args=(x, y)).then(cb)
@@ -736,7 +738,7 @@ class MyConvNetForMNIST(nn.Module):
         x = x.to_here() if is_rref else x
         with torch.cuda.stream(torch.cuda.current_stream(self.device)):
             # intentionally adding delay to current CUDA stream
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             return self.net(x)
 
     def __getstate__(self):
@@ -1085,7 +1087,7 @@ class RpcTestCommon:
                     tensor = torch.zeros((100,), device="cuda:0")
                     add_tensor = torch.ones((100,), device="cuda:0")
                     expected_tensor = tensor + add_tensor
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor += add_tensor
                 if sparse_tensor:
                     tensor = tensor.coalesce()
@@ -4296,13 +4298,16 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_init_rpc_twice(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
 
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
+        with self.assertWarnsRegex(
+            FutureWarning, "torch.distributed.rpc is deprecated"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
         rpc.shutdown()
 
         # Wait for all init to complete.
@@ -4312,14 +4317,30 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         new_backend_options = self.rpc_backend_options
         new_backend_options.init_method += "init_2"
 
-        # Ensure rpc initialization works again.
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=new_backend_options,
-        )
+        # Ensure rpc initialization works again and only warns once.
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=new_backend_options,
+            )
+        deprecations = [
+            str(x.message)
+            for x in w
+            if "torch.distributed.rpc is deprecated" in str(x.message)
+        ]
+        self.assertEqual(deprecations, [])
+
+        # Warns again when warn_always is enabled.
+        with (
+            set_warn_always_context(True),
+            self.assertWarnsRegex(FutureWarning, "torch.distributed.rpc is deprecated"),
+            self.assertRaisesRegex(TypeError, "must be a member of BackendType"),
+        ):
+            rpc.init_rpc(name=worker_name(self.rank), backend="bad")
 
         # Verify RPCs work after re-init.
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -5662,7 +5683,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         x.record_stream(s1)
         y.record_stream(s1)
         with torch.cuda.stream(s1):
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             z = x + y
         s0.wait_stream(s1)
         z.record_stream(s0)
@@ -6022,7 +6043,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _return_tensor_view(i):
         with torch.cuda.stream(torch.cuda.current_stream(0)):
             x = torch.ones(1000, 200).cuda(0) * i
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             # serialization of the return value will create a new tensor from the
             # view, which is done outside of the user function.
             return x.split(100)[0]
@@ -6153,7 +6174,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
         with torch.cuda.device("cuda:1"):
@@ -6172,7 +6193,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         # don't access the parent future.
         def cb(fut):
             with torch.cuda.device("cuda:1"):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor1.fill_(1)
                 return tensor1
 
@@ -6180,7 +6201,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
         with self.assertRaisesRegex(

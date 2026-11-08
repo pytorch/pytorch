@@ -15,6 +15,7 @@ from torch.export import Dim, export
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -584,6 +585,9 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    # No hw_classification: this file only runs with a GPU and Triton, or on macOS
+    # (see __main__).
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -650,6 +654,8 @@ GPU_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -669,6 +675,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model

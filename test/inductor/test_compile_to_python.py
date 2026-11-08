@@ -13,8 +13,8 @@ from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 def _capture(m, x, tracing_mode="fake"):
@@ -52,12 +52,6 @@ def _flat_inputs(m, x):
     return (
         [p for _, p in m.named_parameters()] + [b for _, b in m.named_buffers()] + [x]
     )
-
-
-def _exec(src):
-    ns = {"__name__": "_compiled"}
-    exec(compile(src, "<compiled>", "exec"), ns)
-    return ns["call"]
 
 
 def _extract_call(src):
@@ -126,7 +120,7 @@ def call(args):
     return (buf0, )""",
         )
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_matmul_extern_kernel_codegen(self):
         m = torch.nn.Linear(4, 3, bias=False).eval()
@@ -147,7 +141,7 @@ def call(args):
     return (buf0, )""",
         )
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_addmm_relu_fused_pointwise_codegen(self):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
@@ -171,7 +165,7 @@ def call(args):
     return (buf1, )""",
         )
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_benchmark_harness_suppressed(self):
         # #187858 pins benchmark_harness=False, so the emitted module is runnable rather
@@ -197,9 +191,9 @@ def call(args):
             compile_to_python(gm, _flat_inputs(m, x))
 
 
-@requires_cuda_and_triton
-class TestInductorCompileToPythonCudaCodegen(TestCase):
-    # On CUDA, compile_to_python emits actual @triton.jit kernels rather than the CPU
+@requires_gpu_and_triton
+class TestInductorCompileToPythonGPUCodegen(TestCase):
+    # On GPU, compile_to_python emits actual @triton.jit kernels rather than the CPU
     # extern_kernels / cpp_fused path the sibling class goldens. The expect goldens lock
     # the ``call()`` body only: it carries NO autotuning artifacts -- XBLOCK / num_warps
     # are chosen inside ``.run`` at launch time and the arch-specific DeviceProperties
@@ -216,20 +210,20 @@ class TestInductorCompileToPythonCudaCodegen(TestCase):
         return src, _extract_call(src)
 
     def test_pointwise_triton_kernel_codegen(self):
-        m = _Pointwise().eval().cuda()
-        x = torch.randn(128, 64, device="cuda")
+        m = _Pointwise().eval().to(GPU_TYPE)
+        x = torch.randn(128, 64, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (128, 64), (64, 1), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((128, 64), (64, 1), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((128, 64), (64, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_poi_fused_0.run(flat_1, buf0, 8192, stream=raw_stream0)
@@ -249,23 +243,23 @@ def call(args):
         self.assertIn("tl.maximum", src)  # the fused relu
         self.assertNotIn("extern_kernels", call_src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_reduction_triton_kernel_codegen(self):
-        m = _SumDim1().eval().cuda()
-        x = torch.randn(64, 256, device="cuda")
+        m = _SumDim1().eval().to(GPU_TYPE)
+        x = torch.randn(64, 256, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (64, 256), (256, 1), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((64, ), (1, ), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((64, ), (1, ), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_per_fused_0.run(flat_1, buf0, 64, 256, stream=raw_stream0)
@@ -281,29 +275,33 @@ def call(args):
         self.assertIn("tl.sum", src)
         self.assertNotIn("extern_kernels", call_src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_addmm_relu_fused_triton_epilogue_codegen(self):
-        # CUDA counterpart of test_addmm_relu_fused_pointwise_codegen: the matmul is an
+        # GPU counterpart of test_addmm_relu_fused_pointwise_codegen: the matmul is an
         # extern BLAS call but the relu epilogue fuses into a @triton.jit kernel
         # (triton_poi_fused_add_0 here; a real AOTAutograd graph, with source-node
         # provenance, would name it triton_poi_fused_addmm_relu_0) rather than the CPU
         # cpp_fused_relu_0.
-        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval().cuda()
-        x = torch.randn(5, 4, device="cuda")
+        m = (
+            torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU())
+            .eval()
+            .to(GPU_TYPE)
+        )
+        x = torch.randn(5, 4, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertExpectedInline(
             call_src,
-            """\
+            f"""\
 def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
     assert_size_stride_grouped((flat_3, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    with torch.{GPU_TYPE}._DeviceGuard(0):
+        torch.{GPU_TYPE}.set_device(0)
         flat_3 = copy_if_misaligned(flat_3)
         flat_1 = copy_if_misaligned(flat_1)
-        buf0 = empty_strided_cuda((5, 3), (3, 1), torch.float32)
+        buf0 = empty_strided_{GPU_TYPE}((5, 3), (3, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: [aten.mm]
         extern_kernels.mm(flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), out=buf0)
         del flat_1
@@ -322,15 +320,15 @@ def call(args):
         self.assertIn("def triton_poi_fused_add_0(", src)
         self.assertIn("tl.maximum", src)  # the fused relu epilogue
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_softmax_fused_reduction_triton_kernel(self):
         # softmax is the canonical multi-stage fusion: max, subtract, exp, sum, divide
         # all collapse into ONE persistent-reduction Triton kernel. Its exact name
         # (the decomposition route) varies, so this checks structure + numerics rather
         # than goldening the call body.
-        m = _Softmax().eval().cuda()
-        x = torch.randn(32, 128, device="cuda")
+        m = _Softmax().eval().to(GPU_TYPE)
+        x = torch.randn(32, 128, device=GPU_TYPE)
         src, call_src = self._inner_call(m, x)
         self.assertIn("@triton.jit", src)
         self.assertIn("@triton_heuristics.persistent_reduction", src)
@@ -339,7 +337,7 @@ def call(args):
         self.assertIn(".exp(", src)
         self.assertNotIn("extern_kernels", call_src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     @skipIf(
         not IS_BIG_GPU,
@@ -359,9 +357,9 @@ def call(args):
         m = (
             torch.nn.Sequential(torch.nn.Linear(8192, 64, bias=False), torch.nn.ReLU())
             .eval()
-            .cuda()
+            .to(GPU_TYPE)
         )
-        x = torch.randn(64, 8192, device="cuda")
+        x = torch.randn(64, 8192, device=GPU_TYPE)
         gm = _capture(m, x)
         orig = SubgraphChoiceCaller._compile_for_benchmarking
         bench_calls = []
@@ -380,6 +378,7 @@ def call(args):
                     options={
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "TRITON",
+                        "triton.num_decompose_k_splits": 10,
                     },
                 )
         self.assertGreater(len(bench_calls), 0)  # benchmark lowerings actually ran
@@ -389,7 +388,7 @@ def call(args):
         )  # excluded by construction, never in the artifact
         with torch.no_grad():
             self.assertEqual(
-                _exec(src)(_flat_inputs(m, x))[0], m(x), atol=1e-2, rtol=1e-2
+                load_from_python(src)(_flat_inputs(m, x))[0], m(x), atol=1e-2, rtol=1e-2
             )
 
     @config.patch({"compile_threads": 1})
@@ -399,8 +398,8 @@ def call(args):
             self.skipTest("requires inductor FxGraphCache enabled")
         if not config.use_static_cuda_launcher:
             self.skipTest("requires the static CUDA launcher")
-        m = _Pointwise().eval().cuda()
-        x = torch.randn(1024, 1024, device="cuda")
+        m = _Pointwise().eval().to(GPU_TYPE)
+        x = torch.randn(1024, 1024, device=GPU_TYPE)
         src, cache = compile_to_python(_capture(m, x), _flat_inputs(m, x))
         self.assertIsInstance(cache, bytes)
         with fresh_cache():
@@ -440,7 +439,7 @@ class TestInductorCompileToPythonContract(TestCase):
         self.assertNotIn("AOTInductorModel", src)
         self.assertNotIn("benchmark_compiled_module", src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_load_from_python_standalone_and_warm(self):
         # load_from_python(python_code, cache) is the inverse of compile_to_python. The
@@ -477,7 +476,7 @@ class TestInductorCompileToPythonContract(TestCase):
         )
         self.assertIsNone(cache)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_graph_partition_runner_call_form(self):
         # graph_partition=True emits the Runner form (``call = runner.call``) instead of a
@@ -490,7 +489,7 @@ class TestInductorCompileToPythonContract(TestCase):
         )
         self.assertIn("call = runner.call", src)
         with torch.no_grad():
-            self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_dynamic_shapes_emits_symbolic_codegen(self):
         # A symbolically-traced graph carries symbolic sizes in its placeholder val
@@ -506,7 +505,7 @@ class TestInductorCompileToPythonContract(TestCase):
         call_src = _extract_call(src)
         self.assertRegex(call_src, r"\bs\d+\b")  # a symbolic size symbol is present
         self.assertNotIn("(8, 4)", call_src)  # the input shape is not baked in
-        fn = _exec(src)
+        fn = load_from_python(src)
         for n in (8, 16, 5):
             xi = torch.randn(n, 4)
             with torch.no_grad():
@@ -536,7 +535,7 @@ class TestInductorCompileToPythonContract(TestCase):
         self.assertIn("def call(", src1)
         self.assertIn("def call(", src2)
         with torch.no_grad():
-            self.assertEqual(_exec(src2)(_flat_inputs(m, x))[0], m(x))
+            self.assertEqual(load_from_python(src2)(_flat_inputs(m, x))[0], m(x))
 
 
 if __name__ == "__main__":

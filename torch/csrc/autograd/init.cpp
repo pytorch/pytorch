@@ -9,9 +9,13 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
@@ -40,6 +44,7 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#include <optional>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -447,10 +452,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
-      prepareProfiler,
+      [](const ProfilerConfig& config,
+         const std::set<ActivityType>& activities,
+         const ActivityFilter& activity_filter,
+         const ProfilerExtensionMap& profiler_extensions) {
+        prepareProfiler(
+            config, activities, activity_filter, profiler_extensions);
+      },
       py::arg("config"),
       py::arg("activities"),
-      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
+      py::arg("activity_filter") = ActivityFilter{},
+      py::arg("profiler_extensions") = ProfilerExtensionMap{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
@@ -717,19 +729,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             // of the hook functions for us
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
-                    pack_hook, unpack_hook));
+                    std::move(pack_hook), std::move(unpack_hook)));
           })
       .def_property_readonly(
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
+              // has_hooks() guarantees a value here (or a throw).
               auto opt = s.retrieve_unpack_hook_data();
-              TORCH_INTERNAL_ASSERT(opt.has_value());
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;
-              PyObject* raw = data_obj.ptr(getPyInterpreter());
-              TORCH_INTERNAL_ASSERT(raw != nullptr);
-              return py::reinterpret_borrow<py::object>(raw);
+              return py::reinterpret_borrow<py::object>(
+                  data_obj.ptr(getPyInterpreter()));
             } else {
               return py::cast(s.get_raw_data().value());
             }
@@ -737,14 +748,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "unpack_hook",
           [](const torch::autograd::SavedVariable& s) -> py::object {
-            auto opt = s.retrieve_unpack_hook_data();
+            auto opt = s.retrieve_unpack_hook();
             if (!opt.has_value()) {
               return py::none();
             }
             py::gil_scoped_acquire gil;
-            const auto& [unpack_safe, _unused_data] = *opt;
-            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
-            return py::reinterpret_borrow<py::function>(unpack_ptr);
+            return py::reinterpret_borrow<py::function>(
+                opt->ptr(getPyInterpreter()));
           });
 
   m.def(
@@ -1395,10 +1405,10 @@ static PyObject* is_grad_layout_enforcement_enabled(
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(obj)) {
-    c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
+    c10::GraphExecGroupState::set_tls_state(std::nullopt);
   } else {
     Py_INCREF(obj);
-    c10::AutogradState::get_tls_state().set_graph_exec_group(
+    c10::GraphExecGroupState::set_tls_state(
         c10::SafePyObject(obj, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -1407,8 +1417,7 @@ static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
 
 static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  const auto& group =
-      c10::AutogradState::get_tls_state().get_graph_exec_group();
+  const auto& group = c10::GraphExecGroupState::get_tls_state();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
     return Py_NewRef(obj);
@@ -1552,6 +1561,17 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
+// A Python FakeTensorMode and a C++ one each read as the FAKE mode, so the
+// Python APIs that install a mode refuse to install one while the other is set.
+// C++ guards that restore a stashed mode (StashTorchDispatchModeGuard,
+// StashTorchDispatchStackGuard) bypass these checks.
+static void check_no_cpp_fake_mode(c10::impl::TorchDispatchModeKey mode_key) {
+  TORCH_CHECK(
+      mode_key != c10::impl::TorchDispatchModeKey::FAKE ||
+          c10::impl::FakeTensorModeTLS::get_state() == nullptr,
+      "trying to set a Python FakeTensorMode while a C++ FakeTensorMode is set");
+}
+
 static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -1565,6 +1585,7 @@ static PyObject* push_on_torch_dispatch_stack(
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
       mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+      check_no_cpp_fake_mode(mode_key.value());
       c10::impl::TorchDispatchModeTLS::set_mode(
           std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
               arg, getPyInterpreter()),
@@ -1630,15 +1651,46 @@ static PyObject* get_dispatch_stack_at(
   END_HANDLE_TH_ERRORS
 }
 
+// A C++ FakeTensorMode lives in FakeTensorModeTLS rather than the FAKE infra
+// mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
+// its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
+// set, so callers that enter, suspend and restore the fake mode through these
+// calls handle either kind the same way; they use the wrapper as the fake mode
+// (e.g. read its shape_env). The mode stack APIs
+// (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
+// a C++ mode is installed and removed only through set/unset_dispatch_mode.
+// get/unset return the mode's wrapper, rebuilding it if it was collected, and
+// raise if that fails; see Note [C++ FakeTensorMode Python wrapper lifetime].
+// TODO: the rebuild always fails until CppFakeTensorMode is added.
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
+  py::object cpp_mode_obj = PyObject_FastGetAttrString(mode, "_cpp_mode");
+  if (cpp_mode_obj) {
+    auto cpp_mode =
+        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
+    TORCH_CHECK(
+        cpp_mode != nullptr,
+        "set_dispatch_mode() called with a mode whose _cpp_mode is None");
+    TORCH_CHECK(
+        !c10::impl::TorchDispatchModeTLS::get_mode(
+             c10::impl::TorchDispatchModeKey::FAKE)
+             .has_value(),
+        "trying to set a C++ FakeTensorMode while a Python FakeTensorMode is set");
+    TORCH_CHECK(
+        c10::impl::FakeTensorModeTLS::get_state() == nullptr,
+        "trying to set the current C++ FakeTensorMode, but one already exists");
+    c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
+    Py_RETURN_NONE;
+  }
+
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
       maybe_mode_key_obj,
-      "set_dispatch_mode() called with a mode that does not contain a _mode_key attribute!");
+      "set_dispatch_mode() called with a mode that has no _cpp_mode or _mode_key attribute!");
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+  check_no_cpp_fake_mode(mode_key);
 
   Py_INCREF(mode);
   c10::impl::TorchDispatchModeTLS::set_mode(
@@ -1657,6 +1709,12 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
   if (!maybe_mode.has_value()) {
+    if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
+      return torch::fake_tensor::getCppFakeTensorModePyObj(
+                 c10::impl::FakeTensorModeTLS::get_state())
+          .release()
+          .ptr();
+    }
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
@@ -1669,6 +1727,18 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(!Py_IsNone(arg));
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
+  if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
+    auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
+    if (cpp_mode != nullptr) {
+      TORCH_CHECK(
+          !c10::impl::TorchDispatchModeTLS::get_mode(mode_key).has_value(),
+          "both a Python FakeTensorMode and a C++ FakeTensorMode are set");
+      // Get the wrapper first, so a failed rebuild leaves the mode installed
+      auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
+      c10::impl::FakeTensorModeTLS::reset_state();
+      return py_mode.release().ptr();
+    }
+  }
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
   if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;

@@ -11,10 +11,16 @@ import os
 from unittest.mock import MagicMock, patch
 
 from torch.distributed.launcher.api import launch_agent, LaunchConfig
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class LauncherApiTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Save original environment variable if it exists
@@ -95,6 +101,45 @@ class LauncherApiTest(TestCase):
             os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"],
             "SIGTERM,SIGINT,SIGHUP,SIGQUIT",
         )
+
+    @patch("torch.distributed.launcher.api.LocalElasticAgent")
+    @patch("torch.distributed.launcher.api.rdzv_registry.get_rendezvous_handler")
+    def test_launch_agent_failing_rdzv_shutdown_does_not_mask_child_failed_error(
+        self, mock_get_handler, mock_agent
+    ):
+        """Test that a failing rendezvous shutdown does not mask ChildFailedError."""
+        from torch.distributed.elastic.multiprocessing.errors import (
+            ChildFailedError,
+            ProcessFailure,
+        )
+
+        config = LaunchConfig(
+            min_nodes=1,
+            max_nodes=1,
+            nproc_per_node=1,
+            run_id="test_run",
+        )
+        entrypoint = "dummy_script.py"
+        args = []
+
+        mock_rdzv_handler = MagicMock()
+        mock_rdzv_handler.shutdown.side_effect = RuntimeError(
+            "Rendezvous store unreachable"
+        )
+        mock_get_handler.return_value = mock_rdzv_handler
+
+        mock_agent_instance = MagicMock()
+        failures = {0: ProcessFailure(0, 123, 1, "")}
+        mock_agent_instance.run.return_value = MagicMock(
+            is_failed=lambda: True, failures=failures
+        )
+        mock_agent.return_value = mock_agent_instance
+
+        with self.assertRaises(ChildFailedError) as raised:
+            launch_agent(config, entrypoint, args)
+
+        self.assertEqual(raised.exception.failures, failures)
+        mock_rdzv_handler.shutdown.assert_called_once()
 
 
 if __name__ == "__main__":
