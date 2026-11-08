@@ -46,6 +46,15 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     return torch.device(device_type).type
 
 
+def get_cache_flush_size(props: Any) -> int:
+    """Bytes to touch to evict L2 and any distinct outer cache."""
+    l2 = getattr(props, "L2_cache_size", 0) or 0
+    llc = getattr(props, "last_level_cache_size", 0) or 0
+    # An outer cache adds to the footprint. Equal values describe one cache
+    # (CUDA, XPU, or the ROCm fallback to L2) and must not be counted twice.
+    return (l2 + llc if llc > l2 else max(l2, llc)) or 256 * 1024 * 1024
+
+
 _GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
 _gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
 
@@ -626,7 +635,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def get_device_cache_size(
         self: Self, device_type: str | torch.device | None = None
     ) -> int:
-        """Get the L2/global cache size, in bytes, of the current device."""
+        """Get a cache-flush size hint in bytes, covering both L2 and LLC."""
         if "L2_cache_size" in self.__dict__:
             return self.__dict__["L2_cache_size"]
 
@@ -634,11 +643,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         device_interface = get_interface_for_device(device_type)
         device = device_interface.current_device()
         props = device_interface.get_device_properties(device)
-        for attr in ("L2_cache_size", "last_level_cache_size"):
-            cache_size = getattr(props, attr, None)
-            if cache_size:
-                return cache_size
-        return 256 * 1024 * 1024
+        return get_cache_flush_size(props)
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None

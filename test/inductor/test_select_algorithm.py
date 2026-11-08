@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import types
 import unittest.mock
 from collections.abc import Callable
 from typing import Any
@@ -42,8 +43,10 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     MI300_ARCH,
+    parametrize,
     skipIfRocmArch,
     TEST_XPU,
 )
@@ -1065,8 +1068,26 @@ class TestSelectAlgorithmCleanup(TestCase):
         self.assertIsNone(autotuner._debug_call)
 
 
+@instantiate_parametrized_tests
 class TestExternKernelCaller(TestCase):
-    def test_extern_cudagraph_benchmark_rotates_selected_inputs(self):
+    @parametrize(
+        "device_type, properties, pool_size",
+        (
+            ("cuda", {"L2_cache_size": 8192, "last_level_cache_size": 32768}, 4),
+            ("cuda", {"L2_cache_size": 8192}, 2),
+            ("xpu", {"last_level_cache_size": 32768}, 4),
+            ("cuda", {"L2_cache_size": 8192, "last_level_cache_size": 0}, 2),
+            ("cuda", {}, 4),
+            ("cuda", {"L2_cache_size": 8192, "last_level_cache_size": 12288}, 4),
+            ("cuda", {"L2_cache_size": 32768, "last_level_cache_size": 8192}, 4),
+            ("cuda", {"L2_cache_size": 8192, "last_level_cache_size": 8192}, 2),
+            ("cuda", {"L2_cache_size": 8192, "last_level_cache_size": None}, 2),
+            ("cuda", {"L2_cache_size": 0, "last_level_cache_size": 0}, 4),
+        ),
+    )
+    def test_extern_cudagraph_benchmark_rotates_selected_inputs(
+        self, device_type, properties, pool_size
+    ):
         from torch._inductor.runtime.benchmarking import benchmarker
 
         input_meta, output_meta = self._mm_tensor_metas()
@@ -1079,16 +1100,21 @@ class TestExternKernelCaller(TestCase):
             cudagraph_unroll=4,
             cudagraph_cold_cache_input_indices=(1,),
         )
-        inputs = tuple(torch.randn(64, 64) for _ in range(2))
+        # Each selected input is 16 KiB; the pool grows until its copies cover
+        # twice the flush hint.
+        inputs = tuple(torch.randn(64, 64, dtype=torch.float32) for _ in range(2))
         out = torch.empty(64, 64)
-        run_fns = [unittest.mock.Mock(), unittest.mock.Mock()]
-        make_run_fn = unittest.mock.Mock(return_value=run_fns[1])
+        run_fns = [unittest.mock.Mock() for _ in range(pool_size)]
+        make_run_fn = unittest.mock.Mock(side_effect=run_fns[1:])
         device_interface = unittest.mock.Mock()
         device_interface.device.return_value = contextlib.nullcontext()
-        device_interface.get_device_properties.return_value.L2_cache_size = 1
+        device_interface.get_device_properties.return_value = types.SimpleNamespace(
+            **properties
+        )
+        expected_device_type = device_type
 
         def run_cudagraph_benchmark(fn, *, device_type, cudagraph_unroll):
-            self.assertEqual(device_type, "cuda")
+            self.assertEqual(device_type, expected_device_type)
             self.assertEqual(cudagraph_unroll, 4)
             for _ in range(cudagraph_unroll):
                 fn()
@@ -1098,7 +1124,7 @@ class TestExternKernelCaller(TestCase):
             patch.object(
                 request,
                 "_get_benchmark_device",
-                return_value=(device_interface, "cuda", 0),
+                return_value=(device_interface, device_type, 0),
             ),
             patch.object(request, "make_run_fn", new=make_run_fn),
             patch.object(
@@ -1112,17 +1138,19 @@ class TestExternKernelCaller(TestCase):
                 1.25,
             )
 
-        make_run_fn.assert_called_once()
-        rotated_inputs = make_run_fn.call_args.args
-        self.assertIs(rotated_inputs[0], inputs[0])
-        self.assertIsNot(rotated_inputs[1], inputs[1])
-        self.assertEqual(rotated_inputs[1], inputs[1])
-        rotated_out = make_run_fn.call_args.kwargs["out"]
-        self.assertIsNot(rotated_out, out)
-        self.assertEqual(rotated_out.size(), out.size())
-        self.assertEqual(rotated_out.stride(), out.stride())
+        self.assertEqual(make_run_fn.call_count, pool_size - 1)
+        for call in make_run_fn.call_args_list:
+            rotated_inputs = call.args
+            self.assertIs(rotated_inputs[0], inputs[0])
+            self.assertIsNot(rotated_inputs[1], inputs[1])
+            self.assertEqual(rotated_inputs[1], inputs[1])
+            rotated_out = call.kwargs["out"]
+            self.assertIsNot(rotated_out, out)
+            self.assertEqual(rotated_out.size(), out.size())
+            self.assertEqual(rotated_out.stride(), out.stride())
         for run_fn in run_fns:
-            self.assertEqual(run_fn.call_count, 2)
+            self.assertEqual(run_fn.call_count, 4 // pool_size)
+        device_interface.get_device_properties.assert_called_once_with(0)
         device_interface.synchronize.assert_called_once()
 
     @requires_gpu()

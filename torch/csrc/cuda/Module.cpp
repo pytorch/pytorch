@@ -22,6 +22,7 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/detail/LastLevelCache.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/core/AllocatorConfig.h>
@@ -1240,6 +1241,18 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
       .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
+      .def_property_readonly(
+          "last_level_cache_size",
+          [](const cudaDeviceProp& prop) -> int64_t {
+#if defined(USE_ROCM)
+            const auto size =
+                at::cuda::detail::getLastLevelCacheSize(prop.uuid.bytes);
+            if (size > 0) {
+              return size;
+            }
+#endif
+            return prop.l2CacheSize;
+          })
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
