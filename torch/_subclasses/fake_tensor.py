@@ -394,7 +394,7 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
         # change. The descriptor checks the hint on every read, but a SymNode's
         # hint is computed when it is created, and the only later write
-        # (guarding_hint_or_throw) is for ints and bools, so a SymFloat's hint
+        # (guarding_hint_or_throw) rejects SymFloats, so a SymFloat's hint
         # cannot change after this and checking it once here is equivalent.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
