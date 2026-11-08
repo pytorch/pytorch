@@ -343,12 +343,13 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # CppFakeTensorMode for a C++ fake or a wrapper of one, or while a C++ mode is
 # entered. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
 # its interface yet. Its from_tensor raises UnsupportedFakeTensorException for
-# views, sparse and mkldnn tensors and tensors with nested ints, its converter's
-# from_real_tensor also for constants that are not plain tensors, and its
-# converter's from_meta_and_device, which makes Python FakeTensors, raises
-# AssertionError. So a caller that needs a Python FakeTensorMode narrows the
-# result with torch._guards.require_python_fake_mode, which raises
-# NotImplementedError for a C++ mode.
+# views, sparse and mkldnn tensors and tensors with nested ints, its
+# converter's from_real_tensor also for constants that are fakes or not plain
+# tensors, and its converter's from_meta_and_device, which makes Python
+# FakeTensors, raises AssertionError. So a caller that needs a Python
+# FakeTensorMode narrows the result with
+# torch._guards.require_python_fake_mode, which raises NotImplementedError for
+# a C++ mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -970,8 +971,7 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 # torch/_decomp/decompositions.py.
 # decomps are used for aot autograd tracing so we would like to unify on their
 # implementation and add additional testing to them
-@functools.cache
-def torch_decomp_decompositions(func: OpOverload) -> bool:
+def is_torch_decomp_decomposition(func: OpOverload) -> bool:
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
@@ -981,6 +981,11 @@ def torch_decomp_decompositions(func: OpOverload) -> bool:
     fn = decomposition_table[func]
     in_decomp_module = fn.__module__.startswith("torch._decomp")
     return in_decomp_module and hasattr(decompositions, fn.__name__)
+
+
+@functools.cache
+def torch_decomp_decompositions(func: OpOverload) -> bool:
+    return is_torch_decomp_decomposition(func)
 
 
 def tree_flatten_only(ty: type[T], tree: PyTree) -> list[T]:
@@ -3690,7 +3695,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # If there's a Python meta, prefer that over the decomposition.
         # fake_try_decomp in torch/csrc/PyInterpreter.cpp mirrors this block for
-        # C++ FakeTensor, and _register_static_shape_decomps in
+        # C++ FakeTensor, and decomposes_under_static_shapes in
         # torch/_meta_registrations.py its static shape case; keep them in sync.
         from torch._decomp import meta_table
 
