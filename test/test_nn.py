@@ -4284,6 +4284,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
+        # When ||x1|| < eps, the clamp must be visible to autograd so df/dx1
+        # equals x2 / (eps * ||x2||). In-place clamp under NoGradGuard left a
+        # scaled correction term (#203946).
+        x1 = torch.tensor([2.0**-21, 0.0], dtype=torch.float64, requires_grad=True)
+        x2 = torch.tensor([3.0, 4.0], dtype=torch.float64)
+        eps = 2.0**-20
+        out = F.cosine_similarity(x1, x2, dim=0, eps=eps)
+        (g,) = torch.autograd.grad(out, (x1,))
+        self.assertEqual(out, torch.tensor(0.3, dtype=torch.float64))
+        self.assertEqual(g, x2 / (eps * x2.norm()))
+
+        x1 = torch.tensor([0.3, 0.4], dtype=torch.float64, requires_grad=True)
+        x2 = torch.tensor([3.0, 4.0], dtype=torch.float64)
+        out = F.cosine_similarity(x1, x2, dim=0, eps=1.0)
+        (g,) = torch.autograd.grad(out, (x1,))
+        self.assertEqual(g, torch.tensor([0.6, 0.8], dtype=torch.float64))
+
 
     def test_affine_grid_error_checking(self):
         # 2D affine
