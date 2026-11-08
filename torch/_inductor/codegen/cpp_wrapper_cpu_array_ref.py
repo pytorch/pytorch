@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Sequence
 from typing import Any
+from typing_extensions import override
 
 import sympy
 
 import torch
 import torch._inductor.async_compile
 import torch._ops
+from torch._prims_common import _is_non_overlapping_and_dense_or_false
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
@@ -205,6 +207,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def _codegen_v2_raw_outputs(
         self, code: IndentedBuffer, output_refs: list[str]
     ) -> None:
+        cst_names = V.graph.constants.keys()
+
         def write_output_to_c_array(idx: int, output: str) -> None:
             output_arrayref_name = f"output_arrayref_{idx}"
             code.splice(
@@ -219,8 +223,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
+            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
+            if isinstance(output_buffer, ir.BaseView):
+                output_storage = output_buffer.unwrap_view()
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, got "
+                        f"{type(output_storage).__name__}"
+                    )
+                if isinstance(output_storage.data, ir.ConstantBuffer):
+                    is_constant_buffer = True
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 output_tensor = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -245,6 +258,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                 )
                 if is_constant_buffer:
+                    # See NOTE(arrayref_constant_output) in generate_return.
                     code.splice(
                         f"""
                         AtenTensorHandle {cached_output_name}_tmp;
@@ -603,7 +617,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
+    @override
     def generate_return(self, output_refs: list[str]):
+        cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
             and config.aot_inductor.use_minimal_arrayref_interface
@@ -652,8 +668,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
+            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
+            if isinstance(output_buffer, ir.BaseView):
+                output_storage = output_buffer.unwrap_view()
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, got "
+                        f"{type(output_storage).__name__}"
+                    )
+                if isinstance(output_storage.data, ir.ConstantBuffer):
+                    is_constant_buffer = True
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
@@ -688,6 +713,24 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # assuming they are not updated at runtime Basically, we
                         # cannot release or transfer the ownership of any original
                         # constant to the user.
+                        #
+                        # NOTE(arrayref_constant_output): unlike the output_handles
+                        # path below, this copy is a dense aoti_torch_clone, not
+                        # aoti_torch_clone_preserve_strides. The copy is wrapped in an
+                        # ArrayRefTensor, which carries its data as a flat buffer of
+                        # numel() elements and cannot represent a non-dense view, so
+                        # we reject non-dense constant outputs rather than silently
+                        # returning different strides.
+                        size = V.graph.sizevars.guard_int_seq(output_buffer.get_size())
+                        stride = V.graph.sizevars.guard_int_seq(
+                            output_buffer.get_stride()
+                        )
+                        if not _is_non_overlapping_and_dense_or_false(size, stride):
+                            raise NotImplementedError(
+                                f"Returning a non-dense constant {output} (size={size}, "
+                                f"stride={stride}) is not supported with "
+                                "aot_inductor.use_minimal_arrayref_interface"
+                            )
                         self.wrapper_call.writeline(
                             f"AtenTensorHandle {cached_output_name}_tmp;"
                         )
@@ -708,10 +751,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     )
                 else:
                     if is_constant_buffer:
-                        # See NOTE(return_constant) above.
+                        # See NOTE(return_constant) above. A constant-folding output
+                        # can be a non-dense view that kernels were compiled
+                        # against, so the clone must keep its strides.
                         self.wrapper_call.writeline(
                             "AOTI_TORCH_ERROR_CODE_CHECK("
-                            f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                            f"aoti_torch_clone_preserve_strides({output}, &output_handles[{idx}]));"
                         )
                     else:
                         if output in output2idx:

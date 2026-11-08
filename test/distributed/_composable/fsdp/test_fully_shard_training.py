@@ -9,6 +9,7 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -41,8 +42,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
     TrainingState,
 )
-from torch.distributed.tensor import DTensor, init_device_mesh, Shard
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
+from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -486,6 +490,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     [(16, 17), (17, 8)],
                 ],
                 "use_shard_placement_fn": [False],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
             },
             self._test_train_parity_single_group,
         )
@@ -498,19 +506,42 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                # Sharding on nonzero dim requires even sharding
+                # The (8, 17) and (1, 17) weights shard dim 1 unevenly, leaving
+                # empty ranks at 8 ranks; the latter has outer size 1
+                "lin_shapes": [
+                    [(32, 16), (16, 8)],
+                    [(16, 17), (17, 8)],
+                    [(16, 17), (17, 1)],
+                ],
+                "use_shard_placement_fn": [True],
+                # False tests Shard(1)-only weights; True adds Shard(0) biases.
+                "bias": [False, True],
+            },
+            self._test_train_parity_single_group,
+        )
+        # The native reduce-scatter copy-in needs even nonzero-dim sharding
+        self.run_subtests(
+            {
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
+                "bias": [False, True],
+                "reduce_scatter_input_fn": [reduce_scatter_input_fn_with_native_copy],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(
-        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
+        self,
+        lin_shapes: list[tuple[int, int]],
+        use_shard_placement_fn: bool,
+        bias: bool = True,
+        reduce_scatter_input_fn: Callable | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            nn.Linear(*lin_shapes[0], bias=bias),
+            nn.ReLU(),
+            nn.Linear(*lin_shapes[1], bias=bias),
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -521,17 +552,19 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            losses: list[torch.Tensor] = []
+            outputs: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(*inp).sum())
-                losses[-1].backward()
+                outputs.append(_model(*inp))
+                outputs[-1].sum().backward()
                 _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            self.assertEqual(outputs[0], outputs[1])
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -612,6 +645,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @with_tf32_off
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: bool | int,
@@ -673,7 +707,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard_fn(module)
         fully_shard_fn(model)
         if unshard_async_op:
-            model._set_unshard_async_op(unshard_async_op)
+            model.set_unshard_in_current_stream(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -1662,6 +1696,122 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
             self.assertTrue(param.to_local().is_contiguous())
             self.assertTrue(param.grad.is_contiguous())
             self.assertTrue(param.grad.to_local().is_contiguous())
+
+    def test_uneven_shard_dim1_bf16_all_gather(self):
+        # The columns of the (9, 13) weight split 4, 4, 4, 1 and those of the
+        # (4, 9) weight 3, 3, 3, 0: full shards take the bf16 foreach-copy fast
+        # path into the all-gather, while the others are padded first
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(13, 9, bias=False), nn.Linear(9, 4, bias=False)
+        ).to(device_type)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model).to(torch.bfloat16)
+        fully_shard(
+            model,
+            shard_placement_fn=lambda param: Shard(1),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        inp = torch.randn((2, 13), device=device_type.type)
+        self.assertEqual(model(inp), ref_model(inp.to(torch.bfloat16)))
+
+    def test_train_parity_uneven_shard_dim1(self):
+        meshes = [
+            init_device_mesh(device_type.type, (self.world_size,)),
+            init_device_mesh(
+                device_type.type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dp_replicate", "dp_shard"),
+            ),
+        ]
+        self.run_subtests(
+            {"mesh": meshes, "reshard_after_forward": [True, False, 2]},
+            self._test_train_parity_uneven_shard_dim1,
+        )
+
+    def _test_train_parity_uneven_shard_dim1(
+        self, mesh: DeviceMesh, reshard_after_forward: bool | int
+    ):
+        class FeedForward(nn.Module):
+            # Stacked gate and up projections, sharded on F like w2. Scaled like
+            # nn.Linear, so activations stay O(1) and fp32 reduction-order
+            # differences stay within tolerance.
+            def __init__(self, dim: int, hidden_dim: int):
+                super().__init__()
+                self.w13 = nn.Parameter(torch.randn(2, hidden_dim, dim) / dim**0.5)
+                self.w2 = nn.Parameter(torch.randn(dim, hidden_dim) / hidden_dim**0.5)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                gate, up = torch.einsum("bd,nfd->nbf", x, self.w13)
+                return (nn.functional.silu(gate) * up) @ self.w2.t()
+
+        # F = 2s - 3 and F = s + 1 over s shard ranks leave a short and an empty
+        # rank on every mesh: 2, 2, 1, 0 rows over 4 ranks, and 1, 0 and 2, 1
+        # over 2
+        shard_size = mesh.shape[-1]
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            FeedForward(8, 2 * shard_size - 3), FeedForward(8, shard_size + 1)
+        ).to(device_type)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2, fused=True)
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=lambda param: Shard(1),
+        )
+        for layer in model:
+            fully_shard_fn(layer)
+        fully_shard_fn(model)
+        # Unlike foreach, fused requires each gradient to have its parameter's
+        # strides, including on empty shards
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
+
+        num_microbatches = 2
+        for _ in range(3):
+            for microbatch_idx in range(num_microbatches):
+                # HSDP accumulates reduce-scatter outputs until the all-reduce
+                model.set_requires_all_reduce(microbatch_idx == num_microbatches - 1)
+                inp = torch.randn((4, 8), device=device_type.type)
+                ref_loss = ref_model(inp).sum()
+                loss = model(inp).sum()
+                self.assertEqual(loss, ref_loss)
+                ref_loss.backward()
+                loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            check_sharded_parity(self, ref_model, model)
+            # Checked here since fused AdamW checks them only on CUDA
+            for param in model.parameters():
+                self.assertEqual(
+                    param.grad.to_local().stride(), param.to_local().stride()
+                )
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+    def test_uneven_shard_dim1_load_state_dict_assign(self):
+        # distribute_tensor leaves rank 3's empty (4, 0) shard of a (4, 5) weight
+        # with the strides of the tensor it views, so FSDP gives it the
+        # contiguous strides of its gradient, as fused optimizers require
+        model = nn.Linear(5, 4, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+        weight = torch.randn((4, 5), device=device_type.type)
+        dist.broadcast(weight, src=0)
+        sharded_weight = distribute_tensor(
+            weight, model.weight.device_mesh, model.weight.placements
+        )
+        model.load_state_dict({"weight": sharded_weight}, assign=True)
+        model(torch.randn((2, 5), device=device_type.type)).sum().backward()
+        self.assertEqual(
+            model.weight.to_local().stride(), model.weight.grad.to_local().stride()
+        )
+        self.assertEqual(model.weight.full_tensor(), weight)
 
 
 class TestFullyShardSharedParams(FSDPTestContinuous):
@@ -2792,15 +2942,18 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
     @skip_if_lt_x_gpu(8)
-    def test_shard_placement_fn_tp_ep(self):
+    @parametrize("tp_degree", [1, 2])
+    @parametrize("dp_replicate", [1, 2])
+    def test_shard_placement_fn_tp_ep(self, tp_degree: int, dp_replicate: int):
         # Every new mesh adds NCCL communicators that hold /dev/shm until the
         # processes exit, and the meshes depend only on tp_degree and
-        # dp_replicate, so build them once rather than once per subtest.
+        # dp_replicate, so build them once rather than once per subtest, and
+        # give each configuration its own test (and so its own processes).
         self._parallel_meshes = {}
         self.run_subtests(
             {
-                "tp_degree": [1, 2],
-                "dp_replicate": [1, 2],
+                "tp_degree": [tp_degree],
+                "dp_replicate": [dp_replicate],
                 "reshard_non_layer_modules": [False, True, 2],
             },
             self._test_shard_placement_fn_tp_ep,
@@ -3367,10 +3520,13 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
+        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            inp = torch.ones((2, 8), device=device_type)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
@@ -3509,6 +3665,59 @@ class TestFullyShardCudaGraph(FSDPTest):
             self._test_manual_backward_finalization_cudagraph,
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
+    def test_pending_backward_prefetch_cleanup_cudagraph(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        fake_pg = dist.new_group(backend="fake")
+        mesh = DeviceMesh.from_group(fake_pg, "cuda")
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device)
+        fully_shard(model[0], mesh=mesh)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        static_inputs = [torch.randn(4, 8, device=device) for _ in range(2)]
+
+        def run_accumulation() -> None:
+            model.set_is_last_backward(False)
+            model.set_reshard_after_backward(False)
+            model.set_requires_gradient_sync(False)
+            model(static_inputs[0]).sum().backward()
+            model.set_is_last_backward(True)
+            model.set_reshard_after_backward(True)
+            model.set_requires_gradient_sync(True)
+            model(static_inputs[1]).sum().backward()
+
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            run_accumulation()
+            model.zero_grad(set_to_none=True)
+
+        pending_all_gather_cleanups = 0
+        orig_finalize_backward = FSDPParamGroup.finalize_backward
+
+        def finalize_backward(param_group: FSDPParamGroup) -> None:
+            nonlocal pending_all_gather_cleanups
+            result = param_group._all_gather_result
+            if result is not None and result.all_gather_event is not None:
+                pending_all_gather_cleanups += 1
+            orig_finalize_backward(param_group)
+
+        graph = torch.cuda.CUDAGraph()
+        with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
+            with torch.cuda.graph(graph, stream=stream):
+                run_accumulation()
+        self.assertGreater(pending_all_gather_cleanups, 0)
+        graph.replay()
+        torch.cuda.synchronize()
+
     def _test_manual_backward_finalization_cudagraph(self, async_op: bool) -> None:
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
@@ -3563,7 +3772,7 @@ class TestFullyShardCudaGraph(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFullyShardGradientAccumulation)
-
+instantiate_parametrized_tests(TestFullyShardNDTraining)
 
 if __name__ == "__main__":
     run_tests()

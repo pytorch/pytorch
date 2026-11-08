@@ -5,7 +5,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
 #include <c10/core/Allocator.h>
-#include <c10/util/flat_hash_map.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -43,7 +42,7 @@ using CaptureId_t = c10::CaptureId_t;
  * Meanwhile, within the graph, at capture time, instead of
  * populating PhiloxCudaStates with the uint64_t offset pulled
  * directly from the global state, PhiloxCudaState uses a pointer
- * to a one-element stream-local int64_t device tensor
+ * to a one-element graph-owned int64_t device tensor
  * holding an initial offset value, and a uint64_t holding an
  * intra-graph offset. (The intra-graph offset starts from zero
  * when capture begins.)  In each consumer kernel,
@@ -57,7 +56,8 @@ using CaptureId_t = c10::CaptureId_t;
  * The control flow above ensures graphed execution is bitwise
  * identical to eager execution as long as RNG ops are enqueued
  * from a single thread, even if RNG ops and graphs containing
- * RNG ops are enqueued and run simultaneously on multiple streams.
+ * RNG ops are enqueued and run simultaneously on multiple streams,
+ * provided overlapping replays use different graphs.
  *
  * Usage:
  * ~~~~~~
@@ -100,8 +100,7 @@ using CaptureId_t = c10::CaptureId_t;
 
 /**
  * Per-capture state for a generator.
- * Each (generator, capture_id) pair gets its own CUDAGeneratorCaptureState.
- * This holds the GPU tensors and offset tracking for a specific graph capture.
+ * Owned by CUDAGraph and assigned lazily to a generator state during capture.
  */
 struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
   uint64_t offset_intragraph_{0};
@@ -111,23 +110,19 @@ struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
   CUDAGeneratorCaptureState() = default;
 
   bool is_initialized() const { return rng_state_seed_extragraph_.defined(); }
-  void initialize(uint64_t seed);
+  void initialize(c10::DeviceIndex device);
   void increase(uint64_t increment);
   uint64_t finalize();
   void setup_for_replay(uint64_t seed, uint64_t philox_offset);
 };
 
 /**
- * Generator state that supports multiple concurrent graph captures.
- * Each capture gets its own CUDAGeneratorCaptureState keyed by CaptureId_t.
+ * Shared seed and eager offset for a generator and its graphsafe aliases.
+ * Capture-specific state belongs to CUDAGraph.
  */
 struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t seed_;
   uint64_t philox_offset_per_thread_;
-
-  // Map from capture ID to per-capture state
-  ska::flat_hash_map<CaptureId_t, c10::intrusive_ptr<CUDAGeneratorCaptureState>> capture_states_;
-  mutable std::mutex capture_states_mutex_;
 
   CUDAGeneratorState(
       uint64_t seed = default_rng_seed_val,
@@ -137,10 +132,10 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
 
   void increase(uint64_t increment);
 
-  CUDAGeneratorCaptureState* get_capture_state(CaptureId_t capture_id, bool create_if_not_found = false);
-  uint64_t capture_epilogue(CaptureId_t capture_id);
-  void replay_prologue(CaptureId_t capture_id, uint64_t wholegraph_increment);
-  void remove_capture_state(CaptureId_t capture_id);
+  CUDAGeneratorCaptureState* get_capture_state(CaptureId_t capture_id);
+  void replay_prologue(
+      CUDAGeneratorCaptureState& capture_state,
+      uint64_t wholegraph_increment);
 
   c10::intrusive_ptr<CUDAGeneratorState> clone();
 };

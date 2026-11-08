@@ -43,7 +43,10 @@ from torch.testing._internal.common_quantization import (
     FunctionalConvReluModel,
     FunctionalConvReluConvModel,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 # Standard Libraries
 import copy
@@ -78,6 +81,8 @@ default_equalization_qconfig_dict = {
 
 
 class TestEqualizeFx(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def channel_minmax(self, input, axis=1):
         ''' Finds the min/max of inputs associated with a specific channel
         '''
