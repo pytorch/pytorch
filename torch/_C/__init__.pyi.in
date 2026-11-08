@@ -2308,12 +2308,19 @@ class _CppFakeTensorMode:
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     epoch: _int
+    @property
+    def fake_tensor_converter(self) -> FakeTensorConverter: ...
+    @property
+    def shape_env(self) -> ShapeEnv | None: ...
+    @overload
     def __init__(
         self,
         converter: FakeTensorConverter,
         shape_env: ShapeEnv | None,
-        wrapper: object,
     ) -> None: ...
+    @overload
+    def __init__(self, cpp_mode: object, /) -> None: ...
+    def _attach_python_object(self) -> None: ...
 
 def _from_meta_and_device(
     meta: Tensor, device: _device, mode: _CppFakeTensorMode
