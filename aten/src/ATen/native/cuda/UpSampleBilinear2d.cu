@@ -932,6 +932,21 @@ int64_t nhwc_gather_min_contributions() {
   return 0;
 }
 
+// Each gather thread loops over its whole grad_output window. Above this many
+// contributions per grad_input address the window is large and the grid small,
+// and the bf16/fp32 scatter is faster. fp16 scatter is slow enough that gather
+// wins at every measured ratio. A return of 0 means no cap. 512 is from the
+// gfx950 sweep in perf/ratio_sweep_high_mi355x.md: it sits above the last
+// winning pyramid shape (ratio ~455) and below the first losing one (~1820).
+// No higher or lower ratio kept every bf16/fp32 plane above 0.95x. The same
+// value applies to every architecture that reaches this gate.
+int64_t nhwc_gather_max_contributions(at::ScalarType dtype) {
+  if (dtype == at::ScalarType::Half) {
+    return 0;
+  }
+  return 512;
+}
+
 // Writes every grad_input element, so the caller skips zero-fill.
 template <typename scalar_t>
 void upsample_bilinear2d_backward_gather_nhwc_launch(
@@ -1037,12 +1052,17 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   // address, the gather, which writes every element, beats zero-fill plus
   // atomic scatter. A cut of 0 keeps the scatter.
   const int64_t min_contributions = nhwc_gather_min_contributions();
+  const int64_t max_contributions =
+      nhwc_gather_max_contributions(grad_output_.scalar_type());
   if (min_contributions > 0 &&
       grad_output_.sizes() != grad_input.sizes() &&
       memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 &&
       grad_input.is_contiguous(memory_format) &&
       4 * grad_output_.numel() >=
-          min_contributions * grad_input.numel()) {
+          min_contributions * grad_input.numel() &&
+      (max_contributions == 0 ||
+       4 * grad_output_.numel() <
+           max_contributions * grad_input.numel())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16,
         grad_output_.scalar_type(), "upsample_bilinear2d_backward_gather_nhwc",
