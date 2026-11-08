@@ -1525,6 +1525,50 @@ class TestUnbackedSymints(InductorTestCase):
         )
         self.assertEqual(asserts, [sympy.Eq(1, u0)])
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @parametrize("concat_targets", [False, True])
+    @parametrize("reduction", ["none", "sum", "mean"])
+    def test_ctc_loss_tensor_lengths(self, device, concat_targets, reduction):
+        def fn(log_probs, targets, input_lengths, target_lengths):
+            return torch.ctc_loss(
+                log_probs,
+                targets,
+                input_lengths,
+                target_lengths,
+                reduction={"none": 0, "mean": 1, "sum": 2}[reduction],
+                zero_infinity=True,
+            )
+
+        T, N, C, S = 50, 4, 20, 10
+        log_probs = torch.randn(T, N, C, device=device).log_softmax(-1)
+        input_lengths = torch.randint(T // 2, T + 1, (N,), device=device)
+
+        cfn = torch.compile(fn, fullgraph=True)
+
+        for max_len in (1, S // 2, S):
+            target_lengths = torch.randint(1, max_len + 1, (N,), device=device)
+            target_lengths[0] = max_len
+
+            target_shape = (int(target_lengths.sum()),) if concat_targets else (N, S)
+            targets = torch.randint(1, C, target_shape, device=device)
+
+            args = (targets, input_lengths, target_lengths)
+
+            lp = log_probs.clone().requires_grad_()
+            lp_ref = log_probs.clone().requires_grad_()
+
+            actual = cfn(lp, *args)
+            expected = fn(lp_ref, *args)
+
+            self.assertEqual(actual, expected)
+
+            actual.sum().backward()
+            expected.sum().backward()
+
+            self.assertEqual(lp.grad, lp_ref.grad)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

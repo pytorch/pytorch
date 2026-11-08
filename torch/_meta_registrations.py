@@ -8666,6 +8666,21 @@ def meta_embedding_bag_backward(
         )
 
 
+@register_meta([aten._ctc_loss_backward.default, aten._ctc_loss_backward.Tensor])
+def meta_ctc_loss_backward(
+    grad,
+    log_probs,
+    targets,
+    input_lengths,
+    target_lengths,
+    neg_log_likelihood,
+    log_alpha,
+    blank,
+    zero_infinity=False,
+):
+    return torch.empty_like(log_probs, memory_format=torch.contiguous_format)
+
+
 @register_meta(aten._embedding_bag_dense_backward)
 def meta_embedding_bag_dense_backward(
     grad,

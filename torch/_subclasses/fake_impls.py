@@ -736,7 +736,12 @@ def _to_dense(
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
     and func
-    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
+    not in [
+        aten.index.Tensor,
+        aten.nonzero.default,
+        aten.repeat_interleave.Tensor,
+        aten._ctc_loss.Tensor,
+    ]
 )
 def dyn_shape(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
@@ -1397,6 +1402,40 @@ def repeat_interleave_tensor(
         _constrain_range_for_size(output_size)
         # TODO: consider a memo
     return repeats.new_empty(output_size)  # type: ignore[return-value]
+
+
+@register_op_impl(aten._ctc_loss.Tensor)
+def ctc_loss_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensor,
+    targets: FakeTensor,
+    input_lengths: FakeTensor,
+    target_lengths: FakeTensor,
+    blank: int = 0,
+    zero_infinity: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    # The output shapes and the targets.size(-1) bound below rely on these
+    torch._check(log_probs.dim() == 3, lambda: "log_probs must be 3-D")
+    torch._check(targets.dim() in (1, 2), lambda: "targets must be 1-D or 2-D")
+
+    # log_alpha is (batch, T, 2 * max(target_lengths) + 1). Use a bare unbacked
+    # symbol for the last dim so it can be bound from the output.
+    alpha_len = fake_mode.shape_env.create_unbacked_symint()
+    _constrain_range_for_size(alpha_len, min=1)
+    torch._check(alpha_len <= 2 * targets.size(-1) + 1)
+    T, batch_size = log_probs.shape[:2]
+    neg_log_likelihood = log_probs.new_empty(batch_size)
+    log_alpha = log_probs.new_empty((batch_size, T, alpha_len))
+    return neg_log_likelihood, log_alpha  # type: ignore[return-value]
 
 
 @register_op_impl(torch.ops.aten.item.default)
