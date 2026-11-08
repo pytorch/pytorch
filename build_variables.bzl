@@ -1176,6 +1176,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/CachedTensorUtils.cpp",
     "aten/src/ATen/FakeTensor.cpp",
+    "aten/src/ATen/FakeTensorDispatchTables.cpp",
     "aten/src/ATen/FunctionalInverses.cpp",
     "aten/src/ATen/FunctionalStorageImpl.cpp",
     "aten/src/ATen/FunctionalTensorWrapper.cpp",

@@ -5524,6 +5524,14 @@ class TestFakeTensorViewCopy(TestCase):
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
 
+def _aten_ops():
+    from torch._library.utils import lookup_op
+
+    for name in torch._C._dispatch_get_all_op_names():
+        if name.startswith("aten::"):
+            yield lookup_op(name)
+
+
 class TestCppFakeTensorModeBindings(TestCase):
     def _make_mode(self, shape_env=None):
         return _make_cpp_mode(shape_env)
@@ -6354,6 +6362,26 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(fake_t.storage_offset(), t.storage_offset())
         storage = mode.from_tensor(alias).untyped_storage()
         self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
+
+    def test_fake_fallback_static_shape_decomps(self):
+        # StaticShapeDecomp records the ops FakeTensorMode decomposes under
+        # static shapes
+        from torch._decomp import decomposition_table
+        from torch._meta_registrations import cpp_meta_supports_symint
+        from torch._subclasses.fake_tensor import torch_decomp_decompositions
+
+        mismatched = set()
+        for op in _aten_ops():
+            decomposes = (
+                op in decomposition_table
+                and torch_decomp_decompositions(op)
+                and not cpp_meta_supports_symint(op)
+            )
+            names = (op._schema.name, op._schema.overload_name)
+            contains = torch._C._fake_dispatch_contains_static_shape_decomp(*names)
+            if contains != decomposes:
+                mismatched.add(op.name())
+        self.assertEqual(mismatched, set())
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
