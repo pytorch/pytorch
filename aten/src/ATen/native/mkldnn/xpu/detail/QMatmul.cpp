@@ -840,35 +840,41 @@ void matmul_int4(
 
   // set scale and zero point for matmul args
   matmul_ext.set_attribute(
-      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, mat2_scale.data_ptr(), [&]() {
+      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
+      const_cast<void*>(mat2_scale.const_data_ptr()),
+      [&]() {
         return make_onednn_memory(
-            get_onednn_md(mat2_scale), engine, mat2_scale.data_ptr());
+            get_onednn_md(mat2_scale), engine, mat2_scale.const_data_ptr());
       });
 
   // set zp_md for asymmetric quantization
   matmul_ext.set_attribute(
       DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
-      mat2_zero_point.data_ptr(),
+      const_cast<void*>(mat2_zero_point.const_data_ptr()),
       [&]() {
         return make_onednn_memory(
-            get_onednn_md(mat2_zero_point), engine, mat2_zero_point.data_ptr());
+            get_onednn_md(mat2_zero_point),
+            engine,
+            mat2_zero_point.const_data_ptr());
       });
 
   if (quantized_act) {
     matmul_ext.set_attribute(
-        DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, mat1_scale->data_ptr(), [&]() {
+        DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC,
+        const_cast<void*>(mat1_scale->const_data_ptr()),
+        [&]() {
           return make_onednn_memory(
-              get_onednn_md(*mat1_scale), engine, mat1_scale->data_ptr());
+              get_onednn_md(*mat1_scale), engine, mat1_scale->const_data_ptr());
         });
 
     matmul_ext.set_attribute(
         DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC,
-        mat1_zero_point->data_ptr(),
+        const_cast<void*>(mat1_zero_point->const_data_ptr()),
         [&]() {
           return make_onednn_memory(
               get_onednn_md(*mat1_zero_point),
               engine,
-              mat1_zero_point->data_ptr());
+              mat1_zero_point->const_data_ptr());
         });
   }
 
@@ -876,20 +882,24 @@ void matmul_int4(
   std::vector<std::pair<int, void*>> arg_handles;
   arg_handles.reserve(8);
 
-  arg_handles.emplace_back(DNNL_ARG_SRC, mat1.data_ptr());
-  arg_handles.emplace_back(DNNL_ARG_WEIGHTS, mat2.data_ptr());
-  arg_handles.emplace_back(DNNL_ARG_DST, result.data_ptr());
+  arg_handles.emplace_back(
+      DNNL_ARG_SRC, const_cast<void*>(mat1.const_data_ptr()));
+  arg_handles.emplace_back(
+      DNNL_ARG_WEIGHTS, const_cast<void*>(mat2.const_data_ptr()));
+  arg_handles.emplace_back(DNNL_ARG_DST, result.mutable_data_ptr());
 
   Tensor bias_contig;
   if (with_bias) {
     bias_contig = bias->contiguous();
-    arg_handles.emplace_back(DNNL_ARG_BIAS, bias_contig.data_ptr());
+    arg_handles.emplace_back(
+        DNNL_ARG_BIAS, const_cast<void*>(bias_contig.const_data_ptr()));
   }
 
   int scratchpad_size = matmul_ext.get_scratchpad_size();
   Tensor scratchpad_tensor = at::empty(
       {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
-  arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
+  arg_handles.emplace_back(
+      DNNL_ARG_SCRATCHPAD, scratchpad_tensor.mutable_data_ptr());
 
   auto& strm = GpuStreamManager::Instance().get_stream();
   auto qint4_matmul_event =
