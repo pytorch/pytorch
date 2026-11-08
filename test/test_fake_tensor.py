@@ -54,6 +54,7 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
     UnsupportedOperatorException,
 )
+from torch._subclasses.fake_utils import _check_alias_info
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -78,6 +79,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -6923,6 +6925,88 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(is_in_torch_dispatch_mode())
         gc.collect()
         self.assertIsNone(refs[0]())
+
+
+class TestCppFakeFallbackOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # An op the fake fallback runs gives what Python's FakeTensorMode gives, or
+    # raises where it raises; one it does not support raises
+    # NotImplementedError, and an input the C++ mode cannot convert yet raises
+    # UnsupportedFakeTensorException
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_fake_fallback_matches_python(self, device, dtype, op):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        def convert(mode, sample):
+            inputs = (sample.input, sample.args, sample.kwargs)
+            return pytree.tree_map_only(torch.Tensor, mode.from_tensor, inputs)
+
+        def run(mode, inputs):
+            inp, args, kwargs = inputs
+            with mode:
+                return op(inp, *args, **kwargs)
+
+        compared = 0
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            # The C++ side first, as it rejects much of op_db
+            mode = CppFakeTensorMode()
+            try:
+                inputs = convert(mode, sample)
+            except UnsupportedFakeTensorException:
+                continue
+            cpp_error = None
+            try:
+                out = run(mode, inputs)
+            except Exception as e:
+                rejected = "fake tensor fallback does not support" in str(e)
+                if type(e) is NotImplementedError and rejected:
+                    continue
+                cpp_error = e
+            # Qualified, as this file's FakeTensorMode makes C++ modes under
+            # CPP_FAKETENSOR
+            python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+            python_inputs = convert(python_mode, sample)
+            python_error = None
+            try:
+                expected = run(python_mode, python_inputs)
+            except Exception as e:
+                python_error = e
+            if cpp_error is not None or python_error is not None:
+                # The same error as Python's, and not one of the fallback's
+                # internal asserts
+                same = type(cpp_error) is type(python_error)
+                if not same or "INTERNAL ASSERT" in str(cpp_error):
+                    msg = f"C++ raised {cpp_error!r}; Python raised {python_error!r}"
+                    raise AssertionError(msg) from (cpp_error or python_error)
+                continue
+            _check_alias_info("C++ fake", expected, python_inputs, out, inputs)
+            expected_leaves, expected_spec = pytree.tree_flatten(expected)
+            out_leaves, out_spec = pytree.tree_flatten(out)
+            self.assertEqual(out_spec, expected_spec)
+            for e, o in zip(expected_leaves, out_leaves):
+                if not isinstance(e, torch.Tensor):
+                    self.assertEqual(o, e)
+                    continue
+                self.assertIsInstance(o, torch.Tensor)
+                self.assertIs(torch._C._maybe_get_fake_mode(o), mode)
+                self.assertEqual(
+                    (o.shape, o.dtype, o.device, o.layout),
+                    (e.shape, e.dtype, e.device, e.layout),
+                )
+                self.assertEqual((o.is_conj(), o.is_neg()), (e.is_conj(), e.is_neg()))
+                if e.layout == torch.strided:
+                    self.assertEqual(o.stride(), e.stride())
+                    self.assertEqual(o.storage_offset(), e.storage_offset())
+            compared += 1
+        if compared == 0:
+            self.skipTest("no sample ran through the fake fallback")
+
+
+instantiate_device_type_tests(
+    TestCppFakeFallbackOpInfoDevice, globals(), only_for=("cpu",)
+)
 
 
 if __name__ == "__main__":
