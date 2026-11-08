@@ -1329,7 +1329,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                     torch.compile(fn, backend="eager", fullgraph=True)()
                 )
                 self.assertTrue(torch.compile(fn, backend="eager")())
-        from torch._dynamo.variables.functions import (
+        from torch._dynamo.variables.descriptors import (
             ClassAttrClassMethodVariable,
             ClassMethodVariable,
         )
