@@ -1745,6 +1745,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # Python object; their __dict__ starts empty and any custom
             # attribute is recorded in the side effects table.
             return {}
+        elif (
+            isinstance(vt, variables.ClassMethodVariable) and vt.is_synthetic
+        ):
+            # A new classmethod's state is populated entirely through the
+            # side-effects table; its backing object is only a placeholder.
+            return {}
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:

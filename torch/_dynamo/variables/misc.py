@@ -86,6 +86,7 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import (
     BaseUserFunctionVariable,
+    invoke_and_store_as_constant,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -110,6 +111,8 @@ if TYPE_CHECKING:
 
 
 class SuperClassMethodVariable(UserMethodVariable):
+    """Bound classmethod loaded through super(), with reconstructible lookup."""
+
     _nonvar_fields = {
         "name",
         *UserMethodVariable._nonvar_fields,
@@ -130,6 +133,22 @@ class SuperClassMethodVariable(UserMethodVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.super_vt)
         codegen.extend_output(codegen.create_load_attrs(self.name))
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.is_constant:
+            return invoke_and_store_as_constant(
+                tx,
+                self.get_function(),
+                self.get_name(),
+                [self.im_self, *args],
+                kwargs,
+            )
+        return super().call_function(tx, args, kwargs)
 
 
 class SuperVariable(VariableTracker):
@@ -290,9 +309,7 @@ class SuperVariable(VariableTracker):
             if self.objvar.source:
                 cls_source = TypeSource(self.objvar.source)
             cls_variable = VariableTracker.build(
-                tx,
-                self.objvar.value_type,  # type: ignore[attr-defined]
-                cls_source,
+                tx, self.objvar.python_type(), cls_source
             )
         fn_vt = VariableTracker.build(
             tx,

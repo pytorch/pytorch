@@ -1686,14 +1686,19 @@ class VariableBuilder:
                 )(v)
 
             install_guard(
-                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
+                self.get_source().make_guard(GuardBuilder.ID_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             # Preserve cache_hash for SAC context_fn caching
             original_cache_hash = getattr(value, "cache_hash", None)
             return FunctoolsPartialVariable(
-                func_obj, args, keywords, original_cache_hash=original_cache_hash
+                func_obj,
+                args,
+                keywords,
+                value=value,
+                original_cache_hash=original_cache_hash,
+                source=self.source,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

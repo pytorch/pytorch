@@ -14,13 +14,13 @@ import functools
 import inspect
 import sys
 import types
-from typing import Any, cast, TYPE_CHECKING, TypeAlias
+from typing import Any, Callable, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
 from torch._guards import Source
 
 from .. import graph_break_hints, variables
-from ..bytecode_transformation import create_call_function
+from ..bytecode_transformation import create_call_function, create_call_method
 from ..exc import (
     get_dynamo_observed_exception,
     raise_attribute_error,
@@ -918,6 +918,61 @@ class GenericMethodVariable(VariableTracker):
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
 
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        from .object_protocol import generic_hash_impl
+
+        self_hash, self_fake = generic_hash_impl(tx, self.im_self)
+        func_hash, func_fake = generic_hash_impl(tx, self.im_func)
+        result = self_hash ^ func_hash
+        return (-2 if result == -1 else result), self_fake or func_fake
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, GenericMethodVariable
+        ):
+            return ConstantVariable.create(NotImplemented)
+
+        from .object_protocol import generic_richcompare_bool, vt_identity_compare
+
+        same_func = generic_richcompare_bool(
+            tx, self.im_func, other.im_func, "__eq__"
+        )
+        same_self = vt_identity_compare(self.im_self, other.im_self)
+        if same_self is None:
+            unimplemented(
+                gb_type="method comparison with undecidable receiver",
+                context=f"{self} {op} {other}",
+                explanation="Dynamo cannot tell at trace time whether the "
+                "two bound methods share a receiver.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
+        try:
+            equal = (
+                same_func.as_python_constant() and same_self.as_python_constant()
+            )
+        except NotImplementedError:
+            unimplemented(
+                gb_type="method comparison with undecidable receiver",
+                context=f"{self} {op} {other}",
+                explanation="Dynamo cannot tell at trace time whether the "
+                "two bound methods share a receiver.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
+        return ConstantVariable.create(equal if op == "__eq__" else not equal)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "classmethod")
+        )
+        codegen(self.im_func)
+        codegen.extend_output(create_call_function(1, False))
+        codegen.load_method("__get__")
+        codegen(variables.ConstantVariable.create(None))
+        codegen(self.im_self)
+        codegen.extend_output(create_call_method(2))
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -928,7 +983,7 @@ class GenericMethodVariable(VariableTracker):
 
 
 class ClassMethodVariable(UserDefinedObjectVariable):
-    """classmethod descriptor wrapping a callable.
+    """classmethod descriptor wrapping an object.
 
     CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
     whose tp_descr_get (cm_descr_get) creates a bound method of the
@@ -949,6 +1004,8 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         descriptor: VariableTracker,
         value: classmethod | None = None,  # type: ignore[type-arg]
         is_synthetic: bool | None = None,
+        is_materializing: bool = False,
+        materialized_value: classmethod | None = None,  # type: ignore[type-arg]
         **kwargs: Any,
     ) -> None:
         if is_synthetic is None:
@@ -959,8 +1016,14 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self.descriptor = descriptor
         self.is_synthetic = is_synthetic
+        self.is_materializing = is_materializing
+        self.materialized_value = materialized_value
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields | {"is_synthetic"}
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields | {
+        "is_materializing",
+        "is_synthetic",
+        "materialized_value",
+    }
 
     @classmethod
     def create(
@@ -968,16 +1031,9 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslatorBase",
         descriptor: VariableTracker,
     ) -> "ClassMethodVariable":
-        result = cls(
-            descriptor,
-            is_synthetic=False,
-            mutation_type=AttributeMutationNew(),
-        )
+        result = cls(descriptor, mutation_type=AttributeMutationNew())
         tx.output.side_effects.track_attribute_mutation_new(result)
-        # DunderDictVariable seeds its proxy from the cleared backing dict.
-        # Expose that dict only during initialization, then hide the placeholder.
         attrs_vt = result.get_dict_vt(tx)
-        result.is_synthetic = True
 
         attrs = ("__module__", "__name__", "__qualname__", "__doc__")
         if sys.version_info < (3, 14):
@@ -1028,11 +1084,12 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         func_source = AttrSource(source, "__func__") if source else None
         # Being in a class __dict__ is what makes the bound method addressable
         # as `owner.<name>`, so build the VT that can source it.
-        # A classmethod may wrap any callable, so let the builder pick the VT;
-        # tp_descr_get_impl rejects the ones it cannot bind.
+        # A classmethod may wrap any object, so let the builder pick the VT;
+        # tp_descr_get_impl binds the resulting tracker.
         return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
+            value=descriptor,
             source=source,
         )
 
@@ -1047,12 +1104,51 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         return classmethod
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
-        return classmethod(self.descriptor.as_python_constant())
+        if not self.is_synthetic:
+            return self.value
+        return self._materialize(self.descriptor.as_python_constant())
+
+    def _materialize(
+        self,
+        descriptor: Any,
+        convert: Callable[[VariableTracker], Any] | None = None,
+    ) -> classmethod:  # type: ignore[type-arg]
+        # NestedUserFunctionVariable.get_function() does not preserve every
+        # observable function attribute, so it is not a safe __func__ here.
+        if isinstance(self.descriptor, variables.NestedUserFunctionVariable):
+            raise AsPythonConstantNotImplementedError(self)
+        if self.is_materializing:
+            raise AsPythonConstantNotImplementedError(self)
+        self.is_materializing = True
+        try:
+            result = self.materialized_value
+            if result is None:
+                result = classmethod(descriptor)
+            elif result.__func__ is not descriptor:
+                raise AsPythonConstantNotImplementedError(self)
+            if self.dict_vt is None:
+                state = {}
+            elif convert is None:
+                state = self.dict_vt.as_python_constant()
+            else:
+                state = {
+                    self.dict_vt.items._maybe_unwrap_key(name): convert(value)
+                    for name, value in self.dict_vt.items.items()
+                }
+            result.__dict__.clear()
+            result.__dict__.update(state)
+            self.materialized_value = result
+            return result
+        except NotImplementedError:
+            raise AsPythonConstantNotImplementedError(self) from None
+        finally:
+            self.is_materializing = False
 
     def get_real_python_backed_value(self) -> object:
-        if self.is_synthetic:
+        try:
+            return self.as_python_constant()
+        except AsPythonConstantNotImplementedError:
             return NO_SUCH_SUBOBJ
-        return self.value
 
     def _isabstractmethod_getter(
         self, tx: "InstructionTranslatorBase"
@@ -1074,11 +1170,17 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         ),
     }
     if sys.version_info >= (3, 14):
-        for attr in ("__annotations__", "__annotate__"):
-            tp_getset[attr] = GetSet(
-                lambda s, tx, name=attr: s._get_wrapped_attr(tx, name),
-                lambda s, tx, value, name=attr: s._set_wrapped_attr(tx, name, value),
-            )
+        tp_getset.update(
+            {
+                name: GetSet(
+                    lambda s, tx, name=name: s._get_wrapped_attr(tx, name),
+                    lambda s, tx, value, name=name: s._set_wrapped_attr(
+                        tx, name, value
+                    ),
+                )
+                for name in ("__annotations__", "__annotate__")
+            }
+        )
 
     def _bound_source(
         self, owner: VariableTracker, func: BaseUserFunctionVariable
@@ -1097,7 +1199,11 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         func = self.descriptor
-        if sys.version_info < (3, 13) and func.tp_type.tp_descr_get is not None:
+        if (
+            sys.version_info < (3, 13)
+            and not isinstance(func, BaseUserFunctionVariable)
+            and func.tp_type.tp_descr_get is not None
+        ):
             # Before 3.13, cm_descr_get delegated to the wrapped descriptor.
             return func.tp_descr_get_impl(tx, owner, owner)
         # Python 3.13+ binds the wrapped object to the class.
