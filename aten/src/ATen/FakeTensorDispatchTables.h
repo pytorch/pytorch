@@ -8,8 +8,8 @@
 
 namespace at::impl {
 
-// C++-side copy of the Python decomp/meta/prims/op_impl registries
-// these are updated at Python registration sites
+// C++-side copy of the Python decomp/meta/prims/op_impl registries, and of the
+// ops FakeTensorMode decomposes under static shapes
 //
 // The tables are kept in sync by hooks at the Python registration sites, which
 // call fakeDispatchTableAdd/Remove, except StaticShapeDecomp, filled once:
@@ -29,12 +29,12 @@ namespace at::impl {
 //                OpOverload.py_impl
 //   - StaticShapeDecomp: the Decomp ops that FakeTensorMode decomposes under
 //                static shapes when they are not in Meta and have no sparse
-//                input (torch_decomp_decompositions, minus
-//                cpp_meta_supports_symint), filled by torch._meta_registrations
-//                once the decompositions are registered (torch._decomp
-//                imports them all). Later registrations and removals are not
-//                mirrored; test_fake_fallback_static_shape_decomps checks the
-//                table against the predicates.
+//                input (decomposes_under_static_shapes), filled by
+//                torch._meta_registrations once the decompositions are
+//                registered (torch._decomp imports them all). Later
+//                registrations and removals are not mirrored;
+//                test_fake_fallback_static_shape_decomps checks the table
+//                against the predicate.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
@@ -58,7 +58,7 @@ inline uint32_t fakeDispatchCategoryBit(FakeDispatchCategory category) {
 }
 
 // Record/erase that `name` belongs to `category`. Called from the Python
-// registration hooks listed above.
+// registration hooks listed above, and once at import for StaticShapeDecomp.
 TORCH_API void fakeDispatchTableAdd(
     FakeDispatchCategory category,
     const c10::OperatorName& name);
