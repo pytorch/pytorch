@@ -297,11 +297,9 @@ def _set_head_requires_gradient_sync(head, requires_gradient_sync: bool) -> None
         head.set_requires_gradient_sync(requires_gradient_sync)
 
 
-def _head_reshard_settings(head) -> tuple[bool, bool]:
+def _head_reshard_settings(head) -> tuple[bool | int, bool]:
     if isinstance(head, FSDPModule):
-        # FSDPModule has setters for these but no getters.
-        (group,) = head._get_fsdp_state()._fsdp_param_groups
-        return group._reshard_after_forward, group.reshard_after_backward
+        return head.get_reshard_after_forward(), head.get_reshard_after_backward()
     return head.reshard_after_forward, head.reshard_after_backward
 
 

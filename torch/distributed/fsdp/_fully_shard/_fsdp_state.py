@@ -2,6 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
@@ -69,8 +71,6 @@ class FSDPStateContext(Generic[_StateType]):
 
     @is_last_backward.setter
     def is_last_backward(self, is_last_backward: bool) -> None:
-        # Callers such as torchtitan set this directly and restore it, so the
-        # engine context follows every write
         self._is_last_backward = is_last_backward
         if self.engine_context is not None:
             self.engine_context.wait_reductions_at_backward_end = is_last_backward
@@ -99,13 +99,6 @@ class FSDPState(_State):
     @property
     def _engine_buckets(self) -> "list[FullyShardBucket]":
         return self._fsdp_param_groups
-
-    @property
-    def _modules_to_run_forward(self) -> "_PendingGroupModules":
-        """The modules of this state's open grouped forward, as FSDP2's
-        attribute, for callers that finish such forwards themselves (e.g.
-        torchtitan's evaluation cleanup)."""
-        return _PendingGroupModules(self)
 
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
@@ -421,6 +414,65 @@ class FSDPState(_State):
                 )
             return self._cast_output_dtype(output)
 
+    def _complete_grouped_forward(self, output: Any) -> Any:
+        """See ``FSDPModule.complete_grouped_forward``."""
+        with _spmd_no_typecheck():
+            for bucket in self._engine_buckets:
+                if bucket.bucket.group_pass is not None:
+                    bucket.bucket.complete_group_pass(output)
+                    self._training_state = TrainingState.IDLE
+        return output
+
+    @contextmanager
+    def _partial_backward(self, outer_backward_follows: bool) -> Iterator[None]:
+        """See ``FSDPModule.partial_backward``."""
+        from .._flex_shard.bucket_runtime import PartialBackward
+        from ._fsdp_engine import unshard
+
+        context = self._engine_context
+        if self._is_root is None or context is None:
+            raise RuntimeError(
+                f"{self._state_name} partial_backward needs the root forward to run first"
+            )
+        if context.partial_backward is not None:
+            raise RuntimeError(f"{self._state_name} partial_backward cannot nest")
+        buckets = self._engine_buckets
+        runtimes = tuple(bucket.bucket for bucket in buckets)
+        manual_finalization = self._state_ctx.manual_backward_finalization
+        with _spmd_no_typecheck():
+            unshard(self, async_op=False)
+        scope = context.partial_backward = PartialBackward(runtimes)
+        try:
+            yield
+        except BaseException:
+            # Reshard without collectives, which only some ranks might reach;
+            # reset_iter_state discards the gradients
+            context.partial_backward = None
+            with _spmd_no_typecheck():
+                for runtime in runtimes:
+                    keep = scope.ran_backward and (
+                        manual_finalization
+                        or not runtime.bucket_storage._reshard_after_backward
+                    )
+                    if runtime.is_unsharded and not keep:
+                        runtime.reshard()
+            raise
+        context.partial_backward = None
+        with _spmd_no_typecheck():
+            if not scope.ran_backward:
+                for runtime in runtimes:
+                    if runtime.is_unsharded:
+                        runtime.reshard()
+                return
+            # The outer backward reduces a group shared with modules outside
+            # this one, which get their gradients there
+            shared = any(len(bucket.modules) > 1 for bucket in buckets)
+            if not manual_finalization and not (outer_backward_follows and shared):
+                for runtime in runtimes:
+                    runtime.post_backward()
+            if not outer_backward_follows:
+                context.end_backward(finish=True, manual=manual_finalization)
+
     def _functorch_pre_backward(self, grad: torch.Tensor) -> None:
         for bucket in self._engine_buckets:
             bucket.bucket.pre_backward_hook((grad,))
@@ -442,40 +494,6 @@ class FSDPState(_State):
                 functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
                 output,
             )
-
-
-class _PendingGroupModules:
-    """A view of the modules an open grouped forward has yet to run; clearing
-    it completes that forward."""
-
-    def __init__(self, state: FSDPState) -> None:
-        self._state = state
-
-    def _modules(self) -> set[nn.Module]:
-        return {
-            module
-            for bucket in self._state._engine_buckets
-            for module in bucket.bucket.modules_to_run
-        }
-
-    def __bool__(self) -> bool:
-        return bool(self._modules())
-
-    def __len__(self) -> int:
-        return len(self._modules())
-
-    def __iter__(self):
-        return iter(self._modules())
-
-    def __contains__(self, module: object) -> bool:
-        return module in self._modules()
-
-    def clear(self) -> None:
-        with _spmd_no_typecheck():
-            for bucket in self._state._engine_buckets:
-                if bucket.bucket.group_pass is not None:
-                    bucket.bucket.complete_group_pass(None)
-        self._state._training_state = TrainingState.IDLE
 
 
 class _FunctorchPreBackward(torch.autograd.Function):

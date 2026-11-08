@@ -1023,9 +1023,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
 
             sync = step == len(active_sets) - 1
             model.set_requires_all_reduce(sync)
-            previous_output = group._partial_reduce_output
+            previous_output = group.bucket.partial_reduce_output
             model(inp, active).backward()
-            output = group._partial_reduce_output
+            output = group.bucket.partial_reduce_output
             if sync:
                 self.assertIsNone(output)
                 continue
@@ -1047,7 +1047,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 model.zero_grad()
                 model.reshard()
                 model.set_requires_gradient_sync(True)
-                self.assertIs(group._partial_reduce_output, output)
+                self.assertIs(group.bucket.partial_reduce_output, output)
 
         for i, param in enumerate(model.params):
             expected = expected_grads[i]
@@ -1061,11 +1061,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         model.set_requires_all_reduce(False)
         inp = torch.ones(8, device=device, dtype=torch.bfloat16)
         model(inp, (2,)).backward()
-        self.assertIsNotNone(group._partial_reduce_output)
+        self.assertIsNotNone(group.bucket.partial_reduce_output)
         model.set_requires_gradient_sync(False)
         model(inp, (3,)).backward()
         model.reset_iter_state()
-        self.assertIsNone(group._partial_reduce_output)
+        self.assertIsNone(group.bucket.partial_reduce_output)
         model.set_requires_gradient_sync(True)
         model(inp, (3,)).backward()
         for param in model.params[:3]:

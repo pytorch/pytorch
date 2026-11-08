@@ -131,9 +131,7 @@ class TestFullyShardEngine(FSDPTest):
         state = model._get_fsdp_state()
         context = state._engine_context
         self.assertEqual(context.pending_unshards, [])
-        # Direct writes reach the engine too, as torchtitan's chunked loss
-        # sets and restores is_last_backward
-        state._state_ctx.is_last_backward = True
+        model.set_is_last_backward(True)
         self.assertTrue(context.wait_reductions_at_backward_end)
 
     @skip_if_lt_x_gpu(2)

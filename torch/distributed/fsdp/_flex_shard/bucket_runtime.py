@@ -299,6 +299,21 @@ class GroupForwardPass:
     completed: bool = False
 
 
+@dataclass
+class PartialBackward:
+    """Buckets whose modules run forwards and backwards on their own, e.g. the
+    output projection of a chunked loss (``FSDPModule.partial_backward``):
+    they stay unsharded, their grads accumulate without reduction, and the
+    end of such a backward leaves the other buckets as they are."""
+
+    buckets: tuple[BucketRuntime, ...]
+    # Whether a backward through the buckets' modules ran
+    ran_backward: bool = False
+
+    def includes(self, bucket: BucketRuntime) -> bool:
+        return any(b is bucket for b in self.buckets)
+
+
 class GradientReductionHandle:
     """Returned by ``FlexShardModule.finalize_backward(async_op=True)``.
 
@@ -383,6 +398,8 @@ class BucketCommContext:
     keep_prefetches_until_used: bool = False
     # Frontend callbacks run at the end of each backward's final callback.
     backward_end_callbacks: list[Callable[[], None]] = field(default_factory=list)
+    # The open partial backward, if any (see PartialBackward)
+    partial_backward: PartialBackward | None = None
     # Run by every bucket's pre-backward hook, i.e. as each backward starts
     backward_start_callbacks: list[Callable[[], None]] = field(default_factory=list)
     # Runs the steps after a reduce-scatter (see PostReduceScatter); created
@@ -625,28 +642,39 @@ class BucketCommContext:
 
         def _post_backward_callback() -> None:
             with dist._spmd_no_typecheck():
-                finish = self.finish_at_backward_end
-                if manual:
-                    if finish:
-                        self.finish_buckets(syncing=False)
+                if (scope := self.partial_backward) is not None:
+                    for bucket in scope.buckets:
+                        if not bucket.post_backward_ran:
+                            bucket.post_backward()
+                        bucket.reset_backward_state()
+                    scope.ran_backward = True
                 else:
-                    if finish:
-                        self.finish_buckets()
-                    if self.wait_reductions_at_backward_end:
-                        self.wait_and_clear_reduce_grad_states(debug_fqn=None)
-                    if finish and (
-                        self.wait_reductions_at_backward_end
-                        or not self.keep_prefetches_until_used
-                    ):
-                        self.take_pending_unshard(None)
+                    self.end_backward(finish=self.finish_at_backward_end, manual=manual)
                 self.finish_at_backward_end = False
                 self.post_backward_callback_queued = False
-                for callback in self.backward_end_callbacks:
-                    callback()
 
         torch.autograd.Variable._execution_engine.queue_callback(
             _post_backward_callback
         )
+
+    def end_backward(self, *, finish: bool, manual: bool) -> None:
+        """The end of a backward (see ``queue_post_backward_callback``), also
+        of one that a partial backward ends outside autograd."""
+        if manual:
+            if finish:
+                self.finish_buckets(syncing=False)
+        else:
+            if finish:
+                self.finish_buckets()
+            if self.wait_reductions_at_backward_end:
+                self.wait_and_clear_reduce_grad_states(debug_fqn=None)
+            if finish and (
+                self.wait_reductions_at_backward_end
+                or not self.keep_prefetches_until_used
+            ):
+                self.take_pending_unshard(None)
+        for callback in self.backward_end_callbacks:
+            callback()
 
     def finish_buckets(
         self, *, reverse_module_order: bool = False, syncing: bool = True
@@ -1369,6 +1397,11 @@ class BucketRuntime:
         self.group_pass = None
         self.post_backward_ran = False
 
+    @property
+    def in_partial_backward(self) -> bool:
+        scope = self.context.partial_backward
+        return scope is not None and scope.includes(self)
+
     def needs_finish(self) -> bool:
         """Whether backwards left this bucket to finish: still unsharded (no
         post-backward trigger fired) or, with gradient sync on, holding grads
@@ -1397,10 +1430,11 @@ class BucketRuntime:
         """
         if not torch.compiler.is_compiling():
             self.logger.debug("%s::pre_backward (%s)", self.log_name, self.debug_fqn)
+        partial = self.in_partial_backward
         with dist._spmd_no_typecheck():
             for callback in self.context.backward_start_callbacks:
                 callback()
-            self.context.queue_post_backward_callback(finish=True)
+            self.context.queue_post_backward_callback(finish=not partial)
             if self.bucket_storage._unshard_in_backward:
                 self.unshard()
                 # A later call's backward re-gathers after an earlier post-backward
@@ -1413,10 +1447,12 @@ class BucketRuntime:
                 and self.bucket_storage._requires_gradient_sync
                 and not self.bucket_storage._defer_post_backward
                 and not self.context.post_backward_per_call
+                and not partial
             ):
                 self._post_backward(reshard=False)
             self._run_pre_backward_hook()
-            self._prefetch(forward=False)
+            if not partial:
+                self._prefetch(forward=False)
 
     def _run_pre_backward_hook(self) -> None:
         """Run the bucket's pre_backward_hook. A bucket without one whose
@@ -1495,12 +1531,13 @@ class BucketRuntime:
             if defer_upcast:
                 # As FSDP2: a backward without sync that starts the grad keeps
                 # the upcast, so that a param used more than once accumulates
-                # its uses in the wider dtype. Set it either way: an earlier
-                # forward may have deferred it with gradient sync on (e.g. a
-                # grouped module called before sync was turned off).
-                defer = (
-                    param.grad is not None
-                    or self.bucket_storage._requires_gradient_sync
+                # its uses in the wider dtype, as do the backwards of a partial
+                # backward. Set it either way: an earlier forward may have
+                # deferred it with gradient sync on (e.g. a grouped module
+                # called before sync was turned off).
+                syncs = self.bucket_storage._requires_gradient_sync
+                defer = param.grad is not None or (
+                    syncs and not self.in_partial_backward
                 )
                 param.grad_dtype = None if defer else dtype
                 continue
@@ -1589,6 +1626,13 @@ class BucketRuntime:
         # reshard=False keeps the unsharded params for a backward still to run.
         self.backward_without_unshard = False
         self.post_backward_ran = reshard
+        scope = self.context.partial_backward
+        if scope is not None and scope.includes(self):
+            # The grads accumulate for the partial backward's end to reduce
+            scope.ran_backward = True
+            self.needs_sync = True
+            self._set_unsharded_grad_dtypes(defer_upcast=False)
+            return
         if reshard and not self.is_unsharded and self.post_forward_storage is not None:
             # A group that backward did not reach reshards from the post-forward
             # group to the full one, dropping any prefetch over the post-forward
@@ -1659,13 +1703,13 @@ class BucketRuntime:
             sharded_params.append(bucket_param.sharded_param)
             indices.append(index)
         if (
-            not self.forward_since_reduce
-            and not keep_unused
-            and not into_partial
+            not keep_unused
             and not partial_indices
             and all(grad is None for grad in grads)
+            and (fsdp2_compatible or not (self.forward_since_reduce or into_partial))
         ):
-            # No forward since the last reduction: no grads, as in FSDP2,
+            # No grads, also for a reduction into the partial output, or no
+            # forward since the last reduction: no reduction, as in FSDP2,
             # rather than zeros
             grads, params, infos, sharded_params, indices = [], [], [], [], []
         self.forward_since_reduce = False
@@ -1760,7 +1804,8 @@ class BucketRuntime:
                 self.context.forward_order.append(self)
             self.unshard()
             self._record_forward_with_grad()
-            self._prefetch(forward=True)
+            if not self.in_partial_backward:
+                self._prefetch(forward=True)
         args, kwargs, has_trigger = self._register_input_grad_hook(args, kwargs)
         self.call_has_trigger.append(has_trigger)
         return args, kwargs
@@ -1796,7 +1841,8 @@ class BucketRuntime:
             self._record_forward_with_grad()
             if not opens_pass:
                 return None
-            self._prefetch(forward=True)
+            if not self.in_partial_backward:
+                self._prefetch(forward=True)
         forward_pass = GroupForwardPass()
         args, kwargs, forward_pass.has_trigger = self._register_input_grad_hook(
             args, kwargs, forward_pass
@@ -1943,7 +1989,9 @@ class BucketRuntime:
         if _in_backward() or mod not in self.modules_to_run:
             return
         self.modules_to_run.discard(mod)
-        if not self.modules_to_run:
+        # In a partial backward, each call completes the pass, so that its
+        # backward re-gathers nothing and ends as the module's own
+        if not self.modules_to_run or self.in_partial_backward:
             with dist._spmd_no_typecheck():
                 self.complete_group_pass(output)
 
@@ -1968,6 +2016,10 @@ class BucketRuntime:
             self.context.post_forward_order.append(self)
         tensors = _tensor_leaves(output)
         grad_outputs = [tensor for tensor in tensors if tensor.requires_grad]
+        # A partial backward keeps the params unsharded until it ends
+        reshard = self.bucket_storage._reshard_after_forward and not (
+            self.in_partial_backward
+        )
         if (
             output is None
             or not torch.is_grad_enabled()
@@ -1975,7 +2027,7 @@ class BucketRuntime:
         ):
             # No backward will reach these params through this forward: reshard
             # only as reshard_after_forward says, as in FSDP2
-            if self.bucket_storage._reshard_after_forward:
+            if reshard:
                 self.reshard(after_forward=True)
             return
         self.backward_calls += 1
@@ -1998,7 +2050,7 @@ class BucketRuntime:
             for node in nodes:
                 if node is not None:
                     node.register_prehook(self.pre_backward_hook)
-        if self.bucket_storage._reshard_after_forward:
+        if reshard:
             persistent = {_storage_ptr(buffer) for buffer in self.persistent_buffers}
             # An output viewing the persistent storage would see it freed.
             if not any(_storage_ptr(value) in persistent for value in grad_outputs):

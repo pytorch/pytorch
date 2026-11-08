@@ -27,6 +27,9 @@ from torch.distributed.tensor import DTensor
 
 from .._flex_shard.all_gather_layout import AllGatherLayout, DefaultAllGatherLayout
 from .._flex_shard.bucket_runtime import (
+    _alloc_storage,
+    _free_storage,
+    _inner_tensors,
     BucketCommContext,
     BucketParam,
     BucketRuntime,
@@ -323,7 +326,6 @@ class FullyShardBucket:
     ) -> None:
         self.modules = modules
         self.mesh_info = mesh_info
-        self._post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
         self.offload_policy = offload_policy
@@ -436,30 +438,6 @@ class FullyShardBucket:
         return self.storage._reshard_after_forward
 
     @property
-    def reshard_after_backward(self) -> bool:
-        return self.storage._reshard_after_backward
-
-    @reshard_after_backward.setter
-    def reshard_after_backward(self, value: bool) -> None:
-        self.storage.set_reshard_after_backward(value)
-
-    @property
-    def reduce_grads(self) -> bool:
-        return self.storage._requires_gradient_sync
-
-    @reduce_grads.setter
-    def reduce_grads(self, value: bool) -> None:
-        self.storage.set_requires_gradient_sync(value)
-
-    @property
-    def all_reduce_grads(self) -> bool:
-        return self.storage._requires_all_reduce
-
-    @all_reduce_grads.setter
-    def all_reduce_grads(self, value: bool) -> None:
-        self.storage._requires_all_reduce = value
-
-    @property
     def unshard_in_backward(self) -> bool:
         return self.storage._unshard_in_backward
 
@@ -532,10 +510,6 @@ class FullyShardBucket:
         )
 
     @property
-    def _partial_reduce_output(self) -> torch.Tensor | None:
-        return self.bucket.partial_reduce_output
-
-    @property
     def _reduce_scatter_process_group(self) -> dist.ProcessGroup | None:
         return self.storage.reduce_mesh.get_group()
 
@@ -561,31 +535,11 @@ class FullyShardBucket:
             )
         )
 
-    @property
-    def post_forward_mesh_info(self) -> FSDPMeshInfo | None:
-        return self._post_forward_mesh_info
-
-    @post_forward_mesh_info.setter
-    def post_forward_mesh_info(
-        self, post_forward_mesh_info: FSDPMeshInfo | None
-    ) -> None:
-        self.set_post_forward_mesh_info(post_forward_mesh_info)
-
-    @property
-    def _post_backward_pending(self) -> bool:
-        """Whether a backward without gradient sync left gradients for a later
-        reduction, as FSDP2's group attribute of that name."""
-        return self.bucket.needs_sync
-
-    def reshard(self) -> None:
-        self.bucket.reshard()
-
     def set_post_forward_mesh_info(
         self, post_forward_mesh_info: FSDPMeshInfo | None
     ) -> None:
         """Reshard after forward (``post_forward_mesh_info`` not None), to the
         smaller post-forward mesh for an int ``reshard_after_forward``."""
-        self._post_forward_mesh_info = post_forward_mesh_info
         self.storage._reshard_after_forward = post_forward_mesh_info is not None
         self.storage._post_forward_group = (
             post_forward_mesh_info.shard_process_group
@@ -864,6 +818,23 @@ def _buckets(state: Any) -> list[FullyShardBucket]:
     return list(state._engine_buckets)
 
 
+def first_storage(state: Any) -> ShardedBucketStorage | None:
+    """The storage of the state's first group, which holds the settings that
+    the ``FSDPModule`` setters give all its groups."""
+    buckets = _buckets(state)
+    return buckets[0].storage if buckets else None
+
+
+def get_reshard_after_forward(state: Any) -> bool | int:
+    storage = first_storage(state)
+    if storage is None:
+        return True
+    if not storage._reshard_after_forward:
+        return False
+    group = storage._post_forward_group
+    return True if group is None else group.size()
+
+
 def reshard(state: Any) -> None:
     for bucket in _buckets(state):
         runtime = bucket.bucket
@@ -888,6 +859,32 @@ def unshard(state: Any, async_op: bool) -> list[BucketRuntime]:
             runtime.unshard(on_current_stream=True)
         runtimes.append(runtime)
     return runtimes
+
+
+def _sharded_storages(state: Any) -> list[tuple[torch.Tensor, int]]:
+    """The tensors whose storage holds the state's sharded parameters, with
+    its size in bytes: each group's storage, or for parameters with their
+    own, their data, the inner tensors for tensor subclasses."""
+    storages = []
+    for bucket in _buckets(state):
+        if not bucket.own_storage:
+            storages.append((bucket.storage._byte_storage, bucket.storage._total_bytes))
+            continue
+        for fsdp_param in bucket.fsdp_params:
+            for tensor in _inner_tensors(fsdp_param._sharded_param_data):
+                numel = int(tensor.storage_offset()) + tensor.numel()
+                storages.append((tensor, numel * tensor.itemsize))
+    return storages
+
+
+def free_sharded_params(state: Any) -> None:
+    for tensor, _ in _sharded_storages(state):
+        _free_storage(tensor)
+
+
+def restore_sharded_params(state: Any) -> None:
+    for tensor, nbytes in _sharded_storages(state):
+        _alloc_storage(tensor, nbytes)
 
 
 def wait_for_unshard(runtimes: list[BucketRuntime]) -> None:
@@ -924,16 +921,11 @@ def set_all_reduce_hook(
     stream: torch.Stream | None,
 ) -> None:
     buckets = _buckets(state)
-    if len(buckets) > 1:
-        raise NotImplementedError(
-            "set_all_reduce_hook is not supported with multiple parameter groups "
-            "(per-param mesh)"
-        )
+    if stream is not None and any(b.storage._replicate_group for b in buckets):
+        raise ValueError("stream cannot be set when using native HSDP")
     for bucket in buckets:
         bucket.storage._all_reduce_hook = hook
         if stream is not None:
-            if bucket.storage._replicate_group is not None:
-                raise ValueError("stream cannot be set when using native HSDP")
             bucket.storage._all_reduce_hook_stream = stream
 
 
@@ -1189,9 +1181,9 @@ def validate_finalize_backward(state: Any) -> None:
             b
             for b in buckets
             if b.bucket.needs_finish()
-            and b.reduce_grads
+            and b.storage._requires_gradient_sync
             and isinstance(b.mesh_info, DDPMeshInfo)
-            and not b.all_reduce_grads
+            and not b.storage._requires_all_reduce
         ),
         None,
     ):
