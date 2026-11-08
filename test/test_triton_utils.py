@@ -86,6 +86,65 @@ class TestTritonUtils(TestCase):
             finally:
                 triton_utils.triton_backend.cache_clear()
 
+    def test_cuda_tma_device_rejects_rocm_with_cpu_backend(self):
+        triton_utils.has_triton_cuda_tma_device.cache_clear()
+        self.addCleanup(triton_utils.has_triton_cuda_tma_device.cache_clear)
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            mock.patch.object(
+                triton_utils, "has_triton_tma_device", return_value=True
+            ) as has_tma,
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.version.hip", "6.3"),
+        ):
+            self.assertFalse(triton_utils.has_triton_cuda_tma_device())
+            has_tma.assert_not_called()
+
+    def test_cuda_tma_device_accepts_hopper(self):
+        triton_utils.has_triton_cuda_tma_device.cache_clear()
+        self.addCleanup(triton_utils.has_triton_cuda_tma_device.cache_clear)
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            mock.patch.object(
+                triton_utils, "has_triton_tma_device", return_value=True
+            ) as has_tma,
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+            mock.patch("torch.version.hip", None),
+        ):
+            self.assertTrue(triton_utils.has_triton_cuda_tma_device())
+            has_tma.assert_called_once_with()
+
+    def test_datacenter_blackwell_tma_device_capabilities(self):
+        cases = {
+            (9, 0): False,
+            (10, 0): True,
+            (10, 3): True,
+            (11, 0): True,
+            (12, 0): False,
+            (12, 1): False,
+        }
+        self.addCleanup(triton_utils.has_datacenter_blackwell_tma_device.cache_clear)
+        for capability, expected in cases.items():
+            triton_utils.has_datacenter_blackwell_tma_device.cache_clear()
+            with (
+                self.subTest(capability=capability),
+                mock.patch.object(
+                    triton_utils, "has_triton_tma_device", return_value=True
+                ),
+                mock.patch.object(
+                    triton_utils,
+                    "has_triton_tensor_descriptor_host_tma",
+                    return_value=True,
+                ),
+                mock.patch("torch.cuda.is_available", return_value=True),
+                mock.patch("torch.cuda.get_device_capability", return_value=capability),
+                mock.patch("torch.version.hip", None),
+            ):
+                self.assertEqual(
+                    triton_utils.has_datacenter_blackwell_tma_device(), expected
+                )
+
 
 if __name__ == "__main__":
     run_tests()

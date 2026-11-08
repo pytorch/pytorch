@@ -19,8 +19,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -180,6 +180,68 @@ class MultiKernelTest(TestCase):
 
         self.assertEqual(events, ["lock_enter", "lock_exit"])
 
+    @requires_triton()
+    @config.patch("triton.multi_kernel", 1)
+    def test_subgraph_multi_kernel_names_unique(self):
+        def f(pred, x, z):
+            branch = torch.cond(
+                pred, lambda x: x.sum(-1), lambda x: (x * 3).sum(-1), (x,)
+            )
+            return (z.relu() * 2).sum(-1), branch
+
+        x = torch.randn(1024, 256, device=GPU_TYPE)
+        z = torch.randn(4096, 256, device=GPU_TYPE)
+        pred = torch.tensor(True, device=GPU_TYPE)
+        expected = f(pred, x, z)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), pred, x, z)
+        self.assertEqual(expected, actual)
+        # Subgraph wrappers are emitted into the parent's module, so a name
+        # defined by both would shadow the parent's definition.
+        names = re.findall(r"^(multi_kernel_\d+) = ", code, re.MULTILINE)
+        self.assertGreater(len(names), 1)
+        self.assertEqual(len(names), len(set(names)), names)
+
+    @skipIfXpu(msg="uses CUDA graph capture")
+    def test_benchmark_sub_kernels_captures_on_current_stream(self):
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        output = torch.zeros(1, device=GPU_TYPE)
+        multi_kernel_call = self._benchmark_lock_call([])
+        kernel = multi_kernel_call._kernels[0]
+        multi_kernel_call._kernels = [kernel]
+
+        def run(output, *, stream):
+            with torch.cuda.stream(torch.cuda.ExternalStream(stream)):
+                output.add_(1)
+
+        kernel.run = run
+        kernel.get_device_interface = lambda: get_interface_for_device(GPU_TYPE)
+
+        def benchmark(fn, **kwargs):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                fn()
+            stream.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                graph, stream=stream, capture_error_mode="thread_local"
+            ):
+                fn()
+            torch.cuda.synchronize()
+            output.zero_()
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(output, torch.ones_like(output))
+            return 1.0
+
+        with unittest.mock.patch(
+            "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+            side_effect=benchmark,
+        ):
+            multi_kernel_call.benchmark_sub_kernels(
+                output, stream=torch.cuda.current_stream().cuda_stream
+            )
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)
@@ -197,8 +259,6 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     def test_triton_gemm(self):
@@ -222,13 +282,14 @@ class MultiKernelTest(TestCase):
         # One for the first pass and one for the second pass.
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
-        self.assertEqual(ref, act)
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
@@ -251,7 +312,10 @@ class MultiKernelTest(TestCase):
         # One for the first pass and one for the second pass.
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
-        self.assertEqual(ref, act)
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
@@ -296,6 +360,12 @@ class MultiKernelTest(TestCase):
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
         test_softmax, expect_multi_kernel=True
     )
+    test_softmax_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_softmax)
+    test_triton_gemm_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_triton_gemm)
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).to(GPU_TYPE)

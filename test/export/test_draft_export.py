@@ -7,12 +7,27 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_real_tensor,
+)
 from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -21,6 +36,8 @@ from torch.utils._pytree import tree_leaves
 
 
 class TestDraftExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -285,50 +302,6 @@ class TestDraftExport(TestCase):
                 ):
                     torch.ops.mylib.foo8(*inp)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
-    def test_missing_meta_kernel_guard(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT"):
-
-            @torch.library.custom_op("mylib::foo4", mutates_args={})
-            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                return a + b
-
-            class M(torch.nn.Module):
-                def forward(self, a, b):
-                    res1 = torch.ops.mylib.foo4(a, b)
-                    return res1
-
-            inp = (
-                torch.ones(3, 4),
-                torch.ones(3, 4),
-            )
-
-            ep = draft_export(
-                M(),
-                inp,
-                dynamic_shapes={
-                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                },
-            )
-
-            inp = (torch.randn(2, 3), torch.randn(2, 3))
-            self.assertEqual(ep.module()(*inp), M()(*inp))
-            m = ep.module()
-            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-                bad_device_inps = (
-                    torch.randn(2, 3, device=torch.device("cuda")),
-                    torch.randn(2, 3, device=torch.device("cuda")),
-                )
-                m(*bad_device_inps)
-
-            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
-                bad_dtype_inps = (
-                    torch.randn(2, 3, dtype=torch.float16),
-                    torch.randn(2, 3, dtype=torch.float16),
-                )
-                m(*bad_dtype_inps)
-
     def test_fake_infer_dense_in_memory_check(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 
@@ -442,7 +415,7 @@ class TestDraftExport(TestCase):
         # the fake tensors on node.meta["val"] should have real_tensor
         gm = ep.module()
         tensors = [
-            node.meta.get("val").real_tensor
+            maybe_get_real_tensor(node.meta.get("val"))
             for node in gm.graph.nodes
             if node.op == "placeholder"
         ]
@@ -478,6 +451,46 @@ class TestDraftExport(TestCase):
                 if bindings := node.meta.get("unbacked_bindings"):
                     unbacked_binding_symbols.update(bindings.keys())
             self.assertEqual(len(unbacked_binding_symbols), 1)
+
+    def test_vmap_over_empty_batch(self):
+        # Real tensor propagation runs ops on the real tensors too, and a vmap
+        # over an empty batch leaves no real storage for a view of one row,
+        # also when the batch size is only known at run time.
+        class M(torch.nn.Module):
+            def forward(self, x, empty):
+                rows = [x[x[:, 0, 0] > bound] for bound in (100, -100)]
+                return [
+                    torch.vmap(lambda row: row * 2 + 1)(t) for t in (x, empty, *rows)
+                ]
+
+        inputs = (torch.randn(5, 3, 4), torch.randn(0, 3, 4))
+        ep = draft_export(M(), inputs)
+        self.assertEqual(len(ep._report.failures), 0)
+        self.assertEqual(ep.module()(*inputs), M()(*inputs))
+        # With or without real tensors, every batched value is a view of the
+        # tensor it wraps.
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        for graph in (export(M(), inputs).graph, ep.graph):
+            batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+            self.assertEqual(len(batched), 4)
+            for node in batched:
+                self.assertEqual(
+                    StorageWeakRef(node.meta["val"].untyped_storage()),
+                    StorageWeakRef(node.args[0].meta["val"].untyped_storage()),
+                )
+        # Like other ops, the ones inside vmap keep no real tensors.
+        predispatch = torch._functorch.predispatch
+        inside, checked = False, 0
+        for node in ep.graph.nodes:
+            if node.target is predispatch._vmap_increment_nesting:
+                inside = True
+            elif node.target is predispatch._vmap_decrement_nesting:
+                inside = False
+            elif inside and isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+                self.assertIsNone(maybe_get_real_tensor(node.meta["val"]), node.name)
+                checked += 1
+        self.assertGreater(checked, 0)
 
     def test_offsets(self):
         class M(torch.nn.Module):
@@ -767,12 +780,59 @@ class TestDraftExport(TestCase):
                 package_path=f.name,
             )
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties(0).total_memory < 2**28,
-        "Requires 16 MB GPU memory to pass the test; setting it higher to catch violations",
-    )
-    def test_cuda_memory_usage(self):
+
+class TestDraftExportDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_missing_meta_kernel_guard(self, device):
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
+
+            @torch.library.custom_op("mylib::foo4", mutates_args={})
+            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    res1 = torch.ops.mylib.foo4(a, b)
+                    return res1
+
+            inp = (
+                torch.ones(3, 4),
+                torch.ones(3, 4),
+            )
+
+            ep = draft_export(
+                M(),
+                inp,
+                dynamic_shapes={
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+
+            inp = (torch.randn(2, 3), torch.randn(2, 3))
+            self.assertEqual(ep.module()(*inp), M()(*inp))
+            m = ep.module()
+            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+                bad_device_inps = (
+                    torch.randn(2, 3, device=device),
+                    torch.randn(2, 3, device=device),
+                )
+                m(*bad_device_inps)
+
+            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+                bad_dtype_inps = (
+                    torch.randn(2, 3, dtype=torch.float16),
+                    torch.randn(2, 3, dtype=torch.float16),
+                )
+                m(*bad_dtype_inps)
+
+    # 16 MB is enough to run the test; ask for more so a regression OOMs
+    # instead of silently passing.
+    @onlyAccelerator
+    @largeTensorTest(2**28)
+    def test_accelerator_memory_usage(self, device):
         # This used to OOM
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -781,21 +841,23 @@ class TestDraftExport(TestCase):
                 return x
 
         # measure base usage
-        device = torch.device("cuda:0")
-        torch.cuda.reset_peak_memory_stats()
-        base_usage = torch.cuda.memory_allocated(device)
+        torch.accelerator.reset_peak_memory_stats(device)
+        base_usage = torch.accelerator.memory_allocated(device)
 
         # usage with input tensor allocated
         x = torch.randn(2**10, 2**10).to(device)
-        x_usage = torch.cuda.memory_allocated(device)
+        x_usage = torch.accelerator.memory_allocated(device)
 
         # draft export peak memory usage
         draft_export(Foo(), (x,), strict=False)
-        peak_mem_usage = torch.cuda.memory_stats(device)["allocated_bytes.all.peak"]
+        peak_mem_usage = torch.accelerator.max_memory_allocated(device)
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
+
+
+instantiate_device_type_tests(TestDraftExportDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
