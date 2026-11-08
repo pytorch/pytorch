@@ -1478,6 +1478,115 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             self.assertEqual(out_buf, out)
 
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "q_len,k_len,window_size",
+        [
+            (1, 64, (8, 0)),  # pytorch/pytorch#203417 reproducer
+            (16, 64, (32, 0)),
+            (16, 64, (8, 4)),
+            (16, 64, (-1, 0)),  # already bottom-right aligned
+            (64, 16, (8, 48)),  # seqlen_q > seqlen_k, no empty rows
+        ],
+    )
+    def test_numeric_window_bottom_right(
+        self, device, dtype, q_len, k_len, window_size
+    ):
+        # Numeric sliding windows follow flash-attention's convention: both edges
+        # are anchored at the bottom-right diagonal, j - i = seqlen_k - seqlen_q.
+        # Covers the dense (_flash_attention_forward without cu_seqlens) and the
+        # varlen path; the varlen batch mixes two different seqlen_k - seqlen_q.
+        torch.manual_seed(0)
+        H, D = 2, 64
+        left, right = window_size
+
+        def ref_attn(q, k, v):
+            # q: (sq, H, D), k/v: (sk, H, D), computed in fp32
+            sq, sk = q.shape[0], k.shape[0]
+            i = torch.arange(sq, device=q.device)[:, None]
+            j = torch.arange(sk, device=q.device)[None, :]
+            d = sk - sq
+            mask = torch.ones(sq, sk, dtype=torch.bool, device=q.device)
+            if left >= 0:
+                mask &= j >= i + d - left
+            if right >= 0:
+                mask &= j <= i + d + right
+            qf, kf, vf = (t.float().transpose(0, 1) for t in (q, k, v))
+            out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
+            return out.transpose(0, 1)
+
+        with _use_backend("fa2"):
+            # Dense
+            q = torch.randn(1, q_len, H, D, device=device, dtype=dtype)
+            k = torch.randn(1, k_len, H, D, device=device, dtype=dtype)
+            v = torch.randn(1, k_len, H, D, device=device, dtype=dtype)
+            out = torch.ops.aten._flash_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                None,
+                q_len,
+                k_len,
+                0.0,
+                False,
+                False,
+                window_size_left=left if left >= 0 else None,
+                window_size_right=right if right >= 0 else None,
+            )[0]
+            self.assertEqual(out[0].float(), ref_attn(q[0], k[0], v[0]), atol=2e-2, rtol=2e-2)
+
+            # Varlen, forward and backward
+            q_lens = [q_len, max(q_len // 2, 1)]
+            k_lens = [k_len, k_len - 8 if k_len > 8 else k_len]
+            cu_q = torch.tensor(
+                [0, q_lens[0], sum(q_lens)], device=device, dtype=torch.int32
+            )
+            cu_k = torch.tensor(
+                [0, k_lens[0], sum(k_lens)], device=device, dtype=torch.int32
+            )
+            qv = torch.randn(
+                sum(q_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            kv = torch.randn(
+                sum(k_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            vv = torch.randn(
+                sum(k_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            out = varlen_attn(
+                qv,
+                kv,
+                vv,
+                cu_q,
+                cu_k,
+                max(q_lens),
+                max(k_lens),
+                window_size=window_size,
+            )
+            grad = torch.randn_like(out)
+            out.backward(grad)
+
+            qr, kr, vr = (
+                t.detach().float().clone().requires_grad_() for t in (qv, kv, vv)
+            )
+            refs = []
+            for b in range(2):
+                qs = slice(int(cu_q[b]), int(cu_q[b + 1]))
+                ks = slice(int(cu_k[b]), int(cu_k[b + 1]))
+                refs.append(ref_attn(qr[qs], kr[ks], vr[ks]))
+            ref = torch.cat(refs, dim=0)
+            ref.backward(grad.float())
+            self.assertEqual(out.float(), ref, atol=2e-2, rtol=2e-2)
+            self.assertEqual(qv.grad.float(), qr.grad, atol=3e-2, rtol=3e-2)
+            self.assertEqual(kv.grad.float(), kr.grad, atol=3e-2, rtol=3e-2)
+            self.assertEqual(vv.grad.float(), vr.grad, atol=3e-2, rtol=3e-2)
+
+
 class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     # cuDNN is the only varlen backend with dedicated aten ops
     # (_cudnn_attention_forward/_backward) and it is only ever selected for a
