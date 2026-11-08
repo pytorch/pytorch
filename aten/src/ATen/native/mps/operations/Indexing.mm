@@ -339,7 +339,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // The block-scan running count is bounded by numel, so it fits uint32 (and can
   // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
   // genuinely >2^32-element tensors need the 64-bit scan.
-  const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
+  const bool count_fits_u32 = std::in_range<uint32_t>(numel);
   auto pso_step2 =
       lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
@@ -950,7 +950,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
-  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(self.numel()),
               "masked_fill not supported for tensors of more than 2**32 elements");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();

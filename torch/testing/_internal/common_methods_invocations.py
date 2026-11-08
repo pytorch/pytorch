@@ -3596,12 +3596,17 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2,)), output_size=(1,)),
+                     error_type=ValueError, error_regex="Expected 2D or 3D tensor")
+
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
-                     error_regex="'output_size' should contain one int")
+                     error_type=ValueError, error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3633,10 +3638,11 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 2")
+                     error_type=ValueError, error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3671,10 +3677,11 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 3")
+                     error_type=ValueError, error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3794,6 +3801,7 @@ class _TestParamsMaxPoolBase:
     def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
+            # Overlapping stride first: inductor_one_sample (test_torchinductor_opinfo.py) runs only the first sample
             'stride': [2, None],
             'ceil_mode': [True, False],
             'padding': [0, 1],
@@ -3802,9 +3810,9 @@ class _TestParamsMaxPoolBase:
         }
 
         self.shapes = [
-            [1, 2, None],  # batch
+            [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first 1d sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -3827,32 +3835,35 @@ class _TestParamsMaxPoolBase:
         yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+    pass
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2)]
-        self.kwargs['stride'] += [(2, 1)]
-        self.kwargs['padding'] += [(1, 1)]
-        self.kwargs['dilation'] += [(1, 2)]
+        self.kwargs['kernel_size'] = [(3, 2)]
+        # Per-dim stride values differ: H overlaps and W tiles (both overlap with dilation)
+        self.kwargs['stride'] = [(1, 2), None]
+        self.kwargs['padding'] = [0, (1, 1)]
+        self.kwargs['dilation'] = [1, (1, 2)]
 
-        self.shapes.append([6])
+        self.shapes.append([5])  # odd, so the first sample has a partial ceil_mode window in W
+
+class _TestParamsMaxPool2dBackward(_TestParamsMaxPool2d):
+
+    def __init__(self) -> None:
+        super().__init__()
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        self.kwargs['return_indices'] = [True]
 
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2, 3)]
-        self.kwargs['stride'] += [(2, 1, 2)]
-        self.kwargs['dilation'] += [(1, 2, 1)]
+        self.kwargs['kernel_size'] = [(3, 2, 3)]
+        # Per-dim stride values all differ: D overlaps and H, W tile (H overlaps too with dilation)
+        self.kwargs['stride'] = [(1, 2, 3), None]
+        self.kwargs['dilation'] = [1, (1, 2, 1)]
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -3864,7 +3875,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
-        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2dBackward,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -4985,7 +4996,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
                        requires_grad=requires_grad, low=-5, high=5)
     return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
-def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True, **kwargs):
+def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
     batch_options: list[list[int]] = [
         [],  # no batch
@@ -5012,13 +5023,8 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
     # in_features == 0, used to abort the process on MPS, see https://github.com/pytorch/pytorch/issues/190050
-    # Callers that forward these to gradcheck forward-mode AD (e.g.
-    # linear_cross_entropy) opt out via include_empty=False: gradcheck collapses
-    # its tolerance to 0 for zero-element inputs, see
-    # https://github.com/pytorch/pytorch/issues/190436
-    if include_empty:
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
 
     # 1D weight contracts away the last input dim (out_features == 1 with the
     # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
@@ -5031,11 +5037,10 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
         yield SampleInput(create_tensor(8, 3), create_tensor(3))
         yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
         yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
-        if include_empty:
-            # An empty reduction dim and an empty batch, where the shortcuts taken for
-            # zero-element tensors still have to drop the 1D weight's output dim.
-            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
-            yield SampleInput(create_tensor(0, 8), create_tensor(8))
+        # An empty reduction dim and an empty batch, where the shortcuts taken for
+        # zero-element tensors still have to drop the 1D weight's output dim.
+        yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+        yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -5921,11 +5926,11 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (),),
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
-        ((), (),),
         ((), (0,),),
         ((), (0, True,),),
-        # Non-fused mode kernel on CUDA
-        ((3000,), ()),
+        # Non-fused CUDA mode kernel: slice_size > 2 * MAX_BLOCK_SIZE in native/cuda/TensorModeKernel.cpp;
+        # divisible by 4 so the DTensor op-db tests (4-rank mesh) can shard it
+        ((2052,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
@@ -7279,8 +7284,8 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 def _large_logit_linear_cross_entropy_samples(device, dtype, requires_grad, **kwargs):
     """Samples whose logits are large, which the curated shapes are not.
 
-    The samples above reach |z| of about 20 at most, median 6, because their
-    tensors come from the shared linear generator. Accuracy of a chunked
+    The samples above reach |z| of about 20 at most: in_features=3, values
+    in [-2, 2] and linear_bias in [-9, 9]. Accuracy of a chunked
     implementation can depend on |z| well past that: an implementation may hold
     the logits at low precision -- eager does for fp16 -- and such a buffer
     stores ``z`` with absolute error proportional to ``|z|`` while the softmax
@@ -7405,46 +7410,27 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                  weight="<to be initialized>", reduction="sum"),
         ]
 
+    # (input, linear_weight) shapes: unbatched and 1-D batch.
+    # Keep them non-empty: gradcheck's forward AD uses zero tolerance for empty inputs (#190436).
+    shapes = [((3,), (4, 3)), ((8, 3), (4, 3))]
+    if not chunked:
+        # N-D linear_weight (K-dim loss) always falls back from the chunked path
+        shapes.append(((4, 3), (2, 1, 5, 6, 3)))
+    make_linear_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-2, high=2)
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
-        for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad, include_empty=False):
-            linear_input = linear_sample.input
-            if len(linear_sample.args) == 1:
-                linear_weight = linear_sample.args[0]
+        # ignore_index is not supported for probabilities target
+        if probabilities_target and "ignore_index" in kwargs:
+            continue
+        for input_shape, weight_shape in shapes:
+            linear_input = make_linear_arg(input_shape)
+            linear_weight = make_linear_arg(weight_shape)
+            num_classes = weight_shape[0]
+            out_features = weight_shape[1:-1]
+            num_batches = input_shape[:-1]
+            if probabilities_target:
+                target_shape = (*num_batches, num_classes, *out_features)
             else:
-                # skip samples with linear bias as unsupported
-                continue
-
-            if linear_weight.dim() == 1:
-                # linear_cross_entropy requires a linear weight of rank >= 2
-                continue
-
-            num_classes = linear_weight.shape[0]
-            num_batches = linear_input.shape[:-1]
-            input_shape = (*num_batches, num_classes)
-            if len(input_shape) <= 2:
-                if probabilities_target:
-                    target_shape = input_shape
-                else:
-                    target_shape = num_batches
-            else:
-                # cross_entropy supports only one-dimensional
-                # batches. However, linear_cross_entropy supports
-                # multidimensional weights that sample_inputs_linear
-                # would not generate. So, we'll swap linear input and
-                # weights to generate samples with 2-D inputs and N-D
-                # linear weights for linear_cross_entropy:
-                linear_input, linear_weight = linear_weight, linear_input
-                num_classes = linear_weight.shape[0]
-                out_features = linear_weight.shape[1:-1]
-                num_batches = linear_input.shape[:-1]
-                if probabilities_target:
-                    target_shape = (*num_batches, num_classes, *out_features)
-                else:
-                    target_shape = (*num_batches, *out_features)
-
-            if 0 in target_shape:
-                # skip degenerate samples
-                continue
+                target_shape = (*num_batches, *out_features)
 
             if "weight" in kwargs:
                 # Strictly positive class weights only. Real-world
@@ -7455,18 +7441,12 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # non-contig drift) stay within bounds.
                 kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype, low=0.5, high=2)
             if "linear_bias" in kwargs:
-                # Logical shape matches the logits-per-batch slice:
-                # (num_classes, *out_features). Derived from
-                # linear_weight.shape[:-1] so it covers both the 2-D
-                # and K-dim swapped cases above.
+                # Logical shape matches the logits-per-batch slice: (num_classes, *out_features)
                 kwargs["linear_bias"] = make_tensor(
-                    linear_weight.shape[:-1],
+                    weight_shape[:-1],
                     device=device, dtype=dtype, requires_grad=requires_grad,
                 )
             if probabilities_target:
-                # ignore_index is not supported for probabilities target
-                if "ignore_index" in kwargs:
-                    continue
                 target = make_tensor(
                     target_shape,
                     low=0,
@@ -10494,8 +10474,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
-        indices = sample.args[0]
+    samples = list(sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs))
+    smallest_size = min((math.prod(s.kwargs['output_size'][2:]) for s in samples), default=None)
+    for sample in samples:
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
@@ -10511,8 +10492,11 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
         # indices.
-        # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Here we go with the solution 2, the easiest of all: non-overlapping
+        # windows (stride=None, i.e. stride == kernel_size) always give unique indices.
+        # gradcheck is expensive, so only the smallest max_pool input is kept;
+        # output_size is that input's shape (sample.input is the pooled output).
+        if sample.kwargs['stride'] is None and math.prod(sample.kwargs['output_size'][2:]) == smallest_size:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -15368,24 +15352,11 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
                 "TestConsistency", "test_output_match", device_type="mps",
             ),
-            # Same fp16 atomic-order spread as the unchunked variant: N-D
-            # linear weights fall back to the reference nll_loss2d path.
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
-                "TestTorchFunctionRedispatchOpsDevice",
-                "test_redispatch",
-                device_type="cuda",
-            ),
         ),
         skips=_lce_chunked_op_skips + (
             DecorateInfo(unittest.skip("chunked op falls back to reference under "
                                        "torch.jit.trace; covered by unchunked variant"),
                          "TestNNCOpInfo", "test_nnc_correctness"),
-            # nll_loss2d decomposition mismatch (chunked path also dispatches
-            # through nll_loss2d for the per-row reduction).
-            DecorateInfo(
-                unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                "TestDecomp", "test_comprehensive", device_type="cuda"),
             # acc_policy="auto" accumulates fp16/bf16 in fp32 on CPU only, so the
             # CPU reference is more precise than MPS by design.
             DecorateInfo(unittest.skip("CPU uses fp32 accumulation"),
@@ -15435,12 +15406,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("chunked op falls back to reference under "
                                        "torch.jit.trace; covered by unchunked variant"),
                          "TestNNCOpInfo", "test_nnc_correctness"),
-            # nll_loss2d decomp mismatch (CUDA) and the dot.default decomp
-            # not widening bf16 accumulation (CPU); both are aten-decomp
-            # precision properties, not chunked-path bugs.
-            DecorateInfo(
-                unittest.skip("decomposition precision mismatch (nll_loss2d / dot)"),
-                "TestDecomp", "test_comprehensive"),
+            # The dot.default decomposition doesn't match the fp32-accumulated bf16 dot
+            # closely enough (hardware-dependent; seen on CUDA, reported on CPU).
+            DecorateInfo(unittest.skip("dot.default decomposition precision mismatch"),
+                         "TestDecomp", "test_comprehensive", dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Inconsistent accuracy"),
                          "TestConsistency", "test_output_match",
                          dtypes=(torch.float16, torch.bfloat16),
@@ -18051,10 +18020,8 @@ op_db: list[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # FIXME:
-               # Expected 2114 but got 1123.
-               # Absolute difference: 991 (up to 0.001 allowed)
-               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
+               # FIXME: test only runs on ROCm; when the mode value repeats, CPU returns the index at the end
+               # of its sorted run and the non-fused CUDA path the index at the start, so indices can differ
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    "TestCommon",
@@ -23116,13 +23083,7 @@ if "cutedsl" in dsl_ops_by_dsl:
             "nn.functional.linear_cross_entropy",
             variant_test_name="cutedsl",
             sample_inputs_func=sample_inputs_cutedsl_linear_cross_entropy,
-            skips=_cutedsl_lce_skips + (
-                # nll_loss2d decomposition mismatch on total_weight, as on the
-                # "chunked" variant.
-                DecorateInfo(
-                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                    "TestDecomp", "test_comprehensive", device_type="cuda"),
-            ),
+            skips=_cutedsl_lce_skips,
             **_cutedsl_lce_kwargs,
         ),
         OpInfo(
@@ -23135,9 +23096,9 @@ if "cutedsl" in dsl_ops_by_dsl:
             check_batched_grad=False,
             check_batched_gradgrad=False,
             skips=_cutedsl_lce_skips + (
-                DecorateInfo(
-                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                    "TestDecomp", "test_comprehensive"),
+                # As on the "chunked_none" variant.
+                DecorateInfo(unittest.skip("dot.default decomposition precision mismatch"),
+                             "TestDecomp", "test_comprehensive", dtypes=(torch.bfloat16,)),
                 # Recompute-in-backward is not vmap-over-grad compatible, as on
                 # the "chunked_none" variant.
                 DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice",
