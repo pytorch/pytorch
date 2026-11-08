@@ -59,6 +59,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     free_symbols,
     free_unbacked_symbols,
+    guarding_hint_or_throw,
     ShapeEnv,
     ShapeEnvSettings,
     StatefulSymbolicContext,
@@ -5995,6 +5996,9 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(maybe_get_item_memo(fake), memo if kept else None)
         mode.epoch += 1
         self.assertIs(maybe_get_item_memo(fake), backed_float)
+        # Which relies on a SymFloat's hint never being filled in later
+        with self.assertRaisesRegex(AssertionError, "Expected an int or bool"):
+            guarding_hint_or_throw(unbacked_float.node)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_set_get_fake_dispatch_keys(self):
