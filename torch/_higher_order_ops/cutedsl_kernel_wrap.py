@@ -164,8 +164,8 @@ def python_scalar(value: Any, annotation: type | None = None) -> Any:
             from cutlass.base_dsl.typing import Boolean, Integer
 
             if not issubclass(annotation, (Boolean, Integer)):
-                # nvidia-cutlass-dsl 4.5 and later would pass the int through Int32
-                # first, overflowing or wrapping one beyond its range.
+                # nvidia-cutlass-dsl 4.8 refuses to compile an int beyond int64 and
+                # uint64 for a float parameter (OverflowError); 4.4 casts it itself.
                 return float(value)
         return int(value)
     if isinstance(value, float):
