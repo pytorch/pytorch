@@ -7,7 +7,7 @@ from typing import Any, cast, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._custom_class_base import CustomClassBase
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
@@ -226,7 +226,7 @@ def _resolve_input_async_collectives(
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
 ) -> tuple[FakeTensorMode, ShapeEnv | None]:
-    fake_mode = detect_fake_mode(flat_args)
+    fake_mode = require_python_fake_mode(detect_fake_mode(flat_args))
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = FakeTensorMode(shape_env=shape_env)

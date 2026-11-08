@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
 
@@ -1548,7 +1548,7 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
@@ -1612,7 +1612,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Returns the active fake mode, or None if no fake mode is active. It can be
     a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
@@ -1620,5 +1620,36 @@ def active_fake_mode() -> FakeTensorMode | None:
     """
     # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
     # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
-    # CppFakeTensorMode wrapper when that slot is empty.
+    # CppFakeTensorMode when that slot is empty.
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+
+
+@overload
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode,
+) -> FakeTensorMode: ...
+
+
+@overload
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+) -> FakeTensorMode | None: ...
+
+
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+) -> FakeTensorMode | None:
+    """
+    Returns mode, a result of detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, for a caller that needs a Python FakeTensorMode, and
+    raises for a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise NotImplementedError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode
