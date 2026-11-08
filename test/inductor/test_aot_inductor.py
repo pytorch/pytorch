@@ -11017,7 +11017,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.cond(x.sum() > 0, lambda x: x + 1, lambda x: x - 1, (x,))
 
-        class SyncsEvent(torch.nn.Module):
+        class RecordsAndSyncsEvent(torch.nn.Module):
             def forward(self, x):
                 s = torch.cuda.Stream()
                 with torch.cuda.stream(s):
@@ -11092,7 +11092,7 @@ class AOTInductorTestsTemplate:
             (Item(), "incompatible op", {}),
             (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
             (Cond(), "control flow operator: torch.cond", {}),
-            (SyncsEvent(), "it uses stream op streams.record_event", {}),
+            (RecordsAndSyncsEvent(), "it uses stream op streams.record_event", {}),
             (SyncsStream(), "it uses stream op streams.synchronize_stream", {}),
             (SyncsDevice(), "it uses stream op streams.synchronize_device", {}),
             (Random(), r"it uses random numbers \(prims.inductor_seeds", {}),
@@ -11195,10 +11195,15 @@ class AOTInductorTestsTemplate:
                     def forward(self, x):
                         return region(x) + region(x * 2)
 
+                x = torch.randn(4, 4, device=self.device)
+                # The failing op must be inside a subgraph, not inlined.
+                graph = torch.export.export(Model(), (x,)).graph
+                op = torch.ops.higher_order.invoke_subgraph
+                self.assertTrue(graph.find_nodes(op="call_function", target=op))
                 with self.assertRaisesRegex(Exception, f"CUDA graph: .*{reason}"):
                     AOTIRunnerUtil.compile(
                         Model(),
-                        (torch.randn(4, 4, device=self.device),),
+                        (x,),
                         inductor_configs={"aot_inductor.cudagraphs": True},
                     )
 
