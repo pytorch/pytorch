@@ -14,7 +14,17 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Literal, Self, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    Literal,
+    overload,
+    Self,
+    TYPE_CHECKING,
+    TypeGuard,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypedDict, Unpack
 from weakref import ReferenceType
 
@@ -331,12 +341,14 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # Note [Fake mode lookups and CppFakeTensorMode]
 # maybe_get_fake_mode, detect_fake_mode and active_fake_mode return a
 # CppFakeTensorMode for a C++ fake or a wrapper of one, or while a C++ mode is
-# entered. CppFakeTensorMode is not a FakeTensorMode subclass and does not yet
-# have all of its interface, so a caller that needs a Python FakeTensorMode (to
-# call from_tensor on it, or to pass it on to code that uses more of
-# FakeTensorMode) narrows the result with
-# torch._guards.require_python_fake_mode, which raises NotImplementedError for
-# a C++ mode.
+# entered. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
+# its interface yet. Its from_tensor raises UnsupportedFakeTensorException for
+# views, sparse and mkldnn tensors and tensors with nested ints, its converter's
+# from_real_tensor also for constants that are not plain tensors, and its
+# converter's from_meta_and_device, which makes Python FakeTensors, raises
+# AssertionError. So a caller that needs a Python FakeTensorMode narrows the
+# result with torch._guards.require_python_fake_mode, which raises
+# NotImplementedError for a C++ mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -779,6 +791,22 @@ def _exit_fake_mode(
             torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
 
+# The ShapeEnv from_tensor converts with, shared with CppFakeTensorMode
+def _from_tensor_shape_env(
+    mode: FakeTensorMode | CppFakeTensorMode,
+    static_shapes: bool | None,
+    symbolic_context: SymbolicContext | None,
+    /,
+) -> ShapeEnv | None:
+    if static_shapes is None:
+        static_shapes = mode.static_shapes
+    if static_shapes:
+        if symbolic_context is not None:
+            raise AssertionError("cannot set both static_shapes and symbolic_context")
+        return None
+    return mode.shape_env
+
+
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
@@ -790,17 +818,23 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     __slots__ = ("enter_stack",)
 
     def __init__(
-        self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
+        self,
+        *,
+        shape_env: ShapeEnv | None = None,
+        allow_non_fake_inputs: bool = False,
+        static_shapes: bool | None = None,
     ) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        converter = FakeTensorConverter(copy_data=copy_data)
+        converter = FakeTensorConverter(copy_data=copy_data, cpp_fakes=True)
         tb = CapturedTraceback.extract()
         super().__init__(converter, shape_env, creation_traceback=tb)
         self._attach_python_object()
         self._init_enter_state()
         self.allow_non_fake_inputs = allow_non_fake_inputs
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
 
     @classmethod
     def _from_cpp_mode(cls, cpp_mode: object) -> Self:
@@ -823,6 +857,33 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     def stack(self) -> str:
         tb = self._creation_traceback
         return "" if tb is None else "".join(tb.format())
+
+    # Like FakeTensorMode.from_tensor, for C++ fakes
+    def from_tensor(
+        self,
+        tensor: Tensor,
+        *,
+        static_shapes: bool | None = None,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
+        if (
+            torch._C._maybe_get_fake_mode(tensor) is self
+            and static_shapes is None
+            and source is None
+            and symbolic_context is None
+        ):
+            return tensor
+
+        return self.fake_tensor_converter.from_real_tensor(
+            self,
+            tensor,
+            shape_env=_from_tensor_shape_env(self, static_shapes, symbolic_context),
+            source=source,
+            symbolic_context=symbolic_context,
+            trace=trace,
+        )
 
     # Same as FakeTensorMode.avoid_device_init
     @property
@@ -949,17 +1010,18 @@ class FakeTensorConverter:
     @property
     def tensor_memo(
         self,
-    ) -> weakref.WeakValueDictionary[
-        torch._subclasses.meta_utils.MetaTensorId, FakeTensor
-    ]:
+    ) -> weakref.WeakValueDictionary[torch._subclasses.meta_utils.MetaTensorId, Tensor]:
         return self.meta_converter.tensor_memo
 
-    meta_converter: MetaConverter[FakeTensor]
+    # Holds FakeTensors, or C++ fakes for a C++ mode's converter (cpp_fakes)
+    meta_converter: MetaConverter[Tensor]
     constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType[FakeTensor]]]
     export: bool
 
-    def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
-        self.meta_converter = MetaConverter(copy_data=copy_data)
+    def __init__(
+        self, *, copy_data: bool = False, export: bool = False, cpp_fakes: bool = False
+    ) -> None:
+        self.meta_converter = MetaConverter(copy_data=copy_data, cpp_fakes=cpp_fakes)
         self.export = export
 
         # map from to storage to corresponding constant tensors
@@ -1023,22 +1085,24 @@ class FakeTensorConverter:
             else:
                 self.invalidate_constant_aliases(constant)
 
-    def _get_memo(self, t: Tensor) -> FakeTensor | None:
+    def _get_memo(self, t: Tensor) -> Tensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
             return None
         return self.tensor_memo.get(tid)
 
-    def set_tensor_memo(self, t: Tensor, v: FakeTensor) -> None:
+    def set_tensor_memo(self, t: Tensor, v: Tensor) -> None:
         tid = self.meta_converter.describer.get_tensor_id(t)
         self.meta_converter.tensor_memo[tid] = v
 
     # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device.
+    # If you have a meta tensor already, call from_meta_and_device (or, for a
+    # C++ fake, torch._C._from_meta_and_device).
     #
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
+    @overload
     def from_real_tensor(
         self,
         fake_mode: FakeTensorMode,
@@ -1049,7 +1113,41 @@ class FakeTensorConverter:
         source: Source | None = None,
         symbolic_context: SymbolicContext | None = None,
         trace: bool = True,
-    ) -> FakeTensor:
+    ) -> FakeTensor: ...
+
+    @overload
+    def from_real_tensor(
+        self,
+        fake_mode: CppFakeTensorMode,
+        t: Tensor,
+        make_constant: bool = False,
+        shape_env: ShapeEnv | None = None,
+        *,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor: ...
+
+    def from_real_tensor(
+        self,
+        fake_mode: FakeTensorMode | CppFakeTensorMode,
+        t: Tensor,
+        make_constant: bool = False,
+        shape_env: ShapeEnv | None = None,
+        *,
+        source: Source | None = None,
+        symbolic_context: SymbolicContext | None = None,
+        trace: bool = True,
+    ) -> Tensor:
+        # A converter makes one kind of fake, which the casts to FakeTensor in
+        # this class rely on
+        cpp_fakes = self.meta_converter.cpp_fakes
+        if isinstance(fake_mode, CppFakeTensorMode) != cpp_fakes:
+            kind = type(fake_mode).__name__
+            raise AssertionError(
+                f"this converter's cpp_fakes does not match the {kind}; use the "
+                "mode's own fake_tensor_converter"
+            )
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -1068,7 +1166,9 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
-                maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
+                # A FakeTensor, as a C++ mode rejects mkldnn tensors
+                keys = torch._C._dispatch_keys(t)
+                cast(FakeTensor, maybe_memo).dispatch_keys = keys
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -1076,6 +1176,14 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             if make_constant:
                 raise AssertionError("make_constant must be False for nn.Parameter")
+        # The C++ mode records a constant on the fake itself, which a wrapper of
+        # C++ fakes is not, and only for a real constant
+        if make_constant and cpp_fakes and not _is_plain_tensor(t):
+            msg = "constants that are not plain tensors nyi in C++ fake tensors"
+            raise UnsupportedFakeTensorException(msg)
+        if make_constant and cpp_fakes and is_fake_tensor(t):
+            msg = "fake constants nyi in C++ fake tensors"
+            raise UnsupportedFakeTensorException(msg)
 
         constant = t if make_constant else None
 
@@ -1083,8 +1191,8 @@ class FakeTensorConverter:
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
         def mk_fake_tensor(
-            make_meta_t: Callable[[], object], device: torch.device | str
-        ) -> FakeTensor:
+            make_meta_t: Callable[[], Tensor], device: torch.device | str
+        ) -> Tensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -1093,9 +1201,12 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
+                if isinstance(fake_mode, CppFakeTensorMode):
+                    return torch._C._from_meta_and_device(
+                        make_meta_t(), torch.device(device), fake_mode
+                    )
                 return FakeTensor(
                     fake_mode,
-                    # pyrefly: ignore [bad-argument-type]
                     make_meta_t(),
                     # pyrefly: ignore [bad-argument-type]
                     device,
@@ -1115,7 +1226,8 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if t.is_mkldnn:
-            out.dispatch_keys = torch._C._dispatch_keys(t)
+            # A FakeTensor, as above
+            cast(FakeTensor, out).dispatch_keys = torch._C._dispatch_keys(t)
 
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
@@ -1240,7 +1352,14 @@ class FakeTensorConverter:
                             ),
                         )
         if make_constant:
-            self.add_constant_storage_mapping(out)
+            if cpp_fakes:
+                # The C++ mode records the constant's storage aliases itself.
+                # TODO: invalidate them when a constant's storage is mutated.
+                # Nothing does yet, so ops on C++ fakes have to reject constant
+                # inputs until something does.
+                torch._C._set_fake_constant(out, constant)
+            else:
+                self.add_constant_storage_mapping(cast(FakeTensor, out))
         # NB: meta_converter set the memo
         return out
 
@@ -1253,6 +1372,12 @@ class FakeTensorConverter:
         pytype: type[torch.Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> FakeTensor:
+        # This builds FakeTensors, so the memo holds only those
+        if self.meta_converter.cpp_fakes:
+            raise AssertionError(
+                "from_meta_and_device makes FakeTensors, but this converter's "
+                "cpp_fakes is set"
+            )
         if t.device.type != "meta":
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
@@ -1268,7 +1393,7 @@ class FakeTensorConverter:
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
-            return maybe_memo
+            return cast(FakeTensor, maybe_memo)
         out = FakeTensor(
             fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
         )
@@ -1308,18 +1433,29 @@ def allow_non_fake_inputs_temporarily(
 
 @contextlib.contextmanager
 def in_kernel_invocation_manager(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
 ) -> Generator[None, None, None]:
     # See: note [Fake Tensor Dispatch Keys]
-    prev_in_kernel = fake_mode.in_kernel_invocation
+    # A CppFakeTensorMode has no in_kernel_invocation flag: C++ fakes read the
+    # thread-local one _InKernelInvocation sets below. That flag can be set
+    # without the Meta include (by a bare _InKernelInvocation), so for a C++
+    # mode only the Meta include implies the flag.
+    python_mode = None if isinstance(fake_mode, CppFakeTensorMode) else fake_mode
+    prev_in_kernel = python_mode is not None and python_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    if meta_in_tls != prev_in_kernel:
-        raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    if python_mode is not None:
+        if meta_in_tls != prev_in_kernel:
+            raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+    elif meta_in_tls and not torch._C._in_kernel_invocation():
+        raise AssertionError(
+            "the Meta TLS dispatch key is included outside a kernel invocation"
+        )
 
     # _InKernelInvocation makes C++ fakes report meta here too, see Note
     # [C++ in_kernel_invocation].
     with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
-        fake_mode.in_kernel_invocation = True
+        if python_mode is not None:
+            python_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)
         with torch._C._PreserveDispatchKeyGuard():
@@ -1327,7 +1463,8 @@ def in_kernel_invocation_manager(
             try:
                 yield
             finally:
-                fake_mode.in_kernel_invocation = prev_in_kernel
+                if python_mode is not None:
+                    python_mode.in_kernel_invocation = prev_in_kernel
                 # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
 
 
@@ -3925,19 +4062,10 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             return tensor
 
-        shape_env: ShapeEnv | None = self.shape_env
-        if static_shapes is None:
-            static_shapes = self.static_shapes
-        if static_shapes:
-            if symbolic_context is not None:
-                raise AssertionError(
-                    "cannot set both static_shapes and symbolic_context"
-                )
-            shape_env = None
         return self.fake_tensor_converter.from_real_tensor(
             self,
             tensor,
-            shape_env=shape_env,
+            shape_env=_from_tensor_shape_env(self, static_shapes, symbolic_context),
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,

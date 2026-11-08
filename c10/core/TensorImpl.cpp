@@ -1189,6 +1189,7 @@ FakeTensorMode::FakeTensorMode(
     : shape_env_(std::move(shape_env)),
       fake_tensor_converter_(std::move(converter)),
       allow_meta_(allow_meta),
+      static_shapes_(shape_env_ == nullptr),
       allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
 FakeTensorMode::~FakeTensorMode() = default;

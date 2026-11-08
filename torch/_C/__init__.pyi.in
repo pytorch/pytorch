@@ -2312,6 +2312,7 @@ class _CppFakeTensorMode:
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     allow_non_fake_inputs: _bool
+    static_shapes: _bool
     epoch: _int
     @property
     def _creation_traceback(self) -> PyCapturedTraceback | None: ...

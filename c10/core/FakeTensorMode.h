@@ -51,6 +51,13 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // CppFakeTensorMode.static_shapes, which only Python reads: whether
+  // from_tensor makes fakes with static shapes when its static_shapes argument
+  // is None. Kept here so a rebuilt Python object sees it. The constructor
+  // sets it to shape_env_ == nullptr, as FakeTensorMode.static_shapes defaults
+  // to shape_env is None.
+  bool static_shapes_ = true;
+
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
   // Python's _allow_unsafe_data_ptr_access, exposed under that name.
