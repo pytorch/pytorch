@@ -183,6 +183,8 @@ struct AttentionKernel {
     int64_t bias_strideB = 0;
 
     int32_t num_batches = 0;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int32_t num_heads = 0;
     int32_t q_heads_per_kv = 1;
 
@@ -197,8 +199,8 @@ struct AttentionKernel {
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
     CUTLASS_DEVICE bool advance_to_block() {
-      auto batch_id = blockIdx.z;
-      auto head_id = blockIdx.y;
+      auto batch_id = blockIdx.z + batch_offset;
+      auto head_id = blockIdx.y + head_offset;
       auto kv_head_id = head_id / q_heads_per_kv;
       int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
@@ -249,10 +251,10 @@ struct AttentionKernel {
       }
 
       // Advance to the current batch / head / query_start
-      query_ptr += (q_start + query_start) * q_strideM + head_id * q_strideH;
-      key_ptr += k_start * k_strideM + kv_head_id * k_strideH;
+      query_ptr += (q_start + query_start) * q_strideM + int64_t(head_id) * q_strideH;
+      key_ptr += k_start * k_strideM + int64_t(kv_head_id) * k_strideH;
 
-      value_ptr += k_start * v_strideM + kv_head_id * v_strideH;
+      value_ptr += k_start * v_strideM + int64_t(kv_head_id) * v_strideH;
       output_ptr +=
           int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
 
@@ -306,7 +308,9 @@ struct AttentionKernel {
       //  - we iterate over heads instead of queries (strideM = strideH)
       // Excluded under dropout: rows become heads here, but the per-row RNG
       // offset still indexes them as queries.
+      // bias_strideH must fit in the 32-bit bias_strideM it is remapped to.
       if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
+          bias_strideH <= cutlass::platform::numeric_limits<int32_t>::max() &&
           logsumexp_ptr == nullptr && window_size == 0 &&
           !(kSupportsDropout && use_dropout)) {
         if (head_id % kQueriesPerBlock != 0) {
@@ -729,7 +733,7 @@ struct AttentionKernel {
       auto prologueV = [&](int blockN) {
         typename MM1::Mma::IteratorB iterator_V(
             typename MM1::IteratorB::Params{typename MM1::LayoutB(p.v_strideM)},
-            const_cast<scalar_t*>(p.value_ptr + iter_key_start * p.v_strideM),
+            const_cast<scalar_t*>(p.value_ptr + int64_t(iter_key_start) * p.v_strideM),
             {problem_size_1_k, problem_size_1_n},
             thread_id(),
             cutlass::MatrixCoord{0, blockN * MM1::Mma::Shape::kN});
@@ -773,7 +777,7 @@ struct AttentionKernel {
       typename MM0::IteratorB iterator_B(
           typename MM0::IteratorB::Params(
               typename MM0::MmaCore::LayoutB(p.k_strideM)),
-          const_cast<scalar_t*>(p.key_ptr + iter_key_start * p.k_strideM),
+          const_cast<scalar_t*>(p.key_ptr + int64_t(iter_key_start) * p.k_strideM),
           {problem_size_0_k, problem_size_0_n},
           thread_id(),
           tb_offset_B);
@@ -1025,7 +1029,7 @@ struct AttentionKernel {
 
         typename MM1::Mma::IteratorB iterator_V(
             typename MM1::IteratorB::Params{typename MM1::LayoutB(p.v_strideM)},
-            const_cast<scalar_t*>(p.value_ptr + iter_key_start * p.v_strideM),
+            const_cast<scalar_t*>(p.value_ptr + int64_t(iter_key_start) * p.v_strideM),
             {problem_size_1_k, problem_size_1_n},
             thread_id(),
             cutlass::MatrixCoord{0, blockN * MM1::Mma::Shape::kN});
@@ -1060,7 +1064,6 @@ struct AttentionKernel {
                 kKeysPerBlock;
           }
 
-          // int first_key_block = 0;
           MM1::Mma::drain_cp_asyncs();
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {

@@ -37,8 +37,8 @@ jobs:
             cuda_short: "128"
             torch_cuda_arch_list: "8.0;8.6;9.0"
             runner: "windows.12xlarge"
-            # python 3.10 because 3.9 is not supported by torch >= 2.9; FA3 is ABI stable after 2.9
-            python_version: "3.10"
+            # FA3 is ABI stable after 2.9
+            python_version: "3.11"
             pytorch_version: "2.10.0"
             pytorch_min_version: "2.9.0"
             einops_version: "0.8.2"
@@ -120,7 +120,7 @@ jobs:
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
           nvcc --version
           python -m pip install "torch==${PYTORCH_VERSION}" --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
-          python -m pip install "einops==${EINOPS_VERSION}" "ninja==${NINJA_VERSION}" "numpy==${NUMPY_VERSION}"
+          python -m pip install "einops==${EINOPS_VERSION}" "ninja==${NINJA_VERSION}" "numpy==${NUMPY_VERSION}" "setuptools<84"
           if [[ "${{ inputs.test }}" == "true" ]]; then
             BUILD_DATE=$(date +%Y%m%d)
             export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_VERSION}"
