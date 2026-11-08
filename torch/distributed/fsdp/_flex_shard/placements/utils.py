@@ -124,7 +124,8 @@ def _gradient_reduce_ops(
     factor, all-reduce op, post-all-reduce divide factor)`` that make a
     reduce-scatter over ``group_size`` ranks, then an all-reduce over
     ``reduction.replicate_size`` replicas if more than one, produce
-    ``reduction``, as FSDP2's ``_get_gradient_divide_factors``."""
+    ``reduction``: NCCL's AVG or premultiplied sum for fp32 and bf16, else
+    sums with divisions before and after, as FSDP2 divides."""
     sum_op = dist.ReduceOp.SUM
     if _to_dist_reduce_op(reduction.op) == sum_op:
         return sum_op, None, None, sum_op, None

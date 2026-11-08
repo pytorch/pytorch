@@ -281,7 +281,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
 
         storage: Any
         version: int
-        storage_offset: int
+        storage_offset: int | torch.SymInt
         shape: torch.Size
         stride: tuple[int, ...]
         dtype: torch.dtype
@@ -740,7 +740,6 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
             # replacement tensor into a false cache hit.
             storage=tensor.untyped_storage(),
             version=tensor._version,
-            # pyrefly: ignore [bad-argument-type]
             storage_offset=tensor.storage_offset(),
             shape=tensor.shape,
             stride=tensor.stride(),
@@ -754,8 +753,7 @@ class BlockwiseQuantBucketedBlockShard(BucketedBlockShard):
         tensor: torch.Tensor,
         state: _LocalPackedSourceState,
     ) -> bool:
-        return (
-            # pyrefly: ignore [bad-return]
+        return bool(
             tensor._version == state.version
             and tensor.untyped_storage() is state.storage
             and tensor.storage_offset() == state.storage_offset
@@ -1573,8 +1571,7 @@ def _is_vec_copy_viewable(tensor: torch.Tensor) -> bool:
     """Return whether a uint8 tensor satisfies PyTorch's dtype-view contract."""
     if torch.compiler.is_compiling():
         return False
-    return (
-        # pyrefly: ignore [bad-return]
+    return bool(
         tensor.dtype == torch.uint8
         and tensor.ndim > 0
         and tensor.stride(-1) == 1

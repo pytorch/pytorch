@@ -292,16 +292,16 @@ def _cast_grad_runs(
     return out
 
 
-def _aligned_offsets(tensors: list[torch.Tensor]) -> list[int]:
-    """Byte offsets of ``tensors`` packed in one buffer, each aligned to its
-    element size so that it can be viewed in its dtype."""
+def _aligned_offsets(slots: list[tuple[int, torch.dtype]]) -> list[int]:
+    """Byte offsets of ``(numel, dtype)`` slots packed in one buffer, each
+    aligned to its element size so that it can be viewed in its dtype."""
     offsets = []
     offset = 0
-    for tensor in tensors:
-        itemsize = tensor.element_size()
+    for numel, dtype in slots:
+        itemsize = dtype.itemsize
         offset = -(-offset // itemsize) * itemsize
         offsets.append(offset)
-        offset += tensor.numel() * itemsize
+        offset += numel * itemsize
     return offsets
 
 
@@ -362,7 +362,12 @@ class FullyShardBucket:
         self.offload = isinstance(offload_policy, CPUOffloadPolicy)
         if self.offload:
             self.storage._compute_device = device
+        # Each parameter's slot of the storage, and the local tensor that
+        # _home bound its sharded parameter to (None for an alias)
         self.views: list[torch.Tensor] = []
+        self.local_views: list[torch.Tensor | None] = []
+        # The (numel, dtype) of each slot, which storage must match for reuse
+        self._slots: list[tuple[int, torch.dtype]] = []
         # (index, first index) of parameters that another FSDPParam of the
         # group also holds (see _home)
         self.aliases: list[tuple[int, int]] = []
@@ -381,8 +386,8 @@ class FullyShardBucket:
         # Parameters whose all-gather FSDPParam defines stay in their own
         # storage (see param_driven_unshard)
         self.own_storage = any(
-            hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-            or type(fsdp_param._sharded_param_data) is not torch.Tensor
+            hasattr(fsdp_param._init_shard, "fsdp_pre_all_gather")
+            or type(fsdp_param._init_shard) is not torch.Tensor
             for fsdp_param in self.fsdp_params
         )
         # Re-read at lazy init, as FSDP2 reads extensions then (see refresh)
@@ -535,20 +540,6 @@ class FullyShardBucket:
         )
 
     @property
-    def _prepare_reduce_scatter_inputs(self) -> Callable:
-        from ._fsdp_collectives import _default_reduce_scatter_input_fn
-
-        return self.storage._reduce_scatter_input_fn or _default_reduce_scatter_input_fn
-
-    @_prepare_reduce_scatter_inputs.setter
-    def _prepare_reduce_scatter_inputs(self, fn: Callable) -> None:
-        from ._fsdp_collectives import _default_reduce_scatter_input_fn
-
-        self.storage._reduce_scatter_input_fn = (
-            None if fn is _default_reduce_scatter_input_fn else fn
-        )
-
-    @property
     def _partial_reduce_output(self) -> torch.Tensor | None:
         return self.bucket.partial_reduce_output
 
@@ -621,70 +612,107 @@ class FullyShardBucket:
 
     # Storage #
     def homed(self) -> bool:
-        """Whether each parameter's data still views the bucket storage.
-        ``FSDPParam.reset_sharded_param`` rebinds it when the sharded parameter
-        changed (``to_empty``, ``load_state_dict(assign=True)``, a dtype
-        change)."""
-        return self.own_storage or (
-            len(self.views) == len(self.fsdp_params)
-            and all(
-                fsdp_param._sharded_param_data is view
-                for fsdp_param, view in zip(self.fsdp_params, self.views)
+        """Whether each sharded parameter's local tensor is still the slot that
+        _home bound it to, which a replaced sharded parameter or local tensor
+        (``to_empty``, ``load_state_dict(assign=True)``, a dtype change) is
+        not."""
+        if self.own_storage:
+            return True
+        if len(self.local_views) != len(self.fsdp_params):
+            return False
+        aliases = {index for index, _ in self.aliases}
+        return all(
+            index in aliases or fsdp_param._sharded_local_tensor is local
+            for index, (fsdp_param, local) in enumerate(
+                zip(self.fsdp_params, self.local_views, strict=True)
             )
         )
 
     def _home(self) -> None:
-        """Move each parameter's padded sharded data into one byte buffer and
-        point its ``_sharded_param_data`` and sharded parameter at it."""
-        shards = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
-        if self.own_storage or any(data.is_meta for data in shards):
-            # Meta parameters stay on meta until to_empty(), as FSDP2's; lazy
-            # init homes them
+        """Keep the parameters' sharded data in one byte buffer, each in a slot
+        of its ``stored_size`` in its dtype: the shard each took of its
+        parameter at construction, and the data of sharded parameters replaced
+        since, in new storage if their dtypes or device changed. Parameters
+        with storage of their own (``own_storage``) keep it."""
+        fsdp_params = self.fsdp_params
+        if self.own_storage:
+            for fsdp_param in fsdp_params:
+                if fsdp_param._init_shard is not None:
+                    fsdp_param.bind_storage(None)
             self._build_infos()
             return
-        nbytes = [data.numel() * data.element_size() for data in shards]
-        offsets = _aligned_offsets(shards)
-        total = offsets[-1] + nbytes[-1] if shards else 0
-        if self.offload:
-            pin_memory = cast(CPUOffloadPolicy, self.offload_policy).pin_memory
-            storage = torch.empty(
-                total, dtype=torch.uint8, device="cpu", pin_memory=pin_memory
-            )
+        sources = [
+            fsdp_param._init_shard
+            if fsdp_param._init_shard is not None
+            else fsdp_param._sharded_local_tensor
+            for fsdp_param in fsdp_params
+        ]
+        slots = [
+            (fsdp_param.stored_size.numel(), cast(torch.Tensor, source).dtype)
+            for fsdp_param, source in zip(fsdp_params, sources, strict=True)
+        ]
+        offsets = _aligned_offsets(slots)
+        total = offsets[-1] + slots[-1][0] * slots[-1][1].itemsize if slots else 0
+        devices = {cast(torch.Tensor, source).device for source in sources}
+        if torch.device("meta") in devices and len(devices) > 1:
+            # Some parameters are materialized and others still on meta, e.g.
+            # while to_empty() visits the group's modules one by one: each
+            # keeps its local tensor until all are materialized
+            for fsdp_param in fsdp_params:
+                if fsdp_param._init_shard is not None:
+                    fsdp_param.bind_storage(None)
+            self._build_infos()
+            return
+        if torch.device("meta") in devices:
+            # Meta parameters stay on meta until to_empty(), as FSDP2's
+            device = torch.device("meta")
+        elif self.offload:
+            device = torch.device("cpu")
         else:
-            storage = torch.empty(total, dtype=torch.uint8, device=self.device)
+            # The parameters' device, as FSDP2's sharded parameters stay where
+            # Module._apply (e.g. module.cpu()) moved them
+            device = devices.pop() if len(devices) == 1 else self.device
+        storage = self.storage._byte_storage
+        reuse = slots == self._slots and storage.device == device
+        if not reuse:
+            pin_memory = (
+                self.offload and cast(CPUOffloadPolicy, self.offload_policy).pin_memory
+            )
+            storage = torch.zeros(
+                total,
+                dtype=torch.uint8,
+                device=device,
+                pin_memory=pin_memory and device.type == "cpu",
+            )
         views = []
+        local_views: list[torch.Tensor | None] = []
         first_index: dict[int, int] = {}
         self.aliases = []
-        for index, (fsdp_param, data, size, offset) in enumerate(
-            zip(self.fsdp_params, shards, nbytes, offsets, strict=True)
+        for index, (fsdp_param, (numel, dtype), offset) in enumerate(
+            zip(fsdp_params, slots, offsets, strict=True)
         ):
-            view = storage[offset : offset + size].view(data.dtype)
-            if not data.is_meta and data.numel():
-                view.copy_(data)
-            fsdp_param._sharded_param_data = view
+            view = storage[offset : offset + numel * dtype.itemsize].view(dtype)
             views.append(view)
-            first = first_index.setdefault(id(fsdp_param.sharded_param), index)
-            if first != index:
-                # A parameter tied after fully_shard (e.g. re-tied after
-                # to_empty) has an FSDPParam per module, as in FSDP2, so a
-                # slot per FSDPParam. The parameter views the first slot, and
-                # each unshard copies it into the others (sync_aliases).
-                self.aliases.append((index, first))
-                continue
-            shard_dim = fsdp_param.fsdp_placement.dim
-            sharded_param = cast(DTensor, fsdp_param.sharded_param)
-            local = sharded_param._local_tensor
-            length = local.size(shard_dim) if local.numel() > 0 else 0
-            # Shard(0) data is stored padded, Shard(i), i > 0, data compact
-            stored_size = (
-                fsdp_param.padded_sharded_param_size
-                if shard_dim == 0
-                else fsdp_param.sharded_size
-            )
-            sharded_param._local_tensor = view.view(stored_size).narrow(
-                shard_dim, 0, length
-            )
+            if fsdp_param._init_shard is None:
+                first = first_index.setdefault(id(fsdp_param.sharded_param), index)
+                if first != index:
+                    # A parameter tied after fully_shard (e.g. re-tied after
+                    # to_empty) has an FSDPParam per module, as in FSDP2, so a
+                    # slot per FSDPParam. The parameter views the first slot,
+                    # and each unshard copies it into the others (sync_aliases).
+                    self.aliases.append((index, first))
+                    fsdp_param.bind_storage(view, holds_param=False)
+                    local_views.append(None)
+                    continue
+                local = fsdp_param._sharded_local_tensor
+                if reuse and local is self.local_views[index]:
+                    local_views.append(local)
+                    continue
+            fsdp_param.bind_storage(view)
+            local_views.append(fsdp_param._sharded_local_tensor)
         self.views = views
+        self.local_views = local_views
+        self._slots = slots
         self.storage._byte_storage = storage
         self.storage._total_bytes = total
         self._build_infos()
@@ -697,9 +725,10 @@ class FullyShardBucket:
 
     def _build_infos(self) -> None:
         shards = [fsdp_param._sharded_param_data for fsdp_param in self.fsdp_params]
+        offsets = _aligned_offsets([(data.numel(), data.dtype) for data in shards])
         infos: dict[str, ParamInfo] = {}
         for index, (fsdp_param, data, offset) in enumerate(
-            zip(self.fsdp_params, shards, _aligned_offsets(shards), strict=True)
+            zip(self.fsdp_params, shards, offsets, strict=True)
         ):
             has_override = fsdp_param._has_sharded_grad_dtype_override
             fqn = (
@@ -1070,12 +1099,9 @@ def set_symm_mem(state: Any, backend: str) -> None:
 
 
 def set_reduce_scatter_input_fn(state: Any, fn: Callable | None) -> None:
-    from ._fsdp_collectives import _default_reduce_scatter_input_fn
-
+    """``None`` restores the engine ``Shard`` placement's own copy-in."""
     for bucket in _buckets(state):
-        bucket.storage._reduce_scatter_input_fn = (
-            None if fn is None or fn is _default_reduce_scatter_input_fn else fn
-        )
+        bucket.storage._reduce_scatter_input_fn = fn
 
 
 def set_reduce_scatter_unused_params(state: Any, enable: bool) -> None:

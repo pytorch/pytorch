@@ -9289,9 +9289,10 @@ def shallow_copy_data_(self, source_tensor):
 
 
 if torch.distributed.is_available():
-    # Defines FSDP2's ops (fsdp::copy_, fsdp::all_gather_copy_in, ...), which this
-    # file and the bucketing passes lower
-    from torch.distributed.fsdp._fully_shard import _fsdp_collectives  # noqa: F401
+    # Defines the FSDP engine's ops (fsdp::copy_, fsdp::all_gather_copy_in, ...),
+    # which this file and the bucketing passes lower. Imported by its full name,
+    # since this module's ``ops`` is Inductor's.
+    import torch.distributed.fsdp._flex_shard.ops
 
 if hasattr(torch.ops.fsdp, "copy_"):
 

@@ -35,13 +35,16 @@ from torch.distributed.fsdp._flex_shard.all_gather_layout import (
     AllGatherResult,
     foreach_all_gather_copy_out,
 )
+from torch.distributed.fsdp._flex_shard.placement_contract import GradientReduction
 from torch.distributed.fsdp._flex_shard.placements.param_driven_shard import (
     ParamAllGather,
 )
+from torch.distributed.fsdp._flex_shard.placements.shard import (
+    reduce_scatter_input_fn as default_reduce_scatter_input_fn,
+)
+from torch.distributed.fsdp._flex_shard.placements.utils import _gradient_reduce_ops
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
-    _get_gradient_divide_factors,
     DefaultAllGather,
     DefaultReduceScatter,
 )
@@ -378,7 +381,7 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
         grads = [torch.randn(8, 4, device=device).t(), torch.randn(4, 6, device=device)]
         outputs = []
         for input_fn in (
-            _default_reduce_scatter_input_fn,
+            default_reduce_scatter_input_fn,
             reduce_scatter_input_fn_with_native_copy,
         ):
             output = torch.empty(56, device=device)
@@ -464,7 +467,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         def reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size):
             # Copies that only the returned copy-in holds
             grads = [grad.clone() for grad in unsharded_grads]
-            copy_in = _default_reduce_scatter_input_fn(
+            copy_in = default_reduce_scatter_input_fn(
                 grads, shard_dims=shard_dims, world_size=world_size
             )
             grad_refs[:] = [weakref.ref(grad) for grad in grads]
@@ -492,7 +495,7 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
         model.set_all_gather_layout(CountingLayout(all_gather_output_fn))
         group = fully_shard.state(model)._fsdp_param_group
-        group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
         model.set_custom_reduce_scatter(CountingReduceScatter())
         inp = torch.randn((2, 8), device=device)
         model(inp).sum().backward()
@@ -511,14 +514,14 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # FSDP frees the copy-in and its gradient copies before the reduce-scatter
         self.assertEqual(num_alive_grads, [0])
         # A callback with the 2.15 signature fails instead of misreading arguments
-        group._prepare_reduce_scatter_inputs = (
+        model.set_reduce_scatter_input_fn(
             lambda fsdp_params, unsharded_grads, world_size: None
         )
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
             model(inp).sum().backward()
         # The defaults take the sizes by keyword too
         with self.assertRaisesRegex(TypeError, "positional"):
-            _default_reduce_scatter_input_fn([], [], 1)
+            default_reduce_scatter_input_fn([], [], 1)
         with self.assertRaisesRegex(TypeError, "positional"):
             _default_all_gather_output_fn(torch.empty(0), [], [], [], 1)
 
@@ -2552,12 +2555,10 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         state = model._get_fsdp_state()
         fsdp_param_group = state._fsdp_param_group
         group = fsdp_param_group.mesh_info.shard_process_group
-        (
-            _,
-            _,
-            _,
-            all_reduce_op,
-        ) = _get_gradient_divide_factors(group, None, torch.float32)
+        reduce_scatter_op, _, _, all_reduce_op, _ = _gradient_reduce_ops(
+            GradientReduction(), group.size(), torch.float32
+        )
+        self.assertEqual(reduce_scatter_op, ReduceOp.SUM)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
 
 
@@ -2571,7 +2572,7 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
         # A backend can register a device impl of fsdp::record_grad_output_stream at
         # import time. Then the op is not a no-op on that device, so the not-opted-in
         # case is not testable there. Run only the opted-in case on such a device.
-        import torch.distributed.fsdp._fully_shard._fsdp_collectives
+        import torch.distributed.fsdp._flex_shard.ops
 
         backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
             "fsdp::record_grad_output_stream",

@@ -126,6 +126,30 @@ class TestFullyShardEngine(FSDPTest):
             self.assertEqual(value, state_dict[name])
 
     @skip_if_lt_x_gpu(2)
+    def test_meta_init_of_grouped_modules(self):
+        # to_empty() visits a group's modules one by one, so the bucket sees
+        # some of its parameters materialized while others are still on meta
+        def build(device: torch.device | str) -> nn.Module:
+            with torch.device(device):
+                model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
+            fully_shard([model[0], model[1]])
+            fully_shard(model)
+            return model
+
+        torch.manual_seed(0)
+        reference = build(device_type)
+        model = build("meta")
+        model.to_empty(device=device_type)
+        with torch.no_grad():
+            for param, ref_param in zip(
+                model.parameters(), reference.parameters(), strict=True
+            ):
+                param.copy_(ref_param)
+        inp = torch.randn(4, 16, device=device_type)
+        self.assertEqual(model(inp), reference(inp))
+        self.assertTrue(model[0]._get_fsdp_state()._engine_buckets[0].homed())
+
+    @skip_if_lt_x_gpu(2)
     def test_meta_init_and_load_state_dict_assign(self):
         torch.manual_seed(0)
         reference = _Net(torch.float32).to(device_type)

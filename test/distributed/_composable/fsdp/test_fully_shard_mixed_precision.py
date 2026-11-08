@@ -13,9 +13,8 @@ import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _get_gradient_divide_factors,
-)
+from torch.distributed.fsdp._flex_shard.placement_contract import GradientReduction
+from torch.distributed.fsdp._flex_shard.placements.utils import _gradient_reduce_ops
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     DefaultAllGatherLayout,
@@ -260,8 +259,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=orig_dtype
+        _, predivide_factor, postdivide_factor, _, _ = _gradient_reduce_ops(
+            GradientReduction(), self.process_group.size(), orig_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)
@@ -454,8 +453,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         ref_output = ref_compute_model(tokens, ref_residual)
         self.assertEqual(output, ref_output)
         ref_output.sum().backward()
-        predivide, postdivide, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=reduce_dtype
+        _, predivide, postdivide, _, _ = _gradient_reduce_ops(
+            GradientReduction(), self.process_group.size(), reduce_dtype
         )
         for ref_param, compute_param in zip(
             ref_model.parameters(), ref_compute_model.parameters(), strict=True

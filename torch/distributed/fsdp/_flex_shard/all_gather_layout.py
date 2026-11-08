@@ -44,6 +44,8 @@ import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
 
+from . import ops as _fsdp_ops  # noqa: F401  # registers the fsdp:: ops it calls
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable

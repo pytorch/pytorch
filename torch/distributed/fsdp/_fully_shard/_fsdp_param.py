@@ -112,34 +112,6 @@ data, so we use storage resizing on the all-gather output.
 Refer to https://github.com/meta-pytorch/spmd_types/blob/main/docs/local_spmd_types.md
 """
 
-lib = torch.library.Library("fsdp", "FRAGMENT")
-
-lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
-
-
-# Like the ops in _fsdp_collectives.py, this registers once to
-# CompositeExplicitAutograd so that it covers every backend without listing
-# them. Not CompositeImplicitAutograd: that would decompose it into aten.copy_,
-# skipping copy__functionalize below and Inductor's fsdp.copy_ lowering.
-@torch.library.impl(lib, "copy_", "CompositeExplicitAutograd")
-def copy_(tensor, data):
-    tensor.copy_(data)
-
-
-@torch.library.impl(lib, "copy_", "Functionalize")
-def copy__functionalize(tensor, data):
-    torch._sync(tensor)
-    torch._sync(data)
-    tensor_inner = torch._from_functional_tensor(tensor)
-    data_inner = torch._from_functional_tensor(data)
-    with torch._C._ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-    ):
-        torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
-
-
-torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
-
 
 class ShardedState(Enum):
     """
@@ -222,7 +194,14 @@ class FSDPParam:
     # Whether this rank's Shard(i), i > 0, shard is shorter than the padded shard,
     # so collectives pad it (Shard(0) shards are stored padded)
     needs_nonzero_dim_padding: bool
-    _sharded_param_data: torch.Tensor  # 1D
+    # This rank's shard of the parameter, until bind_storage copies it into
+    # storage and builds the sharded parameter
+    _init_shard: torch.Tensor | None
+    # Whether the parameter keeps its sharded data in storage of its own
+    # (bind_storage(None)) rather than in its group's engine bucket
+    owns_storage: bool
+    _requires_grad: bool  # of the parameter passed to fully_shard
+    _sharded_param_data: torch.Tensor  # 1D, stored_size elements
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
@@ -267,7 +246,6 @@ class FSDPParam:
         )
         self.grad_offload_event: torch.Event | None = None
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
-        self._init_extensions()
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -366,39 +344,66 @@ class FSDPParam:
         self.needs_nonzero_dim_padding = (
             shard_dim != 0 and self.sharded_size != padded_sharded_size
         )
-        # Pre-pad the sharded parameter to avoid padding before all-gather. For
-        # Shard(i), i > 0, padding would sit between the rows of the dims before
-        # i, so keep the shard itself and pad it in all_gather_inputs if uneven.
-        padded_sharded_param = param_data.new_zeros(
-            padded_sharded_size if shard_dim == 0 else self.sharded_size
-        )
-        if sharded_param.numel() > 0:
-            padded_sharded_param.narrow(
-                dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
-            ).copy_(sharded_param)
-        if self.offload_to_cpu and not padded_sharded_param.is_meta:
-            padded_sharded_param = padded_sharded_param.cpu()
-            if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory()
-        self._sharded_param_data = padded_sharded_param.view(-1)
-        length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
-        sharded_param = padded_sharded_param.narrow(
-            dim=shard_dim, start=0, length=length
-        )
-        if not sharded_param.is_contiguous():
-            raise AssertionError(
-                f"Expected contiguous tensor with {self.fsdp_placement=}"
+        # The group's bucket copies this into its storage (bind_storage), which
+        # lets `param_data` be freed when the `fully_shard` call returns
+        self._init_shard = sharded_param
+        self._requires_grad = param.requires_grad
+        self.owns_storage = False
+
+    @property
+    def stored_size(self) -> torch.Size:
+        """The size of the sharded data in storage. Shard(0) data is stored
+        padded, so that the all-gather needs no copy to pad it. For Shard(i),
+        i > 0, padding would sit between the rows of the dims before i, so the
+        shard is stored as is and padded in all_gather_inputs if uneven."""
+        if self.fsdp_placement.dim == 0:
+            return self.padded_sharded_param_size
+        return self.sharded_size
+
+    @torch.no_grad()
+    def bind_storage(
+        self, data: torch.Tensor | None, *, holds_param: bool = True
+    ) -> None:
+        """Keep the sharded data in ``data``, this parameter's slot of its
+        group's bucket storage (``stored_size`` elements), or, for ``None``, in
+        storage of its own, for tensor subclasses and parameters with an
+        all-gather extension at init. Copies the shard taken at init, or the
+        local tensor of a sharded parameter replaced since (to_empty,
+        load_state_dict(assign=True), a dtype change), and points the sharded
+        parameter at its slot, unless another parameter of the group holds it
+        (``holds_param=False``, a parameter tied after ``fully_shard``)."""
+        init = self._init_shard is not None
+        source = self._init_shard if init else self._sharded_local_tensor
+        if source is None:
+            raise AssertionError(f"{self._display_name} has no sharded data to bind")
+        self.owns_storage = data is None
+        if data is None:
+            data = source.new_zeros(self.stored_size)
+            if self.offload_to_cpu and not data.is_meta:
+                data = data.cpu()
+                if self.pin_memory:
+                    data = data.pin_memory()
+        else:
+            data = data.view(self.stored_size)
+        shard_dim = self.fsdp_placement.dim
+        length = self.sharded_size[shard_dim]
+        local = data.narrow(shard_dim, 0, length)
+        if not local.is_meta and local.numel() > 0:
+            # A replaced Shard(0) local tensor may hold the padding too
+            local.copy_(source.narrow(shard_dim, 0, length))
+        self._sharded_param_data = data.view(-1)
+        if init:
+            self._init_shard = None
+            self.sharded_param = nn.Parameter(
+                self.to_sharded_dtensor(local), requires_grad=self._requires_grad
             )
-        self.sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(sharded_param),
-            requires_grad=param.requires_grad,
-        )
-        if self._has_sharded_grad_dtype_override:
-            self.sharded_param.grad_dtype = self.sharded_grad_dtype
-        # Let `param_data` be freed normally when its ref count reaches 0 when
-        # the `fully_shard` call returns to allow provided parameters to alias
-        self._setattr_on_modules(self.sharded_param)
-        self.sharded_state = ShardedState.SHARDED
+            if self._has_sharded_grad_dtype_override:
+                self.sharded_param.grad_dtype = self.sharded_grad_dtype
+            self._setattr_on_modules(self.sharded_param)
+            self.sharded_state = ShardedState.SHARDED
+            self._init_extensions()
+        elif holds_param:
+            cast(DTensor, self.sharded_param)._local_tensor = local
 
     def _resolve_spmd_types_for_storage(
         self,
@@ -1210,9 +1215,8 @@ class FSDPParam:
             self.sharded_grad_dtype = param.grad_dtype
 
     def reset_sharded_param(self):
-        # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
-        # that change the sharded parameter tensor, we may need to re-pad the
-        # sharded local tensor and re-save the reference.
+        # Re-read the sharded parameter after ops like `nn.Module._apply` or
+        # `load_state_dict(assign=True)` that may replace it or its local tensor.
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
         self._capture_grad_dtype_policy(self.sharded_param)
@@ -1231,74 +1235,36 @@ class FSDPParam:
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
-        updated_local_tensor = False
-        # local_tensor can be padded twice
-        # 1st time in fully_shard(model)
-        # 2nd time in model(input) lazy_init
-        # 2nd time should be no-op if parameters remain unchanged
-        # 2nd time shouldn't be no-op if people call model.load_state_dict(...) before lazy_init
-        # this makes it possible for trainer to call `sd = model.state_dict()` before the training loop
-        # and use `sd` without calling .state_dict() per iteration
-        same_local_tensor = False
-        # TODO: need to support tensor subclass
-        if type(self._sharded_param_data) is torch.Tensor:
-            data = self._sharded_param_data
-            # The same storage, by identity since empty storages (e.g. a rank's
-            # shard of a (1, ...) param over 2 ranks) all have data_ptr() 0, and
-            # the same byte offset, since a group's parameters share one storage
-            # (its engine bucket)
-            same_local_tensor = (
-                data.untyped_storage()._cdata == local_tensor.untyped_storage()._cdata
-                and data.storage_offset() * data.element_size()
-                == local_tensor.storage_offset() * local_tensor.element_size()
-            )
-        padded_sharded_size = self.padded_sharded_param_size
-        shard_dim = self.fsdp_placement.dim
-        length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if shard_dim != 0:
-            # Shard(i), i > 0, keeps the shard itself, without padding
-            if local_tensor.size() != self.sharded_size and not same_local_tensor:
-                raise AssertionError(
-                    f"Shard({shard_dim}) expects local tensor size {self.sharded_size}: "
-                    f"{local_tensor.size()=}"
-                )
-            if (
-                local_tensor.numel() == 0
-                and local_tensor.stride() != self.contiguous_sharded_stride
-            ):
-                # An empty shard, e.g. from distribute_tensor, can keep the strides
-                # of the tensor it views, but fused optimizers require the
-                # contiguous strides of its gradient
-                local_tensor = local_tensor.new_empty(self.sharded_size)
-                updated_local_tensor = True
-        elif local_tensor.size() != padded_sharded_size and not same_local_tensor:
-            padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
-            padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
-                local_tensor
-            )
-            local_tensor = padded_local_tensor
-            updated_local_tensor = True
-        if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory()
-            updated_local_tensor = True
-        if not same_local_tensor:
-            self._sharded_param_data = local_tensor.view(-1)
         if not isinstance(self.sharded_param, DTensor):
             raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")
-        if updated_local_tensor:
-            # Only change the local tensor object if needed
-            self.sharded_param._local_tensor = local_tensor.narrow(
-                dim=shard_dim, start=0, length=length
+        accepted = (self.sharded_size, self.stored_size)
+        if local_tensor.size() not in accepted:
+            raise AssertionError(
+                f"{self._display_name} expects a local tensor of size "
+                f"{self.sharded_size} but got {local_tensor.size()}"
             )
-            if not self.sharded_param._local_tensor.is_contiguous():
-                raise AssertionError(
-                    "Expected sharded_param._local_tensor to be contiguous"
-                )
+        if self.owns_storage and not _same_storage_slot(
+            local_tensor, self._sharded_param_data
+        ):
+            self.bind_storage(None)
+        # Otherwise the group's bucket copies a replaced local tensor into its
+        # storage (FullyShardBucket.refresh)
         self._sharding_spec = self.sharded_param._spec
         self._sharding_spec_by_dtype.clear()
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
+
+
+def _same_storage_slot(tensor: torch.Tensor, data: torch.Tensor) -> bool:
+    """Whether ``tensor`` starts at ``data`` in the same storage, compared by
+    identity since empty storages all have data_ptr() 0 (e.g. a rank's shard of
+    a (1, ...) parameter over 2 ranks)."""
+    return bool(
+        tensor.untyped_storage()._cdata == data.untyped_storage()._cdata
+        and tensor.storage_offset() * tensor.element_size()
+        == data.storage_offset() * data.element_size()
+    )
 
 
 def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTensorSpec:

@@ -618,17 +618,17 @@ class Shard(Placement):
             p if slot_dtype != torch.uint8 else p.view(torch.uint8)
             for p in padded_full_params
         ]
-        # pyrefly: ignore [bad-argument-type]
-        keep = [i for i, (_, size) in enumerate(layout.slots) if size]
+        slots = layout.slots
+        if slots is None:
+            raise AssertionError("The native copy-out needs the slots of its layout")
+        keep = [i for i, (_, size) in enumerate(slots) if size]
         if keep:
             torch.ops.fsdp._all_gather_copy_out_(
                 [outputs[i] for i in keep],
                 prepared.buffers[1],
-                [layout.slots[i][1] for i in keep],
+                [slots[i][1] for i in keep],
                 [
-                    math.prod(
-                        state.infos[i].global_shape[: state.infos[i].placement.dim]
-                    )
+                    math.prod(state.infos[i].global_shape[: _shard_dim(state.infos[i])])
                     for i in keep
                 ],
                 state.world_size,
@@ -643,8 +643,7 @@ class Shard(Placement):
         comm: Any = None,
         copy_in_fn: Any = None,
     ) -> tuple[torch.Tensor, Shard._ReduceGradLayout]:
-        # pyrefly: ignore [missing-attribute]
-        shard_dims = [info.placement.dim for info in infos]
+        shard_dims = [_shard_dim(info) for info in infos]
         copy_in_tensors, num_leading_dims, padded_sizes = (
             _reduce_scatter_copy_in_layout(tensors, shard_dims, world_size)
         )
@@ -676,8 +675,7 @@ class Shard(Placement):
         results: list[torch.Tensor] = []
         flat_offset = 0
         for info, padded_size in zip(infos, layout.padded_sizes, strict=True):
-            # pyrefly: ignore [missing-attribute]
-            dim = info.placement.dim
+            dim = _shard_dim(info)
             local_shape = info.placement.compute_local_shape(
                 info.global_shape, rank, world_size
             )
@@ -824,6 +822,14 @@ def _reduce_scatter_copy_in_layout(
             ) * world_size
         padded_sizes.append(torch.Size(padded_size))
     return tensors, num_leading_dims, padded_sizes
+
+
+def _shard_dim(info: ParamInfo) -> int:
+    """The shard dim of a parameter of a ``Shard`` bucket."""
+    placement = info.placement
+    if not isinstance(placement, Shard):
+        raise AssertionError(f"Expected Shard for {info.fqn}, got {placement!r}")
+    return placement.dim
 
 
 def _pad_and_reorder_by_rank(

@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, TYPE_CHECKING
+from typing import Any, cast, ClassVar, Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -83,10 +83,11 @@ def set_global_layout(tensor: torch.Tensor, layout: GlobalLayout) -> None:
     passed to ``flex_shard()`` that are local shards of an outer (e.g. TP/EP)
     sharding must declare their layout this way.
     """
-    tensor.global_shape = layout.global_shape  # pyrefly: ignore [missing-attribute]
-    tensor.global_offsets = layout.global_offsets  # pyrefly: ignore [missing-attribute]
-    tensor.local_offsets = layout.local_offsets  # pyrefly: ignore [missing-attribute]
-    tensor.local_sizes = layout.local_sizes  # pyrefly: ignore [missing-attribute]
+    checkpointable = cast(CheckpointableTensor, tensor)
+    checkpointable.global_shape = layout.global_shape
+    checkpointable.global_offsets = layout.global_offsets
+    checkpointable.local_offsets = layout.local_offsets
+    checkpointable.local_sizes = layout.local_sizes
 
 
 _PARTIAL_GRAD_GROUP_ATTR = "_flex_shard_partial_grad_group"
@@ -147,8 +148,8 @@ def compose_global_layouts(outer: GlobalLayout, inner: GlobalLayout) -> GlobalLa
     )
 
 
-# pyrefly: ignore [invalid-literal]
-GradientReduceOp = Literal[dist.ReduceOp.AVG, dist.ReduceOp.SUM]
+# "avg", "sum", or dist.ReduceOp.AVG or SUM
+GradientReduceOp: TypeAlias = Literal["avg", "sum"] | dist.ReduceOp.RedOpType
 
 
 @dataclass(frozen=True)

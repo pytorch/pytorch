@@ -10,7 +10,7 @@ import dataclasses
 import functools
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -19,6 +19,7 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import tree_leaves, tree_map_only
 
+from . import ops as _fsdp_ops  # noqa: F401  # registers the fsdp:: ops it calls
 from .bucket_comm import (
     begin_bucket_unshard,
     begin_explicit_bucket_unshard,
@@ -1302,8 +1303,12 @@ class BucketRuntime:
         """Expose ``params`` through their modules' ``_parameters``."""
         for bucket_param, param in zip(self.bucket_params, params, strict=True):
             for owner in (bucket_param.param_owner, *bucket_param.shared_owners):
-                # pyrefly: ignore [unsupported-operation]
-                owner.module._parameters[owner.param_name] = param
+                # Not only Parameters: the compile branch exposes its unshard's
+                # outputs, so that autograd reaches the unshard
+                parameters = cast(
+                    dict[str, torch.Tensor | None], owner.module._parameters
+                )
+                parameters[owner.param_name] = param
 
     def reshard(self, *, after_forward: bool = False) -> None:
         """Swap the local shards back in and free the persistent storage.
@@ -2063,7 +2068,6 @@ class _InputGradsTrigger(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def forward(
         callback: Callable[[], None], *inputs: torch.Tensor
     ) -> tuple[torch.Tensor, ...]:
@@ -2079,10 +2083,9 @@ class _InputGradsTrigger(torch.autograd.Function):
         return (None, *grads)
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
-    def jvp(ctx: Any, callback_tangent: object, *grad_inputs: Any) -> tuple[Any, ...]:
+    def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         # Drop the non-tensor callback's tangent
-        return grad_inputs
+        return grad_inputs[1:]
 
 
 if dist._is_spmd_types_available():

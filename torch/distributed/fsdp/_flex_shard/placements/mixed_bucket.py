@@ -765,8 +765,9 @@ class MixedBucketPlacement(Placement):
         ):
             return None
         for group in groups:
-            # pyrefly: ignore [missing-attribute]
-            group.placement._validate_bucket_inputs(group.tensors, group.infos)
+            _block_shard(group.placement)._validate_bucket_inputs(
+                group.tensors, group.infos
+            )
         layouts, offsets, owner_ranks, row_numels = plan
         # This rank's params, each with its offset in this rank's row.
         owned = [
@@ -923,12 +924,13 @@ class MixedBucketPlacement(Placement):
             owner_rank = _one_hot_block_owner(
                 group.prepared.placement, state.world_size
             )
+            if owner_rank is None:
+                raise AssertionError("Expected owner-rows groups to have one owner")
             group_state = group.prepared.placement_state
             for index, (param_index, info) in enumerate(
                 zip(group.indices, group_state.infos, strict=True)
             ):
                 start = (
-                    # pyrefly: ignore [bad-index]
                     row_starts[owner_rank]
                     + group.offset
                     + group_state.layout.param_offsets[index]
@@ -936,9 +938,11 @@ class MixedBucketPlacement(Placement):
                 full_params[param_index] = rows[start : start + info.global_numel].view(
                     info.global_shape
                 )
+        unsharded = [param for param in full_params if param is not None]
+        if len(unsharded) != len(full_params):
+            raise AssertionError("Expected each parameter in an owner's row")
         return PlacementUnshardResult(
-            # pyrefly: ignore [bad-argument-type]
-            full_params=full_params,
+            full_params=unsharded,
             persistent_buffers=[rows] if prepared.persistent else [],
         )
 
@@ -1034,8 +1038,9 @@ class MixedBucketPlacement(Placement):
             for group, layout, offset, owner_rank in zip(
                 groups, layouts, offsets, owner_ranks, strict=True
             ):
-                # pyrefly: ignore [missing-attribute]
-                group.placement._validate_bucket_inputs(group.tensors, group.infos)
+                _block_shard(group.placement)._validate_bucket_inputs(
+                    group.tensors, group.infos
+                )
                 for index, (tensor, info) in enumerate(
                     zip(group.tensors, group.infos, strict=True)
                 ):
@@ -1089,10 +1094,9 @@ class MixedBucketPlacement(Placement):
                     # packed straight into the bucket's send buffer below,
                     # rather than into a world-size buffer of its own, which
                     # would be zeros but for that row.
-                    # pyrefly: ignore [missing-attribute]
-                    group.placement._validate_bucket_inputs(group.tensors, group.infos)
-                    # pyrefly: ignore [missing-attribute]
-                    layout = group.placement._padded_bucket_layout(group.infos)
+                    placement = _block_shard(group.placement)
+                    placement._validate_bucket_inputs(group.tensors, group.infos)
+                    layout = placement._padded_bucket_layout(group.infos)
                     prepared = PlacementPreparedReduceGrad(
                         placement=group.placement,
                         buffers=[],
@@ -1201,8 +1205,7 @@ class MixedBucketPlacement(Placement):
                 start = group_state.offset
                 end = start + group_state.numel
                 if not group_state.prepared.buffers:
-                    # pyrefly: ignore [missing-attribute]
-                    group.placement._pack_reduce_scatter_grad(
+                    _block_shard(group.placement)._pack_reduce_scatter_grad(
                         group.tensors,
                         group.infos,
                         world_size,
@@ -1276,12 +1279,13 @@ class MixedBucketPlacement(Placement):
         ):
             if state.transport is not None:
                 reduce = state.transport
+                if state.row_numels is None:
+                    raise AssertionError("Expected the row lengths of owner rows")
                 reduce_owner_rows(
                     reduce.plan,
                     reduce.hosts,
                     reduce.buffers,
                     rank=reduce.rank,
-                    # pyrefly: ignore [bad-argument-type]
                     row_start=_row_starts(state.row_numels)[reduce.rank],
                     send=send,
                     recv=recv,
@@ -1525,6 +1529,14 @@ def _collective_placement(
     return placement
 
 
+def _block_shard(placement: Placement) -> BlockShard:
+    """``placement`` as the ``BlockShard`` of a group with one owner (see
+    _one_hot_block_owner)."""
+    if not isinstance(placement, BlockShard):
+        raise AssertionError(f"Expected BlockShard, got {placement!r}")
+    return placement
+
+
 def _one_hot_block_owner(
     placement: Placement,
     world_size: int,
@@ -1672,17 +1684,21 @@ def _owner_rows_plan(
         _one_hot_block_owner(group.placement, world_size) is None for group in groups
     ):
         return None
-    # pyrefly: ignore [missing-attribute]
-    layouts = [group.placement._padded_bucket_layout(group.infos) for group in groups]
+    layouts = [
+        _block_shard(group.placement)._padded_bucket_layout(group.infos)
+        for group in groups
+    ]
     group_numels = [layout.padded_segment_numel for layout in layouts]
     offsets, owner_ranks, _, _ = _plan_group_offsets(
         [group.placement for group in groups], group_numels, world_size
     )
+    owners = [rank for rank in owner_ranks if rank is not None]
+    if len(owners) != len(owner_ranks):
+        raise AssertionError("Expected owner-rows groups to have one owner")
     row_numels = _gathered_row_numels(
         _owner_row_numels(owner_ranks, offsets, group_numels, world_size)
     )
-    # pyrefly: ignore [bad-return]
-    return layouts, offsets, owner_ranks, row_numels
+    return layouts, offsets, owners, row_numels
 
 
 def _owner_rows_reduce_state(
@@ -1743,17 +1759,14 @@ def _owner_rows_reduce_transport(
         if owner_rank == rank
         for info in group.infos
     }
-    recv_dtype = (
-        next(iter(dtypes))
-        if len(dtypes) == 1 and None not in dtypes
-        else _grad_reduce_dtype(groups[0].infos[0])
-    )
+    recv_dtype = _grad_reduce_dtype(groups[0].infos[0])
+    if len(dtypes) == 1 and (dtype := next(iter(dtypes))) is not None:
+        recv_dtype = dtype
     return _OwnerRowsReduce(
         plan=transport[0],
         hosts=transport[1],
         buffers=owner_rows_transport_buffers(mesh, transport[1]),
         rank=rank,
-        # pyrefly: ignore [bad-argument-type]
         recv_dtype=recv_dtype,
     )
 
