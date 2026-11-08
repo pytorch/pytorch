@@ -29,6 +29,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -1336,7 +1337,13 @@ static void maybe_copy_fake_tensor_metadata(
     return;
   }
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
-  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  if (!fake_device.has_value()) {
+    // Inside the fake fallback, a view of a view that inherited only the Fake
+    // key (see at::init_cpp_fake) has no fake state to copy either; the
+    // fallback makes the op's outputs fakes
+    TORCH_INTERNAL_ASSERT(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+    return;
+  }
   at::set_and_normalize_fake_device(result, *fake_device);
   result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
 }
