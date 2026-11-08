@@ -496,7 +496,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
             def forward(self, input: torch.Tensor) -> torch.Tensor:
                 state = fully_shard.state(self)
-                param_group = state._fsdp_param_group
+                param_group = state._fsdp_param_groups[0]
                 if param_group is None:
                     raise AssertionError("Expected an FSDP parameter group")
                 all_gathers = {
@@ -548,7 +548,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
             output.sum().backward()
             state = fully_shard.state(model)
-            param_group = state._fsdp_param_group
+            param_group = state._fsdp_param_groups[0]
             if param_group is None:
                 raise AssertionError("Expected an FSDP parameter group")
             for all_gather in param_group.all_gather.params:
@@ -914,7 +914,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             model, reshard_after_forward=True, shard_placement_fn=lambda _: Shard(1)
         )
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
-        all_gather = fully_shard.state(model)._fsdp_param_group.all_gather.params[0]
+        all_gather = fully_shard.state(model)._fsdp_param_groups[0].all_gather.params[0]
         inp = torch.randn((2, 16), device=device_type)
         # Layouts are cached once the outputs that they are checked against exist
         model(inp)
@@ -994,7 +994,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             s = Shard(int(payload == "complex"))
             fully_shard(model, reshard_after_forward=2, shard_placement_fn=lambda _: s)
             self._patch_extension(model[1], fsdp_pre_all_gather, fsdp_post_all_gather)
-            fsdp_params = fully_shard.state(model)._fsdp_param_group.fsdp_params
+            fsdp_params = fully_shard.state(model)._fsdp_param_groups[0].fsdp_params
             with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
                 model(inp).sum().backward()
             if msg != all_gather_msg:
@@ -1209,7 +1209,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         inp = torch.randn((2, 8), device=device_type)
         for _ in range(2):
             self.assertEqual(model(inp), inp @ weight.T)
-        all_gather = fully_shard.state(model)._fsdp_param_group.all_gather.params[0]
+        all_gather = fully_shard.state(model)._fsdp_param_groups[0].all_gather.params[0]
         self.assertEqual(all_gather.output_layouts, ())
         # More shard ranks have nothing to all-gather, which raises, not StopIteration
         model = nn.Linear(8, 8, bias=False, device=device_type)

@@ -503,7 +503,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         with torch.no_grad():
             model(inp)
 
-        fsdp_param_group = fully_shard.state(model)._fsdp_param_group
+        fsdp_param_group = fully_shard.state(model)._fsdp_param_groups[0]
         if fsdp_param_group is None:
             raise AssertionError("Expected root FSDP parameter group")
         infos = fsdp_param_group.storage.param_infos.values()

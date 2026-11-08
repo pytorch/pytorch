@@ -96,34 +96,9 @@ class FSDPState(_State):
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
 
-    @property
-    def _engine_buckets(self) -> "list[FullyShardBucket]":
-        return self._fsdp_param_groups
-
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
         return _get_module_fsdp_state(module)
-
-    @property
-    def _fsdp_param_group(self) -> "FullyShardBucket | None":
-        """
-        Returns the param group for backward compatibility.
-        This property is only valid when there is at most one param group.
-        For per-param mesh support with multiple param groups, use
-        ``_fsdp_param_groups`` instead.
-        """
-        if len(self._fsdp_param_groups) > 1:
-            group_fqns = [g._module_fqn for g in self._fsdp_param_groups]
-            raise AssertionError(
-                f"Expected at most 1 param group for backward compatibility, "
-                f"but got {len(self._fsdp_param_groups)} (fqns: {group_fqns}). "
-                f"Use `_fsdp_param_groups` (plural) to access all param groups "
-                f"when using per-param mesh via shard_placement_fn returning "
-                f"ShardPlacementResult."
-            )
-        if self._fsdp_param_groups:
-            return self._fsdp_param_groups[0]
-        return None
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -256,7 +231,7 @@ class FSDPState(_State):
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._engine_context = context
-            buckets = state._engine_buckets
+            buckets = state._fsdp_param_groups
             for bucket in buckets:
                 # For the root, do not reshard after forward since for
                 # training, the parameters would be all-gathered right away
@@ -290,7 +265,7 @@ class FSDPState(_State):
             self._state_ctx.manual_backward_finalization_active = None
         for state in self._state_ctx.all_states:
             state._training_state = TrainingState.IDLE
-            for bucket in state._engine_buckets:
+            for bucket in state._fsdp_param_groups:
                 bucket.wait_for_grad_offload()
 
     def _validate_no_duplicate_params(self) -> None:
@@ -362,7 +337,7 @@ class FSDPState(_State):
         # The buckets' hooks unshard outside spmd_types' type checker
         # themselves; the post-backward trigger they wrap the typed inputs in
         # stays checked
-        for bucket in self._engine_buckets:
+        for bucket in self._fsdp_param_groups:
             runtime = bucket.bucket
             hook = (
                 runtime.group_pre_forward_hook
@@ -381,7 +356,7 @@ class FSDPState(_State):
         from .._flex_shard.bucket_runtime import _in_backward
 
         with _spmd_no_typecheck():
-            for bucket in self._engine_buckets:
+            for bucket in self._fsdp_param_groups:
                 runtime = bucket.bucket
                 if runtime.group_modules:
                     runtime.group_post_forward_hook(module, input, output)
@@ -389,7 +364,9 @@ class FSDPState(_State):
                     runtime.post_forward_hook(module, input, output)
             if _in_backward():
                 return self._cast_output_dtype(output)
-            if not any(b.bucket.group_pass is not None for b in self._engine_buckets):
+            if not any(
+                b.bucket.group_pass is not None for b in self._fsdp_param_groups
+            ):
                 self._training_state = TrainingState.IDLE
             if self._state_ctx.iter_forward_root is self:
                 # Complete the forward of groups whose modules did not all run,
@@ -398,7 +375,7 @@ class FSDPState(_State):
                 for state in reversed(self._state_ctx.all_states):
                     if state is self:
                         continue
-                    for bucket in state._engine_buckets:
+                    for bucket in state._fsdp_param_groups:
                         if bucket.bucket.group_pass is not None:
                             bucket.bucket.complete_group_pass(output)
                             state._training_state = TrainingState.IDLE
@@ -417,7 +394,7 @@ class FSDPState(_State):
     def _complete_grouped_forward(self, output: Any) -> Any:
         """See ``FSDPModule.complete_grouped_forward``."""
         with _spmd_no_typecheck():
-            for bucket in self._engine_buckets:
+            for bucket in self._fsdp_param_groups:
                 if bucket.bucket.group_pass is not None:
                     bucket.bucket.complete_group_pass(output)
                     self._training_state = TrainingState.IDLE
@@ -436,7 +413,7 @@ class FSDPState(_State):
             )
         if context.partial_backward is not None:
             raise RuntimeError(f"{self._state_name} partial_backward cannot nest")
-        buckets = self._engine_buckets
+        buckets = self._fsdp_param_groups
         runtimes = tuple(bucket.bucket for bucket in buckets)
         manual_finalization = self._state_ctx.manual_backward_finalization
         with _spmd_no_typecheck():
@@ -474,7 +451,7 @@ class FSDPState(_State):
                 context.end_backward(finish=True, manual=manual_finalization)
 
     def _functorch_pre_backward(self, grad: torch.Tensor) -> None:
-        for bucket in self._engine_buckets:
+        for bucket in self._fsdp_param_groups:
             bucket.bucket.pre_backward_hook((grad,))
 
     def _cast_forward_inputs(

@@ -291,7 +291,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         model.set_keep_unsharded_storage(True)
         # Get unsharded storage pointers to compare against later
         model.unshard()
-        param_group = model._get_fsdp_state()._fsdp_param_group
+        param_group = model._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
         data_ptrs = [
             fsdp_param.unsharded_param.data_ptr()
@@ -301,7 +301,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         # Trigger a reshard, which should not free the unsharded storage
         with torch.inference_mode():
             model(torch.randn(2, 8, device=device))
-        self.assertTrue(param_group.is_sharded_post_forward)
+        self.assertIsNotNone(param_group.bucket.post_forward_storage)
         model.unshard()
         # The unsharded storage pointers remain unchanged after resharding
         self.assertEqual(
@@ -1128,7 +1128,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
         with torch.no_grad():
             model.head(model(tokens, skip_head=True))
-        head_runtime = model.head._get_fsdp_state()._engine_buckets[0].bucket
+        head_runtime = model.head._get_fsdp_state()._fsdp_param_groups[0].bucket
         self.assertEqual(head_runtime.modules_to_run, {model.norm})
         for module in model.modules():
             if isinstance(module, FSDPModule):
@@ -1435,7 +1435,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
-        param_group = model.head._get_fsdp_state()._fsdp_param_group
+        param_group = model.head._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
 
         for iter_idx in range(5):
@@ -1450,7 +1450,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 # If the group resharded mid-loop, the next chunk's
                 # pre_forward would re-all-gather — defeats the toggle.
                 self.assertTrue(
-                    param_group.is_unsharded,
+                    param_group.bucket.is_unsharded,
                     lambda msg: f"{msg}\nhead group resharded mid-chunk at iter {iter_idx}",
                 )
             # Restore + explicit reshard (matches ChunkedCELoss exit).
@@ -1458,7 +1458,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model.head.set_reshard_after_backward(True)
             model.head.reshard()
             self.assertFalse(
-                param_group.is_unsharded,
+                param_group.bucket.is_unsharded,
                 lambda msg: f"{msg}\nhead.reshard() did not reshard at iter {iter_idx}",
             )
             h.backward(torch.cat(h_grads, dim=1).to(h.dtype))
@@ -1691,7 +1691,7 @@ def _fsdp_policies(model: nn.Module) -> tuple:
 def _outer_backward_state(model: _ChunkedLossModel) -> list:
     """What the outer backward reads of the groups other than the head's:
     whether their parameters are unsharded and their post-backward counts."""
-    head_buckets = model.head._get_fsdp_state()._engine_buckets
+    head_buckets = model.head._get_fsdp_state()._fsdp_param_groups
     return [
         (
             runtime.is_unsharded,
@@ -2527,7 +2527,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         state = model._get_fsdp_state()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertTrue(group.is_unsharded)
+                self.assertTrue(group.bucket.is_unsharded)
 
         # The already-reduced group takes the reshard-only finalization path.
         model.zero_grad(set_to_none=True)
@@ -2536,7 +2536,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         model.finalize_backward()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertFalse(group.is_unsharded)
+                self.assertFalse(group.bucket.is_unsharded)
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_respects_gradient_sync(self):
@@ -2747,7 +2747,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         state = model._get_fsdp_state()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertFalse(group.is_unsharded)
+                self.assertFalse(group.bucket.is_unsharded)
 
         for input_tensor in inputs:
             ref_model(input_tensor).sum().backward()

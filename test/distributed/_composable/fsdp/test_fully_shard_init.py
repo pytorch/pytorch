@@ -568,9 +568,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         root_state = fully_shard.state(model)
         root_state._lazy_init()
 
-        root_param_group = root_state._fsdp_param_group
+        root_param_group = root_state._fsdp_param_groups[0]
         self.assertIsNotNone(root_param_group)
-        self.assertEqual(root_param_group._module_fqn, "")
+        self.assertEqual(root_param_group.module_fqn, "")
         root_param_fqns = {
             fsdp_param._param_fqn for fsdp_param in root_param_group.fsdp_params
         }
@@ -585,9 +585,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
         model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_param_group = model0_in_proj_state._fsdp_param_group
+        model0_in_proj_param_group = model0_in_proj_state._fsdp_param_groups[0]
         self.assertIsNotNone(model0_in_proj_param_group)
-        self.assertEqual(model0_in_proj_param_group._module_fqn, "0.in_proj")
+        self.assertEqual(model0_in_proj_param_group.module_fqn, "0.in_proj")
         model0_in_proj_param_fqns = {
             fsdp_param._param_fqn
             for fsdp_param in model0_in_proj_param_group.fsdp_params
@@ -597,9 +597,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
         model0_out_proj_state = fully_shard.state(model[0].out_proj)
-        model0_out_proj_param_group = model0_out_proj_state._fsdp_param_group
+        model0_out_proj_param_group = model0_out_proj_state._fsdp_param_groups[0]
         self.assertIsNotNone(model0_out_proj_param_group)
-        self.assertEqual(model0_out_proj_param_group._module_fqn, "0.out_proj")
+        self.assertEqual(model0_out_proj_param_group.module_fqn, "0.out_proj")
         model0_out_proj_param_fqns = {
             fsdp_param._param_fqn
             for fsdp_param in model0_out_proj_param_group.fsdp_params
@@ -1034,7 +1034,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
                         param_group.mesh_info.reduce_scatter_process_group
                     )
                     self.assertIsNot(
-                        param_group._reduce_scatter_process_group,
+                        param_group.storage.reduce_mesh.get_group(),
                         param_group.mesh_info.shard_process_group,
                     )
                     rs_process_groups.add(

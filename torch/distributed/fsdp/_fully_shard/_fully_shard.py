@@ -1312,7 +1312,7 @@ class FSDPModule:
                         grad.requires_grad
                     )
             # The engine's buckets take the parameters' new data
-            for bucket in state._engine_buckets:
+            for bucket in state._fsdp_param_groups:
                 bucket.refresh()
         return ret
 

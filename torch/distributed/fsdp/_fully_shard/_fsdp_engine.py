@@ -25,7 +25,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.tensor import DTensor
 
-from .._flex_shard.all_gather_layout import AllGatherLayout, DefaultAllGatherLayout
 from .._flex_shard.bucket_runtime import (
     _alloc_storage,
     _free_storage,
@@ -56,6 +55,7 @@ from ._fsdp_param import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from .._flex_shard.all_gather_layout import AllGatherLayout
     from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
     from ._fsdp_common import DataParallelMeshInfo, ShardPlacementFnResult
 
@@ -381,10 +381,6 @@ class FullyShardBucket:
         self.all_gather = ParamDrivenAllGather(
             representation, len(self.fsdp_params), device
         )
-        from ._fsdp_collectives import DefaultAllGather, DefaultReduceScatter
-
-        self._default_all_gather_comm = DefaultAllGather()
-        self._default_reduce_scatter_comm = DefaultReduceScatter()
         # Parameters whose all-gather FSDPParam defines stay in their own
         # storage (see param_driven_unshard)
         self.own_storage = any(
@@ -420,81 +416,13 @@ class FullyShardBucket:
         if self.bucket.is_unsharded:
             self.bucket.reshard()
 
-    # Group attributes that tools and tests inspect
-    @property
-    def _module_fqn(self) -> str | None:
-        return self.module_fqn
-
-    @property
-    def is_unsharded(self) -> bool:
-        return self.bucket.is_unsharded
-
-    @property
-    def is_sharded(self) -> bool:
-        return not self.bucket.is_unsharded and self.bucket.post_forward_storage is None
-
-    @property
-    def _reshard_after_forward(self) -> bool:
-        return self.storage._reshard_after_forward
-
-    @property
-    def unshard_in_backward(self) -> bool:
-        return self.storage._unshard_in_backward
-
-    @property
-    def unshard_async_op(self) -> bool:
-        return self.storage._unshard_async_op
-
-    @property
-    def gradient_divide_factor(self) -> float | None:
-        return self.storage.gradient_divide_factor
-
-    @property
-    def force_sum_reduction_for_comms(self) -> bool:
-        return self.storage.gradient_reduction.force_sum
-
-    @property
-    def reduce_scatter_unused_params(self) -> bool:
-        return self.storage._reduce_scatter_unused_params
-
-    @property
-    def reduce_scatter_max_input_buffers(self) -> int:
-        return self.max_input_buffers
-
-    @property
-    def _all_gather_result(self) -> Any:
-        """The bucket's pending (prefetched) unshard, if any."""
-        runtime = self.bucket
-        for pending in runtime.context.pending_unshards:
-            if pending.bucket is runtime:
-                return pending.result
-        return None
-
-    @property
-    def is_sharded_post_forward(self) -> bool:
-        return self.bucket.post_forward_storage is not None
-
     @property
     def all_gather_layout(self) -> AllGatherLayout:
         """``FSDPModule.set_all_gather_layout``'s layout."""
         return self.all_gather.layout
 
-    @property
-    def _all_gather_layout(self) -> AllGatherLayout:
-        return self.all_gather.layout
-
-    @property
-    def _all_gather_comm(self) -> Any:
-        return self.storage._all_gather_comm or self._default_all_gather_comm
-
-    @property
-    def _reduce_scatter_comm(self) -> Any:
-        return self.storage._reduce_scatter_comm or self._default_reduce_scatter_comm
-
-    @property
-    def _all_gather_buffers(self) -> Any:
-        return self.all_gather.layout_buffers
-
+    # FSDP2's parameter groups had this hook (e.g. set by APF), which an
+    # assignment would otherwise silently replace with an unused attribute
     @property
     def _all_gather_output_fn(self) -> Any:
         raise AttributeError(
@@ -509,30 +437,14 @@ class FullyShardBucket:
             "FSDPModule.set_all_gather_layout(DefaultAllGatherLayout(fn))"
         )
 
-    @property
-    def _reduce_scatter_process_group(self) -> dist.ProcessGroup | None:
-        return self.storage.reduce_mesh.get_group()
-
-    @property
-    def _all_gather_process_group(self) -> dist.ProcessGroup | None:
-        if self.bucket.post_forward_storage is not None:
-            return self.bucket.post_forward_group
-        return self.mesh.get_group()
-
     def param_driven_unshard(self) -> bool:
         """Whether the all-gather needs ``ParamDrivenShard``: parameters with
-        their own all-gather, or a layout other than the native rank-major
-        one."""
-        from ..experimental import all_gather_output_fn_with_native_copy
-
-        layout = self.all_gather_layout
+        their own all-gather, or a layout that FSDP's native copies do not
+        implement."""
         return (
             self.own_storage
             or self.has_extensions
-            or not (
-                type(layout) is DefaultAllGatherLayout
-                and layout.output_fn in (None, all_gather_output_fn_with_native_copy)
-            )
+            or not self.all_gather_layout._uses_native_copies
         )
 
     def set_post_forward_mesh_info(
@@ -815,7 +727,7 @@ class FullyShardBucket:
 
 # FSDPModule methods on the engine #
 def _buckets(state: Any) -> list[FullyShardBucket]:
-    return list(state._engine_buckets)
+    return list(state._fsdp_param_groups)
 
 
 def first_storage(state: Any) -> ShardedBucketStorage | None:
@@ -978,6 +890,14 @@ def _single_bucket(state: Any, method: str) -> list[FullyShardBucket]:
     return buckets
 
 
+def _all_gather_comm_type(bucket: FullyShardBucket) -> type:
+    """The type of the bucket's all-gather comm, ``DefaultAllGather`` if unset."""
+    from ._fsdp_collectives import DefaultAllGather
+
+    comm = bucket.storage._all_gather_comm
+    return DefaultAllGather if comm is None else type(comm)
+
+
 def _check_layout_comm(bucket: FullyShardBucket, layout: Any, comm_type: type) -> None:
     if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
         raise ValueError(
@@ -992,16 +912,12 @@ def set_custom_all_gather(state: Any, comm: Any) -> None:
     for bucket in buckets:
         _check_layout_comm(bucket, bucket.all_gather_layout, type(comm))
     for bucket in buckets:
-        bucket.storage._all_gather_comm = (
-            None if comm is bucket._default_all_gather_comm else comm
-        )
+        bucket.storage._all_gather_comm = comm
 
 
 def set_custom_reduce_scatter(state: Any, comm: Any) -> None:
     for bucket in _single_bucket(state, "set_custom_reduce_scatter"):
-        bucket.storage._reduce_scatter_comm = (
-            None if comm is bucket._default_reduce_scatter_comm else comm
-        )
+        bucket.storage._reduce_scatter_comm = comm
 
 
 def set_allocate_memory_from_process_group(state: Any, enable: bool) -> None:
@@ -1012,14 +928,9 @@ def set_allocate_memory_from_process_group(state: Any, enable: bool) -> None:
         ProcessGroupAllocReduceScatter,
     )
 
+    comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
     for bucket in _buckets(state):
-        _check_layout_comm(
-            bucket,
-            bucket.all_gather_layout,
-            ProcessGroupAllocAllGather
-            if enable
-            else type(bucket._default_all_gather_comm),
-        )
+        _check_layout_comm(bucket, bucket.all_gather_layout, comm_type)
     for bucket in _buckets(state):
         storage = bucket.storage
         for comm, allowed in (
@@ -1292,7 +1203,7 @@ def share_context(states: list[Any]) -> None:
 def set_all_gather_layout(states: list[Any], layout: AllGatherLayout) -> None:
     buckets = [bucket for state in states for bucket in _buckets(state)]
     for bucket in buckets:
-        _check_layout_comm(bucket, layout, type(bucket._all_gather_comm))
+        _check_layout_comm(bucket, layout, _all_gather_comm_type(bucket))
         if layout is bucket.all_gather_layout:
             continue
         runtime = bucket.bucket

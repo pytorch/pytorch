@@ -295,7 +295,7 @@ class TestFullyShardOverlap(FSDPTest):
             for pg in param_groups:
                 self.assertIsNone(pg.mesh_info.reduce_scatter_process_group)
                 self.assertIs(
-                    pg._reduce_scatter_process_group,
+                    pg.storage.reduce_mesh.get_group(),
                     pg.mesh_info.shard_process_group,
                 )
 
@@ -310,11 +310,11 @@ class TestFullyShardOverlap(FSDPTest):
         for pg in param_groups:
             self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
             self.assertIs(
-                pg._reduce_scatter_process_group,
+                pg.storage.reduce_mesh.get_group(),
                 pg.mesh_info.reduce_scatter_process_group,
             )
             self.assertIsNot(
-                pg._reduce_scatter_process_group, pg.mesh_info.shard_process_group
+                pg.storage.reduce_mesh.get_group(), pg.mesh_info.shard_process_group
             )
 
         # Disable: reset back to sharing the shard PG

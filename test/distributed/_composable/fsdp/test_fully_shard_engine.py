@@ -95,7 +95,7 @@ class TestFullyShardEngine(FSDPTest):
             fully_shard(
                 module, shard_placement_fn=lambda p: Shard(1 if p.ndim > 1 else 0)
             )
-            infos = module._get_fsdp_state()._engine_buckets[0].storage.param_infos
+            infos = module._get_fsdp_state()._fsdp_param_groups[0].storage.param_infos
             for info in infos.values():
                 self.assertIs(type(info.placement), EngineShard)
         torch.manual_seed(1 + self.rank)
@@ -140,7 +140,7 @@ class TestFullyShardEngine(FSDPTest):
         model = _Net(torch.bfloat16).to(device_type)
         self._shard(model)
         self._train_step(model, torch.bfloat16)
-        bucket = model._get_fsdp_state()._engine_buckets[0]
+        bucket = model._get_fsdp_state()._fsdp_param_groups[0]
         storage = bucket.storage.byte_storage
         self.assertEqual(storage.dtype, torch.uint8)
         infos = list(bucket.storage.param_infos.values())
@@ -193,7 +193,7 @@ class TestFullyShardEngine(FSDPTest):
                 param.copy_(ref_param)
         inp = torch.randn(4, 16, device=device_type)
         self.assertEqual(model(inp), reference(inp))
-        self.assertTrue(model[0]._get_fsdp_state()._engine_buckets[0].homed())
+        self.assertTrue(model[0]._get_fsdp_state()._fsdp_param_groups[0].homed())
 
     @skip_if_lt_x_gpu(2)
     def test_meta_init_and_load_state_dict_assign(self):
@@ -215,7 +215,7 @@ class TestFullyShardEngine(FSDPTest):
         }
         model.load_state_dict(sharded_sd, assign=True)
         actual = self._train_step(model, torch.float32)
-        self.assertTrue(model._get_fsdp_state()._engine_buckets[0].homed())
+        self.assertTrue(model._get_fsdp_state()._fsdp_param_groups[0].homed())
         self.assertEqual(len(expected), len(actual))
         for exp, act in zip(expected, actual):
             self.assertEqual(exp, act, atol=0, rtol=0)

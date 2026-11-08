@@ -35,7 +35,6 @@ from ..all_gather_layout import (
     AllGatherLayout,
     AllGatherResult,
     DEFAULT_ALL_GATHER_LAYOUT,
-    DefaultAllGatherLayout,
     foreach_all_gather_copy_out,
 )
 from ..placement_contract import PlacementPreparedUnshard, PlacementUnshardResult
@@ -373,9 +372,7 @@ class ParamDrivenShard(Shard):
                     global_shape=info.global_shape,
                     padded_sharded_size=torch.Size(padded_sharded_size),
                     uneven=uneven,
-                    custom_layout=not isinstance(
-                        all_gather.layout, DefaultAllGatherLayout
-                    ),
+                    custom_layout=not all_gather.layout._rank_major_output_only,
                 )
             )
         state = _ParamDrivenUnshardState(
@@ -410,20 +407,17 @@ class ParamDrivenShard(Shard):
         ]
         state.split_sizes = [t.numel() for t in inputs]
         numel = sum(state.split_sizes)
-        layout = all_gather.layout
-        if isinstance(layout, DefaultAllGatherLayout):
-            copy_in = layout.copy_in
-        else:
-            copy_in, state.layout, state.output_metadata = layout.prepare(
-                AllGatherInputMetadata(
-                    input_split_sizes=list(state.split_sizes),
-                    input_outer_sizes=list(state.outer_sizes),
-                    input_numel=numel,
-                    world_size=world_size,
-                    dtype=dtype,
-                    device=all_gather.device,
-                )
+        # Copies, since copy_in and the default copy-out read these lists
+        copy_in, state.layout, state.output_metadata = all_gather.layout.prepare(
+            AllGatherInputMetadata(
+                input_split_sizes=list(state.split_sizes),
+                input_outer_sizes=list(state.outer_sizes),
+                input_numel=numel,
+                world_size=world_size,
+                dtype=dtype,
+                device=all_gather.device,
             )
+        )
         size = (numel * world_size,)
         output = (
             torch.empty(size, dtype=dtype, device=all_gather.device)
