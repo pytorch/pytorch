@@ -2543,8 +2543,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 raise AssertionError(f"expected {self.device_type} device")
 
     @onlyAccelerator
-    # views nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
+    @skipIfCppFakeTensor("sets the Python fake_device property")
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -6366,17 +6365,11 @@ class TestCppFakeTensorModeBindings(TestCase):
     def test_fake_fallback_static_shape_decomps(self):
         # StaticShapeDecomp records the ops FakeTensorMode decomposes under
         # static shapes
-        from torch._decomp import decomposition_table
-        from torch._meta_registrations import cpp_meta_supports_symint
-        from torch._subclasses.fake_tensor import torch_decomp_decompositions
+        from torch._meta_registrations import decomposes_under_static_shapes
 
         mismatched = set()
         for op in _aten_ops():
-            decomposes = (
-                op in decomposition_table
-                and torch_decomp_decompositions(op)
-                and not cpp_meta_supports_symint(op)
-            )
+            decomposes = decomposes_under_static_shapes(op)
             names = (op._schema.name, op._schema.overload_name)
             contains = torch._C._fake_dispatch_contains_static_shape_decomp(*names)
             if contains != decomposes:
