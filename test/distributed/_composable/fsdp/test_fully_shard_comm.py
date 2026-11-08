@@ -3177,7 +3177,7 @@ class TestAllGatherLayouts(TestCase):
 
         class Layout(AllGatherLayout):
             def prepare_output(self, metadata):
-                return None
+                return "custom"
 
             def finalize_outputs(self, metadata):
                 output, params = metadata.all_gather_output, metadata.param_metadata
@@ -3232,9 +3232,14 @@ class TestAllGatherLayouts(TestCase):
             result = AllGatherResult(
                 source, None, None, [[source.dtype]] * 2, [[2], [2]], [2, 2], [1, 1]
             )
-            layout = Layout()
+            # With the metadata that Layout's prepare_output returns
+            result = result._replace(
+                layout=Layout(),
+                output_metadata="custom",
+                all_gather_input=collective_input,
+            )
             return foreach_all_gather_copy_out(
-                result._replace(layout=layout, all_gather_input=collective_input),
+                result,
                 params,
                 SimpleNamespace(size=lambda: world_size),
                 persistent,
