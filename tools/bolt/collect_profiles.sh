@@ -1,40 +1,34 @@
 #!/bin/bash
-# Collect LLVM BOLT profiles for the torch libraries of an aarch64 CUDA
-# nightly build from its unoptimized libraries, which it uploads as the
-# prebolt-cuda-aarch64-<cuda> artifact: libc10.so, libc10_cuda.so,
-# libtorch_cpu.so, libtorch_cuda.so and a <SOABI>/libtorch_python.so for each
-# Python version. Only the run step needs a GPU machine:
+# Collect LLVM BOLT profiles from the unoptimized libraries that an aarch64 CUDA
+# nightly uploads as prebolt-cuda-aarch64-<cuda>: libc10.so, libc10_cuda.so,
+# libtorch_cpu.so, libtorch_cuda.so and a <SOABI>/libtorch_python.so per Python
+# version. Only the run step needs a GPU machine:
 #
 #   instrument <prebolt-dir> <out-dir>
 #       Instrument the libraries of <prebolt-dir> that do not depend on Python
 #       and the libtorch_python.so of each version of BOLT_PYTHON_VERSIONS.
 #   run <instrumented-dir> <runs-dir>
-#       Copy the instrumented libraries over those of the torch installed for
-#       python3, a wheel of the same build, run tools/bolt/synthetic_workload.py
-#       and collect the per-process profiles in <runs-dir>/<SOABI>. Run it with
-#       each Python version. The installed libraries are restored on exit.
+#       With each Python version: copy the instrumented libraries over those of
+#       python3's torch (a wheel of the same build), run synthetic_workload.py,
+#       collect the profiles in <runs-dir>/<SOABI> and restore the libraries.
 #   finalize <prebolt-dir> <runs-dir> <out-dir>
-#       Merge the profiles of each library with merge-fdata, convert them to
-#       YAML, validate them with a trial optimization that uses the options of
-#       the build-time BOLT step, and package them as torch.tar.zst in the
-#       layout of cmake/bolt_profiles/torch.tar.zst: libtorch_python.yaml and
-#       the other libraries' profiles from the run of the first Python version,
-#       libtorch_python-<SOABI>.yaml from the run of each further version.
+#       Merge each library's profiles with merge-fdata, convert them to YAML,
+#       validate them with a trial optimization using the build-time options and
+#       package them like cmake/bolt_profiles/torch.tar.zst: libtorch_python.yaml
+#       and the other libraries' profiles from the first Python version's run,
+#       a libtorch_python-<SOABI>.yaml from each further version's run.
 #
 # Environment:
-#   LLVM_BOLT_HOME             LLVM install with llvm-bolt, merge-fdata and the
-#                              instrumentation runtime (default /usr/local, where
-#                              .ci/docker/common/install_llvm_tools.sh puts the
-#                              BOLT that optimizes the nightly)
+#   LLVM_BOLT_HOME             LLVM with llvm-bolt, merge-fdata and the BOLT runtime
+#                              (default /usr/local, where install_llvm_tools.sh
+#                              puts the BOLT that optimizes the nightly)
 #   BOLT_FDATA_DIR            directory the instrumented libraries write their
 #                              profiles to (instrument, default /tmp/bolt-fdata)
 #   BOLT_WORKLOAD_VARIANT      synthetic_workload.py --variant (run, default all)
 #   BOLT_WORKLOAD_STEPS        synthetic_workload.py --steps (run, default 45000)
 #   BOLT_WORKLOAD_WARMUP       synthetic_workload.py --warmup (run, default 50)
-#   BOLT_WORKLOAD_MAX_SECONDS  synthetic_workload.py --max-seconds (run,
-#                              default 0, no limit)
-#   BOLT_PYTHON_VERSIONS       Python versions to profile, e.g. "3.12 3.14t"
-#                              (instrument and finalize, default 3.12)
+#   BOLT_WORKLOAD_MAX_SECONDS  synthetic_workload.py --max-seconds (run, default 0)
+#   BOLT_PYTHON_VERSIONS       e.g. "3.12 3.14t" (instrument, finalize; default 3.12)
 #   BOLT_VALIDATE              set to 0 to skip the trial optimization (finalize)
 
 set -euo pipefail
@@ -48,8 +42,7 @@ BOLT_WORKLOAD_MAX_SECONDS="${BOLT_WORKLOAD_MAX_SECONDS:-0}"
 read -ra PYTHON_VERSIONS <<< "${BOLT_PYTHON_VERSIONS:-3.12}"
 BOLT_VALIDATE="${BOLT_VALIDATE:-1}"
 
-# Options of the build-time optimization in torch_optimize_layout_if_enabled
-# (cmake/public/utils.cmake). Keep in sync.
+# Keep in sync with torch_optimize_layout_if_enabled (cmake/public/utils.cmake).
 BOLT_OPTIMIZE_OPTIONS=(
   -lite -infer-stale-profile
   -reorder-blocks=ext-tsp -reorder-functions=cdsort
@@ -59,14 +52,8 @@ BOLT_OPTIMIZE_OPTIONS=(
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-log() {
-  echo "[collect_profiles] $*"
-}
-
-die() {
-  echo "[collect_profiles] ERROR: $*" >&2
-  exit 1
-}
+log() { echo "[collect_profiles] $*"; }
+die() { echo "[collect_profiles] ERROR: $*" >&2; exit 1; }
 
 usage() {
   echo "Usage: $0 instrument <prebolt-dir> <out-dir>" >&2
@@ -95,10 +82,9 @@ make_output_dir() {
   mkdir -p "${OUTPUT_DIR}/logs"
 }
 
-# The profile name of library $1, a path relative to the prebolt directory:
-# the name the build looks the profile up by (cmake/bolt_profiles/README.md)
-# without .yaml, e.g. libtorch_python-cpython-312-aarch64-linux-gnu for
-# cpython-312-aarch64-linux-gnu/libtorch_python.so.
+# The profile name the build looks up for library $1 (relative to prebolt), minus
+# .yaml, e.g. libtorch_python-cpython-312-aarch64-linux-gnu for the library
+# cpython-312-aarch64-linux-gnu/libtorch_python.so (cmake/bolt_profiles/README.md).
 profile_stem() {
   if [[ "$1" == */* ]]; then
     echo "$(basename "$1" .so)-$(dirname "$1")"
@@ -109,22 +95,12 @@ profile_stem() {
 
 # The SOABI of Python version $1, e.g. cpython-314t-aarch64-linux-gnu for 3.14t.
 soabi() { echo "cpython-${1/./}-$(uname -m)-linux-gnu"; }
-
-build_id() {
-  readelf -n "$1" 2> /dev/null | awk '/Build ID/ {print $3}'
-}
+build_id() { readelf -n "$1" 2> /dev/null | awk '/Build ID/ {print $3}'; }
 
 setup_llvm() {
   LLVM_BOLT="${LLVM_BOLT_HOME}/bin/llvm-bolt"
   MERGE_FDATA="${LLVM_BOLT_HOME}/bin/merge-fdata"
   "${LLVM_BOLT}" --version | tee "${OUTPUT_DIR}/logs/llvm-bolt-version.txt"
-}
-
-# Check that the libraries in directory $1 are the ones listed in sha256sums
-# file $2, i.e. the libraries that were instrumented.
-verify_libraries() {
-  (cd "$1" && sha256sum --check --quiet "$2") \
-    || die "the libraries in $1 differ from the instrumented ones"
 }
 
 cmd_instrument() {
@@ -227,13 +203,7 @@ cmd_run() {
   cp "${instrumented_dir}/sha256sums" "${runs_dir}/"
   cp "${instrumented_dir}/logs/"* "${runs_dir}/logs/"
   {
-    python3 - << 'EOF'
-import torch
-
-print(f"torch: {torch.__version__} (git {torch.version.git_version})")
-print(f"cuda: {torch.version.cuda}")
-print(f"device: {torch.cuda.get_device_name(0)}")
-EOF
+    python3 -c 'import torch as t; print(f"torch: {t.__version__} (git {t.version.git_version})\ncuda: {t.version.cuda}\ndevice: {t.cuda.get_device_name(0)}")'
     echo "workload: --variant ${BOLT_WORKLOAD_VARIANT} --steps ${BOLT_WORKLOAD_STEPS} --warmup ${BOLT_WORKLOAD_WARMUP} --max-seconds ${BOLT_WORKLOAD_MAX_SECONDS}"
     grep -E '^\[bolt-synth\] (variants=|done |stopping |WARNING: dropping)' \
       "${OUTPUT_DIR}/logs/workload.txt" || true
@@ -255,9 +225,8 @@ make_profile() {
     "${MERGE_FDATA}" "${raw[@]}" -o "${OUTPUT_DIR}/fdata/${stem}.fdata"
   [[ -s "${OUTPUT_DIR}/fdata/${stem}.fdata" ]] || die "merge-fdata produced an empty profile for ${rel}"
 
-  # The build-time step consumes YAML profiles. Unlike fdata, they carry block
-  # hashes that let -infer-stale-profile match profiles to binaries built from
-  # slightly different sources.
+  # The build consumes YAML: unlike fdata it has block hashes, which let
+  # -infer-stale-profile match profiles to binaries of slightly different sources.
   log "Converting the ${rel} profile to YAML"
   run_logged "${OUTPUT_DIR}/logs/convert-${stem}.txt" \
     "${LLVM_BOLT}" "${lib}" -o /dev/null \
@@ -298,7 +267,8 @@ cmd_finalize() {
   shared="$(soabi "${PYTHON_VERSIONS[0]}")"
   [[ -f "${runs_dir}/${shared}/run-info.txt" ]] \
     || die "no run for ${shared}, which provides the profiles of the libraries that do not depend on Python"
-  verify_libraries "${prebolt_dir}" "${runs_dir}/sha256sums"
+  (cd "${prebolt_dir}" && sha256sum --check --quiet "${runs_dir}/sha256sums") \
+    || die "the libraries in ${prebolt_dir} differ from the instrumented ones"
   cp "${runs_dir}/logs/"* "${OUTPUT_DIR}/logs/"
   setup_llvm
 

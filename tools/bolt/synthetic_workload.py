@@ -82,7 +82,6 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
             z = F.gelu(z)
             z = z.contiguous()
             del x, y, z
-
         a, b = (torch.randn(64, 1024, device=device, dtype=dtype) for _ in range(2))
         c = a + b
         c = c * a
@@ -97,7 +96,6 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
         i = rotate[0]
         di = i % len(cpu_dst_buffers)
         cpu_dst_buffers[di].copy_(cpu_src_buffers[di])
-
         big = torch.randn(64, 1024, device=device, dtype=dtype)
         _ = big[:, 100:300]
         _ = big[:, ::2]
@@ -122,9 +120,7 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
         _ = idx_put_target[idx_put_idx_row, idx_put_idx_col]
         # An explicit int list is boxed into a vector<long> IValue.
         _ = torch.split(big, [200, 200, 200, 200, 224], dim=1)
-
-        # Allocator malloc / free churn and per-op glue: the cost scales with
-        # the number of ops fired, not with their size.
+        # Allocator churn and per-op glue: the cost scales with op count, not size.
         for _ in range(8):
             for sh in small_alloc_shapes:
                 _ = torch.empty(sh, device=device, dtype=dtype)
@@ -155,7 +151,6 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
         for t in (big, big3d, c, silu_buf):
             for _ in range(4):
                 _ = t.shape
-
         # CPU-side int64 index preprocessing, as in recommender models.
         pos = torch.arange(cpu_lengths.numel())
         offs = torch.arange(0, 512, 8)
@@ -232,15 +227,13 @@ def _cnn_variant(device: torch.device, dtype: torch.dtype):
     bn_nchw = nn.BatchNorm2d(c_in).to(device=device, dtype=dtype)
     bn_nhwc = nn.BatchNorm2d(c_in).to(device=device, dtype=dtype)
     bn_nhwc = bn_nhwc.to(memory_format=torch.channels_last)
-    dw_conv = nn.Conv2d(64, 64, kernel_size=3, padding=1, groups=64, bias=False).to(
-        device=device, dtype=dtype
-    )
+    dw_conv = nn.Conv2d(64, 64, kernel_size=3, padding=1, groups=64, bias=False)
+    dw_conv = dw_conv.to(device=device, dtype=dtype)
     # Speech-style conv1d block; the explicit F.pad drives constant_pad_nd.
     conv1d_ch, conv1d_k = 256, 31
     conv1d_pw1 = nn.Conv1d(conv1d_ch, 2 * conv1d_ch, 1).to(device=device, dtype=dtype)
-    conv1d_dw = nn.Conv1d(conv1d_ch, conv1d_ch, conv1d_k, groups=conv1d_ch).to(
-        device=device, dtype=dtype
-    )
+    conv1d_dw = nn.Conv1d(conv1d_ch, conv1d_ch, conv1d_k, groups=conv1d_ch)
+    conv1d_dw = conv1d_dw.to(device=device, dtype=dtype)
     conv1d_pw2 = nn.Conv1d(conv1d_ch, conv1d_ch, 1).to(device=device, dtype=dtype)
     conv1d_x = torch.randn(1, conv1d_ch, 128, device=device, dtype=dtype)
 
@@ -253,9 +246,8 @@ def _cnn_variant(device: torch.device, dtype: torch.dtype):
     def step():
         x_nchw = torch.randn(n, 64, h, w, device=device, dtype=dtype)
         out_nchw = _run_chain(x_nchw, convs_nchw, bn_nchw)
-        x_nhwc = torch.randn(n, 64, h, w, device=device, dtype=dtype).to(
-            memory_format=torch.channels_last
-        )
+        x_nhwc = torch.randn(n, 64, h, w, device=device, dtype=dtype)
+        x_nhwc = x_nhwc.to(memory_format=torch.channels_last)
         out_nhwc = _run_chain(x_nhwc, convs_nhwc, bn_nhwc)
         _ = dw_conv(x_nchw)
         with torch.no_grad():
@@ -325,8 +317,7 @@ class _IdentityWithGrad(torch.autograd.Function):
 
 def _training_variant(device: torch.device, dtype: torch.dtype):
     """Autograd engine, AMP GradScaler and multi-tensor (foreach) Adam."""
-    # fp32 params under autocast(fp16): GradScaler refuses fp16 gradients and
-    # its unscale kernel does not support bf16.
+    # fp32 params under fp16 autocast: GradScaler takes neither fp16 grads nor bf16.
     del dtype
     f32 = torch.float32
     conv_blocks: list[nn.Module] = []
@@ -375,9 +366,8 @@ def _training_variant(device: torch.device, dtype: torch.dtype):
             proj = torch.mm(out, mm_w)
             for _ in range(4):
                 proj = _IdentityWithGrad.apply(proj)
-            loss = loss + 1e-3 * (
-                rows.float().pow(2).mean() + proj.float().pow(2).mean()
-            )
+            extra = rows.float().pow(2).mean() + proj.float().pow(2).mean()
+            loss = loss + 1e-3 * extra
         optim.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.step(optim)
@@ -398,8 +388,7 @@ def _training_variant(device: torch.device, dtype: torch.dtype):
 
 def _distributed_variant(device: torch.device, dtype: torch.dtype):
     """Host-side ProcessGroupNCCL dispatch of the usual collectives on one rank."""
-    # Flight recorder with C++ stacks and collective timing, as large training
-    # jobs enable it. Must be set before init_process_group.
+    # Flight recorder as large training jobs run it; set before init_process_group.
     os.environ.setdefault("TORCH_FR_BUFFER_SIZE", "2000")
     os.environ.setdefault("TORCH_NCCL_DUMP_ON_TIMEOUT", "1")
     os.environ.setdefault("TORCH_NCCL_TRACE_CPP_STACK", "1")
@@ -410,7 +399,6 @@ def _distributed_variant(device: torch.device, dtype: torch.dtype):
             backend="nccl", store=dist.HashStore(), world_size=1, rank=0
         )
     dump_nccl_trace = getattr(torch._C._distributed_c10d, "_dump_nccl_trace", None)
-
     inp = torch.randn(1024, device=device, dtype=dtype)
     ag_in = torch.randn(256, device=device, dtype=dtype)
     ag_out = torch.empty(256, device=device, dtype=dtype)
@@ -563,9 +551,8 @@ def _rnn_variant(device: torch.device, dtype: torch.dtype):
     fp16 = torch.float16
     lstm_cell_a = nn.LSTMCell(512, 1024).to(device=device, dtype=fp16)
     lstm_cell_b = nn.LSTMCell(1024, 1024).to(device=device, dtype=fp16)
-    lstm = nn.LSTM(512, 512, num_layers=2, batch_first=True).to(
-        device=device, dtype=fp16
-    )
+    lstm = nn.LSTM(512, 512, num_layers=2, batch_first=True)
+    lstm = lstm.to(device=device, dtype=fp16)
     gru = nn.GRU(512, 512, num_layers=2, batch_first=True).to(device=device, dtype=fp16)
     seq_input = torch.randn(8, 64, 512, device=device, dtype=fp16)
     drop_input = torch.randn(8, 1024, device=device, dtype=fp16)
@@ -592,8 +579,7 @@ def _rnn_variant(device: torch.device, dtype: torch.dtype):
 
 def _activations_variant(device: torch.device, dtype: torch.dtype):
     """bf16 SiLU, GLU, eval-mode BatchNorm2d and masked_fill kernels."""
-    # Kept out of other variants so the shared glue code's branch profile is
-    # not skewed towards any single caller.
+    # Separate variant, so no single caller skews the shared glue's branch profile.
     del dtype
     bf16 = torch.bfloat16
     act_input = torch.randn(8, 2048, device=device, dtype=bf16)
@@ -640,8 +626,7 @@ def _transformer_variant(device: torch.device, dtype: torch.dtype):
             for la, lb, ln in zip(linears_a, linears_b, norms, strict=True):
                 ff = lb(F.silu(la(h)))
                 h = ln(h + ff)
-            # Bias-less linear and matmul on 3-D input fold the batch dims
-            # (nn.Linear with bias takes addmm instead).
+            # Bias-less linear and 3-D matmul fold the batch dims (with bias: addmm).
             for _ in range(4):
                 y = F.linear(h, w_fold)
                 y = torch.matmul(y, w_fold)
@@ -659,9 +644,8 @@ def _moe_variant(device: torch.device, dtype: torch.dtype):
     tokens, hidden, ffn = 2048, 1024, 2048
     x = torch.randn(tokens, hidden, device=device, dtype=dtype)
     router = nn.Linear(hidden, num_experts, bias=False, device=device, dtype=dtype)
-    w_gate_up = (
-        torch.randn(num_experts, hidden, 2 * ffn, device=device, dtype=dtype) * 0.02
-    )
+    w_gate_up = torch.randn(num_experts, hidden, 2 * ffn, device=device, dtype=dtype)
+    w_gate_up = w_gate_up * 0.02
     w_down = torch.randn(num_experts, ffn, hidden, device=device, dtype=dtype) * 0.02
 
     def step():
@@ -740,8 +724,7 @@ def _build_round_robin(
     names = []
     steps = []
     for name in ALL_VARIANTS:
-        # Run one step up front so a variant that cannot run here is dropped
-        # (unless --strict) before the timed loop.
+        # One step up front drops (unless --strict) variants that cannot run here.
         try:
             step_fn = VARIANTS[name](device, dtype)
             step_fn()
@@ -755,7 +738,6 @@ def _build_round_robin(
     if not steps:
         raise SystemExit("[bolt-synth] no variant could run")
     _log(f"variants={','.join(names)}")
-
     counter = 0
     # Per-variant [seconds, steps]; main() prints and resets them every window.
     stats: dict[str, list[float]] = {name: [0.0, 0] for name in names}
@@ -782,19 +764,9 @@ def main() -> None:
     dtypes = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
     p.add_argument("--dtype", default="bf16", choices=list(dtypes))
     p.add_argument("--log-every", type=int, default=50)
-    p.add_argument(
-        "--max-seconds",
-        type=float,
-        default=0.0,
-        help="stop the timed loop early after this many seconds (0: no limit)",
-    )
-    p.add_argument(
-        "--strict",
-        action="store_true",
-        help="with --variant all, fail instead of dropping variants that cannot run",
-    )
+    p.add_argument("--max-seconds", type=float, default=0.0, help="0: no limit")
+    p.add_argument("--strict", action="store_true", help="never drop variants")
     args = p.parse_args()
-
     if not torch.cuda.is_available():
         raise SystemExit("CUDA not available")
     device = torch.device("cuda")
@@ -807,19 +779,16 @@ def main() -> None:
         f"torch={torch.__version__} cuda={torch.version.cuda} "
         f"device={torch.cuda.get_device_name(0)}"
     )
-
     stats: dict[str, list[float]] = {}
     if args.variant == "all":
         step_fn, stats = _build_round_robin(device, dtype, args.strict)
     else:
         step_fn = VARIANTS[args.variant](device, dtype)
-
     # Untimed warmup lets cuDNN / cuBLAS heuristics and the allocator settle.
     for i in range(args.warmup):
         step_fn()
         if (i + 1) % max(1, args.warmup // 5) == 0:
             _log(f"warmup {i + 1}/{args.warmup}")
-
     torch.cuda.synchronize()
     t_start = time.perf_counter()
     last_log_t = t_start
@@ -856,7 +825,6 @@ def main() -> None:
                 f"--max-seconds={args.max_seconds:g} reached"
             )
             break
-
     torch.cuda.synchronize()
     total = time.perf_counter() - t_start
     overall_ips = done_steps / total if total > 0 else 0.0

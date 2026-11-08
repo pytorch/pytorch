@@ -1,11 +1,10 @@
 # Owner(s): ["module: cuda"]
 
-# Collects LLVM BOLT profiles on GB300 from the unoptimized libraries and the
-# wheels of an aarch64 CUDA nightly build (linux-aarch64-binary-manywheel) with
-# tools/bolt/collect_profiles.sh: instrument on a CPU runner, run the workload
-# with each Python version on GB300, merge and validate on a CPU runner. The
-# jobs use the nightly's manylinux image, which has every Python version and
-# its llvm-bolt. The result includes a torch.tar.zst for cmake/bolt_profiles.
+# Collects LLVM BOLT profiles with tools/bolt/collect_profiles.sh from the
+# unoptimized libraries and wheels of an aarch64 CUDA nightly: instrument on CPU,
+# run the workload with each Python version on GB300, then merge, validate and
+# package a torch.tar.zst for cmake/bolt_profiles on CPU. All jobs use the
+# nightly's manylinux image, which has every Python version and its llvm-bolt.
 
 name: BOLT profile collection (GB300)
 
@@ -105,7 +104,6 @@ jobs:
           if [[ -z "${NIGHTLY_RUN_ID}" ]]; then
             NIGHTLY_RUN_ID="$(/opt/python/cp312-cp312/bin/python3 - << 'EOF'
           import json, os, sys, urllib.request
-
           def get(path):
               request = urllib.request.Request(
                   f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/{path}",
@@ -113,7 +111,6 @@ jobs:
               )
               with urllib.request.urlopen(request) as response:
                   return json.load(response)
-
           name = f"prebolt-cuda-aarch64-{os.environ['BOLT_CUDA']}"
           workflow = "generated-linux-aarch64-binary-manywheel-nightly.yml"
           for run in get(f"workflows/{workflow}/runs?branch=nightly&per_page=20")["workflow_runs"]:
