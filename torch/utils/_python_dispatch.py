@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import threading
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ import torchgen
 import torchgen.model
 from torch._C import (
     _get_dispatch_stack_at,
+    _is_cpp_fake_mode_set,
     _len_torch_dispatch_stack,
     _pop_torch_dispatch_stack,
     _push_on_torch_dispatch_stack,
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from torch._custom_class_base import CustomClassBase
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -40,21 +43,43 @@ _is_in_non_infra_torch_dispatch_mode = False
 _is_in_any_mode_without_ignore_compile_internals = False
 
 
+class _CppFakeModeTLS(threading.local):
+    def __init__(self) -> None:
+        # The CppFakeTensorModes entered through __enter__ on this thread and
+        # not yet exited. The FAKE slot holds only the C++ mode, which refers to
+        # its Python object by weakref, unlike a Python FakeTensorMode, which
+        # the slot holds strongly; so this keeps an entered mode, and its
+        # enter_stack, alive until __exit__ on this thread, or until this thread
+        # ends.
+        self.entered: list[CppFakeTensorMode] = []
+        # Whether _disable_current_modes has taken a C++ FakeTensorMode out of
+        # this thread's FAKE slot, which it may hold without an entered mode
+        # (on a thread that inherited it through ThreadLocalState)
+        self.suspended = False
+
+
+_cpp_fake_mode_tls = _CppFakeModeTLS()
+
+
+def _is_cpp_fake_mode_active() -> bool:
+    # Whether a C++ FakeTensorMode is installed on this thread, or entered and
+    # not yet exited, or suspended by _disable_current_modes, as a
+    # TorchDispatchMode still counts for is_in_torch_dispatch_mode() while it
+    # is taken out of its slot. Dynamo, which traces and builds guards inside
+    # _disable_current_modes, folds this to a constant guarded on calling it
+    # again (constant_fold_functions_need_guards), so the fold and the guard
+    # at frame entry agree.
+    tls = _cpp_fake_mode_tls
+    return _is_cpp_fake_mode_set() or tls.suspended or bool(tls.entered)
+
+
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
-    return (
-        _is_in_torch_dispatch_mode
-        if include_infra_modes
-        else _is_in_non_infra_torch_dispatch_mode
-    )
-
-
-# Sets the flag is_in_torch_dispatch_mode() reads and returns its previous value,
-# for CppFakeTensorMode, which TorchDispatchMode.__enter__/__exit__ do not run for
-def _set_is_in_torch_dispatch_mode(value: bool, /) -> bool:
-    global _is_in_torch_dispatch_mode
-    prev = _is_in_torch_dispatch_mode
-    _is_in_torch_dispatch_mode = value
-    return prev
+    if not include_infra_modes:
+        return _is_in_non_infra_torch_dispatch_mode
+    if _is_in_torch_dispatch_mode:
+        return True
+    # A C++ FakeTensorMode, an infra mode, is not a TorchDispatchMode
+    return _is_cpp_fake_mode_active()
 
 
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
@@ -445,13 +470,17 @@ def _disable_current_modes():
 
     # Manually disable proxy and fake modes, if any are active
     cpp_fake_mode = None
+    was_suspended = _cpp_fake_mode_tls.suspended
     try:
         # A C++ FakeTensorMode is not on the mode stack, but with the Python
         # modes popped, the FAKE slot reports it.
         fake_key = torch._C._TorchDispatchModeKey.FAKE
         cpp_fake_mode = torch._C._unset_dispatch_mode(fake_key)
+        if cpp_fake_mode is not None:
+            _cpp_fake_mode_tls.suspended = True
         yield old_pre_dispatch_modes + old_modes
     finally:
+        _cpp_fake_mode_tls.suspended = was_suspended
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):

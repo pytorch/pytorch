@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -243,12 +244,13 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
-  // not the wrapper itself. See
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
-  // only getCppFakeTensorModePyObj accesses it, under a lock.
+  // Owns a Python weakref to this mode's Python object (a CppFakeTensorMode,
+  // which subclasses the mode's binding), not the object itself. See
+  // Note [C++ FakeTensorMode Python object lifetime] in
+  // torch/csrc/FakeTensorMode.cpp. Accessed only under fake_mode_pyobj_mutex_,
+  // by _CppFakeTensorMode._attach_python_object and getCppFakeTensorModePyObj.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  std::mutex fake_mode_pyobj_mutex_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
@@ -267,10 +269,9 @@ struct C10_API FakeTensorMode {
   // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
-  // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
-  // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
-  // mode's Python wrapper, which must expose epoch as a property forwarding
-  // here.
+  // The mode's epoch (FakeTensorMode.epoch), which code that retraces bumps. A
+  // fake's memos are kept only for the epoch they were set in, unless kept
+  // across epochs; the memo bindings read it through the fake's mode.
   uint64_t epoch_ = 0;
 
   FakeTensorMode(
