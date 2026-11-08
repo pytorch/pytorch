@@ -50,7 +50,11 @@ if TYPE_CHECKING:
 
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        CppFakeTensorMode,
+        FakeTensor,
+        FakeTensorMode,
+    )
 
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
@@ -748,7 +752,7 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     ctx: object | None = None  # is_traceable_wrapper_subclass
     type: type | None = None  # is_traceable_wrapper_subclass
-    fake_mode: FakeTensorMode | None = None
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None
     view_func: ViewFunc[Any] | None = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
@@ -2235,7 +2239,9 @@ class MetaConverter(Generic[_TensorT]):
                                 in_kernel_invocation_manager,
                             )
 
-                            mb_fake_mode = maybe_get_fake_mode(r)
+                            mb_fake_mode = torch._guards.require_python_fake_mode(
+                                maybe_get_fake_mode(r)
+                            )
                             if mb_fake_mode is not None:
                                 maybe_fake_mgr = in_kernel_invocation_manager(
                                     mb_fake_mode
@@ -2319,8 +2325,10 @@ class MetaConverter(Generic[_TensorT]):
                 # pyrefly: ignore [unbound-name]
                 if not is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
+                # pyrefly: ignore [unbound-name]
+                r_mode = torch._guards.require_python_fake_mode(maybe_get_fake_mode(r))
                 # pyrefly: ignore [unbound-name, missing-attribute]
-                r.nested_int_memo = maybe_get_fake_mode(r).create_symbolic_nested_int(
+                r.nested_int_memo = r_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
 

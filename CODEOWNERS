@@ -162,6 +162,8 @@
 # /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+# /test/expect/TestSparseXPU.test_print_coalesced_xpu_float64.expect
+# /test/expect/TestSparseXPU.test_print_uncoalesced_xpu_float64.expect
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
@@ -1156,10 +1158,10 @@
 /torch/distributed/_composable/replicate.py @weifengpy
 /torch/nn/parallel/ @weifengpy
 # label: module: dtensor
-# owner: @weifengpy
-/torch/distributed/tensor/placement_types.py @weifengpy
-/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
-/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+# owner: @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/placement_types.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy @pianpwk @anshul-si
 #
 # [infra_developer_tools]
 # /.devcontainer/
@@ -1210,6 +1212,7 @@
 #
 # [infra_test]
 # /test/benchmark_utils/
+# /test/hw_classification_testdata/
 # /test/junit_xml_testdata/
 # /test/scripts/
 # /test/spincli/

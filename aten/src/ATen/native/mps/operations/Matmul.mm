@@ -352,11 +352,11 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
   const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
   const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
   const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
-  constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
-  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 && m <= int_max &&
-      k <= int_max && n <= int_max && self.stride(0) <= int_max && mat2.stride(0) <= int_max && has_mpp() &&
+  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 &&
+      std::in_range<int32_t>(m) && std::in_range<int32_t>(k) && std::in_range<int32_t>(n) &&
+      std::in_range<int32_t>(self.stride(0)) && std::in_range<int32_t>(mat2.stride(0)) && has_mpp() &&
       lib.hasFunction(mpp_kernel);
   const auto kernel_name = use_mpp ? mpp_kernel : self.scalar_type() == at::kByte ? "int_mm_uchar" : "int_mm_char";
   auto stream = getCurrentMPSStream();
