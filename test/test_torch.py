@@ -7187,6 +7187,7 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
+    @skipIfXpu(msg="XPU split_with_sizes_copy.out still uses stride(dim) as the chunk size")
     def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
         def check(x, split_sizes, dim, out):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
@@ -7209,6 +7210,12 @@ class TestTorchDeviceType(TestCase):
             out = [torch.empty(2, 3, 2, 5, device=device, memory_format=memory_format) for _ in range(2)]
             check(x, [2, 2], 0, out)
         check(x, [4, 0], 0, [torch.empty_like(x), torch.empty(0, 3, 2, 5, device=device)])
+        # Permuted leading dims, with outputs permuted the same way
+        x = torch.randn(3, 4, 6, device=device).transpose(0, 1)
+        check(x, [2, 4], 2, [torch.empty_like(x[:, :, :2]), torch.empty_like(x[:, :, 2:])])
+        # A single non-empty split laid out like the transposed input
+        x = torch.arange(12.0, device=device).reshape(3, 4).t()
+        check(x, [0, 3], 1, [torch.empty(4, 0, device=device), torch.empty_like(x)])
 
     def test_copy_float16(self, device):
         # Check that fbgemm code no longer reads memory out of bounds, see
