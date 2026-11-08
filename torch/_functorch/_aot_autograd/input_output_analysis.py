@@ -387,9 +387,9 @@ def compute_overlapping_inputs(
             for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
         }
 
-    # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
-    # dynamo sources inside AOTAutograd. Static-shape graphs need the same storage
-    # protection so a rebind triggers recompilation instead of reusing stale aliases.
+    # Keep the pairwise StorageOverlap guard on symbolic-shape paths. A merged
+    # storage group needs an identity guard for every member, including static
+    # shapes and members that do not overlap any other member.
     if (
         tracing_context is not None
         # We check that we have more than 1 aliased tensor, which should be true at
@@ -406,12 +406,14 @@ def compute_overlapping_inputs(
             aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
         ]
 
-        tracing_context.guards_context.aotautograd_guards.append(
-            StorageOverlap(overlapping_sources, non_overlapping_sources)
-        )
-        tracing_context.guards_context.aotautograd_guards.append(
-            StorageIdentity(overlapping_sources)
-        )
+        if symbolic:
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageOverlap(overlapping_sources, non_overlapping_sources)
+            )
+        if len(actual_aliased_indices) > 1:
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageIdentity(overlapping_sources + non_overlapping_sources)
+            )
 
     return actual_aliased_indices
 

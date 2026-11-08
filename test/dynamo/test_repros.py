@@ -5082,9 +5082,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=cnt, dynamic=False)
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
 
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+        self.assertIn("untyped_storage()._cdata ==", guard_str)
+        self.assertNotIn("check_overlapping(", guard_str)
+
         a.set_(torch.tensor([3.0, 4.0, 5.0]))
         self.assertEqual(compiled(a, b), torch.tensor(3.0))
         self.assertEqual(b, torch.tensor([10.0, 1.0, 2.0, 3.0, 4.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_synthetic_base_non_overlapping_member_rebind_recompiles_static(self):
+        def fn(a, b, c):
+            a[0] = 10.0
+            return b[0].clone() + c[0].clone()
+
+        base = torch.arange(8, dtype=torch.float32)
+        a = base[2:5]
+        b = base[3:6]
+        c = base[:2]
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, dynamic=False)
+        self.assertEqual(compiled(a, b, c), torch.tensor(3.0))
+
+        c.set_(torch.zeros(2))
+        self.assertEqual(compiled(a, b, c), torch.tensor(3.0))
+        self.assertEqual(base[2], torch.tensor(10.0))
         self.assertEqual(cnt.frame_count, 2)
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
