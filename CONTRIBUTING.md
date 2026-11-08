@@ -160,7 +160,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
 | Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
-| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. |
+| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
@@ -176,7 +176,7 @@ The labels are the source of truth for where your PR is in the process. For what
 
 If a maintainer requests changes and your PR returns to `in progress`, please address their feedback before the PR returns to maintainer review. A fresh automated review checks that the feedback has been addressed, and the PR must meet all of the readiness criteria above again. The earlier passing review cannot move the PR back to `ready for review`. If you address comments without pushing, comment `@pytorchbot review` to run the automated review again.
 
-With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
 **Pre-conditions**:
 
@@ -685,6 +685,8 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
+
+A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
 
 ## GreenLight
 
