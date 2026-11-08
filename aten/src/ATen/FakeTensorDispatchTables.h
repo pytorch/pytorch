@@ -6,6 +6,10 @@
 
 #include <cstdint>
 
+namespace c10 {
+class OperatorHandle;
+} // namespace c10
+
 namespace at::impl {
 
 // C++-side copy of the Python decomp/meta/prims/op_impl registries
@@ -80,5 +84,10 @@ inline bool fakeDispatchCategoriesHave(
     FakeDispatchCategory category) {
   return categories & fakeDispatchCategoryBit(category);
 }
+
+// Whether Python's FakeTensorMode runs op through a Python implementation (a
+// registry mirrored in these tables, or an op_implementations handler matched
+// by a predicate), which the C++ fake fallback must reject
+TORCH_API bool fakeHasPythonFakeImpl(const c10::OperatorHandle& op);
 
 } // namespace at::impl

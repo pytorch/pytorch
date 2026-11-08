@@ -6363,6 +6363,22 @@ class TestCppFakeTensorModeBindings(TestCase):
         storage = mode.from_tensor(alias).untyped_storage()
         self.assertEqual(storage._cdata, fake.untyped_storage()._cdata)
 
+    def test_fake_fallback_python_impl_predicates(self):
+        # fakeHasPythonFakeImpl selects every aten op an op_implementations
+        # predicate selects
+        from torch._subclasses.fake_impls import op_implementations_checks
+
+        # alias's op_impl only keeps the dispatch keys, which the fallback
+        # does too, so the C++ side runs its C++ Meta kernel
+        missing = set()
+        for op in _aten_ops():
+            if not any(check(op) for check, _ in op_implementations_checks):
+                continue
+            names = (op._schema.name, op._schema.overload_name)
+            if not torch._C._fake_has_python_fake_impl(*names):
+                missing.add(op.name())
+        self.assertEqual(missing, {"aten::alias"})
+
     def test_fake_fallback_static_shape_decomps(self):
         # StaticShapeDecomp records the ops FakeTensorMode decomposes under
         # static shapes
