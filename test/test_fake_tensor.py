@@ -1086,14 +1086,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(y.untyped_storage()._cdata, x.untyped_storage()._cdata)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
-    # mkldnn nyi in C++ fake tensors
+    # factories under the mode nyi in C++ fake tensors
     @xfailIf(CPP_FAKETENSOR)
     def test_alias_fake_mkldnn(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        real = torch.randn(2, 3).to_mkldnn()
         with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(real)
+            x = fake_mode.from_tensor(torch.randn(2, 3).to_mkldnn())
             y = torch.ops.aten.alias.default(x)
         self.assertTrue(y.is_mkldnn)
         self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
@@ -1185,14 +1184,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 self.assertEqual(y_unwrapped.stride(), (3, 1))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
-    # mkldnn nyi in C++ fake tensors
+    # factories under the mode nyi in C++ fake tensors
     @xfailIf(CPP_FAKETENSOR)
     def test_mkldnn_unsafe_fallback(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        real = torch.randn(1, 2, 8, 8).to_mkldnn()
         with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(real)
+            x = fake_mode.from_tensor(torch.randn(1, 2, 8, 8).to_mkldnn())
             y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
             self.assertTrue(is_fake_tensor(y))
             self.assertEqual(y.shape, (1, 2, 4, 4))
@@ -2545,6 +2543,8 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 raise AssertionError(f"expected {self.device_type} device")
 
     @onlyAccelerator
+    # views nyi in C++ fake tensors
+    @xfailIf(CPP_FAKETENSOR)
     def test_fake_device(self, device):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -5546,12 +5546,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
-            torch._C._CppFakeTensorMode(None, None, traceback.StackSummary())
+            torch._C._CppFakeTensorMode(None, None)
         # A mode's Python object is set once, and is a CppFakeTensorMode
         with self.assertRaisesRegex(RuntimeError, "already has a Python object"):
             mode._attach_python_object()
-        stack = traceback.StackSummary()
-        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None, stack)
+        bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None)
         with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
             bare._attach_python_object()
         with self.assertRaisesRegex(TypeError, "expects a CppFakeTensorMode"):
@@ -6068,6 +6067,14 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
+        # The stack is captured where the mode is created: in
+        # CppFakeTensorMode.__init__, called from here
+        *_, caller, init = mode._creation_traceback.summary()
+        self.assertEqual(init.name, "__init__")
+        init_file = init.filename.replace("\\", "/")
+        self.assertTrue(init_file.endswith("torch/_subclasses/fake_tensor.py"))
+        self.assertIn("test_cpp_fake_tensor_mode_init", caller.name)
+        self.assertTrue(mode.stack.endswith("".join(traceback.format_list([init]))))
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
@@ -6116,12 +6123,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
+        def make_mode():
+            return CppFakeTensorMode()
+
         def make_other():
             return CppFakeTensorMode()
 
         self.addCleanup(self._restore_fake_mode_state)
-        mode, other = CppFakeTensorMode(), make_other()
+        mode, other = make_mode(), make_other()
         # Each mode records the stack it was created at
+        self.assertIn("in make_mode", mode.stack)
         self.assertNotIn("in make_other", mode.stack)
         self.assertIn("in make_other", other.stack)
         cpu = torch.device("cpu")
@@ -6140,10 +6151,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(active_fake_mode(), mode)
             self.assertIs(detect_fake_mode(), mode)
             # As for a Python mode, the inputs' mode must match the active one
-            only_mode = r"(?:(?!in make_other)[\s\S])*"
+            not_other = r"(?:(?!in make_other)[\s\S])*"
+            not_mode = r"(?:(?!in make_mode)[\s\S])*"
             msg = (
-                rf"from active fake mode allocated at:\n  File {only_mode}"
-                r"from fake tensor input 0 allocated at:\n[\s\S]*in make_other"
+                rf"from active fake mode 0 allocated at:\n{not_other}in make_mode"
+                rf"{not_other}from fake tensor input 0 allocated at:\n"
+                rf"{not_mode}in make_other{not_mode}\Z"
             )
             with self.assertRaisesRegex(AssertionError, msg):
                 detect_fake_mode([other_fake])
@@ -6251,11 +6264,13 @@ class TestCppFakeTensorModeBindings(TestCase):
             cases.append(("mkldnn", "mkldnn", torch.randn(2).to_mkldnn()))
         for kind, case, t in cases:
             with self.subTest(case=case):
-                mode = CppFakeTensorMode()
+                shape_env = ShapeEnv()
+                mode = CppFakeTensorMode(shape_env=shape_env)
                 msg = rf"{kind} nyi in C\+\+ fake tensors"
                 with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
                     mode.from_tensor(t)
-                self.assertEqual(len(mode.fake_tensor_converter.tensor_memo), 0)
+                # Rejected before any symbol is made
+                self.assertEqual(len(shape_env.backed_var_to_val), 0)
         # A constant must be a plain tensor
         mode = CppFakeTensorMode()
         converter = mode.fake_tensor_converter
@@ -6263,6 +6278,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "constants that are not plain tensors nyi"
         with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
             converter.from_real_tensor(mode, wrapper, make_constant=True)
+        # and a real one, which the fake records
+        fake = mode.from_tensor(torch.randn(2))
+        with self.assertRaisesRegex(UnsupportedFakeTensorException, "fake constants"):
+            converter.from_real_tensor(mode, fake, make_constant=True)
 
     def test_cpp_fake_tensor_mode_converter_kind(self):
         # A converter makes one kind of fake

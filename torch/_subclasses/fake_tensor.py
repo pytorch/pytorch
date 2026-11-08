@@ -340,17 +340,19 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
 # Note [Fake mode lookups and CppFakeTensorMode]
 # maybe_get_fake_mode, detect_fake_mode and active_fake_mode return a
-# CppFakeTensorMode for a C++ fake or an entered C++ mode. CppFakeTensorMode is
-# not a FakeTensorMode subclass and has little of its interface yet. Its
-# from_tensor raises UnsupportedFakeTensorException for views, sparse and
-# mkldnn tensors, tensors with nested ints, and constants that are not plain
-# tensors, and its converter's from_meta_and_device, which makes Python
-# FakeTensors, raises AssertionError. So a caller that needs a Python
-# FakeTensorMode narrows the result with torch._guards.require_python_fake_mode,
-# which raises NotImplementedError for a C++ mode.
+# CppFakeTensorMode for a C++ fake or a wrapper of one, or while a C++ mode is
+# entered. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
+# its interface yet. Its from_tensor raises UnsupportedFakeTensorException for
+# views, sparse and mkldnn tensors and tensors with nested ints, its converter's
+# from_real_tensor also for constants that are not plain tensors, and its
+# converter's from_meta_and_device, which makes Python FakeTensors, raises
+# AssertionError. So a caller that needs a Python FakeTensorMode narrows the
+# result with torch._guards.require_python_fake_mode, which raises
+# NotImplementedError for a C++ mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
-    """The fake mode of t, a Python FakeTensorMode or, for a C++ fake, a
-    CppFakeTensorMode (see Note [Fake mode lookups and CppFakeTensorMode])."""
+    """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
+    wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
+    CppFakeTensorMode])."""
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -826,7 +828,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         converter = FakeTensorConverter(copy_data=copy_data, cpp_fakes=True)
-        super().__init__(converter, shape_env, traceback.extract_stack())
+        tb = CapturedTraceback.extract()
+        super().__init__(converter, shape_env, creation_traceback=tb)
         self._attach_python_object()
         self._init_enter_state()
         self.allow_non_fake_inputs = allow_non_fake_inputs
@@ -845,11 +848,15 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     def _init_enter_state(self) -> None:
         self.enter_stack: list[_FakeModeEnterRecord] = []
 
-    # Where the mode was created, as FakeTensorMode.stack reports (empty for a
-    # mode made in C++)
+    # Where the mode was created: the frames FakeTensorMode.stack shows, in its
+    # format (empty for a mode made in C++). Unlike FakeTensorMode.stack it is
+    # formatted on each access (only error messages read it), and its source
+    # lines are looked up then, without the module's globals, so they can be
+    # missing for a module loaded through a loader (e.g. from a zip).
     @property
     def stack(self) -> str:
-        return "".join(traceback.format_list(self._stack_trace or []))
+        tb = self._creation_traceback
+        return "" if tb is None else "".join(tb.format())
 
     # Like FakeTensorMode.from_tensor, for C++ fakes
     def from_tensor(
@@ -1089,7 +1096,8 @@ class FakeTensorConverter:
         self.meta_converter.tensor_memo[tid] = v
 
     # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device.
+    # If you have a meta tensor already, call from_meta_and_device (or, for a
+    # C++ fake, torch._C._from_meta_and_device).
     #
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
@@ -1133,7 +1141,8 @@ class FakeTensorConverter:
     ) -> Tensor:
         # A converter makes one kind of fake, which the casts to FakeTensor in
         # this class rely on
-        if isinstance(fake_mode, CppFakeTensorMode) != self.meta_converter.cpp_fakes:
+        cpp_fakes = self.meta_converter.cpp_fakes
+        if isinstance(fake_mode, CppFakeTensorMode) != cpp_fakes:
             kind = type(fake_mode).__name__
             raise AssertionError(
                 f"this converter's cpp_fakes does not match the {kind}; use the "
@@ -1168,9 +1177,12 @@ class FakeTensorConverter:
             if make_constant:
                 raise AssertionError("make_constant must be False for nn.Parameter")
         # The C++ mode records a constant on the fake itself, which a wrapper of
-        # C++ fakes is not
-        if make_constant and self.meta_converter.cpp_fakes and not _is_plain_tensor(t):
+        # C++ fakes is not, and only for a real constant
+        if make_constant and cpp_fakes and not _is_plain_tensor(t):
             msg = "constants that are not plain tensors nyi in C++ fake tensors"
+            raise UnsupportedFakeTensorException(msg)
+        if make_constant and cpp_fakes and is_fake_tensor(t):
+            msg = "fake constants nyi in C++ fake tensors"
             raise UnsupportedFakeTensorException(msg)
 
         constant = t if make_constant else None
@@ -1340,8 +1352,11 @@ class FakeTensorConverter:
                             ),
                         )
         if make_constant:
-            if isinstance(fake_mode, CppFakeTensorMode):
-                # The C++ mode tracks the constant's storage aliases itself
+            if cpp_fakes:
+                # The C++ mode records the constant's storage aliases itself.
+                # TODO: invalidate them when a constant's storage is mutated.
+                # Nothing does yet, so ops on C++ fakes have to reject constant
+                # inputs until something does.
                 torch._C._set_fake_constant(out, constant)
             else:
                 self.add_constant_storage_mapping(cast(FakeTensor, out))
