@@ -11,9 +11,8 @@ import torch.nn as nn
 from torch.distributed._composable.replicate_with_fsdp import replicate
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _get_gradient_divide_factors,
-)
+from torch.distributed.fsdp._flex_shard.placement_contract import GradientReduction
+from torch.distributed.fsdp._flex_shard.placements.utils import _gradient_reduce_ops
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -95,8 +94,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=orig_dtype
+        _, predivide_factor, postdivide_factor, _, _ = _gradient_reduce_ops(
+            GradientReduction(), self.process_group.size(), orig_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)

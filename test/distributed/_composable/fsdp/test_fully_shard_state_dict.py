@@ -409,11 +409,9 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # Enable storage retention recursively and verify the child parameters
         model.set_keep_unsharded_storage(keep=True, recurse=True)
-        param_group = model[0]._get_fsdp_state()._fsdp_param_group
+        param_group = model[0]._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
-        self.assertTrue(
-            all(param.keep_unsharded_storage for param in param_group.fsdp_params)
-        )
+        self.assertTrue(param_group.bucket.keep_persistent_storage)
 
         def get_data_ptrs() -> list[int]:
             return [
@@ -426,7 +424,8 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # State dict reshards without releasing the unsharded storage
         model.state_dict()
-        self.assertTrue(param_group.is_sharded)
+        self.assertFalse(param_group.bucket.is_unsharded)
+        self.assertIsNone(param_group.bucket.post_forward_storage)
         self.assertEqual(get_data_ptrs(), data_ptrs)
 
         # Forward triggers an unshard that should reuse the retained storage
