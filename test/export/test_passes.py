@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["oncall: export"]
+import io
 import math
 import operator
 import unittest
@@ -21,6 +22,7 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
+    replace_set_grad_with_hop_pass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
@@ -43,17 +45,21 @@ from torch.export._remove_auto_functionalized_pass import (
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils import _pytree as pytree
 
 
@@ -374,6 +380,8 @@ def _sequential_split_inline_tests():
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
@@ -1001,6 +1009,217 @@ def forward(self, sin, cos):
     """,
         )
 
+    def _check_region_with_cond(self, m, x, region):
+        # The branches of a cond are read with get_attr at the start of the
+        # region, which must still be found.
+        ep = export(m, (x,))
+        target = getattr(torch.ops.higher_order, region)
+        self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is target), 1)
+        # The region body with its cond can be saved, loaded and decomposed.
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded = torch.export.load(buffer).module()
+        modules = (ep.module(), loaded, ep.run_decompositions().module())
+        # x and -x take different branches.
+        for inp in (x, -x):
+            for module in modules:
+                self.assertEqual(module(inp), m(inp))
+        return ep, loaded
+
+    def test_set_grad_region_with_cond(self):
+        class NoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = torch.cond(
+                        x.sum() > 0, lambda a: a.sin(), lambda a: a.cos(), (x,)
+                    )
+                return y + x
+
+        m, x = NoGrad(), torch.randn(4, requires_grad=True)
+        ep, loaded = self._check_region_with_cond(m, x, "wrap_with_set_grad_enabled")
+        # run_decompositions traces an inference graph, so it is left out here.
+        for inp in (x, -x):
+            for module in (ep.module(), loaded):
+                self.assertEqual(
+                    torch.autograd.grad(module(inp).sum(), inp),
+                    torch.autograd.grad(m(inp).sum(), inp),
+                )
+
+    def test_autocast_region_with_cond(self):
+        class Autocast(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    return torch.cond(
+                        x.sum() > 0, lambda a: a @ a.T, lambda a: a.T @ a, (x,)
+                    )
+
+        self._check_region_with_cond(
+            Autocast(), torch.randn(4, 4), "wrap_with_autocast"
+        )
+
+    def _check_region_with_flat_apply(self, ctx, region):
+        # Indexing inside vmap is traced as flat_apply calls, whose input specs
+        # are read with get_attr inside the region.
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexInVmap(torch.nn.Module):
+            def forward(self, x, indices):
+                with ctx(), TransformGetItemToIndex():
+                    return torch.vmap(lambda i: x[i])(indices)
+
+        m, inp = IndexInVmap(), (torch.arange(4.0), torch.tensor([3, 1]))
+        ep = export(m, inp)
+        target = getattr(torch.ops.higher_order, region)
+        (region_node,) = ep.graph.find_nodes(op="call_function", target=target)
+        (body_node,) = (
+            a
+            for a in region_node.args
+            if isinstance(a, torch.fx.Node) and a.op == "get_attr"
+        )
+        body = torch.fx.graph_module._get_attr(ep.graph_module, body_node.target)
+        self.assertTrue(
+            body.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.flat_apply
+            )
+        )
+        specs = [
+            n
+            for n in body.graph.find_nodes(op="get_attr")
+            if isinstance(
+                torch.fx.graph_module._get_attr(body, n.target), pytree.TreeSpec
+            )
+        ]
+        self.assertTrue(specs)
+        self.assertEqual(ep.module()(*inp), m(*inp))
+        self.assertEqual(ep.run_decompositions().module()(*inp), m(*inp))
+
+    def test_set_grad_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(torch.no_grad, "wrap_with_set_grad_enabled")
+
+    def test_autocast_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(
+            lambda: torch.autocast("cpu", dtype=torch.bfloat16),
+            "wrap_with_autocast",
+        )
+
+    def test_set_grad_pass_reads_nested_spec(self):
+        # A pytree spec that lives on a submodule is read with a dotted
+        # get_attr, before, inside and after the region.
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.spec = pytree.tree_flatten((0, 0))[1]
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        before = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
+        graph.call_function(torch._C._set_grad_enabled, (False,))
+        inside = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
+        y = graph.call_function(torch.ops.aten.mul.Tensor, (x, 2))
+        graph.call_function(torch._C._set_grad_enabled, (True,))
+        after = graph.call_function(
+            pytree.tree_unflatten, ([y, y], graph.get_attr("sub.spec"))
+        )
+        graph.output((before, inside, after))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        (region_node,) = new_gm.graph.find_nodes(op="call_function", target=region)
+        # The region gets only tensors, and its body reads the spec itself.
+        self.assertEqual([n.op for n in region_node.args[2:]], ["placeholder"])
+        body = torch.fx.graph_module._get_attr(new_gm, region_node.args[1].target)
+        self.assertEqual(
+            [n.target for n in body.graph.find_nodes(op="get_attr")], ["sub.spec"]
+        )
+        self.assertEqual(new_gm(torch.ones(2)), gm(torch.ones(2)))
+        # The parts outside the region are inlined back and read the one spec.
+        spec_targets = {
+            n.target
+            for n in new_gm.graph.find_nodes(op="get_attr")
+            if isinstance(
+                torch.fx.graph_module._get_attr(new_gm, n.target), pytree.TreeSpec
+            )
+        }
+        self.assertEqual(spec_targets, {"sub.spec"})
+
+    def test_set_grad_pass_converts_dotted_graph_module(self):
+        # A graph module read under a dotted name, here a cond branch on a
+        # submodule, gets its own regions converted and is written back there.
+        branch = torch.fx.Graph()
+        a = branch.placeholder("a")
+        branch.call_function(torch._C._set_grad_enabled, (False,))
+        b = branch.call_function(torch.ops.aten.sin.default, (a,))
+        branch.call_function(torch._C._set_grad_enabled, (True,))
+        branch.output((b,))
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.body = torch.fx.GraphModule(torch.nn.Module(), branch)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        pred = graph.call_function(
+            torch.ops.aten.gt.Scalar,
+            (graph.call_function(torch.ops.aten.sum.default, (x,)), 0),
+        )
+        body = graph.get_attr("sub.body")
+        out = graph.call_function(torch.ops.higher_order.cond, (pred, body, body, (x,)))
+        graph.output((graph.call_function(operator.getitem, (out, 0)),))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(torch.ones(2))
+            FakeTensorProp(gm.sub.body, mode).propagate(fake_x)
+            FakeTensorProp(gm, mode).propagate(fake_x)
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        new_body = torch.fx.graph_module._get_attr(new_gm, "sub.body")
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        self.assertTrue(new_body.graph.find_nodes(op="call_function", target=region))
+        self.assertEqual(new_gm(torch.ones(2)), (torch.ones(2).sin(),))
+
+    def test_node_inline_renames_colliding_attribute(self):
+        # The inlined graph reads an attribute under a name that the outer
+        # module uses for another object, so it is stored under a new name. A
+        # dotted name whose owner the outer module holds as None is added as it
+        # is, while an owner that is not a Module makes the name taken. Neither
+        # becomes a buffer.
+        for owner in (None, torch.tensor([5.0])):
+            with self.subTest(owner=owner):
+                inner_root = torch.nn.Module()
+                inner_root.c = torch.tensor([1.0])
+                inner_root.sub = torch.nn.Module()
+                inner_root.sub.d = torch.tensor([2.0])
+                inner_graph = torch.fx.Graph()
+                x = inner_graph.placeholder("x")
+                y = inner_graph.call_function(torch.add, (x, inner_graph.get_attr("c")))
+                inner_graph.output(
+                    inner_graph.call_function(
+                        torch.add, (y, inner_graph.get_attr("sub.d"))
+                    )
+                )
+                root = torch.nn.Module()
+                root.inner = torch.fx.GraphModule(inner_root, inner_graph)
+                root.c = torch.tensor([10.0])
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                call = graph.call_module("inner", (x,))
+                graph.output(
+                    graph.call_function(torch.mul, (call, graph.get_attr("c")))
+                )
+                gm = torch.fx.GraphModule(root, graph)
+                gm.sub = owner
+                node_inline_(call)
+                gm.recompile()
+                targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
+                self.assertEqual(len(set(targets)), 3)
+                self.assertEqual("sub.d" in targets, owner is None)
+                self.assertFalse(hasattr(owner, "d"))
+                self.assertIs(gm.c, root.c)
+                self.assertEqual([name for name, _ in gm.named_buffers()], ["c"])
+                self.assertEqual(gm(torch.ones(1)), torch.tensor([40.0]))
+
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
         self._check_node_users_in_the_same_graph(mod)
@@ -1324,51 +1543,56 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_device_to(self):
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestMoveToDevicePassDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_move_device_to(self, device):
+        device_type = torch.device(device).type
+
         class M(torch.nn.Module):
             def forward(self, x):
-                x = torch.ops.aten.to.device(x, device="cuda:0", dtype=torch.float32)
+                x = torch.ops.aten.to.device(x, device=device, dtype=torch.float32)
                 return x + x
 
         ep = torch.export.export(M(), (torch.ones(3),))
-        ep = move_to_device_pass(ep, "cuda")
-        ep.graph_module.recompile()
+        ep = move_to_device_pass(ep, device_type)
         self.assertExpectedInline(
             ep.graph_module.code.strip("\n"),
-            """\
+            f"""\
 def forward(self, x):
-    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, '{device_type}', torch.float32);  x = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
     """,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_device_submod(self):
+    def test_move_device_submod(self, device):
+        device_type = torch.device(device).type
+
         class M(torch.nn.Module):
             def forward(self, x):
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    x = x.to(device="cuda:0")
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    x = x.to(device=device)
                     return x + x
 
         ep = torch.export.export(M(), (torch.ones(3),))
-        ep = move_to_device_pass(ep, "cuda")
-        ep.graph_module.submod_1.recompile()
+        ep = move_to_device_pass(ep, device_type)
         self.assertExpectedInline(
             ep.graph_module.submod_1.code.strip("\n"),
-            """\
+            f"""\
 def forward(self, arg0_1):
-    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = '{device_type}');  arg0_1 = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
     """,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass(self):
+    def test_move_to_device_pass(self, device):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
                 super().__init__()
@@ -1378,33 +1602,32 @@ def forward(self, arg0_1):
                 _, states = self.rnn(x)
                 return states
 
-        # move the exported program from cpu to cuda:0
+        # move the exported program from cpu to the accelerator
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
         ep = export(mod, example_inputs, strict=True)
-        location = torch.device("cuda:0")
-        ep = move_to_device_pass(ep, location=location)
+        ep = move_to_device_pass(ep, location=device)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(device))
+
         # move it back to cpu
-        location = "cpu"
-        ep = move_to_device_pass(ep, location=location)
+        ep = move_to_device_pass(ep, location="cpu")
         gm = ep.module()
         test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cpu"))
-        # move it to cuda:0 again
-        location = {"cpu": "cuda:0"}
+
+        # move it to the accelerator again
+        location = {"cpu": device}
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(device))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_device_example_inputs(self):
+    def test_move_device_example_inputs(self, device):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1426,14 +1649,181 @@ def forward(self, arg0_1):
         self.assertEqual(ep.example_inputs[0][1].device, torch.device("cpu"))
         self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
 
-        # Move to CUDA
-        location = torch.device("cuda:0")
-        ep_cuda = move_to_device_pass(ep, location=location)
+        # Move to the accelerator
+        moved_ep = move_to_device_pass(ep, location=device)
 
-        # Verify example_inputs moved to CUDA
-        self.assertEqual(ep_cuda.example_inputs[0][0].device, torch.device("cuda:0"))
-        self.assertEqual(ep_cuda.example_inputs[0][1].device, torch.device("cuda:0"))
-        self.assertEqual(ep_cuda.example_inputs[1]["z"].device, torch.device("cuda:0"))
+        # Verify example_inputs moved to the accelerator
+        self.assertEqual(moved_ep.example_inputs[0][0].device, torch.device(device))
+        self.assertEqual(moved_ep.example_inputs[0][1].device, torch.device(device))
+        self.assertEqual(moved_ep.example_inputs[1]["z"].device, torch.device(device))
+
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestMoveToDevicePassCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_graph_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.long().sum()
+
+        ep = torch.export.export(M(), (torch.zeros(4, dtype=torch.float32),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIn("cuda:0", ep.graph_module.code)
+        (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
+        self.assertEqual(out.device, torch.device("cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_nested_graph_modules(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + torch.ones(4)
+
+                def false_fn(x):
+                    return x - torch.ones(4)
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        ep = torch.export.export(M(), (torch.zeros(4),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        submodules = [
+            m
+            for m in ep.graph_module.modules()
+            if isinstance(m, torch.fx.GraphModule) and m is not ep.graph_module
+        ]
+        self.assertEqual(len(submodules), 2)
+        for submodule in submodules:
+            self.assertIn("cuda:0", submodule.code)
+        (out,) = ep.graph_module(torch.ones(4, device="cuda:0"))
+        self.assertEqual(out, torch.full((4,), 2.0, device="cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_does_not_mutate_source_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+                self.register_buffer("bias", torch.ones(3))
+
+            def forward(self, x):
+                return x * self.weight + self.bias
+
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+        buffer = ep.state_dict["bias"]
+
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIsNot(ep.state_dict["bias"], buffer)
+        self.assertIs(m.weight, param)
+        self.assertIs(m.bias, buffer)
+        self.assertEqual(m.weight.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+        self.assertEqual(ep.state_dict["weight"].device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+        self.assertEqual(
+            ep.module()(torch.ones(3, device="cuda:0")).device,
+            torch.device("cuda:0"),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_wrapper_subclass_parameter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    TwoTensor(torch.ones(3), torch.ones(3))
+                )
+                self.register_buffer("bias", torch.ones(3))
+
+            def forward(self, x):
+                return x + self.weight + self.bias
+
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIs(m.weight, param)
+        self.assertEqual(param.device, torch.device("cpu"))
+        self.assertEqual(param.a.device, torch.device("cpu"))
+        self.assertEqual(param.b.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+
+        moved_param = ep.state_dict["weight"]
+        self.assertEqual(moved_param.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.a.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.b.device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+
+        inp = torch.ones(3, device="cuda:0")
+        self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+
+    def test_move_to_device_pass_interpreter_only_graph(self):
+        init_torchbind_implementations()
+        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
+            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
+
+            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
+            def identity_with_obj(obj, x):
+                return x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ones(3, device=x.device) + x
+
+            ep = torch.export.export(M(), (torch.zeros(3),))
+            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+            add = next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.add.Tensor
+            )
+            inp = add.args[0]
+            with ep.graph.inserting_before(add):
+                with_obj = ep.graph.call_function(
+                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
+                    (custom_obj, inp),
+                )
+                with_obj.meta = add.meta.copy()
+            add.replace_input_with(inp, with_obj)
+
+            with self.assertWarnsRegex(
+                UserWarning, "graph module will no longer be directly callable"
+            ):
+                ep = ep._update(ep.graph_module, ep.graph_signature)
+
+            self.assertEqual(
+                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
+                (torch.full((3,), 2.0),),
+            )
+            ep = move_to_device_pass(ep, "meta")
+            (out,) = torch.fx.Interpreter(ep.graph_module).run(
+                torch.ones(3, device="meta")
+            )
+            self.assertEqual(out.device, torch.device("meta"))
+
+
+# except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
+instantiate_device_type_tests(
+    TestMoveToDevicePassDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

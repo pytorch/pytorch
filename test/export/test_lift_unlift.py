@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+import warnings
 from collections import OrderedDict
 from typing import Any
 
@@ -17,7 +18,11 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.export.graph_signature import CustomObjArgument
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
@@ -139,6 +144,8 @@ class GraphBuilder:
 
 
 class TestLift(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
@@ -360,8 +367,30 @@ class TestLift(TestCase):
         self.assertIn("non_persistent_buf", stateful_gm._non_persistent_buffers_set)
         self.assertNotIn("non_persistent_buf", stateful_gm.state_dict())
 
+    def test_unlift_dotted_constant_requiring_grad(self):
+        # A dotted constant that the unlifted module already holds is not
+        # handled a second time, so it warns once.
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.sub = torch.nn.Module()
+                self.sub.c = torch.randn(2, requires_grad=True)
+
+            def forward(self, x):
+                return x + self.sub.c
+
+        foo, x = Foo(), torch.randn(2)
+        exported = torch.export.export(foo, (x,), strict=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            module = exported.module()
+        self.assertEqual(len([w for w in caught if "`sub.c`" in str(w.message)]), 1)
+        self.assertEqual(module(x), foo(x))
+
 
 class ConstantAttrMapTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
