@@ -1427,67 +1427,72 @@ scatter_preagg_template_min_saved: float = 0.125
 partitioned_scatter_enabled: bool = Config(
     alias="torch._inductor.config.scatter_preagg_template",
     deprecated=True,
-    deprecation_message="has aliased scatter_preagg_template since 2.16 and will "
-    "be removed in 2.18; use that instead. The template is ROCm only, so this no longer affects CUDA or XPU",
+    deprecation_message="has aliased scatter_preagg_template since 2.16; use that "
+    "instead. The template is ROCm only, so this no longer affects CUDA or XPU",
 )
 partitioned_scatter_min_partitions: int = Config(
     default=2,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18",
+    deprecation_message="has done nothing since 2.16",
 )
 partitioned_scatter_max_partitions: int = Config(
     default=64,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18",
+    deprecation_message="has done nothing since 2.16",
 )
 partitioned_scatter_min_index_size: int = Config(
     default=4096,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18; "
+    deprecation_message="has done nothing since 2.16; "
     "scatter_preagg_template_min_numel gates on elements rather than indices",
 )
 partitioned_scatter_min_contention_ratio: float = Config(
     default=4.0,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18",
+    deprecation_message="has done nothing since 2.16",
 )
 partitioned_scatter_non_model_floor_bytes: int = Config(
     default=1_500_000_000,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18",
+    deprecation_message="has done nothing since 2.16",
+)
+partitioned_scatter_fp32_accumulation: bool = Config(
+    default=True,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16",
 )
 partitioned_scatter_force: bool = Config(
     default=False,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16 and will be removed in 2.18: "
-    "the template decides per block at run time (see "
-    "scatter_preagg_template_min_saved)",
+    deprecation_message="has done nothing since 2.16: the template decides per "
+    "block at run time (see scatter_preagg_template_min_saved)",
 )
 
 
 def _warn_deprecated_scatter_env_vars() -> None:
-    for name, instead in (
+    for suffix, instead in (
         (
             "ENABLED",
             "sets scatter_preagg_template unless TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE "
             "is set; use that instead. The template is ROCm only, so this no longer "
             "affects CUDA or XPU",
         ),
+        ("FP32_ACCUMULATION", "does nothing"),
         (
             "FORCE",
             "does nothing: the template decides per block at run time (see "
             "scatter_preagg_template_min_saved)",
         ),
     ):
-        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{name}"
+        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
         if name in os.environ:
             import warnings
 
             warnings.warn(
-                f"{name} is deprecated since 2.16 (removal planned for 2.18) and "
-                f"{instead}.",
+                f"The environment variable {name} is deprecated since 2.16 (removal "
+                f"planned for 2.18) and {instead}.",
                 FutureWarning,
-                stacklevel=2,
+                stacklevel=1,
             )
 
 

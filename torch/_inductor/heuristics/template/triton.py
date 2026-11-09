@@ -449,6 +449,20 @@ class ScatterPreaggTarget:
     plain_atomic_bytes: int = 0
     # Whether fp16 rows may pre-aggregate with a matrix product.
     fp16_matrix_preagg: bool = False
+    # Up to this many destinations, blocks of 128 or more tokens always sort, as
+    # the default configs' blocks are on all but small scatters.
+    always_sorted_keys: int = 64
+    # Output copies for the atomics to take turns over: each takes at least
+    # writes_per_copy writes per element, and all of them at most max_copy_bytes,
+    # as zeroing and summing them costs about as much as the contention they
+    # save on uniform keys. A hot destination takes one atomic per token block,
+    # which serializes enough to pay for the copies' two extra kernels only from
+    # min_copy_tokens tokens (fewer for single columns, whose blocks are cheap).
+    max_copies: int = 8
+    writes_per_copy: int = 16
+    max_copy_bytes: int = 4 << 20
+    min_copy_tokens: int = 1 << 18
+    min_copy_tokens_single_column: int = 1 << 14
 
     def warps(self, threads: int) -> int:
         """Warps of ``threads`` lanes in all: configs keep per-lane work fixed."""

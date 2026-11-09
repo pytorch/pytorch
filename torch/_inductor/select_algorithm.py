@@ -3065,10 +3065,13 @@ class TritonTemplate(KernelTemplate):
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
         triton_meta: TritonMeta | None = None,
+        kernel_kwargs: dict[str, Any] | None = None,
     ) -> GenerateAndLoadResult | None:
         """Generate the python code and load it into the current process"""
+        # kernel_kwargs are not part of the cache key.
         caching_enabled = (
             generate_with_caching
+            and not kernel_kwargs
             and torch._inductor.config.enable_caching_generated_triton_templates
         )
 
@@ -3138,6 +3141,7 @@ class TritonTemplate(KernelTemplate):
             "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
+            **(kernel_kwargs or {}),
         }
 
         if HAS_WARP_SPEC:
@@ -3296,6 +3300,7 @@ class TritonTemplate(KernelTemplate):
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
         triton_meta: TritonMeta | None = None,
+        kernel_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -3322,6 +3327,8 @@ class TritonTemplate(KernelTemplate):
             mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
                 if you need to return multiple outputs. You can pass them as inputs and mark them as
                 being mutated by the kernel.
+            kernel_kwargs: Extra keyword arguments for the template's ``kernel_type``,
+                for TritonTemplateKernel subclasses that take more than the defaults.
         """
         # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
@@ -3355,6 +3362,7 @@ class TritonTemplate(KernelTemplate):
             tma_load_for_template_epilogue=tma_load_for_template_epilogue,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
             triton_meta=triton_meta,
+            kernel_kwargs=kernel_kwargs,
         )
 
         # May happen as result of dev by 0.

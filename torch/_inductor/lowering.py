@@ -5392,9 +5392,12 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         and isinstance(src, TensorBox)
         and src.get_dtype() == self.get_dtype()
         and can_bypass_atomic_fallback(self.get_dtype())
-        # A decline below would leave the include_self=False zeroing wasted.
-        and not declines_by_size(self.get_dtype(), self.get_size(), index.get_size())
     )
+    # A decline below would leave the include_self=False zeroing wasted.
+    if preagg_bypass and declines_by_size(
+        self.get_dtype(), self.get_size(), index.get_size()
+    ):
+        preagg = preagg_bypass = False
     if not preagg_bypass and (
         fallback_result := scatter_fallback(
             aten.scatter_reduce_.two,

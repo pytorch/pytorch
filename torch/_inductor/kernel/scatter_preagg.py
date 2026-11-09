@@ -60,7 +60,6 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv,
     generate_assert,
-    ir_dataclass,
     needs_fallback_due_to_atomic_add_limitations,
     sympy_dot,
     sympy_index_symbol,
@@ -120,29 +119,38 @@ def _use_sorted(dtype: torch.dtype) -> bool:
     return torch.are_deterministic_algorithms_enabled() or dtype in _NO_ATOMICS
 
 
+def _size_decline(
+    dtype: torch.dtype, out_sizes: Sequence[sympy.Expr], sizes: Sequence[sympy.Expr]
+) -> str | None:
+    """The skip reason if the template declines a scatter over ``sizes`` into an
+    output of ``out_sizes`` for their sizes alone."""
+    # The sorted lowering replaces the eager fallback rather than atomics, so
+    # the size gates do not apply to it.
+    if _use_sorted(dtype):
+        return None
+    numel = _hint(sympy_product(sizes))
+    if numel < config.scatter_preagg_template_min_numel:
+        return "too_small"
+    # bf16 always stages in fp32 (see _try_template), and gets output copies
+    # only at many writes per element.
+    if dtype == torch.bfloat16 and _hint(sympy_product(out_sizes)) > 2 * numel:
+        return "fp32_copy_too_large"
+    return None
+
+
 def declines_by_size(
     dtype: torch.dtype, out_sizes: Sequence[sympy.Expr], sizes: Sequence[sympy.Expr]
 ) -> bool:
     """
-    Whether the template declines a scatter over ``sizes`` into an output of
-    ``out_sizes`` for their sizes alone, which lowerings may check before
-    setting up for it. A decline records its skip reason, as the template's
-    own check would.
+    Whether the template declines a scatter for its sizes alone, which lowerings
+    may check before setting up for it. A decline records its skip reason, so
+    the caller must then not offer the scatter to the template, which would
+    record it again.
     """
-    # The sorted lowering replaces the eager fallback rather than atomics, so
-    # the size gates do not apply to it.
-    if _use_sorted(dtype):
-        return False
-    numel = _hint(sympy_product(sizes))
-    if numel < config.scatter_preagg_template_min_numel:
-        _record_skip("too_small")
-        return True
-    # bf16 always stages in fp32 (see _try_template), and gets output copies
-    # only at many writes per element.
-    if dtype == torch.bfloat16 and _hint(sympy_product(out_sizes)) > 2 * numel:
-        _record_skip("fp32_copy_too_large")
-        return True
-    return False
+    reason = _size_decline(dtype, out_sizes, sizes)
+    if reason is not None:
+        _record_skip(reason)
+    return reason is not None
 
 
 def can_bypass_atomic_fallback(dtype: torch.dtype) -> bool:
@@ -505,19 +513,13 @@ def _align_strides(plan: _ScatterPlan, nodes: list[ir.IRNode]) -> None:
         _guarded(sympy.Eq(Mod(s, 16), 0))
 
 
-@ir_dataclass(frozen=False)
-class _ValueSubgraph(ir.ComputedBuffer):
-    """The scatter's values, carrying the plan the template kernel renders."""
-
-    plan: _ScatterPlan = dataclasses.field(kw_only=True)
-
-
 class ScatterPreaggTemplateKernel(TritonTemplateKernel):
     """Template kernel exposing the scatter plan (sizes, key, value, address) to
     the Jinja template as helper functions."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, plan: _ScatterPlan, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.scatter_plan = plan
         self._register_extra_template_env_fns(
             self.preagg_def_kernel,
             self.preagg_sizes,
@@ -525,13 +527,6 @@ class ScatterPreaggTemplateKernel(TritonTemplateKernel):
             self.preagg_value,
             self.preagg_addr,
         )
-
-    @property
-    def scatter_plan(self) -> _ScatterPlan:
-        subgraph = self.subgraphs[0] if self.subgraphs else None
-        if not isinstance(subgraph, _ValueSubgraph):
-            raise AssertionError("scatter_preagg kernel has no value subgraph")
-        return subgraph.plan
 
     def preagg_def_kernel(self, *names: str) -> str:
         """def_kernel naming the inputs OUT, ``names``, then IN0, IN1, ..."""
@@ -683,22 +678,6 @@ _COMMON_SOURCE = load_kernel_template("triton_scatter_preagg_common")
 scatter_preagg_atomic_template = ScatterPreaggTemplate(
     "scatter_preagg", _COMMON_SOURCE + load_kernel_template("triton_scatter_preagg")
 )
-
-# Up to this many destinations, blocks of 128 or more tokens always sort, as
-# the default configs' blocks are on all but small scatters.
-_ALWAYS_SORTED_KEYS = 64
-
-# Output copies (see _num_copies): each takes at least _WRITES_PER_COPY writes
-# per element, and all of them at most _MAX_COPY_BYTES, as zeroing and summing
-# them costs about as much as the contention they save on uniform keys. A hot
-# destination takes one atomic per token block, which serializes enough to pay
-# for the copies' two extra kernels only from _MIN_COPY_TOKENS tokens (fewer
-# for single columns, whose blocks are cheap).
-_MAX_COPIES = 8
-_WRITES_PER_COPY = 16
-_MAX_COPY_BYTES = 4 << 20
-_MIN_COPY_TOKENS = 1 << 18
-_MIN_COPY_TOKENS_SINGLE_COLUMN = 1 << 14
 
 # The sorted lowering sums each BLOCK_T chunk in a fixed order. Segments that
 # cross chunk boundaries go to PART for the merge kernel.
@@ -901,9 +880,10 @@ def maybe_preaggregated_scatter(
     Lower ``out[output_indexer(i)] += value_fn(i)`` over ``iter_sizes`` with the
     pre-aggregating template. ``inputs`` are the IR nodes value_fn and
     output_indexer read. Returns False if the template declines, for the caller
-    to lower the scatter; the template may have frozen the layouts of the
-    buffers it reads by then, and left buffers it computed for the scheduler to
-    remove.
+    to lower the scatter. Planning freezes the layouts of the buffers read and
+    may compute buffers the scheduler removes when unused. Size guards and the
+    fp32 copy come only after the declines that need a plan, so only a codegen
+    failure leaves guards behind.
     """
     read_names: OrderedSet[str] = OrderedSet()
     for x in inputs:
@@ -959,7 +939,10 @@ def _scatter_into_copy(
 
 
 def _stage_in_fp32(
-    dtype: torch.dtype, num_keys: sympy.Expr, matrix_preagg: bool
+    dtype: torch.dtype,
+    num_keys: sympy.Expr,
+    matrix_preagg: bool,
+    target: ScatterPreaggTarget,
 ) -> bool:
     """
     Whether to accumulate a 16-bit output in an fp32 copy rather than with
@@ -977,7 +960,7 @@ def _stage_in_fp32(
         dtype == torch.float16
         and not matrix_preagg
         and num_keys.is_number
-        and int(num_keys) <= _ALWAYS_SORTED_KEYS
+        and int(num_keys) <= target.always_sorted_keys
     )
 
 
@@ -994,7 +977,8 @@ def _try_template(
         return False
     orig_out = out
     use_sorted = _use_sorted(dtype)
-    if declines_by_size(dtype, out.get_size(), sizes):
+    if (reason := _size_decline(dtype, out.get_size(), sizes)) is not None:
+        _record_skip(reason)
         return False
     device = out.get_device_or_error()
     read_bufs = [
@@ -1033,36 +1017,21 @@ def _try_template(
     )
     target = V.choices.get_scatter_preagg_target(device)
     matrix_preagg = target.matrix_preagg(dtype, num_inner, plan.inner_contiguous)
-    stage = _stage_in_fp32(dtype, plan.num_keys, matrix_preagg) and not use_sorted
+    stage = (
+        _stage_in_fp32(dtype, plan.num_keys, matrix_preagg, target) and not use_sorted
+    )
     copy_dtype = torch.float32 if stage else dtype
     copies = (
-        1 if use_sorted else _num_copies(out_layout, copy_dtype, num_tokens, num_inner)
+        1
+        if use_sorted
+        else _num_copies(out_layout, copy_dtype, num_tokens, num_inner, target)
     )
-    if stage:
-        if copies == 1:
-            # The copy costs passes over (and twice the bytes of) the output,
-            # which outweigh the regular lowering on outputs over twice the
-            # scatter's elements (declines_by_size predicts this for bf16).
-            if _hint(sympy_product(out_layout.size)) > 2 * num_tokens * num_inner:
-                _record_skip("fp32_copy_too_large")
-                return False
-            return _scatter_into_copy(
-                "fp32_copy",
-                out,
-                torch.float32,
-                plan.value_fn,
-                sizes,
-                plan.output_indexer,
-                read_names,
-            )
-
     inputs: list[ir.IRNode] = []
     for name in reads:
         buf = V.graph.try_get_buffer(name)
         if buf is None:
             _record_skip("unknown_input")
             return False
-        buf.freeze_layout()
         inputs.append(buf)
 
     configs = V.choices.get_scatter_preagg_configs(
@@ -1086,15 +1055,34 @@ def _try_template(
             _record_skip("key_space")
             return False
 
-    # The template inlines value_fn and output_indexer through the plan; the
-    # buffer wraps the value function so index-width selection sees its reads.
-    value_subgraph = _ValueSubgraph(
+    if stage and copies == 1:
+        # The copy costs passes over (and twice the bytes of) the output, which
+        # outweigh the regular lowering on outputs over twice the scatter's
+        # elements (declines_by_size predicts this for bf16).
+        if _hint(sympy_product(out_layout.size)) > 2 * num_tokens * num_inner:
+            _record_skip("fp32_copy_too_large")
+            return False
+        return _scatter_into_copy(
+            "fp32_copy",
+            out,
+            torch.float32,
+            plan.value_fn,
+            sizes,
+            plan.output_indexer,
+            read_names,
+        )
+
+    for buf in inputs:
+        buf.freeze_layout()
+
+    # The kernel inlines value_fn and output_indexer through the plan; the
+    # subgraph wraps the value function so index-width selection sees its reads.
+    value_subgraph = ir.ComputedBuffer(
         name=None,
         layout=ir.FlexibleLayout(device=device, dtype=dtype, size=sizes),
         data=ir.Pointwise(
             device=device, dtype=dtype, inner_fn=plan.value_fn, ranges=sizes
         ),
-        plan=plan,
     )
     out = ir.TensorBox(out_storage)
     # Only the default (first) config guards symbolic sizes; the other
@@ -1145,6 +1133,26 @@ def _try_template(
     return True
 
 
+def _select(
+    name: str,
+    choices: list[Any],
+    input_nodes: list[ir.IRNode],
+    layout: ir.Layout,
+    **kwargs: Any,
+) -> None:
+    # MultiTemplateBuffer (deferred selection) does not track mutated inputs, so
+    # the in-place result would be dropped.
+    node, _ = autotune_select_algorithm(
+        name, choices, input_nodes, layout, return_multi_template=False, **kwargs
+    )
+    template_buf = node.data.data
+    if not isinstance(template_buf, ir.TemplateBuffer):
+        raise AssertionError(f"expected a template buffer, got {template_buf}")
+    # The template never stores to its own output, a placeholder that a consumer
+    # of the same size could otherwise fuse onto, losing its code.
+    template_buf.allow_epilogue_fusion = False
+
+
 def _placeholder_layout(
     out: ir.TensorBox, plan: _ScatterPlan, configs: list[ScatterPreaggConfig]
 ) -> ir.FixedLayout:
@@ -1190,7 +1198,11 @@ def _index_gen_fns(
 
 
 def _num_copies(
-    out_layout: ir.Layout, dtype: torch.dtype, num_tokens: int, num_inner: int
+    out_layout: ir.Layout,
+    dtype: torch.dtype,
+    num_tokens: int,
+    num_inner: int,
+    target: ScatterPreaggTarget,
 ) -> int:
     """
     Copies of the output for the atomics to take turns over. Pre-aggregation
@@ -1198,14 +1210,18 @@ def _num_copies(
     thousands of blocks; copies split that, for zeroing and summing them.
     """
     storage = sympy.sympify(out_layout.storage_size())
-    min_tokens = _MIN_COPY_TOKENS_SINGLE_COLUMN if num_inner == 1 else _MIN_COPY_TOKENS
+    min_tokens = (
+        target.min_copy_tokens_single_column
+        if num_inner == 1
+        else target.min_copy_tokens
+    )
     if not storage.is_number or num_tokens < min_tokens:
         return 1
     storage = int(storage)
     copies = min(
-        _MAX_COPIES,
-        num_tokens * num_inner // (storage * _WRITES_PER_COPY),
-        _MAX_COPY_BYTES // (storage * dtype.itemsize),
+        target.max_copies,
+        num_tokens * num_inner // (storage * target.writes_per_copy),
+        target.max_copy_bytes // (storage * dtype.itemsize),
     )
     return 1 << (copies.bit_length() - 1) if copies >= 2 else 1
 
@@ -1361,10 +1377,11 @@ def _lower_atomic(
 
             while widen > 1 and too_wide(widen):
                 widen //= 2
+        plain_d = cfg.block_d * widen
         return adaptive | {
-            "PLAIN_VEC": plain_vec,
+            "PLAIN_VEC": 0 if plain_d < plain_vec else plain_vec,
             "PLAIN_T": cfg.block_t // widen,
-            "PLAIN_D": cfg.block_d * widen,
+            "PLAIN_D": plain_d,
             "PLAIN_ITERS": cfg.d_iters // widen,
         }
 
@@ -1396,6 +1413,7 @@ def _lower_atomic(
             num_warps=cfg.num_warps,
             **({"waves_per_eu": waves_per_eu} if waves_per_eu else {}),
             subgraphs=[value_subgraph],
+            kernel_kwargs={"plan": plan},
             mutated_inputs=[out],
             call_sizes=[plan.num_tokens, plan.num_inner],
             BLOCK_T=cfg.block_t,
@@ -1419,16 +1437,13 @@ def _lower_atomic(
         )
     if not choices:
         return False
-    # MultiTemplateBuffer (deferred selection) does not track mutated inputs, so
-    # the in-place result would be dropped.
     input_nodes = [out, *inputs]
-    autotune_select_algorithm(
+    _select(
         "scatter_preagg",
         choices,
         input_nodes,
         layout,
         input_gen_fns=_index_gen_fns(plan, input_nodes),
-        return_multi_template=False,
     )
     return True
 
@@ -1472,6 +1487,7 @@ def _lower_sorted(
             num_stages=cfg.num_stages,
             num_warps=cfg.num_warps,
             subgraphs=[value_subgraph],
+            kernel_kwargs={"plan": plan},
             mutated_inputs=mutated,
             call_sizes=[plan.num_tokens, plan.num_inner],
             BLOCK_T=cfg.block_t,
@@ -1487,7 +1503,5 @@ def _lower_sorted(
             return False
         selections.append((name, choices, input_nodes))
     for name, choices, input_nodes in selections:
-        autotune_select_algorithm(
-            name, choices, input_nodes, layout, return_multi_template=False
-        )
+        _select(name, choices, input_nodes, layout)
     return True
