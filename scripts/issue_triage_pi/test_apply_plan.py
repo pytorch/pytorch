@@ -16,7 +16,13 @@ from apply_plan import (
     publish,
     summary_markdown,
 )
-from labels import load_templates, load_valid_labels, TRIAGE_SKILL
+from labels import (
+    DISTRIBUTED_MODULES,
+    load_templates,
+    load_valid_labels,
+    SUB_QUEUES,
+    TRIAGE_SKILL,
+)
 
 
 TEMPLATES = load_templates(TRIAGE_SKILL)
@@ -137,9 +143,9 @@ class PlanEffectsTest(unittest.TestCase):
                 result = effects("label", labels, templates, existing)
                 self.assertNotIn("triaged", result.add_labels)
 
-    def test_first_pass_cannot_add_the_distributed_completion_marker(self):
-        result = effects("label", ["module: nn", "bot-triaged", "ptd-bot-triaged"])
-        self.assertEqual(result.add_labels, ["module: nn", "triaged", "bot-triaged"])
+    def test_plan_cannot_request_completion_markers(self):
+        result = effects("request_info", ["module: nn", "bot-triaged", "triaged"])
+        self.assertEqual(result.add_labels, ["module: nn", "bot-triaged"])
 
     def test_high_priority_requires_review_not_triaged(self):
         result = effects("label", ["module: nn", "high priority", "triaged"])
@@ -175,9 +181,85 @@ class PlanEffectsTest(unittest.TestCase):
                 self.assertEqual(main(), 0)
             self.assertIn("→ review", publish.call_args.args[0])
 
-    def test_a_distributed_sub_queue_becomes_the_parent_queue(self):
-        result = effects("redirect_oncall", ["oncall: distributed checkpointing"])
-        self.assertEqual(result.add_labels, ["oncall: distributed", "bot-triaged"])
+    def test_distributed_route_adds_parent_queue_and_completes(self):
+        for labels in (
+            ["oncall: distributed checkpointing"],
+            ["oncall: distributed infra"],
+            ["oncall: distributed parallelisms", "module: fsdp"],
+            ["oncall: pt2", "module: inductor", "oncall: distributed infra"],
+        ):
+            with self.subTest(labels=labels):
+                result = effects("label", labels)
+                self.assertEqual(
+                    result.add_labels,
+                    [*labels, "oncall: distributed", "triaged", "bot-triaged"],
+                )
+
+    def test_existing_distributed_module_completes_a_parallelisms_route(self):
+        result = effects(
+            "label", ["oncall: distributed parallelisms"], existing={"module: fsdp"}
+        )
+        self.assertEqual(
+            result.add_labels,
+            [
+                "oncall: distributed parallelisms",
+                "oncall: distributed",
+                "triaged",
+                "bot-triaged",
+            ],
+        )
+
+    def test_incomplete_distributed_route_goes_to_review(self):
+        for decision, labels in (
+            ("label", ["oncall: distributed", "triaged"]),
+            ("label", ["oncall: distributed parallelisms"]),
+            ("label", ["oncall: distributed parallelisms", "module: performance"]),
+            ("redirect_oncall", ["oncall: distributed"]),
+            ("request_reproduction", ["oncall: distributed parallelisms"]),
+        ):
+            with self.subTest(decision=decision, labels=labels):
+                result = effects(decision, labels)
+                self.assertIn("triage review", result.add_labels)
+                self.assertNotIn("triaged", result.add_labels)
+
+    def test_incomplete_distributed_routes_are_not_triaged(self):
+        for decision, labels, templates in (
+            ("redirect_oncall", ["oncall: distributed infra"], []),
+            ("redirect_oncall", ["oncall: distributed parallelisms", "triaged"], []),
+            ("request_info", ["oncall: distributed infra"], ["request_more_info"]),
+        ):
+            with self.subTest(decision=decision, labels=labels):
+                result = effects(decision, labels, templates)
+                self.assertIn("oncall: distributed", result.add_labels)
+                self.assertNotIn("triaged", result.add_labels)
+
+    def test_plan_cannot_mark_a_redirect_triaged(self):
+        result = effects("redirect_oncall", ["oncall: jit", "triaged"])
+        self.assertEqual(result.add_labels, ["oncall: jit", "bot-triaged"])
+
+    def test_unknown_sub_queue_is_dropped_without_losing_a_valid_one(self):
+        result = effects(
+            "label", ["oncall: distributed infra", "oncall: distributed typo"]
+        )
+        self.assertEqual(
+            result.add_labels,
+            [
+                "oncall: distributed infra",
+                "oncall: distributed",
+                "triaged",
+                "bot-triaged",
+            ],
+        )
+        result = effects("label", ["oncall: distributed typo"])
+        self.assertEqual(result.add_labels, ["triage review", "bot-triaged"])
+
+    def test_two_sub_queues_keep_only_the_parent_for_review(self):
+        result = effects(
+            "label", ["oncall: distributed infra", "oncall: distributed checkpointing"]
+        )
+        self.assertEqual(
+            result.add_labels, ["oncall: distributed", "triage review", "bot-triaged"]
+        )
 
     def test_forbidden_labels_become_triage_review(self):
         result = effects("label", ["sev1", "ciflow/trunk", "module: nn"])
@@ -253,6 +335,43 @@ class PlanEffectsTest(unittest.TestCase):
         )
         self.assertFalse(result.close)
 
+    def test_numerical_close_cannot_override_review_or_human_priority(self):
+        for labels, existing in (
+            (["module: sdpa", "triage review", "triaged"], []),
+            (["module: sdpa"], ["triage review"]),
+            (["module: sdpa"], ["high priority"]),
+        ):
+            with self.subTest(labels=labels, existing=existing):
+                result = effects("close_expected_behavior", labels, existing=existing)
+                self.assertFalse(result.close)
+                self.assertEqual(result.comment, "")
+                self.assertNotIn("triaged", result.add_labels)
+                self.assertIn("triage review", set(result.add_labels) | set(existing))
+
+    def test_numerical_template_requires_expected_behavior_closure(self):
+        for decision in ("label", "triage_review", "request_info"):
+            with self.subTest(decision=decision):
+                result = effects(
+                    decision, ["module: numerical-stability"], ["numerical_accuracy"]
+                )
+                self.assertFalse(result.close)
+                expected = (
+                    TEMPLATES["request_more_info"]["comment"]
+                    if decision == "request_info"
+                    else ""
+                )
+                self.assertEqual(result.comment, expected)
+                self.assertIn("triage review", result.add_labels)
+                self.assertNotIn("triaged", result.add_labels)
+
+    def test_cancelled_numerical_close_drops_all_closing_comments(self):
+        result = effects(
+            "close_question", templates=["redirect_to_forum", "numerical_accuracy"]
+        )
+        self.assertFalse(result.close)
+        self.assertEqual(result.comment, "")
+        self.assertEqual(result.add_labels, ["triage review", "bot-triaged"])
+
     def test_unknown_template_is_not_posted(self):
         result = effects("request_info", templates=["anything goes"])
         self.assertEqual(result.comment, TEMPLATES["request_more_info"]["comment"])
@@ -261,6 +380,9 @@ class PlanEffectsTest(unittest.TestCase):
 
 
 class PlanSchemaTest(unittest.TestCase):
+    def test_distributed_routing_labels_exist_in_the_catalog(self):
+        self.assertLessEqual(SUB_QUEUES | DISTRIBUTED_MODULES, VALID)
+
     # The model can only submit what the schema allows, so a template or
     # decision renamed on one side silently disables that path.
     def test_schema_offers_exactly_the_templates_apply_can_post(self):

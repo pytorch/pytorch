@@ -1,8 +1,14 @@
 import functools
 import hashlib
+import importlib.util
 import logging
 import os
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    import torch
+    from torch._dynamo.device_interface import DeviceInterface
 
 
 log = logging.getLogger(__name__)
@@ -230,12 +236,13 @@ def has_triton_cuda_tma_device() -> bool:
 
 @functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
+    """Same SM 10.x and 11.x range as Inductor's is_datacenter_blackwell_arch()."""
     import torch
 
     if (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (10, 0)
-        and torch.cuda.get_device_capability() < (11, 0)
+        and torch.cuda.get_device_capability() < (12, 0)
         and not torch.version.hip
     ):
         return has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()
@@ -279,6 +286,74 @@ def has_triton_reduction_ordering() -> bool:
     return False
 
 
+def _interface_has_triton(
+    device_interface: type["DeviceInterface"],
+    device: "torch.types.Device" = None,
+) -> bool:
+    """Whether one device interface can compile and run Triton kernels.
+
+    Order: available, then Triton-capable for ``device``, then the backend
+    probe. Gating capability first keeps GPUTooOldForTriton out of the probe;
+    only TritonUnavailableError is caught, so unexpected probe errors rise.
+    ``is_available()`` takes no device; probes take none process-wide and the
+    device positionally, so contract-breaking overrides fail loudly. Nothing
+    here is cached: has_triton.cache_clear() re-probes every interface.
+    """
+    if not device_interface.is_available():
+        return False
+
+    # No device: the zero-arg call. A concrete device: passed positionally.
+    probe_args = () if device is None else (device,)
+
+    if not device_interface.is_triton_capable(*probe_args):
+        return False
+
+    from torch._dynamo.exc import TritonUnavailableError
+
+    try:
+        device_interface.raise_if_triton_unavailable(*probe_args)
+    except TritonUnavailableError:
+        return False
+    return True
+
+
+@functools.cache
+def has_triton_compile_iq() -> bool:
+    """Whether the available Triton is fbtriton with the compile_iq (magnon) hooks."""
+    if not has_triton_package():
+        return False
+    return importlib.util.find_spec("triton.magnon") is not None
+
+
+def triton_compile_iq_collect_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_COLLECT", "collect_enabled")
+
+
+def triton_compile_iq_apply_enabled() -> bool:
+    """Whether fbtriton's compile_iq apply is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_APPLY", "apply_enabled")
+
+
+def triton_compile_iq_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection or apply is on."""
+    return triton_compile_iq_collect_enabled() or triton_compile_iq_apply_enabled()
+
+
+def _triton_compile_iq_flag(env_var: str, flag: str) -> bool:
+    # The env var is read first so the probe, which imports Triton, only runs once compile_iq
+    # is requested.
+    if not os.environ.get(env_var) or not has_triton_compile_iq():
+        return False
+    try:
+        from triton.magnon import flags
+    except ImportError:
+        flags = None
+    enabled = getattr(flags, flag, None)
+    # fbtriton builds without this parser treat any non-empty value as on.
+    return True if enabled is None else enabled()
+
+
 @functools.cache
 def has_triton(*, include_cpu: bool = False) -> bool:
     """Return whether a usable Triton backend is available.
@@ -295,27 +370,75 @@ def has_triton(*, include_cpu: bool = False) -> bool:
         return False
 
     from torch._dynamo.device_interface import get_registered_device_interfaces
-    from torch._dynamo.exc import TritonUnavailableError
 
-    # A device supports Triton if it is available, reports Triton capability, and
-    # its Triton backend is actually built. Capability is gated first so that
-    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
-    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
-    # specific TritonUnavailableError rather than RuntimeError so unexpected
-    # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
         if ":" in name or (name == "cpu" and not include_cpu):
             continue
-        if not (
-            device_interface.is_available() and device_interface.is_triton_capable()
-        ):
-            continue
-        try:
-            device_interface.raise_if_triton_unavailable()
-        except TritonUnavailableError:
-            continue
-        return True
+        if _interface_has_triton(device_interface):
+            return True
     return False
+
+
+@functools.cache
+def _has_triton_for_interface_on_device(
+    device_interface: type["DeviceInterface"], device: "torch.device"
+) -> bool:
+    # Per-(interface, device) memo of the single rule; staleness is documented
+    # on has_triton_for_device().
+    return _interface_has_triton(device_interface, device)
+
+
+def has_triton_for_device(device: "str | torch.device") -> bool:
+    """Whether Triton can compile+run kernels for *this* device.
+
+    The conjunction from has_triton(), scoped to one device, index included:
+    a cuda:1 operand is answered about cuda:1. A concrete index is checked
+    against device_count() before any probe, so a device this host lacks
+    answers False while other probe errors propagate. False for cpu, for
+    names ``torch.device`` cannot parse, and for unregistered types. Memoized
+    per (interface, device) until cleared; package/config gates re-run live.
+    """
+    import torch
+
+    try:
+        device = torch.device(device)
+    except (TypeError, RuntimeError):
+        # torch.device only knows the built-in type names; anything else cannot
+        # back a Triton compile, so report False rather than raising.
+        return False
+
+    if device.type == "cpu":
+        return False
+    if not has_triton_package():
+        return False
+
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
+        return False
+
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        device_interface = get_interface_for_device(device.type)
+    except NotImplementedError:
+        return False
+
+    if device.index is not None:
+        # Resolve the operand's index against the count before any probe:
+        # an exported/fake graph naming cuda:3 on a two-GPU host is answered
+        # here, not by an IndexError escaping through can_pad
+        # mid-compilation.
+        try:
+            count = device_interface.device_count()
+        except NotImplementedError:
+            # Base DeviceInterface raises this when a backend declares no
+            # count: nothing to check the index against, so the probes answer.
+            count = None
+        if count is not None and not 0 <= device.index < count:
+            return False
+
+    return _has_triton_for_interface_on_device(device_interface, device)
 
 
 @functools.cache

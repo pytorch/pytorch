@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import operator
-from dataclasses import dataclass
-from typing import Any, Literal, TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import Any, Literal, Self, TYPE_CHECKING
 
+from .._api import _slice_range, _subrange
 from .._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
+    import builtins
+
     import torch
 
     from ._transport import NIXLTransport
@@ -33,6 +35,13 @@ class NIXLRemoteBuffer(_WireDescriptor):
     device_id: int
     memory_type: str
     metadata: bytes
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        offset, length = _subrange(self.length, offset, length, "remote buffer")
+        return replace(self, address=self.address + offset, length=length)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        return self.slice(*_slice_range(self.length, key))
 
 
 @dataclass
@@ -62,6 +71,14 @@ class NIXLMemoryView:
     def size(self) -> int:
         return self._length
 
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        self._memory._registration.ensure_active()
+        offset, length = _subrange(self._length, offset, length, "view")
+        return type(self)(self._memory, self._offset + offset, length)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        return self.slice(*_slice_range(self._length, key))
+
 
 class NIXLMutableMemoryView(NIXLMemoryView):
     """A writable byte range in NIXL-registered memory."""
@@ -78,17 +95,7 @@ class NIXLMemory:
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         self._registration.ensure_active()
-        offset = 0 if offset is None else operator.index(offset)
-        if offset < 0 or offset > self._registration.length:
-            raise ValueError("offset is outside the registered memory")
-        length = (
-            self._registration.length - offset
-            if length is None
-            else operator.index(length)
-        )
-        if length < 0 or length > self._registration.length - offset:
-            raise ValueError("view exceeds the registered memory")
-        return offset, length
+        return _subrange(self._registration.length, offset, length)
 
     def to_view(
         self, offset: int | None = None, length: int | None = None
