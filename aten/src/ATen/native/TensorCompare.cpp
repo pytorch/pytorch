@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
@@ -10,6 +11,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/ElementBytes.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
@@ -686,6 +688,35 @@ Tensor& where_self_out(
     const Tensor& self,
     const Tensor& other,
     Tensor& out) {
+  if (hasNonPowerOfTwoElementSize(self.scalar_type()) &&
+      other.scalar_type() == self.scalar_type()) {
+    // No typed or opaque kernel; select whole elements of as_element_bytes
+    // views. As below, 0-dim operands may be CPU scalars; move self and other
+    // to the output device first because their bytes views are not 0-dim.
+    TORCH_CHECK(
+        out.scalar_type() == self.scalar_type(),
+        "Expected out type to be ",
+        self.scalar_type(),
+        " but got ",
+        out.scalar_type());
+    at::native::resize_output(
+        out,
+        infer_size_dimvector(
+            condition.sizes(),
+            infer_size_dimvector(self.sizes(), other.sizes())));
+    auto device = out_device(condition, self, other);
+    auto bytes_on_device = [&](const Tensor& t) {
+      return as_element_bytes(
+          t.dim() == 0 && t.device() != device ? t.to(device) : t);
+    };
+    auto out_bytes = as_element_bytes(out);
+    at::where_out(
+        out_bytes,
+        condition.dim() == 0 ? condition : condition.unsqueeze(-1),
+        bytes_on_device(self),
+        bytes_on_device(other));
+    return out;
+  }
   const auto result_type = at::native::result_type(self, other);
   TORCH_CHECK(
       out.scalar_type() == result_type,

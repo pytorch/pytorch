@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
+#include <ATen/native/ElementBytes.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -273,8 +274,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         self.sym_sizes(),
         " doesn't match the broadcast shape ",
         shape);
-    auto self_bytes = self.unsqueeze(-1).view(kByte);
-    copy_impl(self_bytes, src.unsqueeze(-1).view(kByte), non_blocking);
+    auto self_bytes = as_element_bytes(self);
+    copy_impl(self_bytes, as_element_bytes(src), non_blocking);
     return self;
   }
 
