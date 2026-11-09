@@ -335,6 +335,20 @@ class TestSelectExploration(unittest.TestCase):
                 self.assertIn(error, self.stderr)
 
 
+class TestRunExplored(unittest.TestCase):
+    def test_gate(self) -> None:
+        cases = [
+            # td_failed, keep_going -> runs
+            ((False, False), True),
+            ((False, True), True),
+            ((True, True), True),
+            ((True, False), False),
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(exploration.run_explored(*args), expected)
+
+
 class TestExplorationInfo(unittest.TestCase):
     def test_info(self) -> None:
         split = exploration.ExplorationSplit(

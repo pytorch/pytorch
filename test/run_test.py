@@ -66,7 +66,10 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.exploration import select_exploration
+from tools.testing.target_determination.exploration import (
+    run_explored,
+    select_exploration,
+)
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
@@ -2760,7 +2763,9 @@ def main():
     try:
         # Actually run the tests
         run_batch(test_batch)
-        if test_batch_explored is not None and (keep_going or not test_batch.failures):
+        if test_batch_explored is not None and run_explored(
+            bool(test_batch.failures), keep_going
+        ):
             run_batch(test_batch_explored)
 
     finally:

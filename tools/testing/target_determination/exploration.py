@@ -237,6 +237,12 @@ def check_disjoint(
         raise ValueError("explored tests overlap TD's selected tests")
 
 
+def run_explored(td_failed: bool, keep_going: bool) -> bool:
+    """Whether the explored batch runs after TD's batch. Without keep-going, a
+    failure in TD's batch stops the job's tests, so exploration stops too."""
+    return keep_going or not td_failed
+
+
 def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
