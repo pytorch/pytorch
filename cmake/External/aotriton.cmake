@@ -165,8 +165,14 @@ if(NOT __AOTRITON_INCLUDED)
     if(EXISTS "${ROCM_PATH}/lib/cmake/hip")
       list(APPEND __AOTRITON_ROCM_ARGS "-Dhip_DIR=${ROCM_PATH}/lib/cmake/hip")
     endif()
-    # TheRock vendors liblzma; its prefix lets pkg_search_module find liblzma.pc.
-    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig")
+    # Fall back to TheRock's vendored liblzma only without a system one: its
+    # renamed soname resolves only through the wheel's repaired RPATH.
+    # NO_CMAKE_PATH: AOTriton does not inherit our CMAKE_PREFIX_PATH.
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+      pkg_check_modules(__AOTRITON_SYSTEM_LZMA QUIET NO_CMAKE_PATH liblzma)
+    endif()
+    if(NOT __AOTRITON_SYSTEM_LZMA_FOUND AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig")
       list(APPEND __AOTRITON_ROCM_ARGS "-DCMAKE_PREFIX_PATH=${ROCM_PATH}/lib/rocm_sysdeps")
     endif()
 
