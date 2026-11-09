@@ -80,9 +80,9 @@ _GOLDEN = {
     ("sum", "float64", 8, 100003): "93bc7250f8575381",
     # --- prod ---
     ("prod", "float16", 8, 4097): "68d56137046f20c2",
-    ("prod", "float16", 8, 100003): "2d52e87b8e56a9c5",
-    ("prod", "bfloat16", 8, 4097): "e5fc6516cb12b36e",
-    ("prod", "bfloat16", 8, 100003): "926c2606d521edb0",
+    ("prod", "float16", 8, 100003): "597360c473583df4",
+    ("prod", "bfloat16", 8, 4097): "6289b8ed7493445d",
+    ("prod", "bfloat16", 8, 100003): "6ab8e4d173cde603",
     ("prod", "float32", 8, 16): "6890938d89593965",
     ("prod", "float32", 8, 1024): "77f1b0239bc269fb",
     ("prod", "float32", 8, 4097): "a323b3f23861149f",
@@ -100,10 +100,6 @@ def _golden_input(m, n, dtype, prod):
     if prod:
         # Bound the product without rounding narrow factors to 1.
         vals = 1.0 + vals / max(8.0, n**0.5)
-    if dtype.itemsize == 2:
-        # The table was made by rounding to float32 first, as float64 -> float16
-        # and bfloat16 conversions did before they rounded once.
-        vals = vals.float()
     return vals.to(dtype).contiguous()
 
 

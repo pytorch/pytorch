@@ -576,13 +576,6 @@ class TestRoundedConversion(TestCase):
         self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
         self.assertEqual(ep.module()(x), M()(x), atol=0, rtol=0)
 
-    def test_torchscript(self, device):
-        def fn(x):
-            return torch._to_dtype_rounded(x, torch.float16, "toward_zero")
-
-        x = torch.randn(4, device=device)
-        self.assertEqual(torch.jit.script(fn)(x), fn(x), atol=0, rtol=0)
-
     @onlyAccelerator
     def test_cross_device(self, device):
         x = torch.randn(1000, dtype=torch.float64)

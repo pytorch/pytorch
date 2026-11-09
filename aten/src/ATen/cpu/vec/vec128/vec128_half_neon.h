@@ -577,7 +577,8 @@ Vectorized<c10::Half> inline fmadd(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 #else
-  return a * b + c;
+  return fused_multiply_add(
+      a, b, c, [](float x, float y, float z) { return x * y + z; });
 #endif
 }
 
@@ -589,7 +590,8 @@ Vectorized<c10::Half> inline fnmadd(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
 #else
-  return -a * b + c;
+  return fused_multiply_add(
+      a, b, c, [](float x, float y, float z) { return -(x * y) + z; });
 #endif
 }
 
@@ -601,7 +603,8 @@ Vectorized<c10::Half> inline fmsub(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vnegq_f16(vfmsq_f16(c, a, b)));
 #else
-  return a * b - c;
+  return fused_multiply_add(
+      a, b, c, [](float x, float y, float z) { return x * y - z; });
 #endif
 }
 
@@ -613,7 +616,8 @@ Vectorized<c10::Half> inline fnmsub(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vnegq_f16(vfmaq_f16(c, a, b)));
 #else
-  return -a * b - c;
+  return fused_multiply_add(
+      a, b, c, [](float x, float y, float z) { return -(x * y) - z; });
 #endif
 }
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
