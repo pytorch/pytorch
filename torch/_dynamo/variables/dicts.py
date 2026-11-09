@@ -398,9 +398,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
+            storage = (
+                self.items.items()
+                if isinstance(self.items, SideEffectsProxyDict)
+                else dict.items(self.items)
+            )
             items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in dict.items(self.items)
+                f"{tracked_repr(tx, cast(HashableTracker, key).vt)}: {tracked_repr(tx, value)}"
+                for key, value in storage
             ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
@@ -409,7 +414,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def _hashable_key(
         self: "ConstDictVariable | FrozenDictVariable", key: VariableTracker
@@ -813,15 +818,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from . import DictBuiltinVariable
-
-        temp_dict_vt = cast(
-            ConstDictVariable,
-            DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs),
-        )
-        tx.output.side_effects.mutation(self)
-        self._update_items(temp_dict_vt.items)
-        return ConstantVariable.create(None)
+        return self.dict_update_common(tx, args, kwargs, method_name="dict")
 
     # NB - Both key and value are LazyVariableTrackers in the beginning. So,
     # we have to insert guards when a dict method is accessed. For this to be
@@ -1009,9 +1006,20 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        return self.dict_update_common(tx, args, kwargs, container_name=container_name)
+
+    def dict_update_common(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        *,
+        method_name: str = "update",
+        container_name: str | None = None,
+    ) -> VariableTracker:
         # CPython's dict_update_common validates args, updates from the positional
         # source, then merges keywords only if that update succeeded.
-        check_positional(tx, "update", len(args), 0, 1)
+        check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
             tx.output.side_effects.mutation(self)
@@ -1325,6 +1333,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             if op not in ("__eq__", "__ne__") or not pyanydict_check(other):
                 return ConstantVariable.create(NotImplemented)
         except NotImplementedError:
+            # Internal trackers such as ComptimeVariable may not expose a Python type.
             return ConstantVariable.create(NotImplemented)
         if self is other:
             # Keys and values match by identity; avoid guarding nn.Module hook IDs.
@@ -1402,6 +1411,83 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
+    def tp_init_impl(
+        self: ConstDictVariable,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) > 1:
+            # CPython corrected the plural in 3.13.8 (gh-138517).
+            suffix = "s" if sys.version_info < (3, 13, 8) else ""
+            raise_type_error(
+                tx, f"expected at most 1 argument{suffix}, got {len(args)}"
+            )
+        return OrderedDictVariable.odict_update(self, tx, args, kwargs)
+
+    def odict_update(
+        self: VariableTracker,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) > 1:
+            raise_type_error(
+                tx, f"update() takes at most 1 positional argument ({len(args)} given)"
+            )
+        # String subclasses can observe interleaved hashing and insertion.
+        fast_keywords = not kwargs or all(type(key) is str for key in kwargs)
+        if (
+            pyodict_checkexact(self)
+            and fast_keywords
+            and self.is_mutable()
+            and (not args or self._can_fast_merge(args[0]))
+        ):
+            if args and not isinstance(args[0], ConstDictVariable):
+                return cast(
+                    VariableTracker,
+                    ConstDictVariable.dict_update(self, tx, args, kwargs),
+                )
+            self.install_dict_keys_match_guard()
+            if args or kwargs:
+                tx.output.side_effects.mutation(self)
+            if args:
+                source = cast(ConstDictVariable, args[0])
+                source.install_dict_order_guard(tx)
+                source.materialize_keys()
+                self._update_items(source.items)
+            if kwargs:
+                self._update_items(
+                    {
+                        HashableTracker(VariableTracker.build(tx, key)): value
+                        for key, value in kwargs.items()
+                    }
+                )
+            return ConstantVariable.create(None)
+        if pyodict_checkexact(self) and fast_keywords and self.is_mutable() and args:
+            source = args[0].realize()
+            if (
+                type(source) is variables.ZipVariable
+                and len(source.iterable.items) == 2
+            ):
+                # zip produces pairs; keep iteration live across key hash callbacks.
+                for pair in lazily_unpack(tx, source, allow_fast_path=False):
+                    key, value = cast(variables.TupleVariable, pair).items
+                    generic_setitem(tx, self, key, value)
+                if kwargs:
+                    self.odict_update(tx, [], kwargs)
+                return ConstantVariable.create(None)
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
+        )
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        # odict_inplace_or uses mutablemapping_update_arg, including __setitem__.
+        self.odict_update(tx, [other], {})
+        return self
+
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
@@ -1457,82 +1543,8 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
-    def tp_init_impl(
-        self: ConstDictVariable,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) > 1:
-            # CPython corrected the plural in 3.13.8 (gh-138517).
-            suffix = "s" if sys.version_info < (3, 13, 8) else ""
-            raise_type_error(
-                tx, f"expected at most 1 argument{suffix}, got {len(args)}"
-            )
-        return OrderedDictVariable.odict_update(self, tx, args, kwargs)
-
-    def odict_update(
-        self: ConstDictVariable,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) > 1:
-            raise_type_error(
-                tx, f"update() takes at most 1 positional argument ({len(args)} given)"
-            )
-        # String subclasses can observe interleaved hashing and insertion.
-        fast_keywords = not kwargs or all(type(key) is str for key in kwargs)
-        if (
-            pyodict_checkexact(self)
-            and fast_keywords
-            and self.is_mutable()
-            and self._can_fast_merge(args[0] if args else ConstDictVariable({}))
-        ):
-            if args and not isinstance(args[0], ConstDictVariable):
-                return cast(
-                    VariableTracker,
-                    ConstDictVariable.dict_update(self, tx, args, kwargs),
-                )
-            self.install_dict_keys_match_guard()
-            if args or kwargs:
-                tx.output.side_effects.mutation(self)
-            if args:
-                source = cast(ConstDictVariable, args[0])
-                source.install_dict_order_guard(tx)
-                source.materialize_keys()
-                self._update_items(source.items)
-            if kwargs:
-                self._update_items(
-                    {
-                        HashableTracker(VariableTracker.build(tx, key)): value
-                        for key, value in kwargs.items()
-                    }
-                )
-            return ConstantVariable.create(None)
-        if pyodict_checkexact(self) and fast_keywords and self.is_mutable() and args:
-            source = args[0].realize()
-            if (
-                type(source) is variables.ZipVariable
-                and len(source.iterable.items) == 2
-            ):
-                # zip produces pairs; keep iteration live across key hash callbacks.
-                for pair in lazily_unpack(tx, source, allow_fast_path=False):
-                    key, value = cast(variables.TupleVariable, pair).items
-                    generic_setitem(tx, self, key, value)
-                if kwargs:
-                    self.odict_update(tx, [], kwargs)
-                return ConstantVariable.create(None)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
-        )
-
-    def nb_inplace_or_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> VariableTracker:
-        # odict_inplace_or uses mutablemapping_update_arg, including __setitem__.
-        self.odict_update(tx, [other], {})
-        return self
+    def python_type(self) -> type:
+        return collections.OrderedDict
 
     def move_to_end(
         self: "OrderedDictVariable",
@@ -1754,7 +1766,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             OrderedDictVariable.tp_init_impl(new, tx, [left], {})
         else:
             cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
-            new = cast(ConstDictVariable, cls.call_function(tx, [left], {}))
+            new = cls.call_function(tx, [left], {})
         OrderedDictVariable.odict_update(new, tx, [right], {})
         return new
 
@@ -2310,12 +2322,31 @@ class NNModuleHooksDictVariable(ConstDictVariable):
     def is_python_constant(self) -> bool:
         return not self.items
 
+    def python_type(self) -> type:
+        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+        return super().python_type()
+
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
+    def _hashable_key(self, key: VariableTracker) -> HashableTracker:
+        self.materialize_keys()
+        return super()._hashable_key(key)
+
+    def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self.materialize_keys()
+        super()._store_item(key, value)
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self.materialize_keys()
+        super()._update_items(items)
+
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
-        # Detached containers reuse stored hashes and may never compare their keys.
+        # Key lookups, mutations and detached copies can observe IDs without
+        # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
             key.vt.realize()
         return self.items
