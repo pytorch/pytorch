@@ -410,7 +410,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyOn(["cuda", "xpu"])
     @skipIfTorchVersionLessThan(2, 10)
-    def test_my_is_pinned_cuda_true(self, device):
+    def test_my_is_pinned_true(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
@@ -1167,9 +1167,9 @@ class TestLibtorchAgnostic(TestCase):
         t = torch.randn(2, 3)
         self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
 
-        t_cuda = torch.randn(2, 3, device=device)
+        t_device = torch.randn(2, 3, device=device)
         self.assertEqual(
-            libtorch_agnostic.ops.test_tensor_device(t_cuda), t_cuda.device
+            libtorch_agnostic.ops.test_tensor_device(t_device), t_device.device
         )
 
         if torch.device(device).type == "cuda" and torch.cuda.device_count() > 1:
