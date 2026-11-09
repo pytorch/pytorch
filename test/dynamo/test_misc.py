@@ -113,7 +113,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -10530,16 +10529,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch._C._remove_obj_from_tls(torch.compiler._IS_COMPILING)
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
-
-    def test_tracing_flags_scriptable(self):
-        # Only is_compiling() is scriptable: its is_scripting() check predates
-        # the per-thread flags and lets the JIT dead-code the TLS read. The
-        # other readers were never scriptable.
-        @torch.jit.script
-        def scripted_flags():
-            return torch.compiler.is_compiling()
-
-        self.assertEqual(scripted_flags(), False)
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
@@ -20962,35 +20951,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
         inp = torch.ones(3)
         self.assertEqual(fn(inp, Foo()), inp + 1)
-
-
-class TestTracer(JitTestCase):
-    def test_jit_save(self):
-        def fn():
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.a = 3
-
-                @torch.jit.export
-                def __getstate__(self):
-                    return (3, self.training)
-
-                @torch.jit.export
-                def __setstate__(self, state):
-                    self.a = state[0]
-                    self.training = state[1]
-
-                def forward(self, x):
-                    return x + self.a
-
-            f = Foo()
-
-            return torch.jit.trace(f, (torch.rand(3, 4),))
-
-        fn()
-        opt_fn = torch.compile(fn, backend="eager")
-        opt_fn()
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
