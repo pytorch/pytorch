@@ -109,6 +109,10 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
 
     bool is_high_priority_stream;
     std::unordered_map<std::string, std::string> hints;
+
+    c10::intrusive_ptr<::c10d::Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
   };
 
   // c10d-style constructor: the XCCL communicator is bootstrapped lazily, on
@@ -214,6 +218,7 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
 
   void setTimeout(std::chrono::milliseconds timeout) override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
   void shutdown() override;
   void abort() override;
@@ -233,6 +238,8 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     return true;
   }
+
+  bool isInitialized() override;
 
   // ---- caching-allocator segment registration ----
   // Called by XCCLCachingAllocatorHook, possibly from an allocator thread, so

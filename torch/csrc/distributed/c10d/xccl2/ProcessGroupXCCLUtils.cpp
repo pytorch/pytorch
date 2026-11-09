@@ -159,6 +159,16 @@ ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
     const ::c10d::ReduceOp& op,
     onecclComm_t comm,
     const onecclDataType_t dataType) {
+  // Bool is sent as uint8, so a plain SUM would add bytes; MAX is logical OR.
+  if (tensor.scalar_type() == at::kBool) {
+    if (op == ::c10d::ReduceOp::SUM) {
+      return onecclMax;
+    }
+    TORCH_CHECK_TYPE(
+        op != ::c10d::ReduceOp::AVG,
+        "Cannot use ReduceOp.AVG with boolean inputs");
+  }
+
   switch (op) {
     case ::c10d::ReduceOp::SUM:
       return onecclSum;
