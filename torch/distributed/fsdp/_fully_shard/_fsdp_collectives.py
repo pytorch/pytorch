@@ -404,6 +404,10 @@ def foreach_all_gather(
         )
         if output_metadata is not None:  # the layout finalizes the output
             _check_custom_layout_outputs(fsdp_params, world_size)
+        comm_kwargs = {}
+        if layout.comm is not None:  # it selects the output with the metadata
+            all_gather_comm = layout.comm
+            comm_kwargs["output_metadata"] = output_metadata
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
@@ -416,9 +420,6 @@ def foreach_all_gather(
         )
         del param_all_gather_inputs, all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    comm_kwargs = {}
-    if layout.comm_type is not None:  # its comm selects the output with the metadata
-        comm_kwargs["output_metadata"] = output_metadata
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
             output_tensor=all_gather_output,

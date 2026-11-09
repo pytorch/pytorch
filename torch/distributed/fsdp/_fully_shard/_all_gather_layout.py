@@ -17,14 +17,16 @@ buffer at an offset, a tensor subclass that it returns must report that offset.
 ``DefaultAllGatherLayout`` copies with its ``output_fn`` into the parameters' outputs:
 one buffer per output, freed by its parameter, unless a custom layout adopted them.
 
-A layout whose output needs a specific collective names that comm's type as
-``comm_type``. FSDP passes such a comm the metadata that the layout prepared for
-each call as ``output_metadata``, ``None`` for a call that falls back to
-rank-major output, so the comm keeps no per-call state and can serve any number
-of parameter groups. ``FSDPModule.set_custom_all_gather`` installs the comm, and
-``FSDPModule.set_all_gather_layout``, the only way to install a layout, installs
-the layout; each rejects a mismatch with the other. Symmetric memory and
-process-group allocation work only with ``DefaultAllGatherLayout``.
+A layout whose output needs a specific collective carries it as its ``comm``,
+which runs all of the layout's all-gathers. FSDP passes it the metadata that the
+layout prepared for each call as ``output_metadata``, ``None`` for a call that
+falls back to rank-major output, so the comm keeps no per-call state and can
+serve any number of parameter groups. A custom layout without a ``comm`` runs
+FSDP's default all-gather. The comms that ``FSDPModule.set_custom_all_gather``,
+``set_symm_mem_for_comm`` and ``set_allocate_memory_from_process_group_for_comm``
+install work only with ``DefaultAllGatherLayout``, whose copy-in packs the input
+into the output that the comm allocated. ``FSDPModule.set_all_gather_layout`` is
+the only way to install a layout.
 
 ``AllGatherLayout`` and its metadata types are private authoring interfaces;
 out-of-tree backends must target a matching revision of them.
@@ -159,16 +161,18 @@ class AllGatherLayout(ABC):
     persistent buffers that finalize returns (see the module documentation).
     Parameter groups' all-gathers can overlap, so a layout that keeps per-call
     state must not be shared across groups; FSDP passes each call's metadata to
-    finalize and to a comm of ``comm_type`` instead. ``DefaultAllGatherLayout`` is
-    stateless and may be shared. ``comm_type`` is the all-gather comm type that
-    this layout requires, if any, and ``output_fn`` copies out the calls whose
-    output is rank-major (``None`` for FSDP's default copy-out; see
+    finalize and to the layout's ``comm`` instead. ``DefaultAllGatherLayout`` is
+    stateless and may be shared. ``comm`` is the all-gather comm that allocates
+    and runs this layout's collectives (``None`` for FSDP's default one); it must
+    use the ``group`` it is called with, since a layout can serve several
+    parameter groups. ``output_fn`` copies out the calls whose output is
+    rank-major (``None`` for FSDP's default copy-out; see
     ``DefaultAllGatherLayout``). FSDP calls ``prepare`` and ``copy_in`` on its
     all-gather copy-in stream and ``finalize_outputs`` on the current stream,
     which allocates the buffers.
     """
 
-    comm_type: type[AllGather] | None = None
+    comm: AllGather | None = None
     output_fn: Callable | None = None
 
     def prepare(
@@ -184,8 +188,8 @@ class AllGatherLayout(ABC):
     def prepare_output(self, input_metadata: AllGatherInputMetadata) -> object | None:
         """Return per-call metadata, or None to use rank-major input and output.
 
-        The comm must produce the selected layout for this collective; a comm of
-        ``comm_type`` receives this metadata to select it. Metadata must remain
+        The comm must produce the selected layout for this collective; the
+        layout's ``comm`` receives this metadata to select it. Metadata must remain
         valid until its result is finalized; FSDP may also wait for a prepared
         all-gather and drop it unfinalized, e.g. on reshard.
         """

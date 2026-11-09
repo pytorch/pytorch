@@ -3086,20 +3086,20 @@ class _ParamContiguousAllGather(DefaultAllGather):
 
 
 class _ParamContiguousLayout(AllGatherLayout):
-    """Backs a group's parameters with one FSDP-owned buffer that a
-    ``_ParamContiguousAllGather``'s parameter-contiguous output refills with a
-    single copy.
+    """Backs a group's parameters with one FSDP-owned buffer that the
+    parameter-contiguous output of its ``comm``, a ``_ParamContiguousAllGather``,
+    refills with a single copy.
 
     ``mode`` is "custom" to always select parameter-contiguous output,
     "rank_major" to always fall back, or "alternate" to fall back on the first
     all-gather and then alternate. "rank_major" never selects
-    parameter-contiguous output, so it also runs with any comm, as
-    ``comm_type=None``.
+    parameter-contiguous output, so it also runs without a ``comm``, on FSDP's
+    default all-gather.
     """
 
-    def __init__(self, mode, comm_type=_ParamContiguousAllGather):
+    def __init__(self, mode, comm=None):
         self.mode = mode
-        self.comm_type = comm_type
+        self.comm = comm
         self.num_prepares = 0
         # This call's choice, which finalize checks against FSDP's metadata
         self.split_sizes = None
@@ -3320,49 +3320,46 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    def test_layout_comm_type(self):
+    def test_layout_comm(self):
         model = nn.Linear(8, 8)
         fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
         group = model._get_fsdp_state()._fsdp_param_group
         native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
-        comm = DefaultAllGather()
-        # Neither setter replaces what the other installed
+        comm = _ParamContiguousAllGather()
+        # Under the default layout, neither setter replaces what the other installed
         model.set_all_gather_layout(native)
         model.set_custom_all_gather(comm)
         self.assertIs(group._all_gather_layout, native)
         self.assertIs(group._all_gather_comm, comm)
-        # A layout that requires a comm type needs that comm installed first and
-        # then rejects comms of other types
-        layout = _ParamContiguousLayout("custom")
-        mismatch = "requires a _ParamContiguousAllGather comm, not DefaultAllGather"
-        with self.assertRaisesRegex(ValueError, mismatch):
+        # Installed comms only work with the default layout: a custom layout, which
+        # carries its own comm, is rejected while one is installed and then rejects
+        # them, also from FSDP's comm setters
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        rejected = "cannot use _ParamContiguousAllGather"
+        with self.assertRaisesRegex(ValueError, rejected):
             model.set_all_gather_layout(layout)
         self.assertIs(group._all_gather_layout, native)
-        model.set_custom_all_gather(_ParamContiguousAllGather())
+        default_comm = DefaultAllGather()
+        model.set_custom_all_gather(default_comm)
         model.set_all_gather_layout(layout)
-        model.set_custom_all_gather(_ParamContiguousAllGather())  # same type
-        with self.assertRaisesRegex(ValueError, mismatch):
+        with self.assertRaisesRegex(ValueError, rejected):
             model.set_custom_all_gather(comm)
-        # Symmetric memory and process-group allocation need the default layout
         with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
             model.set_allocate_memory_from_process_group_for_comm(True)
         with self.assertRaisesRegex(ValueError, "cannot use SymmMemAllGather"):
             model.set_symm_mem_for_comm()
-        self.assertIs(type(group._all_gather_comm), _ParamContiguousAllGather)
-        # The comm keeps no per-call state, so it can serve another module too
+        self.assertIs(group._all_gather_comm, default_comm)
+        # The layout's comm keeps no per-call state, so another module's layout can
+        # carry it too
         other = nn.Linear(8, 8)
         fully_shard(other, mesh=init_device_mesh("cpu", (self.world_size,)))
-        other.set_custom_all_gather(group._all_gather_comm)
-        other.set_all_gather_layout(_ParamContiguousLayout("custom"))
-        # Replacing the layout keeps the comm, and 2.15's hook fails loudly
-        model.set_all_gather_layout(DefaultAllGatherLayout())
-        self.assertIs(type(group._all_gather_comm), _ParamContiguousAllGather)
+        other.set_all_gather_layout(_ParamContiguousLayout("custom", layout.comm))
+        # 2.15's hook fails loudly
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn
-        # A module with several parameter groups cannot install a custom comm, so
-        # neither a layout that requires one
+        # A layout reaches every parameter group of a module
         mesh = init_device_mesh("cpu", (self.world_size, 1), mesh_dim_names=("a", "b"))
         bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
         model = nn.Linear(8, 8)
@@ -3371,8 +3368,6 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             mesh=mesh["b"],
             shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
         )
-        with self.assertRaisesRegex(ValueError, mismatch):
-            model.set_all_gather_layout(_ParamContiguousLayout("custom"))
         model.set_all_gather_layout(native)
         groups = model._get_fsdp_state()._fsdp_param_groups
         self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
@@ -3387,7 +3382,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         # Layouts, default ones too, change only between iterations, and FSDP
         # checks every group before replacing any layout
         model[1].unshard()
-        rank_major = _ParamContiguousLayout("rank_major", comm_type=None)
+        rank_major = _ParamContiguousLayout("rank_major")
         for layout in (rank_major, native):
             with self.assertRaisesRegex(RuntimeError, "cannot replace"):
                 model.set_all_gather_layout(layout)
@@ -3411,8 +3406,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         handle.wait()
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):
             model[0].set_all_gather_layout(native, recurse=False)
-        # Symmetric memory and process-group allocation need the default layout,
-        # even where a custom layout falls back to it on every call
+        # Process-group allocation needs the default layout, even where a custom
+        # layout falls back to rank-major output on every call
         with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
             model[0].set_allocate_memory_from_process_group_for_comm(True)
         self.assertIs(groups[0]._all_gather_comm, comm)
@@ -3458,8 +3453,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         for mode in ("custom", "alternate"):
             model = nn.Linear(8, 8)
             fully_shard(model, mesh=mesh, reshard_after_forward=True)
-            model.set_custom_all_gather(_ParamContiguousAllGather())
-            model.set_all_gather_layout(RejectedRefill(mode))
+            layout = RejectedRefill(mode, _ParamContiguousAllGather())
+            model.set_all_gather_layout(layout)
             model(inp)
             with self.assertRaisesRegex(ValueError, "did not refill"):
                 model(inp)
@@ -3497,9 +3492,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             local_tensor = param._local_tensor
             local_tensor.fsdp_pre_all_gather = pre_all_gather.__get__(local_tensor)
             local_tensor.fsdp_post_all_gather = post.__get__(local_tensor)
-        layout = _ParamContiguousLayout("alternate")
+        layout = _ParamContiguousLayout("alternate", _ParamContiguousAllGather())
         layout.num_prepares = 1  # custom first, then fall back every other unshard
-        model.set_custom_all_gather(_ParamContiguousAllGather())
         model.set_all_gather_layout(layout)
         inp = torch.randn(2, 8)
         for _ in range(3):
@@ -3518,8 +3512,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         ref_model = copy.deepcopy(model)
         mesh = init_device_mesh("cpu", (self.world_size,))
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
-        model.set_custom_all_gather(_ParamContiguousAllGather())
-        model.set_all_gather_layout(_ParamContiguousLayout("custom"))
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        model.set_all_gather_layout(layout)
         inp = torch.randn(2, 8)
         with torch.inference_mode():
             for _ in range(2):  # adopts, then refills
@@ -3556,9 +3550,8 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     # One comm serves every block, whose all-gathers overlap, while each block has
     # its own layout, which keeps per-call state
     comm = _ParamContiguousAllGather()
-    layouts = [_ParamContiguousLayout(mode) for _ in model]
+    layouts = [_ParamContiguousLayout(mode, comm) for _ in model]
     for block, layout in zip(model, layouts):
-        block.set_custom_all_gather(comm)
         block.set_all_gather_layout(layout, recurse=False)
     groups = [block._get_fsdp_state()._fsdp_param_group for block in model]
     ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
@@ -3618,7 +3611,6 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     if mode == "custom":
         for block, layout in zip(model, layouts):
             test.assertGreater(layout.single_copy_refills, 0)
-            block.set_custom_all_gather(_ParamContiguousAllGather())  # any time
             block.set_all_gather_layout(layout, recurse=False)  # a no-op
             with test.assertRaisesRegex(RuntimeError, "cannot replace"):
                 block.set_all_gather_layout(DefaultAllGatherLayout())

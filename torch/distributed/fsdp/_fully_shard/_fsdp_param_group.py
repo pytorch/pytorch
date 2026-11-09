@@ -419,24 +419,17 @@ class FSDPParamGroup:
             )
 
     def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
-        # Symmetric memory and process-group allocation assume FSDP's in-place
-        # rank-major all-gather, while a custom layout packs separate input
-        allocating = (SymmMemAllGather, ProcessGroupAllocAllGather)
-        default_layout = isinstance(layout, DefaultAllGatherLayout)
-        if not default_layout and issubclass(comm_type, allocating):
+        # Installed comms expect the default copy-in into the output they allocate,
+        # while a custom layout packs its own input and carries its own comm
+        custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+        if custom_layout and comm_type is not DefaultAllGather:
             raise ValueError(
                 self._with_fqn(
                     f"all-gather layout {type(layout).__name__} cannot use "
-                    f"{comm_type.__name__}: symmetric memory and process-group "
-                    "allocation only work with DefaultAllGatherLayout"
-                )
-            )
-        if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
-            raise ValueError(
-                self._with_fqn(
-                    f"all-gather layout {type(layout).__name__} requires a "
-                    f"{layout.comm_type.__name__} comm, not {comm_type.__name__}; "
-                    "install one with set_custom_all_gather() before the layout"
+                    f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+                    "set_symm_mem_for_comm() and "
+                    "set_allocate_memory_from_process_group_for_comm() only work "
+                    "with DefaultAllGatherLayout; a custom layout carries its own comm"
                 )
             )
 

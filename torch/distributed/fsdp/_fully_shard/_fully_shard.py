@@ -779,12 +779,12 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        This sets only the comm and keeps the installed all-gather layout. A
-        layout whose ``comm_type`` is set requires a comm of that type, which
-        FSDP passes each call's layout metadata: install the comm with this
-        method before the layout, and while the layout is installed, comms of
-        other types are rejected. Otherwise the comm can be replaced at any time,
-        since the layout, not the comm, owns the parameters' outputs.
+        This only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`,
+        which packs the comm's input into the output that the comm allocated; a
+        custom layout carries its own comm instead (see
+        :meth:`set_all_gather_layout`). The comm can be replaced at any time,
+        since it owns no outputs.
 
         Args:
             comm (AllGather): Custom all-gather communication.
@@ -920,25 +920,24 @@ class FSDPModule:
 
         The layout packs the group's all-gather inputs before the collective and
         turns the collective output into the parameters' all-gather outputs
-        after it completes.
+        after it completes. This is the only way to install a layout.
         :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
-        packs rank-major input and copies the output with its ``output_fn``,
-        e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
-        for the native copy; it works with any comm that produces rank-major
-        output and is the only layout that works with
-        :meth:`set_symm_mem_for_comm` and
-        :meth:`set_allocate_memory_from_process_group_for_comm`. This is the only
-        way to install a layout. A layout whose
-        ``comm_type`` is set, e.g. one whose collective writes
-        parameter-contiguous output, requires a comm of that type, which FSDP
-        passes each call's layout metadata: install the comm first with
-        :meth:`set_custom_all_gather`. Replacing a layout keeps the installed
-        comm. A layout that keeps no per-call state can serve any number of
-        modules. Set custom layouts before the first unshard: layouts change only
-        between iterations, while no all-gather is pending and parameters are
-        resharded, and never after parameters adopt outputs from a custom
-        layout, since only the layout that created those outputs can refill
-        them. FSDP checks every group before changing any.
+        packs rank-major input into the collective output and copies the output
+        with its ``output_fn``, e.g.
+        ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)`` for the
+        native copy. It is the only layout that works with the comms that
+        :meth:`set_custom_all_gather`, :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm` install, which
+        expect that copy-in. A custom layout, e.g. one whose collective writes
+        parameter-contiguous output, packs its own input and carries its own
+        all-gather as its ``comm``, which FSDP passes each call's layout
+        metadata; without a ``comm``, it runs FSDP's default all-gather. A
+        layout that keeps no per-call state can serve any number of modules. Set
+        custom layouts before the first unshard: layouts change only between
+        iterations, while no all-gather is pending and parameters are resharded,
+        and never after parameters adopt outputs from a custom layout, since
+        only the layout that created those outputs can refill them. FSDP checks
+        every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
