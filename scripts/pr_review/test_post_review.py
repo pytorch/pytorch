@@ -11,6 +11,7 @@ import io
 import json
 import re
 import sys
+import tempfile
 import unittest
 import urllib.parse
 from contextlib import redirect_stdout
@@ -2119,7 +2120,15 @@ class TestTooLargeModeReadsItsInputs(unittest.TestCase):
         with mock.patch.object(Path, "read_text", return_value='{"status": "x"}'):
             with mock.patch.object(post_review, "run", return_value=0) as run_:
                 self.main(["--row-file", "terminal.json"], self.ENV)
-        self.assertEqual(run_.call_args.args[-1], (100, 400_000))
+        self.assertEqual(run_.call_args.args[-2:], ((100, 400_000), ""))
+
+    def test_the_row_path_passes_the_approved_commit_the_review_was_told(self):
+        with mock.patch.object(Path, "read_text", return_value='{"status": "x"}'):
+            with mock.patch.object(post_review, "run", return_value=0) as run_:
+                self.main(
+                    ["--row-file", "terminal.json"], {**self.ENV, "APPROVED_SHA": SHA}
+                )
+        self.assertEqual(run_.call_args.args[-1], SHA)
 
     def test_a_bad_limit_drops_the_numbers_not_the_notice(self):
         _, decline_ = self.main(["--too-large"], {**self.ENV, "MAX_DIFF_BYTES": "4e5"})
@@ -2137,14 +2146,18 @@ RULES = [
 ]
 
 
-def approval(rid, login, state="APPROVED", type_="User"):
+OLD = "b" * 40
+
+
+def approval(rid, login, state="APPROVED", type_="User", commit=SHA, at=""):
     return {
         "id": rid,
         "node_id": f"N{rid}",
         "user": {"login": login, "type": type_},
         "body": "",
         "state": state,
-        "commit_id": SHA,
+        "commit_id": commit,
+        "submitted_at": at or f"2026-11-09T00:00:{rid:02d}Z",
     }
 
 
@@ -2270,10 +2283,132 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         (body,) = gh.posted()
         self.assertEqual(body["event"], "REQUEST_CHANGES")
 
+    def told(self, approved_sha, *reviews):
+        gh = Rules(reviews=list(reviews), comments=[])
+        self.assertEqual(
+            run(gh, row(), 1, SHA, "no automated review", AUTHOR, None, approved_sha),
+            0,
+        )
+        (body,) = gh.posted()
+        return gh, body
+
+    def test_an_earlier_commit_the_review_was_told_about_keeps_the_request(self):
+        gh, body = self.told(
+            OLD,
+            old_review(5, state="CHANGES_REQUESTED"),
+            approval(6, "alice", commit=OLD),
+        )
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        self.assertIn(
+            f"An approval from `alice` of {OLD[:12]} meets merge_rules.yaml's",
+            body["body"],
+        )
+        self.assertIn("blocks only on problems in the changes made since", body["body"])
+        self.assertNotIn("posted as a comment", body["body"])
+        self.assertEqual(dismissed(gh), [], "a request after the approval is withdrawn")
+
+    def test_an_approval_the_review_was_not_told_about_says_nothing(self):
+        for told in ("", "c" * 40):
+            _, body = self.told(told, approval(6, "alice", commit=OLD))
+            self.assertEqual(body["event"], "REQUEST_CHANGES", told)
+            self.assertNotIn("An approval from", body["body"], told)
+
+    def test_an_approval_of_the_head_wins_over_a_later_one_of_an_earlier_commit(self):
+        _, body = self.told(
+            OLD,
+            approval(6, "alice"),
+            approval(7, "root", commit=OLD, at="2026-11-10T00:00:00Z"),
+        )
+        self.assertEqual(body["event"], "COMMENT")
+
+    def test_the_most_recent_approval_of_an_earlier_commit_counts(self):
+        with mock.patch(
+            "post_review.merge_rules", return_value=[Rule(["*"], ["alice", "root"])]
+        ):
+            gh = Rules(
+                reviews=[
+                    approval(6, "alice", commit="c" * 40, at="2026-11-09T02:00:00Z"),
+                    approval(7, "root", commit=OLD, at="2026-11-09T01:00:00Z"),
+                ],
+                comments=[],
+            )
+            self.assertEqual(
+                post_review.binding_approval(gh, 1, SHA),
+                post_review.Approval(("alice", "root"), "c" * 40),
+            )
+
+    def test_an_approval_of_the_head_under_a_later_rule_wins(self):
+        rules = [Rule(["*"], ["alice"]), Rule(["torch/**"], ["bob"])]
+        with mock.patch("post_review.merge_rules", return_value=rules):
+            gh = Rules(
+                reviews=[
+                    approval(6, "alice", commit=OLD, at="2026-11-10T00:00:00Z"),
+                    approval(7, "bob"),
+                ],
+                comments=[],
+            )
+            self.assertEqual(
+                post_review.binding_approval(gh, 1, SHA),
+                post_review.Approval(("alice", "bob"), SHA),
+            )
+
+    def test_a_clean_verdict_told_of_a_lost_approval_clears_nothing(self):
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = Rules(reviews=[old], comments=[])
+        clean = row(verdict="ready_for_human_review", findings=[])
+        self.assertEqual(
+            run(gh, clean, 1, SHA, "no automated review", AUTHOR, None, OLD), 0
+        )
+        (body,) = gh.posted()
+        self.assertEqual(body["event"], "COMMENT")
+        self.assertEqual(dismissed(gh), [])
+
+    def test_a_clean_verdict_told_of_a_standing_approval_clears(self):
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = Rules(reviews=[old, approval(6, "alice", commit=OLD)], comments=[])
+        clean = row(verdict="ready_for_human_review", findings=[])
+        run(gh, clean, 1, SHA, "no automated review", AUTHOR, None, OLD)
+        self.assertEqual(dismissed(gh), ["5"])
+
+    def test_an_approval_on_an_unreadable_commit_binds_nothing(self):
+        gh = Rules(reviews=[approval(6, "alice", commit="")], comments=[])
+        with mock.patch("post_review.warn") as warned:
+            self.assertIsNone(post_review.binding_approval(gh, 1, SHA))
+        self.assertIn("unreadable commit", warned.call_args.args[0])
+
     def test_a_clean_verdict_does_not_look_for_approvals(self):
         gh = Rules(reviews=[approval(6, "alice")], comments=[])
         go(gh, row(verdict="ready_for_human_review", findings=[]))
         self.assertFalse([c for c in gh.calls if "/files" in c[1]])
+
+
+class TestApprovedCommitMode(unittest.TestCase):
+    """`--approved-commit FILE`, which `prepare` runs before the review."""
+
+    def main(self, found, td):
+        out = Path(td) / "approved"
+        env = {
+            "GH_TOKEN": "t",
+            "REPO": "o/r",
+            "PR_NUMBER": "1",
+            "REVIEWED_SHA": SHA,
+        }
+        with (
+            mock.patch.dict("os.environ", env),
+            mock.patch("sys.argv", ["post_review.py", "--approved-commit", str(out)]),
+            mock.patch("post_review.binding_approval", return_value=found) as check,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        self.assertEqual(check.call_args.args[1:], (1, SHA))
+        return out.read_text()
+
+    def test_it_writes_the_approved_commit(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self.main(post_review.Approval(("alice",), OLD), td), OLD)
+
+    def test_no_approval_writes_an_empty_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self.main(None, td), "")
 
 
 class TestTheRealMergeRules(unittest.TestCase):

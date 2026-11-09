@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Write the changes the author made since the latest automated review.
+"""Write the changes the author made since the latest automated review, or,
+with `--since approval`, since the commit a maintainer approved.
 
 Runs in the review job before the model, from the trusted checkout, on the
 PR's working copy (`--repo`). Its inputs are commits the trusted `prepare` job resolved
@@ -56,6 +57,45 @@ CONFLICTED = (
 )
 
 
+REVIEW_NOTES = {
+    "none": NOTE_NO_REVIEW,
+    "unavailable": NOTE_UNAVAILABLE,
+    "same": NOTE_SAME,
+    "failed": NOTE_FAILED,
+    "base_only": NOTE_BASE_ONLY,
+    "too_large": NOTE_TOO_LARGE,
+    "header": HEADER,
+    "conflicted": CONFLICTED,
+}
+APPROVAL_NOTES = {
+    "none": "# No maintainer approval of an earlier commit to compare with.\n",
+    "unavailable": (
+        "# The commit the maintainer approved, {sha}, or its merge base is no "
+        "longer available.\n"
+    ),
+    "same": "# The maintainer approved this same commit: nothing changed since.\n",
+    "failed": "# The changes since the maintainer's approval could not be computed.\n",
+    "base_only": (
+        "# Nothing changed in this PR's files since the maintainer approved {sha} "
+        "apart from changes from the base.\n"
+    ),
+    "too_large": (
+        "# The changes since the maintainer's approval are too large to list.\n"
+    ),
+    "header": (
+        "# Changes to this PR's files since the maintainer approved {sha}, with "
+        "the approved version replayed onto the current merge base so that "
+        "changes from the base are left out.\n"
+    ),
+    "conflicted": (
+        "\n# These files changed both in the base and in this PR since the "
+        "maintainer's approval, so the approved version could not be replayed; "
+        "their diff against the approved commit includes the base's changes.\n"
+    ),
+}
+NOTES = {"review": REVIEW_NOTES, "approval": APPROVAL_NOTES}
+
+
 REPO = Path(".")
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
@@ -101,30 +141,37 @@ def diff(old: str, files: list[str]) -> str:
     return proc.stdout.decode(errors="replace")
 
 
-def interdiff(previous: str, previous_base: str, base: str, files: list[str]) -> str:
+def interdiff(
+    previous: str,
+    previous_base: str,
+    base: str,
+    files: list[str],
+    notes: dict[str, str] = REVIEW_NOTES,
+) -> str:
     if not previous:
-        return NOTE_NO_REVIEW
+        return notes["none"]
     if not files:
         return NOTE_NO_FILES
     if git("rev-parse", "HEAD").stdout.decode().strip() == previous:
-        return NOTE_SAME
+        return notes["same"]
     if not previous_base or not all(map(has_commit, (previous, previous_base, base))):
-        return NOTE_UNAVAILABLE.format(sha=previous)
+        return notes["unavailable"].format(sha=previous)
     replayed = replay(previous, previous_base, base)
     if replayed is None:
-        return NOTE_FAILED
+        return notes["failed"]
     tree, conflicted = replayed
     earlier = git("diff", "--name-only", "-z", previous_base, previous)
     if earlier.returncode != 0:
-        return NOTE_FAILED
+        return notes["failed"]
     files += [
         f for f in os.fsdecode(earlier.stdout).split("\0") if f and f not in files
     ]
     clean = diff(tree, [f for f in files if f not in conflicted])
     both = diff(previous, [f for f in files if f in conflicted])
     if not clean and not both:
-        return NOTE_BASE_ONLY.format(sha=previous)
-    return HEADER.format(sha=previous) + clean + (CONFLICTED + both if both else "")
+        return notes["base_only"].format(sha=previous)
+    header = notes["header"].format(sha=previous)
+    return header + clean + (notes["conflicted"] + both if both else "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,8 +180,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", type=Path, default=Path("."), help="the PR's working copy"
     )
     ap.add_argument(
-        "--previous", default="", help="commit the latest automated review saw"
+        "--since",
+        choices=sorted(NOTES),
+        default="review",
+        help="what --previous is: the commit the latest automated review saw, "
+        "or the commit a maintainer approved",
     )
+    ap.add_argument("--previous", default="", help="the earlier commit (see --since)")
     ap.add_argument("--previous-base", default="", help="that commit's merge base")
     ap.add_argument("--base", required=True, help="this run's merge base")
     ap.add_argument(
@@ -145,14 +197,15 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     global REPO
     REPO = args.repo
+    notes = NOTES[args.since]
     files = [os.fsdecode(f) for f in args.files.read_bytes().split(b"\0") if f]
     try:
-        text = interdiff(args.previous, args.previous_base, args.base, files)
+        text = interdiff(args.previous, args.previous_base, args.base, files, notes)
     except Exception as e:  # noqa: BLE001 - any failure is a note, never a failed review
         print(f"::warning::interdiff not built: {e}")
-        text = NOTE_FAILED
+        text = notes["failed"]
     if len(text.encode()) > args.max_bytes:
-        text = NOTE_TOO_LARGE
+        text = notes["too_large"]
     args.out.write_text(text)
     return 0
 

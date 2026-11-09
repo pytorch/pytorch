@@ -54,6 +54,7 @@ sys.path.insert(0, str(HERE))
 
 # The collector whose output keys stage A's system prompt must name.
 import fetch_pr_comments  # noqa: E402
+import interdiff  # noqa: E402
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
@@ -1252,6 +1253,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "Read(//tmp/pr-comments.json),"
             # Changes since the commit the latest automated review saw.
             "Read(//tmp/pr-interdiff.txt),"
+            # Changes since the commit a maintainer approved.
+            "Read(//tmp/pr-approval-interdiff.txt),"
             # pr-review's sub-agents. They inherit this session's rules.
             "Agent"
         ),
@@ -2958,6 +2961,8 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
     STAGE2_ENV_KEYS = frozenset(
         (
             "APPEND_SYSTEM_PROMPT",
+            "APPROVED_MERGE_BASE_SHA",
+            "APPROVED_SHA",
             "AWS_REGION",
             "BASE_SHA",
             "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
@@ -5189,7 +5194,13 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
     """
 
     NAME = "Upload the review inputs to S3"
-    INPUTS = ("pr-diff.txt", "pr-files.txt", "pr-comments.json")
+    INPUTS = (
+        "pr-diff.txt",
+        "pr-files.txt",
+        "pr-comments.json",
+        "pr-interdiff.txt",
+        "pr-approval-interdiff.txt",
+    )
 
     def setUp(self):
         self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
@@ -6942,6 +6953,190 @@ printf '%s' '{json.dumps({"items": [], "previous_review_sha": previous})}' > pr-
         self.assertIn(self.PATH, stage_a_system_prompt())
 
 
+class TestTheApprovalInterdiffReachesTheReview(unittest.TestCase):
+    """The review is told what changed since a maintainer's binding approval.
+
+    `prepare` asks post_review.py for the approved commit and the API for its
+    merge base; the review job builds /tmp/pr-approval-interdiff.txt from them
+    with interdiff.py, and stage A blocks only on what changed since. Anything
+    unreadable must leave the file a note, never fail the run: without an
+    approval the review blocks as usual.
+    """
+
+    PATH = "/tmp/pr-approval-interdiff.txt"
+    APPROVED, APPROVED_BASE, MERGE_BASE = "d" * 40, "e" * 40, "f" * 40
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.prepare = strip_comments(job_block(self.text, "prepare"))
+        self.review = strip_comments(job_block(self.text, "review"))
+        self.publish = strip_comments(job_block(self.text, "publish"))
+
+    def _find(self, approved: str | None, compare: str | None, td: str):
+        """The approval step, with post_review.py stubbed to write `approved`
+        (None: it writes no file)."""
+        argv = Path(td) / "gh_calls"
+        argv.write_text("")
+        calls = Path(td) / "py_calls"
+        write = f"printf '%s' '{approved}' > \"$3\"\n" if approved is not None else ""
+        python = f'#!/bin/bash\necho "$*" >> {calls}\n{write}'
+        gh = _GH_STUB if compare is not None else "#!/bin/bash\nexit 1\n"
+        (proc, out) = run_step(
+            self.text,
+            "Find the binding maintainer approval",
+            td,
+            {
+                "GH_ARGV": str(argv),
+                "COMPARE_JSON": json.dumps({"merge_base_commit": {"sha": compare}}),
+                "GH_TOKEN": "stub-token",
+                "REPO": "o/r",
+                "PR_NUMBER": "1",
+                "REVIEWED_SHA": STUB_API_HEAD,
+                "BASE_SHA": STUB_API_BASE,
+            },
+            {"python3": python, "gh": gh},
+        )
+        return proc, out.read_text(), argv.read_text(), calls.read_text()
+
+    def test_the_approved_commit_and_its_merge_base_are_exported(self):
+        with tempfile.TemporaryDirectory() as td:
+            proc, written, gh_calls, py_calls = self._find(
+                self.APPROVED, self.APPROVED_BASE, td
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            py_calls.strip(),
+            "scripts/pr_review/post_review.py --approved-commit approved-commit.txt",
+        )
+        outputs = sole_outputs(self, written)
+        self.assertEqual(outputs.get("approved_sha"), self.APPROVED)
+        self.assertEqual(outputs.get("approved_merge_base_sha"), self.APPROVED_BASE)
+        self.assertEqual(
+            [tuple(ln.split("\t")) for ln in gh_calls.splitlines()],
+            [
+                (
+                    f"repos/o/r/compare/{STUB_API_BASE}...{self.APPROVED}?per_page=1",
+                    ".merge_base_commit.sha",
+                )
+            ],
+        )
+
+    def test_anything_unreadable_is_no_approval_not_a_failure(self):
+        for approved in (None, "", "not-a-sha", self.APPROVED + "\nx=y"):
+            with tempfile.TemporaryDirectory() as td:
+                proc, written, gh_calls, _ = self._find(
+                    approved, self.APPROVED_BASE, td
+                )
+            self.assertEqual(proc.returncode, 0, f"{approved!r}: {proc.stderr}")
+            outputs = sole_outputs(self, written)
+            self.assertEqual(
+                (outputs.get("approved_sha"), outputs.get("approved_merge_base_sha")),
+                ("", ""),
+                approved,
+            )
+            self.assertEqual(gh_calls, "", approved)
+
+    def test_both_shas_reach_the_review_job_and_the_publisher(self):
+        outputs = mapping_items(indented_block(self.prepare, "outputs:"))
+        step = self._build_step()
+        for name in ("approved_sha", "approved_merge_base_sha"):
+            self.assertEqual(
+                norm_expr(outputs[name]), f"${{{{ steps.approval.outputs.{name} }}}}"
+            )
+            self.assertEqual(
+                env_values(step, name.upper()),
+                [f"${{{{ needs.prepare.outputs.{name} }}}}"],
+            )
+        self.assertEqual(
+            env_values(self.publish, "APPROVED_SHA"),
+            ["${{ needs.prepare.outputs.approved_sha }}"],
+        )
+
+    def _build_step(self) -> str:
+        hits = re.split(r"(?m)^      -(?: |$)", self.review)
+        (step,) = [
+            s
+            for s in hits
+            if s.startswith(
+                "name: Build the interdiff since the maintainer's approval\n"
+            )
+        ]
+        return step
+
+    def _run_build(self, approved: str, td: str, fetch_status: int = 0):
+        calls = Path(td) / "calls"
+        calls.write_text("")
+        log = f'#!/bin/bash\necho "$(basename "$0") $*" >> {calls}\n'
+        return run_step(
+            self.text,
+            "Build the interdiff since the maintainer's approval",
+            td,
+            {
+                "APPROVED_SHA": approved,
+                "APPROVED_MERGE_BASE_SHA": self.APPROVED_BASE if approved else "",
+                "MERGE_BASE_SHA": self.MERGE_BASE,
+                "MAX_DIFF_BYTES": "1000",
+            },
+            {"git": log + f"exit {fetch_status}\n", "python3": log},
+        ), calls
+
+    def test_a_commit_gone_after_a_force_push_still_builds_the_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build(self.APPROVED, td, fetch_status=128)
+            ran = calls.read_text().splitlines()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            ran,
+            [
+                f"git -C pr fetch --no-tags --depth=1 origin {self.APPROVED} {self.APPROVED_BASE}",
+                f"python3 trusted/scripts/pr_review/interdiff.py --repo pr --since approval "
+                f"--previous {self.APPROVED} --previous-base {self.APPROVED_BASE} "
+                f"--base {self.MERGE_BASE} --files /tmp/pr-files.z "
+                f"--out {self.PATH} --max-bytes 1000",
+            ],
+        )
+
+    def test_a_malformed_sha_aborts_the_step(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build("not-a-sha", td)
+            ran = calls.read_text()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(ran, "")
+
+    def test_it_runs_after_the_size_gate_and_before_any_credential(self):
+        self.assertIn("if: steps.diff.outputs.too_large == 'false'", self._build_step())
+        size = self.review.find("- name: Build the diff and apply the size gate")
+        build = self.review.find(
+            "- name: Build the interdiff since the maintainer's approval"
+        )
+        creds = self.review.find("- name: Configure AWS credentials via OIDC")
+        self.assertTrue(-1 < size < build < creds, (size, build, creds))
+
+    def test_the_model_is_granted_and_told_how_to_read_it(self):
+        self.assertIn(f"Read(/{self.PATH})", model_step(self.review, "a"))
+        section = TestStageAFanOut.sections()["Maintainer approval"]
+        self.assertIn(self.PATH, section)
+        # Each phrase the section keys on is one interdiff.py writes as the
+        # file's first line, so a reworded note cannot silently stop matching.
+        notes = interdiff.APPROVAL_NOTES
+        self.assertTrue(
+            notes["header"].startswith(
+                "# Changes to this PR's files since the maintainer approved"
+            )
+        )
+        self.assertIn(
+            "`# Changes to this PR's files since the maintainer approved`", section
+        )
+        self.assertIn("apart from changes from the base", notes["base_only"])
+        self.assertIn("apart from changes from the base", section)
+        self.assertIn("non-blocking", section)
+        # post_review.py alone applies an approval of the head, so its note is
+        # one of the "other" notes the review treats as usual.
+        self.assertIn("approved this same commit", notes["same"])
+        self.assertNotIn("approved this same commit", section)
+        self.assertIn("any other note, review as usual", section)
+
+
 class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
     """Executed, not read: the two guards that authenticate the request.
 
@@ -7423,7 +7618,10 @@ class TestStageAFanOut(unittest.TestCase):
         return step.group(1)
 
     def test_sections_are_in_the_order_above_and_below_assume(self):
-        self.assertEqual(list(self.sections()), ["Offline", "Fan-out", "Security"])
+        self.assertEqual(
+            list(self.sections()),
+            ["Offline", "Fan-out", "Maintainer approval", "Security"],
+        )
 
     def test_fan_out_names_the_skill_reviewers(self):
         listed = re.search(r"(\w+) reviewers \(([^)]*)\)", self.sections()["Fan-out"])

@@ -186,6 +186,44 @@ class TestInterdiff(unittest.TestCase):
         interdiff.main([*args, "--max-bytes", "10"])
         self.assertEqual(out.read_text(), interdiff.NOTE_TOO_LARGE)
 
+    def test_since_approval_names_the_approval_in_every_note(self):
+        v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
+        self.checkout(v2)
+        files, out = Path("files.z"), Path("out.txt")
+        files.write_bytes(b"a.txt\0")
+        notes = interdiff.APPROVAL_NOTES
+
+        def write(previous, max_bytes="100000"):
+            interdiff.main(
+                [
+                    "--since",
+                    "approval",
+                    "--previous",
+                    previous,
+                    "--previous-base",
+                    self.b0,
+                    "--base",
+                    self.b0,
+                    "--files",
+                    str(files),
+                    "--out",
+                    str(out),
+                    "--max-bytes",
+                    max_bytes,
+                ]
+            )
+            return out.read_text()
+
+        text = write(self.v1)
+        self.assertTrue(text.startswith(notes["header"].format(sha=self.v1)), text)
+        self.assertIn("+2-pr", text)
+        self.assertEqual(write(""), notes["none"])
+        self.assertEqual(write(v2), notes["same"])
+        self.assertEqual(write(self.v1, "10"), notes["too_large"])
+        self.assertEqual(set(notes), set(interdiff.REVIEW_NOTES))
+        for key, note in notes.items():
+            self.assertNotIn("automated review", note, key)
+
     def test_main_reads_the_repo_it_is_given(self):
         # As in the workflow: run from elsewhere with --repo pointing at the PR's working copy.
         v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
