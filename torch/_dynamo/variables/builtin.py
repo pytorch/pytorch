@@ -110,6 +110,7 @@ from .dicts import (
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
+    _is_skipped_constant_property,
     _NO_DEFAULT,
     binary_iop,
     binary_op,
@@ -3582,8 +3583,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         no_keywords(tx, "dict.fromkeys", kwargs)
         check_positional(tx, "fromkeys", len(args), 1, 2)
-        if isinstance(args[0], ConstDictVariable):
-            args[0].materialize_keys()
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             if isinstance(args[0], ConstDictVariable):
@@ -3597,7 +3596,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 else args[0].items
             )
             result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-            result.items.update(dict.fromkeys(storage, value))
+            result.items = dict.fromkeys(storage, value)
             return result
         return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
 
@@ -3638,6 +3637,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
             if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
+                if not isinstance(obj, ConstDictVariable):
+                    unimplemented(
+                        gb_type="Unsupported builtin dictionary storage operation",
+                        context=f"dict.{name} on {obj.python_type_name()}",
+                        explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+                        hints=[],
+                    )
                 # Explicit dict slots bypass OrderedDict's linked-order behavior.
                 slotdef = obj.lookup_slotdefs(name)
                 if slotdef is None:
@@ -3659,6 +3665,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if user_cls is dict:
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.dict_update_common(tx, list(args), kwargs, method_name="dict")
+            return result
         args_list = list(args)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
@@ -3748,7 +3758,16 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
         try:
-            return self._call_getattr(tx, args, kwargs)
+            fold_constant = False
+            if args[1].is_python_constant():
+                name = args[1].as_python_constant()
+                fold_constant = (
+                    isinstance(name, str)
+                    and _is_skipped_constant_property(tx, args[0], name)
+                    and check_unspec_or_constant_args(args, kwargs)
+                )
+            if not fold_constant:
+                return self._call_getattr(tx, args, kwargs)
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
@@ -3760,17 +3779,24 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
                 raise
-            try:
-                result = getattr(*[a.as_python_constant() for a in args])
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-            except AsPythonConstantNotImplementedError:
-                raise
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-                raise
-            return VariableTracker.build(tx, result)
+        return self._call_constant_getattr(tx, args)
+
+    def _call_constant_getattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+    ) -> VariableTracker:
+        try:
+            result = getattr(*[a.as_python_constant() for a in args])
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+        except AsPythonConstantNotImplementedError:
+            raise
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+            raise
+        return VariableTracker.build(tx, result)
 
     def _call_getattr(
         self,

@@ -87,6 +87,15 @@
  * whose first rocBLAS operation runs inside a capture, such as an autograd
  * worker, still creates its per-(thread, device) internal handle there.
  *
+ * hipblasLtCreate zeroes the new handle's synchronizer with hipMemset, which
+ * returns before the zeroing runs: it is queued on the legacy stream, and no
+ * other stream is ordered after it. If it lands while a split-K kernel runs on
+ * the handle, that kernel can spin forever, or leave flags set that hang a
+ * later one. So creating a hipblaslt handle waits for the legacy stream, and
+ * so for everything queued on it before. Creating a rocBLAS handle synchronizes
+ * the device after creating its embedded hipblaslt handle, which covers that
+ * handle the same way.
+ *
  * A stream-keyed handle passes only to the next thread on its stream, whose
  * work is ordered after work queued on that stream alone, so outside capture,
  * callers must run work on a handle only on the stream it was returned for.
@@ -127,6 +136,16 @@ void createCublasLtHandle(cublasLtHandle_t *handle) {
       "captured. hipBLASLt handles are created per (thread, stream) on first "
       "use; run a hipBLASLt op on this thread and stream before capture begins.");
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
+  // It also zeroes the handle's synchronizer with a hipMemset still queued on
+  // the legacy stream; see Note [hipblaslt handles]. The raw call keeps this
+  // internal wait out of torch.cuda.set_sync_debug_mode.
+  const cudaError_t status =
+      C10_CUDA_ERROR_HANDLED(cudaStreamSynchronize(nullptr));
+  if (status != cudaSuccess) {
+    cublasLtDestroy(*handle);
+    *handle = nullptr;
+    AT_CUDA_CHECK(status);
+  }
 }
 
 void destroyCublasLtHandle(cublasLtHandle_t handle) {
