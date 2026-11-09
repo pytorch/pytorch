@@ -1642,10 +1642,10 @@ def require_python_fake_mode(
     /,
 ) -> FakeTensorMode | None:
     """
-    Returns mode, a result of detect_fake_mode, active_fake_mode or
-    maybe_get_fake_mode, for a caller that needs a Python FakeTensorMode, and
-    raises for a CppFakeTensorMode; see Note [Fake mode lookups and
-    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
+    Returns mode, a fake mode from detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, for a caller that needs a Python FakeTensorMode: a
+    FakeTensorMode or None is returned as is, and a CppFakeTensorMode, which
+    does not have all of FakeTensorMode's interface, raises NotImplementedError.
     """
     from torch._subclasses.fake_tensor import CppFakeTensorMode
 
