@@ -401,7 +401,6 @@
   "test/inductor/test_debug_trace.py",
   "test/inductor/test_decompose_mem_bound_mm.py",
   "test/inductor/test_decompose_shard_dim_alltoall.py",
-  "test/inductor/test_dependencies.py",
   "test/inductor/test_deterministic.py",
   "test/inductor/test_device_assert.py",
   "test/inductor/test_device_backend_hooks.py",
