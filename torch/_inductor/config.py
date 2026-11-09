@@ -3225,21 +3225,13 @@ class halide:
 class helion:
     """Configuration for Inductor-generated Helion kernels (codegen/helion.py)."""
 
-    # Use Helion as Inductor's CUDA kernel backend: emit each kernel that
-    # codegen/helion.py supports, e.g. a pointwise or reduction kernel, as a
-    # Helion kernel and the others as Triton. Needs the Python wrapper.
+    # Emit the kernels codegen/helion.py supports as Helion, the rest as Triton.
     enabled: bool = os.getenv("TORCHINDUCTOR_HELION", "0") == "1"
-
-    # With enabled, also lower static FP16/BF16/FP32 CUDA mm/bmm/addmm/baddbmm
-    # to native matmul IR, so that each matmul and its fused pointwise epilogue
-    # is one Helion kernel. Other matmuls are unchanged.
+    # With enabled, also emit static FP16/BF16/FP32 CUDA matmuls as Helion.
     native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "0") == "1"
-
-    # Emitted as @helion.kernel(backend=...).
+    # Passed as @helion.kernel(backend=...).
     backend: Literal["triton", "cute"] = "triton"
-
-    # Emitted as @helion.kernel(autotune_effort=...); "none" runs Helion's
-    # default config without autotuning.
+    # Passed as @helion.kernel(autotune_effort=...); "none" skips autotuning.
     autotune_effort: Literal["none", "quick", "full"] = "none"
 
 
