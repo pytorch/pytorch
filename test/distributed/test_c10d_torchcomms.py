@@ -1217,7 +1217,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
     installed.
     """
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     _WORLD_ATTRS = (
         "pg_map",
@@ -1347,11 +1347,6 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(comm_a.finalize_calls, 1)
             self.assertEqual(comm_b.finalize_calls, 1)
             self.assertEqual(c10d._world.comms, [])
-
-
-instantiate_device_type_tests(
-    TestC10dTorchCommsDestroyDedup, globals(), only_for=["cuda"]
-)
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):
