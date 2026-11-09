@@ -363,7 +363,7 @@ class TestOutputConsistencyFullGraph(common_utils.TestCase):
 
 
 common_device_type.instantiate_device_type_tests(
-    TestOutputConsistencyFullGraph, globals(), except_for=["cpu"]
+    TestOutputConsistencyFullGraph, globals(), except_for=["cuda"]
 )
 
 if __name__ == "__main__":
