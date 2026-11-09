@@ -6116,6 +6116,45 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(opt_fn(x, wrapper), torch.tensor(13))
             self.assertEqual(backend.frame_count, 2)
 
+    @parametrize("constant_first", [False, True])
+    @parametrize("use_global", [False, True])
+    def test_lru_cache_wrapper_constant_alias(self, constant_first, use_global):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        @functools.lru_cache
+        def other_fn():
+            return 1
+
+        cached_fn.tag = 1
+        other_fn.tag = 1
+
+        @torch._dynamo.assume_constant_result
+        def get_wrapper():
+            return cached_fn
+
+        def fn(x, wrapper):
+            if use_global:
+                wrapper = mixed_scope_lru_wrapper
+            if constant_first:
+                constant = get_wrapper()
+                return x + constant.tag + wrapper.tag, constant is wrapper
+            result = x + wrapper.tag
+            constant = get_wrapper()
+            return result + constant.tag, wrapper is constant
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        with patch.dict(globals(), mixed_scope_lru_wrapper=cached_fn):
+            self.assertEqual(opt_fn(x, cached_fn), (torch.tensor(12), True))
+            self.assertEqual(backend.frame_count, 1)
+            globals()["mixed_scope_lru_wrapper"] = other_fn
+            self.assertEqual(fn(x, other_fn), (torch.tensor(12), False))
+            self.assertEqual(opt_fn(x, other_fn), (torch.tensor(12), False))
+            self.assertEqual(backend.frame_count, 2)
+
     def test_lru_cache_wrapper_delattr(self):
         @functools.lru_cache
         def cached_fn():
