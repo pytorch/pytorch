@@ -15,8 +15,6 @@ from torch.utils._sympy.functions import (
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
-    IsNaN,
-    IsNotNaN,
     Max,
     Min,
     Mod,
@@ -174,14 +172,6 @@ class ReferenceAnalysis:
         return OpaqueUnaryFn_log2(x)
 
     @staticmethod
-    def isnan(x):
-        return IsNaN(x)
-
-    @staticmethod
-    def isnotnan(x):
-        return IsNotNaN(x)
-
-    @staticmethod
     def sqrt(x):
         return OpaqueUnaryFn_sqrt(x)
 
@@ -286,14 +276,6 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def log2(x):
         return torch._sym_log2(x)  # type: ignore[attr-defined]
-
-    @staticmethod
-    def isnan(x):
-        return torch._sym_isnan(x)  # type: ignore[attr-defined]
-
-    @staticmethod
-    def isnotnan(x):
-        return torch.sym_not(torch._sym_isnan(x))  # type: ignore[attr-defined]
 
     @staticmethod
     def sqrt(x):
@@ -584,14 +566,6 @@ class TensorReferenceAnalysis:
     @staticmethod
     def log2(x):
         return torch.ops.aten.log2.default(x)
-
-    @staticmethod
-    def isnan(x):
-        return torch.ops.aten.isnan.default(x)
-
-    @staticmethod
-    def isnotnan(x):
-        return torch.ops.aten.logical_not.default(torch.ops.aten.isnan.default(x))
 
     @staticmethod
     def sqrt(x):

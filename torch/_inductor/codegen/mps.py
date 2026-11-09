@@ -30,6 +30,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
+from .cpp_wrapper_gpu import cpp_string_literal
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
@@ -651,7 +652,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -660,6 +661,7 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
         # Reductions shorter than a simdgroup run serially, in one thread per output
         rnumel = self.features.reduction_numel
@@ -1293,7 +1295,7 @@ class MetalKernel(SIMDKernel):
             self.compute.writelines(
                 [
                     f"if (!{cond}) {{",
-                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    f"    TORCH_REPORT_ERROR(error_buf, {cpp_string_literal(msg)});",
                     "    return;",
                     "}",
                 ]
@@ -1384,7 +1386,7 @@ class MetalScheduling(SIMDScheduling):
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
         for line in body_lines:
-            wrapper.header.writeline(line)
+            wrapper.header.writeline(line.replace("\\", "\\\\").replace("'", "\\'"))
         wrapper.header.writeline(f"''', {headers_repr})")
 
         return fn_name

@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
@@ -40,10 +41,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_GPU,
     HAS_MPS,
     patch_inductor_backend,
+    RUN_CPU,
 )
 
 
@@ -81,11 +82,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    # This fails on periodic CPU shards but passes on other CPU configurations,
-    # so skip it instead of producing unexpected successes.
-    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
-        ("cpu",), is_skip=True
-    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -139,6 +135,23 @@ class DynamicShapesTestCase(TestCase):
 
 
 class DynamicShapesOpTests:
+    # Reinplacing adds independent overlap guards for sizes 0/1.
+    @config.patch(disabled_passes="reinplace_inplaceable_ops")
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        def fn(x):
+            output = torch.zeros_like(x, dtype=torch.int32)
+            output[1:] = x[:-1]
+            return output
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (2, 0, 1, 7, 35):
+            with self.subTest(size=size):
+                x = torch.arange(size, dtype=torch.int64, device=self.device)
+                self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):
@@ -152,9 +165,10 @@ class DynamicShapesOpTests:
         )
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -1628,5 +1642,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+    if (RUN_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
