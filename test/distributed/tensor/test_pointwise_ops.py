@@ -1387,6 +1387,13 @@ class TestPointwiseRuleValidation(TestCase):
                         getattr(full, reduction)(dim=0), **kwargs
                     )
                     self.assertEqual(got, expected)
+                    # without a Partial rule, the in-place variant raises instead
+                    # of silently keeping the unsound placement
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "in-place operations that require placement changes",
+                    ):
+                        pending.nan_to_num_()
 
     def _with_even_sizes(self, fn):
         """Run fn with opinfo sizes overridden to be evenly divisible by world_size."""
