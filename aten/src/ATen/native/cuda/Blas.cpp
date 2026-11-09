@@ -528,8 +528,8 @@ bool launchGemmWithDistinctCAndDCublasLt(
     const Tensor& self,
     const Scalar& alpha,
     const Scalar& beta) {
-  // `self` is row-major with a valid leading dimension (guarded), so stride(0)
-  // can be passed directly; it may legitimately differ from result_ld.
+  // The guard keeps `self` row-major with stride(0) >= size(1), so stride(0) is
+  // already a valid ld; unlike result_ld it is not normalized.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.stride(1) == 1);
   return at::cuda::blas::gemm_and_bias<scalar_t>(
     args.transa == 't',
