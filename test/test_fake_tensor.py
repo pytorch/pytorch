@@ -129,9 +129,11 @@ if CPP_FAKETENSOR:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        if not allow_fallback_kernels or allow_non_fake_inputs or kwargs:
+        if not allow_fallback_kernels or kwargs:
             raise NotImplementedError("CppFakeTensorMode has no such options yet")
-        return CppFakeTensorMode(shape_env=shape_env)
+        return CppFakeTensorMode(
+            shape_env=shape_env, allow_non_fake_inputs=allow_non_fake_inputs
+        )
 
     FakeTensorModeCls = CppFakeTensorMode
 else:
@@ -6055,6 +6057,34 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
 
+    def test_cpp_fake_tensor_mode_allow_non_fake_inputs(self):
+        from torch._subclasses.fake_tensor import (
+            allow_non_fake_inputs_temporarily,
+            CppFakeTensorMode,
+        )
+
+        # Defaults to False, like FakeTensorMode, and is stored on the C++ mode
+        # apart from its other flags
+        self.assertFalse(CppFakeTensorMode().allow_non_fake_inputs)
+        mode = CppFakeTensorMode(allow_non_fake_inputs=True)
+        self.assertTrue(mode.allow_non_fake_inputs)
+        mode.allow_non_fake_inputs = False
+        self.assertFalse(mode.allow_non_fake_inputs)
+        self.assertTrue(mode.allow_meta)
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        # allow_non_fake_inputs_temporarily restores the previous value, also
+        # when the body raises
+        for previous in (False, True):
+            mode.allow_non_fake_inputs = previous
+            with allow_non_fake_inputs_temporarily(mode):
+                self.assertTrue(mode.allow_non_fake_inputs)
+            self.assertEqual(mode.allow_non_fake_inputs, previous)
+        mode.allow_non_fake_inputs = False
+        with self.assertRaisesRegex(ValueError, "raised in the body"):
+            with allow_non_fake_inputs_temporarily(mode):
+                raise ValueError("raised in the body")
+        self.assertFalse(mode.allow_non_fake_inputs)
+
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
     def test_cpp_fake_tensor_mode_rebuild(self):
@@ -6062,7 +6092,7 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         self.addCleanup(self._restore_fake_mode_state)
         shape_env = ShapeEnv()
-        mode = CppFakeTensorMode(shape_env=shape_env)
+        mode = CppFakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
         converter = mode.fake_tensor_converter
         mode.epoch += 2
         epoch = mode.epoch
@@ -6085,6 +6115,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(rebuilt.fake_tensor_converter, converter)
         self.assertIs(rebuilt.shape_env, shape_env)
         self.assertEqual(rebuilt.epoch, epoch)
+        self.assertTrue(rebuilt.allow_non_fake_inputs)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
         with rebuilt:
             self.assertEqual(self._installed(), (rebuilt, True))
