@@ -88,13 +88,11 @@ if(INTERN_BUILD_ATEN_OPS)
     # built for SM 90, etc.  For examples of how to use the function,
     # see below the function itself.
     #
-    # TORCH_CUDA_EXACT_ARCH_LIST (CMake or environment variable, default off): when on, an
+    # TORCH_CUDA_EXACT_ARCH_LIST (CMake variable; the environment variable is forwarded by
+    # cmake/EnvVarForwarding.cmake; default off): when on, an
     # additional arch is added only if TORCH_CUDA_ARCH_LIST itself names it, so a build gets
     # exactly the arches it asked for. Off keeps the behavior above (e.g. sm_121a for
     # RowwiseScaledMM.cu when building for 12.0).
-    if(NOT DEFINED TORCH_CUDA_EXACT_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_EXACT_ARCH_LIST})
-      set(TORCH_CUDA_EXACT_ARCH_LIST "$ENV{TORCH_CUDA_EXACT_ARCH_LIST}")
-    endif()
     if(TORCH_CUDA_EXACT_ARCH_LIST)
       message(STATUS "TORCH_CUDA_EXACT_ARCH_LIST: no additional per-file CUDA arches beyond TORCH_CUDA_ARCH_LIST")
     endif()

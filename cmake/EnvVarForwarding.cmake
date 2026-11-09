@@ -72,6 +72,9 @@
 #
 # Architecture selection (forwarded by prefix or read from the environment):
 #   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "6.0;7.0" (passthrough)
+#   TORCH_CUDA_EXACT_ARCH_LIST=1  build each file only for the arches TORCH_CUDA_ARCH_LIST
+#                            names: no per-file sibling arches from
+#                            _BUILD_FOR_ADDITIONAL_ARCHS in cmake/Codegen.cmake (passthrough)
 #   TORCH_XPU_ARCH_LIST      XPU arches, e.g. "ats-m150,lnl-m" (passthrough)
 #   PYTORCH_ROCM_ARCH        AMD GPU targets, e.g. "gfx900;gfx906" (read from env
 #                            in cmake/public/utils.cmake)
@@ -166,6 +169,7 @@ set(_ENV_PASSTHROUGH
   STATIC_DISPATCH_BACKEND
   SELECTED_OP_LIST
   TORCH_CUDA_ARCH_LIST
+  TORCH_CUDA_EXACT_ARCH_LIST
   TORCH_CK_GEMM_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
