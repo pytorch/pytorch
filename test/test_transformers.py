@@ -4099,7 +4099,6 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
-    @skipIfRocm(msg="AOTriton bottom-right causal attention writes NaN into fully masked rows when another process shares the GPU")
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
