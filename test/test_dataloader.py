@@ -3153,7 +3153,9 @@ class TestDataLoaderWorkerStartup(TestCase):
                 self.assertEqual(starter_threads, {threading.current_thread()})
             else:
                 self.assertNotIn(threading.current_thread(), starter_threads)
-                self.assertTrue(all(not thread.is_alive() for thread in starter_threads))
+                self.assertTrue(
+                    all(not thread.is_alive() for thread in starter_threads)
+                )
             if concurrency > 1:
                 self.assertNotEqual(completed[0], 0)
             self.assertEqual(torch.cat(list(iterator)), torch.arange(8))
@@ -3283,7 +3285,9 @@ class TestDataLoaderWorkerStartup(TestCase):
         try:
             with (
                 mock.patch.object(mp.Process, "start", start),
-                self.assertRaisesRegex(RuntimeError, "worker startup failure") as caught,
+                self.assertRaisesRegex(
+                    RuntimeError, "worker startup failure"
+                ) as caught,
             ):
                 iterator.__init__(loader)
             self.assertIs(caught.exception, error)
@@ -3567,7 +3571,9 @@ class TestDataLoaderWorkerStartup(TestCase):
         try:
             with (
                 mock.patch.object(
-                    target, attribute, side_effect=RuntimeError("initialization failure")
+                    target,
+                    attribute,
+                    side_effect=RuntimeError("initialization failure"),
                 ),
                 self.assertRaisesRegex(RuntimeError, "initialization failure"),
             ):
