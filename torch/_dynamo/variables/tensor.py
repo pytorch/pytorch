@@ -24,8 +24,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
-from typing_extensions import NotRequired, TypedDict
+from typing import Any, NoReturn, NotRequired, Optional, TYPE_CHECKING
+from typing_extensions import TypedDict
 
 import sympy
 
@@ -315,10 +315,10 @@ class CurrentDeviceVariable(VariableTracker):
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         return "torch.fx.experimental.proxy_tensor._coor_current_device()"
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # tp_richcompare_impl reports this device equal to an explicit cuda:N
         # whenever N is the running rank's index, so a hash has to agree with every
-        # cuda:N. Under CooR ConstantVariable.hash_impl drops the index from device
+        # cuda:N. Under CooR ConstantVariable.tp_hash_impl drops the index from device
         # hashes too, so all devices of one type share a bucket and equality decides:
         # two rank-relative devices are equal, and against an explicit cuda:N the
         # comparison is on the runtime index rather than silently unequal.
@@ -1838,7 +1838,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self)
+        return DataPtrVariable.create(self)
 
     def method_const_data_ptr(
         self,
@@ -1846,7 +1846,7 @@ class TensorVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> "DataPtrVariable":
-        return DataPtrVariable(self, method_name="const_data_ptr")
+        return DataPtrVariable.create(self, method_name="const_data_ptr")
 
     def method_record_stream(
         self,
@@ -2453,13 +2453,9 @@ class TensorVariable(VariableTracker):
             ]
             self.proxy = hooked_proxy
             self.synchronize_attributes(tx)
-            return variables.RemovableHandleVariable(
-                mutation_type=variables.base.ValueMutationNew(),
-            )
+            return variables.RemovableHandleVariable.create()
 
-        handle_variable = variables.RemovableHandleVariable(
-            mutation_type=variables.base.ValueMutationNew(),
-        )
+        handle_variable = variables.RemovableHandleVariable.create()
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
@@ -2623,7 +2619,7 @@ class TensorVariable(VariableTracker):
     def method_untyped_storage(
         self, tx: "InstructionTranslatorBase"
     ) -> "UntypedStorageVariable":
-        return UntypedStorageVariable(
+        return UntypedStorageVariable(  # noqa: RVT001
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
 
@@ -2963,7 +2959,7 @@ class TensorVariable(VariableTracker):
             ),
         )
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
         # (e.g. y = x.add_(1)) hash consistently.
@@ -3450,7 +3446,7 @@ class SymNodeVariable(VariableTracker):
     ) -> VariableTracker:
         return self.nb_negative_impl(tx)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.evaluate_expr()), False
 
     def nb_positive_impl(
@@ -3549,7 +3545,7 @@ class NumpyNdarrayVariable(TensorVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, "unhashable type: 'numpy.ndarray'")
@@ -3774,7 +3770,7 @@ class UnspecializedPythonVariable(TensorVariable):
         need_unwrap: bool = True,
     ) -> "UnspecializedPythonVariable":
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.
-        return UnspecializedPythonVariable(
+        return cls(
             **dict(tensor_variable.__dict__),
             raw_value=raw_value,
             need_unwrap=need_unwrap,
@@ -3799,7 +3795,7 @@ class FakeItemVariable(TensorVariable):
     def from_tensor_variable(
         cls, tensor_variable: TensorVariable
     ) -> "FakeItemVariable":
-        return FakeItemVariable(**dict(tensor_variable.__dict__))
+        return cls(**dict(tensor_variable.__dict__))
 
 
 class TensorSubclassVariable(UserDefinedClassVariable):
@@ -3930,6 +3926,14 @@ class DataPtrVariable(VariableTracker):
         ("call_method", "detach"),
         ("call_function", torch.ops.aten.detach.default),
     }
+
+    @staticmethod
+    def create(
+        from_tensor: TensorVariable,
+        method_name: str = "data_ptr",
+        **kwargs: Any,
+    ) -> "DataPtrVariable":
+        return DataPtrVariable(from_tensor, method_name=method_name, **kwargs)
 
     def __init__(
         self,

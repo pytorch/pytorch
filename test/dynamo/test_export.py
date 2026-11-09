@@ -1190,8 +1190,7 @@ def forward(self, x, y):
             ]
             self.assertEqual(len(sin_nodes), 5)
             self.assertEqual(len(cos_nodes), 2)
-            if sys.version_info >= (3, 11):
-                self.assertNotEqual(sin_nodes[0].stack_trace, cos_nodes[0].stack_trace)
+            self.assertNotEqual(sin_nodes[0].stack_trace, cos_nodes[0].stack_trace)
             self.assertNotEqual(sin_nodes[0].stack_trace, sin_nodes[1].stack_trace)
             self.assertIs(sin_nodes[2].stack_trace, sin_nodes[3].stack_trace)
             self.assertIs(sin_nodes[3].stack_trace, sin_nodes[4].stack_trace)
