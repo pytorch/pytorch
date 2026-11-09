@@ -147,6 +147,7 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
+    CUPTI_PYTHON=yes
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.4.1
@@ -466,6 +467,7 @@ build_image() {
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "CUPTI_PYTHON=${CUPTI_PYTHON:-}" \
        --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
        --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
