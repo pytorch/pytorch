@@ -9,6 +9,9 @@ __all__ = [
     # Public functions
     "export",
     "is_in_onnx_export",
+    "register_custom_translation",
+    "unregister_custom_translation",
+    "get_translation_builder",
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
@@ -27,6 +30,11 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 )
 
 from . import errors, ops
+from ._internal.exporter._custom_translation import (
+    get_translation_builder,
+    register_custom_translation,
+    unregister_custom_translation,
+)
 from ._internal.exporter._exportable_module import ExportableModule
 from ._internal.exporter._input_observer import InputObserver
 from ._internal.exporter._onnx_program import ONNXProgram

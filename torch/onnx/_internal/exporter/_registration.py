@@ -24,7 +24,7 @@ from typing import Literal, TypeAlias
 import torch
 import torch._ops
 from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript, onnxscript_apis
-from torch.onnx._internal.exporter import _constants, _schemas
+from torch.onnx._internal.exporter import _constants, _custom_translation, _schemas
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
@@ -154,12 +154,20 @@ class ONNXRegistry:
         return self._opset_version
 
     @classmethod
-    def from_torchlib(cls, opset_version=_constants.TORCHLIB_OPSET) -> ONNXRegistry:
+    def from_torchlib(
+        cls,
+        opset_version=_constants.TORCHLIB_OPSET,
+        *,
+        custom_translations: tuple[_custom_translation.NativeTranslation, ...]
+        | None = None,
+    ) -> ONNXRegistry:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
+        if custom_translations is None:
+            custom_translations = _custom_translation.snapshot()
         registry = cls()
         registry._opset_version = opset_version
         for meta in _torchlib_registry.get_torchlib_ops():
@@ -191,6 +199,22 @@ class ONNXRegistry:
                 continue
 
         registry._cleanup_registry_based_on_opset_version()
+        # Insert ascending versions at the front so the highest compatible
+        # global wins, without discarding lower-opset overrides of built-ins.
+        for entry in sorted(custom_translations, key=lambda e: e.opset_introduced):
+            if entry.opset_introduced <= opset_version:
+                registry._register(
+                    entry.target,
+                    OnnxDecompMeta(
+                        onnx_function=entry,
+                        fx_target=entry.target,
+                        signature=entry.signature,
+                        is_custom=True,
+                        is_complex=entry.is_complex,
+                        opset_introduced=entry.opset_introduced,
+                        skip_signature_inference=True,
+                    ),
+                )
         return registry
 
     def _register(
@@ -287,14 +311,19 @@ class ONNXRegistry:
             # Filter decompositions to only include those with opset_introduced <= opset_version
             decomps = [d for d in decomps if d.opset_introduced <= self.opset_version]
 
-            # Keep only the decomposition with the highest opset_introduced
+            # Select built-ins independently for real and complex inputs.
+            # Custom overrides must not be discarded by a newer built-in.
             if decomps:
-                # Find the maximum opset_introduced
-                max_opset = max(d.opset_introduced for d in decomps)
-
-                # Keep all decompositions with the maximum opset_introduced
                 cleaned_functions[target_or_name] = [
-                    d for d in decomps if d.opset_introduced == max_opset
+                    d
+                    for d in decomps
+                    if d.is_custom
+                    or d.opset_introduced
+                    == max(
+                        other.opset_introduced
+                        for other in decomps
+                        if not other.is_custom and other.is_complex == d.is_complex
+                    )
                 ]
 
         self.functions = cleaned_functions
