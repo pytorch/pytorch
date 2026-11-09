@@ -8385,13 +8385,52 @@ reduce_argmin_value = make_reduction("argmin_value")
 reduce_argmax_with_value = make_arg_with_value_reduction("argmax_with_value")
 reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 
-add = register_pointwise(
-    aten.add,
+register_pointwise_op("add")
+register_op_dtype_propagation_rules(
+    "add", ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, None
+)
+_add = make_pointwise(
+    ops_wrapper("add"),
     allow_alpha=True,
     use_fma_for_alpha=True,
-    override_fn_when_input_bool="logical_or",
+    override_fn_when_input_bool=ops_wrapper("logical_or"),
     round_scalars_to_tensor_dtype=True,
 )
+
+
+@register_lowering([aten.add, prims.add], broadcast=True)
+def add(a, b, *, alpha=None):
+    for tensor, scalar in ((a, b), (b, a)):
+        # Handle Python scalars before input emulation can round them as tensors.
+        if (
+            isinstance(tensor, (TensorBox, ExpandView, ir.Constant))
+            and isinstance(scalar, (int, float, sympy.Basic))
+            and tensor.get_dtype() in (torch.bfloat16, torch.float16)
+            and (device := tensor.get_device()) is not None
+            and device.type == "cuda"
+            and _has_lowp_pointwise_barrier(getattr(V.graph, "current_node", None))
+        ):
+            # Eager CUDA BF16/FP16 add converts Python scalars directly to FP32.
+            def scalar_expr(value):
+                if isinstance(value, sympy.Basic):
+                    return ops.index_expr(value, torch.float32)
+                return ops.constant(value, torch.float32)
+
+            def scalar_add(value):
+                # Explicit FP32 also handles disabled compute upcasting.
+                value = ops.to_dtype(value, torch.float32)
+                scalar_value = scalar_expr(scalar)
+                left, right = (
+                    (value, scalar_value) if tensor is a else (scalar_value, value)
+                )
+                if alpha is None or alpha == 1:
+                    return ops.add(left, right)
+                return ops.fma(right, scalar_expr(alpha), left)
+
+            # Only tensor inputs pass through the precision-emulation barrier.
+            return make_pointwise(scalar_add)(tensor)
+    return _add(a, b, alpha=alpha)
+
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
 
