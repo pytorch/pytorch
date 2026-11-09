@@ -2161,6 +2161,63 @@ static inline void ensure_triton_kernel_compiles_started() {{
 
 
 @dataclasses.dataclass
+class CuteDSLCallWrapper:
+    """The C++ launcher of one exported user CuTeDSL kernel: the counterpart of
+    DeferredTritonCallWrapper, which the C++ wrapper writes into its prefix.
+
+    Parameters, named by position (p<i> for parameter i of the exported C wrapper) so
+    that no Python name can collide with another parameter or a local of the launch
+    block: the module to launch with (see emit_cpp_declarations), per tensor a data
+    pointer then its dynamic sizes and strides (int64, in dimension order), per
+    scalar its value (double for a float, uint64_t for a Uint64, int64_t otherwise),
+    and the stream.
+    """
+
+    wrapper_name: str
+    exported: Any
+    check_align: dict[str, int]
+
+    def generate(self, wrapper: CppWrapperGpu) -> None:
+        from .cutedsl.user_kernel_aot import emit_cpp_launch
+
+        abi = self.exported.abi
+        structs = {s.param: s for s in abi.tensor_structs}
+        params = [f"{abi.module_ctype}* cutedsl_module"]
+        tensor_args: dict[str, tuple[str, list[str], list[str]]] = {}
+        scalar_args: dict[str, str] = {}
+        for i, (ctype, name) in enumerate(abi.params):
+            arg = f"p{i}"
+            if name in structs:
+                st = structs[name]
+                sizes = [f"{arg}_size{j}" for j in range(st.num_dynamic_shapes)]
+                strides = [f"{arg}_stride{j}" for j in range(st.num_dynamic_strides)]
+                params.append(f"void* {arg}")
+                params.extend(f"int64_t {v}" for v in (*sizes, *strides))
+                tensor_args[name] = (arg, sizes, strides)
+            elif ctype != "cudaStream_t":
+                if ctype in ("float", "double", "__half_raw"):
+                    params.append(f"double {arg}")
+                elif ctype == "uint64_t":
+                    params.append(f"uint64_t {arg}")
+                else:
+                    params.append(f"int64_t {arg}")
+                scalar_args[name] = arg
+        # The stream comes last whatever its position in the host function.
+        params.append("cudaStream_t cutedsl_stream")
+        prefix = wrapper.prefix
+        prefix.writeline(f"static inline void {self.wrapper_name}({', '.join(params)})")
+        for line in emit_cpp_launch(
+            self.exported,
+            module_expr="cutedsl_module",
+            tensor_args=tensor_args,
+            scalar_args=scalar_args,
+            stream_expr="cutedsl_stream",
+            check_align=self.check_align,
+        ):
+            prefix.writeline(line)
+
+
+@dataclasses.dataclass
 class UnwrapUnspecArg:
     """Marker that we need to call .item() on the tensor"""
 
