@@ -414,6 +414,8 @@ def compute_overlapping_inputs(
         if len(actual_aliased_indices) > 1 and all(
             source is not None for source in identity_sources
         ):
+            # Warm cache hits do not rerun this analysis or restore this guard.
+            aot_config.cache_info = None
             tracing_context.guards_context.aotautograd_guards.append(
                 StorageIdentity(identity_sources)
             )

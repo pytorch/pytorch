@@ -5134,7 +5134,9 @@ def _automatic_dynamic(
     view_base_context: SymbolicContext | None = None
     if (live_base := _live_view_base(e)) is not None:
         base_source = AttrSource(source, "_base")
-        view_base_context = _automatic_dynamic(live_base, tx, base_source, static_shapes)
+        view_base_context = _automatic_dynamic(
+            live_base, tx, base_source, static_shapes
+        )
 
     if is_traceable_wrapper_subclass(e) and not outer_only:
         # Get symbolic context for outer tensor

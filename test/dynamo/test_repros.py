@@ -43,8 +43,8 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
-from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.debug_utils import same_two_models
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -5082,7 +5082,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=cnt, dynamic=False)
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
 
-        cache_entries = _debug_get_cache_entry_list(compiled._torchdynamo_orig_callable.__code__)
+        cache_entries = _debug_get_cache_entry_list(
+            compiled._torchdynamo_orig_callable.__code__
+        )
         self.assertEqual(len(cache_entries), 1)
         guard_str = str(cache_entries[0].guard_manager)
         self.assertIn("untyped_storage()._cdata ==", guard_str)
@@ -5129,18 +5131,57 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             shape_env=None,
             guards_context=types.SimpleNamespace(aotautograd_guards=[]),
         )
-        aot_config = types.SimpleNamespace(aot_autograd_arg_pos_to_source=sources)
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=sources, cache_info=object()
+        )
 
-        with mock.patch.object(torch._guards.TracingContext, "try_get", return_value=tracing_context):
+        with mock.patch.object(
+            torch._guards.TracingContext, "try_get", return_value=tracing_context
+        ):
             actual = compute_overlapping_inputs(aot_config, inputs, [0, 1, 2])
 
         self.assertEqual(actual, {0, 1})
+        self.assertIsNotNone(aot_config.cache_info)
         for guard in tracing_context.guards_context.aotautograd_guards:
             if isinstance(guard, StorageIdentity):
                 sources = guard.aliased_sources
                 for source in sources[1:]:
                     self.assertIsNotNone(source.name)
         self.assertEqual(tracing_context.guards_context.aotautograd_guards, [])
+
+    def test_storage_identity_disables_aot_cache_save(self):
+        from torch._functorch._aot_autograd.input_output_analysis import (
+            compute_overlapping_inputs,
+        )
+        from torch._guards import StorageIdentity
+
+        base = torch.arange(8, dtype=torch.float32)
+        inputs = [base[2:5], base[3:6], base[:2]]
+        sources = {
+            index: types.SimpleNamespace(name=f"s{index}") for index in range(3)
+        }
+        tracing_context = types.SimpleNamespace(
+            fake_mode=types.SimpleNamespace(shape_env=None),
+            shape_env=None,
+            guards_context=types.SimpleNamespace(aotautograd_guards=[]),
+        )
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=sources, cache_info=object()
+        )
+
+        with mock.patch.object(
+            torch._guards.TracingContext, "try_get", return_value=tracing_context
+        ):
+            actual = compute_overlapping_inputs(aot_config, inputs, [0, 1, 2])
+
+        self.assertEqual(actual, {0, 1})
+        self.assertTrue(
+            any(
+                isinstance(guard, StorageIdentity)
+                for guard in tracing_context.guards_context.aotautograd_guards
+            )
+        )
+        self.assertIsNone(aot_config.cache_info)
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
@@ -5165,7 +5206,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         dest, storage = fresh(5)
         self.assertEqual(opt(dest, storage), storage[0] + 7.0)
 
-        cache_entries = _debug_get_cache_entry_list(opt._torchdynamo_orig_callable.__code__)
+        cache_entries = _debug_get_cache_entry_list(
+            opt._torchdynamo_orig_callable.__code__
+        )
         self.assertEqual(len(cache_entries), 1)
         guard_str = str(cache_entries[0].guard_manager)
 

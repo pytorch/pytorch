@@ -377,6 +377,33 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(stats.hit, 1)
         cache_stats._stats.clear()
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_synthetic_base_rebind_after_cache_warm(self):
+        def fn(a, b):
+            b[0] = 10.0
+            return a[0].clone()
+
+        x = torch.arange(5, dtype=torch.float32)
+        a = x[:3]
+        b = x
+        compiled = torch.compile(fn, backend="inductor", dynamic=False)
+        self.assertEqual(compiled(a, b), torch.tensor(10.0))
+
+        self._clear_dynamo_and_codecache()
+        compiled = torch.compile(fn, backend="inductor", dynamic=False)
+        self.assertEqual(compiled(a, b), torch.tensor(10.0))
+
+        a.set_(torch.tensor([3.0, 4.0, 5.0]))
+        self.assertEqual(compiled(a, b), torch.tensor(3.0))
+        self.assertEqual(b, torch.tensor([10.0, 1.0, 2.0, 3.0, 4.0]))
+
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(

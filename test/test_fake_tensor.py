@@ -32,7 +32,6 @@ from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
-from torch._subclasses.meta_utils import _live_view_base, MetaTensorDescriber
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -52,6 +51,7 @@ from torch._subclasses.fake_tensor import (
     unset_fake_temporarily,
     UnsupportedOperatorException,
 )
+from torch._subclasses.meta_utils import _live_view_base, MetaTensorDescriber
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -5673,6 +5673,8 @@ class TestLiveViewBase(TestCase):
         child.set_(torch.randn(2))
         self.assertIs(child._base, wrapped)
         self.assertIsNone(_live_view_base(child))
+
+
 # Dynamo would trace these tests with the C++ fakes they make as graph inputs,
 # which it cannot fakify yet
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
