@@ -232,10 +232,42 @@ def _origami_configs(selector):  # type: ignore[no-untyped-def]
     return selector._configs
 
 
-ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH = 1024
-ORIGAMI_FLEX_MIN_BATCH_HEADS = 16
-ORIGAMI_FLEX_QK_TOPK = 1
-ORIGAMI_FLEX_PV_TOPK = 2
+@dataclasses.dataclass(frozen=True)
+class _OrigamiFlexTarget:
+    """Origami FlexAttention selection parameters measured on one gfx target."""
+
+    # Shortest Q and KV length for each supported head dim.
+    min_sequence_length: Mapping[int, int]
+    # Smallest B * Hq; fewer batch-heads underfill the GPU.
+    min_batch_heads: int
+    # Tiles kept from Origami's separate QK and PV rankings.
+    qk_topk: int
+    pv_topk: int
+    # Variants of each selected tile kept from the exhaustive space.
+    num_stages: int
+    mha_num_warps: tuple[int, ...]
+    gqa_num_warps: tuple[int, ...]
+
+
+# Only these targets use Origami for FlexAttention, each with its own measured
+# values; every other target keeps the stock pool.
+_ORIGAMI_FLEX_TARGETS: dict[str, _OrigamiFlexTarget] = {
+    "gfx950": _OrigamiFlexTarget(
+        # At 512 tokens the selected pool lost 5-13% to exhaustive tuning. At
+        # 1024, D128 ran ~3% slower than stock and D256 gained nothing.
+        min_sequence_length={32: 1024, 64: 1024, 128: 2048, 256: 2048},
+        # Below 16, the selected pool missed the best tile or lost 6-52%.
+        min_batch_heads=16,
+        # PV top-2 kept the best tile in all 17 exhaustive sweeps. QK top-1
+        # covers shapes where the rankings disagree; in those sweeps it was
+        # already in PV's top 2.
+        qk_topk=1,
+        pv_topk=2,
+        num_stages=2,
+        mha_num_warps=(4,),
+        gqa_num_warps=(2, 4),
+    ),
+}
 
 
 def _origami_flex_problem(
@@ -292,6 +324,8 @@ def _origami_flex_attention_tiles(
     dtype: torch.dtype,
     device_index: int,
     candidate_tiles: tuple[tuple[int, int], ...],
+    qk_topk: int,
+    pv_topk: int,
 ) -> tuple[tuple[int, int], ...]:
     """Select FlexAttention tiles from Origami's two standalone GEMM rankings.
 
@@ -369,10 +403,7 @@ def _origami_flex_attention_tiles(
     qk_ranked = sorted(qk_scores, key=lambda tile: (qk_scores[tile], tile))
     pv_ranked = sorted(pv_scores, key=lambda tile: (pv_scores[tile], tile))
     selected = []
-    for tile in (
-        *qk_ranked[:ORIGAMI_FLEX_QK_TOPK],
-        *pv_ranked[:ORIGAMI_FLEX_PV_TOPK],
-    ):
+    for tile in (*qk_ranked[:qk_topk], *pv_ranked[:pv_topk]):
         if tile not in selected:
             selected.append(tile)
     return tuple(selected)
@@ -2421,7 +2452,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         configs: list[FlexConfig],
         context: FlexAttentionConfigContext,
     ) -> list[FlexConfig]:
-        """Use Origami to replace the gfx950 dense DEFAULT candidate pool."""
+        """Use Origami to replace the dense DEFAULT pool on measured targets."""
         if (
             origami is None
             or not _origami_enabled()
@@ -2482,34 +2513,27 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             qk_head_dim,
             v_head_dim,
         ) = (int(dim) for dim in raw_dims)
-        min_sequence_length = (
-            2 * ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH
-            if qk_head_dim >= 128
-            else ORIGAMI_FLEX_MIN_SEQUENCE_LENGTH
+        device_index = (
+            context.device.index
+            if context.device.index is not None
+            else torch.cuda.current_device()
         )
+        properties = torch.cuda.get_device_properties(device_index)
+        arch = properties.gcnArchName.split(":", 1)[0]
+        target = _ORIGAMI_FLEX_TARGETS.get(arch)
+        if target is None:
+            return configs
+        min_sequence_length = target.min_sequence_length.get(qk_head_dim)
         if (
-            min(seq_len_q, seq_len_kv) < min_sequence_length
-            or batch_size * num_heads < ORIGAMI_FLEX_MIN_BATCH_HEADS
+            min_sequence_length is None
+            or min(seq_len_q, seq_len_kv) < min_sequence_length
+            or batch_size * num_heads < target.min_batch_heads
             or batch_size != kv_batch_size
             or qk_head_dim != v_head_dim
-            or qk_head_dim not in (32, 64, 128, 256)
         ):
             return configs
 
         try:
-            device_index = (
-                context.device.index
-                if context.device.index is not None
-                else torch.cuda.current_device()
-            )
-            arch = torch.cuda.get_device_properties(device_index).gcnArchName.split(
-                ":", 1
-            )[0]
-            # The stage/warp projection below is measured on gfx950. Other Origami
-            # targets retain their stock pool until they have equivalent evidence.
-            if arch != "gfx950":
-                return configs
-
             candidate_tiles = tuple(
                 dict.fromkeys(
                     (candidate.block_m, candidate.block_n)
@@ -2527,6 +2551,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 context.dtype,
                 device_index,
                 candidate_tiles,
+                target.qk_topk,
+                target.pv_topk,
             )
         except Exception as error:
             # Origami is an external model that is on by default, so any failure
@@ -2541,25 +2567,27 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if not selected_tiles:
             return configs
 
-        # Build the safety config from the gfx950 table instead of recovering it
-        # from `configs`: for D=32 the generic default is also present in the
-        # autotune list.
-        stock_default = self.gfx950_default_flex_config.get(
+        # Build the safety config from the target's default table instead of
+        # recovering it from `configs`: for D=32 the generic default is also
+        # present in the autotune list.
+        stock_default = self.flex_fwd_config_by_arch.get(arch, {}).get(
             (context.dtype, qk_head_dim)
         )
         if stock_default is None:
             stock_default = ROCmFlexConfig(128, 64, 1, 4, kpack=get_default_kpack())
-        # Origami has no stage/warp/MFMA/kpack model for this fused kernel.
-        # gfx950 exhaustive measurements project tiles to stage 2 and
-        # unconstrained occupancy; MHA uses four warps while GQA retains two and
-        # four. The autotuner keeps the exhaustive space's MFMA and kpack variants.
-        allowed_warps = (2, 4) if num_heads != num_kv_heads else (4,)
+        # Origami has no stage/warp/MFMA/kpack model for this fused kernel, so
+        # selected tiles take the target's measured stages and warps with
+        # unconstrained occupancy. The autotuner keeps the exhaustive space's
+        # MFMA and kpack variants.
+        allowed_warps = (
+            target.gqa_num_warps if num_heads != num_kv_heads else target.mha_num_warps
+        )
         selected: list[FlexConfig] = [
             candidate
             for candidate in self.exhaustive_flex_attn_fwd_configs
             if isinstance(candidate, ROCmFlexConfig)
             and (candidate.block_m, candidate.block_n) in selected_tiles
-            and candidate.num_stages == 2
+            and candidate.num_stages == target.num_stages
             and candidate.num_warps in allowed_warps
             and candidate.waves_per_eu == 0
         ]

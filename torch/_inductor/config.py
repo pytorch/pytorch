@@ -3181,8 +3181,9 @@ class rocm:
     #   - rocm-origami is installed (else the import gate sets it inert)
     # Each consumer has additional gates. GEMM requires its DEFAULT search space
     # and warns when EXHAUSTIVE bypasses it. FlexAttention currently requires its
-    # DEFAULT search space plus a static, dense, contiguous gfx950 forward problem
-    # in the measured shape domain, with Q/K/V sharing one fp16/bf16 dtype, no
+    # DEFAULT search space plus a static, dense, contiguous forward problem on a
+    # target listed in _ORIGAMI_FLEX_TARGETS (currently gfx950), within that
+    # target's measured shape domain, with Q/K/V sharing one fp16/bf16 dtype, no
     # user-pinned tuning kernel_options, and a score_mod that reads no captured
     # buffers; every other case retains the regular config generator.
     #

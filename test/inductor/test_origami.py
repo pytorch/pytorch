@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import dataclasses
 import logging
 import math
 import os
@@ -95,6 +96,9 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             (torch.float16, 64): stock_default,
             (torch.float16, 128): stock_default,
             (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=2),
+        }
+        self.heuristic.flex_fwd_config_by_arch = {
+            "gfx950": self.heuristic.gfx950_default_flex_config
         }
 
     @staticmethod
@@ -216,6 +220,23 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 selected = self._select(self._context(kernel_options=options))
                 self.assertEqual(len(selected), 9)
 
+    def test_selection_uses_the_target_entry(self):
+        target = dataclasses.replace(
+            triton_heuristics._ORIGAMI_FLEX_TARGETS["gfx950"],
+            min_batch_heads=32,
+            num_stages=1,
+        )
+        with mock.patch.dict(
+            triton_heuristics._ORIGAMI_FLEX_TARGETS, {"gfx1250": target}
+        ):
+            self.assertIs(self._select(self._context(), arch="gfx1250"), self.stock)
+            selected = self._select(
+                self._context(num_heads=32, num_kv_heads=32), arch="gfx1250"
+            )
+        self.assertEqual({config.num_stages for config in selected}, {1})
+        # gfx1250 has no default table, so the generic default is kept.
+        self.assertIn(ROCmFlexConfig(128, 64, 1, 4, kpack=1), selected)
+
     def test_gqa_keeps_two_and_four_warp_variants(self):
         selected = self._select(self._context(num_kv_heads=4))
         self.assertEqual(len(selected), 17)
@@ -270,6 +291,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 self.assertIs(self._select(context), self.stock)
         select_options = {
             "non_gfx950": {"arch": "gfx942"},
+            "unmeasured_target": {"arch": "gfx1250"},
             "exhaustive_search": {"search_space": "EXHAUSTIVE"},
             "origami_unavailable": {"origami_module": None},
             "origami_disabled": {"enabled": False},
@@ -453,6 +475,8 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 torch.float16,
                 0,
                 candidate_tiles,
+                1,
+                2,
             )
         return selected, fake_origami
 
