@@ -1571,7 +1571,25 @@ class _ODictSubclass(collections.OrderedDict):
     def __setattr__(self, name, value):
         if name == "__dict__":
             raise AssertionError("State restoration must bypass __setattr__")
+        if name == "slot" and isinstance(dict.get(self, "b"), _Missing):
+            raise AssertionError("Slot restoration must retain dictionary values")
         super().__setattr__(name, value)
+
+
+class _DictStateLookup(dict):
+    def __getattribute__(self, name):
+        if name == "__setstate__" and isinstance(dict.get(self, "b"), _Missing):
+            raise AssertionError("State lookup must retain dictionary values")
+        return object.__getattribute__(self, name)
+
+
+class _DictStateGetattr(dict):
+    __getattr__ = _DictStateLookup.__getattribute__
+
+
+class _ODictNoKeys(_ODictSubclass):
+    def keys(self):
+        raise AssertionError("State traversal must bypass keys overrides")
 
 
 class _NormalizingODict(collections.OrderedDict):
@@ -4485,23 +4503,95 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
-    def test_implicit_dictionary_bystander_keeps_shared_tensor_subclass_metadata(self):
+    @parametrize("inner_tensor", [False, True])
+    def test_implicit_dictionary_bystander_keeps_shared_tensor_subclass_metadata(
+        self, inner_tensor
+    ):
         def fn(module, x):
             return x + len(tuple(module.mapping)) + hasattr(module, "mapping")
 
         def inputs(blocks):
             module = torch.nn.Module()
-            module.mapping = {"unused": blocks}
             x = SubclassWithMeta(torch.ones(3), extra=blocks)
+            module.mapping = {"unused": x.a if inner_tensor else blocks}
             return {"module": module, "x": x}
 
+        kinds = ["HASATTR", "TENSOR_SUBCLASS_METADATA_MATCH"]
+        if not inner_tensor:
+            kinds.append("TENSOR_MATCH")
         ref, loaded = self._test_serialization(
-            ("HASATTR", "TENSOR_SUBCLASS_METADATA_MATCH", "TENSOR_MATCH"),
+            kinds,
             fn,
             *inputs([4, 4]).values(),
         )
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIn(
+            "L['module'].mapping", {source.name for source in state.guard_on_key_order}
+        )
+
+    def test_implicit_dictionary_order_alias_keeps_its_ancestors(self):
+        def fn(holder, module, x):
+            return (
+                x
+                + len(tuple(holder.cfg))
+                + len(tuple(module.mapping))
+                + hasattr(module, "mapping")
+            )
+
+        def inputs():
+            module = torch.nn.Module()
+            module.mapping = {"unused": threading.Lock()}
+            holder = LockHolder(2)
+            holder.cfg = module.mapping
+            return {"holder": holder, "module": module, "x": torch.ones(1)}
+
+        ref, loaded = self._test_serialization(
+            ("HASATTR", "TENSOR_MATCH"), fn, *inputs().values()
+        )
+        self._test_check_fn(ref, loaded, inputs(), True)
+        invalid = inputs()
+        del invalid["module"].mapping
+        self._test_check_fn(ref, loaded, invalid, False)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIs(
+            state.local_scope["holder"].cfg, state.local_scope["module"].mapping
+        )
+        self.assertIsInstance(state.local_scope["holder"].lock, _Missing)
+
+    @parametrize(
+        "mapping_type",
+        [_ODictSubclass, _ODictNoKeys, _DictStateLookup, _DictStateGetattr],
+    )
+    def test_implicit_dictionary_bystander_keeps_shared_subclass_state(
+        self, mapping_type
+    ):
+        def fn(x, owner, other):
+            return x + len(owner), tuple(other)
+
+        def inputs():
+            shared = ["saved"]
+            owner = mapping_type(a=1, b=shared)
+            owner.tag = "saved"
+            owner.slot = owner
+            return {"x": torch.ones(1), "owner": owner, "other": {"unused": shared}}
+
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "DICT_KEYS_MATCH", "TENSOR_MATCH"),
+            fn,
+            *inputs().values(),
+        )
+        self._test_check_fn(ref, loaded, inputs(), True)
+        invalid = inputs()
+        invalid["other"] = {"changed": invalid["other"]["unused"]}
+        self._test_check_fn(ref, loaded, invalid, False)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        owner = state.local_scope["owner"]
+        self.assertEqual(owner["b"], ["saved"])
+        self.assertIs(owner["b"], state.local_scope["other"]["unused"])
+        self.assertIs(owner.slot, owner)
+        self.assertEqual(owner.tag, "saved")
 
     def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
         def fn(x, stage):
