@@ -70,9 +70,7 @@ def export_python(
 
 
         y = step(x, scale=3.0)  # first run: captures and writes artifacts/step.py
-        y = step(
-            x, scale=3.0
-        )  # served from artifacts/step.py, here or in a new process
+        y = step(x, scale=3.0)  # served from the file, here or in a new process
 
     ``path`` is the graph's Inductor code, and that code is what runs; the rest of
     what Dynamo captured (the guards, the frame's bytecode and AOTAutograd's wrapper)
@@ -105,10 +103,11 @@ def export_python(
             :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
             arguments after any in-place writes, differ beyond
             ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
-            A floating-point tensor is held no tighter than 1e-3
-            (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
-            minifier holds a compiled graph to), since a compiled kernel may sum in
-            another order than eager.
+            Since a compiled kernel may sum in another order than eager, a
+            floating-point or complex tensor is held to a relative tolerance of at
+            least 1e-3 (``torch._dynamo.config.repro_tolerance``) and an absolute one
+            of 1e-3 of its largest finite magnitude: smaller differences are not
+            caught.
             ``fn``'s outputs must be values ``assert_close`` compares. Tensor
             arguments are copied one by one, so arguments that alias each other (one
             tensor passed twice, or views of one tensor) do not alias in the eager
@@ -220,6 +219,31 @@ def _captured_artifact(text: str, path: str) -> str:
     return artifact.replace(_GRAPH_CODE, _source_literal(code), 1)
 
 
+def _assert_matches_eager(actual: object, expected: object) -> None:
+    """``torch.testing.assert_close``, loosened for compiled code: a compiled kernel may
+    sum in another order than eager, and its rounding error scales with the values it
+    sums. So a floating-point or complex tensor is held to a relative tolerance of at
+    least 1e-3 (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
+    minifier holds a compiled graph to) and an absolute one of 1e-3 of its largest
+    finite magnitude, which still checks a tensor of small values."""
+    from torch.testing._comparison import default_tolerances
+
+    floor = torch._dynamo.config.repro_tolerance
+    got, got_spec = pytree.tree_flatten(actual)
+    want, want_spec = pytree.tree_flatten(expected)
+    if got_spec != want_spec:
+        raise AssertionError(f"{got_spec} is not eager's {want_spec}")
+    for g, w in zip(got, want):
+        if isinstance(w, torch.Tensor) and (w.is_floating_point() or w.is_complex()):
+            rtol, atol = default_tolerances(w)
+            finite = w[w.isfinite()]
+            scale = finite.abs().max().item() if finite.numel() else 0.0
+            rtol, atol = max(rtol, floor), max(atol, floor * scale)
+            torch.testing.assert_close(g, w, rtol=rtol, atol=atol)
+        else:
+            torch.testing.assert_close(g, w)
+
+
 class _ExportedPython:
     def __init__(
         self,
@@ -272,23 +296,8 @@ class _ExportedPython:
             [t for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)]
             for tree in ((args, kwargs), (eager_args, eager_kwargs))
         )
-        from torch.testing._comparison import default_tolerances
-
-        actual, actual_spec = pytree.tree_flatten((result, inputs))
-        wanted, wanted_spec = pytree.tree_flatten((expected, eager_inputs))
-        # A compiled kernel may sum in another order than eager, so a floating-point
-        # tensor is held no tighter than Dynamo's accuracy minifier holds a compiled
-        # graph to eager.
-        floor = torch._dynamo.config.repro_tolerance
         try:
-            if actual_spec != wanted_spec:
-                raise AssertionError(f"{actual_spec} is not eager's {wanted_spec}")
-            for got, want in zip(actual, wanted):
-                tolerances = {}
-                if isinstance(want, torch.Tensor) and want.is_floating_point():
-                    rtol, atol = default_tolerances(want)
-                    tolerances = {"rtol": max(rtol, floor), "atol": max(atol, floor)}
-                torch.testing.assert_close(got, want, **tolerances)
+            _assert_matches_eager((result, inputs), (expected, eager_inputs))
         except AssertionError as e:
             raise PrecompileError(
                 f"export_python: {self._path} does not match eager {self._name} "
@@ -296,7 +305,7 @@ class _ExportedPython:
             ) from e
         return result
 
-    def _load(self) -> PrecompiledRunnable:
+    def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         with open(self._path, "rb") as f:
             python_code = _captured_artifact(f.read().decode(), self._path)
         cache = _matching_cache(python_code, self._cache_path)
@@ -320,7 +329,7 @@ class _ExportedPython:
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graph compiles the kernels its code defines.
             log.info("export_python: %s; serving it without the cache", stale)
-        return _runnable_from_pair(python_code, cache)
+        return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         from torch._dynamo.exc import Unsupported
@@ -372,7 +381,8 @@ class _ExportedPython:
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(artifact)
-        self._runnable = self._load()
+        # This process just wrote the file, so it skips the exec warning.
+        self._runnable = self._load(trusted=True)
         return result
 
 
