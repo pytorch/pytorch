@@ -2558,6 +2558,9 @@ Tensor& index_select_out_cuda(
     int64_t dim,
     const Tensor& index,
     Tensor& out) {
+  if (isPackedShellFloatType(self.scalar_type())) {
+    return index_select_out_as_bytes(self, dim, index, out);
+  }
   static constexpr std::string_view DIM_WARNING =
       "Tensor too large or too many (> 25) dimensions";
   TORCH_CHECK(

@@ -1036,6 +1036,7 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    utils.check_packed_shell_float_arithmetic("index_reduce", self.dtype)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -1049,6 +1050,7 @@ def meta_index_reduce_(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    utils.check_packed_shell_float_arithmetic("index_reduce_", self.dtype)
     return self
 
 
@@ -5073,6 +5075,10 @@ def meta_rrelu_with_noise_(
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     _check_index_tensor_types(indices)
+    if accumulate:
+        utils.check_packed_shell_float_arithmetic(
+            "index_put with accumulate=True", self.dtype
+        )
     return torch.empty_like(self)
 
 
@@ -5120,6 +5126,10 @@ def meta_masked_scatter_backward(self, mask, sizes):
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     _check_index_tensor_types(indices)
+    if accumulate:
+        utils.check_packed_shell_float_arithmetic(
+            "index_put_ with accumulate=True", self.dtype
+        )
     return self
 
 
@@ -6424,6 +6434,10 @@ def scatter_shape_check(self, dim, index, src_opt=None):
 # From aten/src/ATen/native/TensorAdvancedIndexing.cpp
 def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=False):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    if src is None or reduce_ is not None:
+        utils.check_packed_shell_float_arithmetic(
+            "scatter with a reduction or a Scalar value", self.dtype
+        )
     scatter_gather_dtype_check("scatter", self, index, src)
     scatter_shape_check(self, wrapped_dim, index, src)
     if reduce_ is not None:
