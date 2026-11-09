@@ -9011,10 +9011,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9125,13 +9130,13 @@ def meta_scaled_grouped_mm_v2(
         ScalingType.BlockWise1x128.value,
         ScalingType.BlockWise128x128.value,
     )
-    hopper = (
+    fp32_block = (
         len(scale_recipe_a) == len(scale_recipe_b) == 1
         and scale_recipe_a[0] in block_recipes
         and scale_recipe_b[0] in block_recipes
         and ScalingType.BlockWise1x128.value in (scale_recipe_a[0], scale_recipe_b[0])
     )
-    bf16_only = not hopper and (
+    bf16_only = not fp32_block and (
         scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
     )
     message = "Grouped scaling configuration requires BFloat16 output"
