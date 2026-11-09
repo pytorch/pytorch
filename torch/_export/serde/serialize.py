@@ -28,6 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -841,6 +842,13 @@ class GraphModuleSerializer(metaclass=Final):
                 # HOP schema is not always available, so we look at node.meta["val"]
                 meta_val = node.meta.get("val", None)
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
+
+            user_kernel_hop = get_user_kernel_hop_info(node.target)
+            if user_kernel_hop is not None and not user_kernel_hop.serializable:
+                raise SerializeError(
+                    f"Serializing {node.target.__name__} nodes ({user_kernel_hop.dsl} "
+                    "user kernels) is not supported"
+                )
 
             # Special handle serialization for aoti_call_delegate
             if node.target is torch._higher_order_ops.aoti_call_delegate:
