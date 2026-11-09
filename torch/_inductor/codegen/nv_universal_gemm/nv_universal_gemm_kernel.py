@@ -29,7 +29,6 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -52,6 +51,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     CuTeDSLEpilogueSource,
 )
 from torch._inductor.virtualized import V
+from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch.utils._ordered_set import OrderedSet
 
 
