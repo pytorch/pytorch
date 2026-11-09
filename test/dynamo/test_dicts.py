@@ -25,6 +25,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -70,6 +71,72 @@ class FakeMapping:
 
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_dict_repr_custom_new_input_falls_back(self):
+        class Mapping(dict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
+
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping, x = Mapping(a=1), torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_dict_repr_uses_ordered_dict_storage(self):
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_ordered_dict_repr_guards_linked_order(self):
+        def fn(x, mapping):
+            return x + 1, repr(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_instance_dict_repr_uses_proxy(self):
+        class Box:
+            def __init__(self):
+                self.a = "first"
+                self.b = "second"
+
+        def fn(x, obj):
+            return x + 1, repr(obj.__dict__)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        obj, x = Box(), torch.ones(1)
+        for value in ("second", "third"):
+            obj.b = value
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_realize_all_preserves_ordered_dict_storage(self):
+        mapping = OrderedDict(a=object(), b=object())
+        mapping.move_to_end("a")
+        actual = LazyVariableTracker.realize_all(mapping)
+        self.assertIs(type(actual), OrderedDict)
+        self.assertEqual(list(actual), ["b", "a"])
+        self.assertEqual(list(dict.keys(actual)), ["a", "b"])
+        for key, value in dict.items(mapping):
+            self.assertIs(actual[key], value)
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize(
@@ -148,7 +215,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             keys = ("extra_a", "extra_b") if kind == "invalid" else ("a", "b")
             kwargs = dict(zip(keys, (1, 2)))
             reversed_kwargs = dict(reversed(kwargs.items()))
-            self.assertNotEqual(compiled(x, **kwargs), compiled(x, **reversed_kwargs))
+            for kw in (kwargs, reversed_kwargs):
+                error_key = compiled(x, **kw)[1].split("'")[1]
+                self.assertEqual(error_key, fn(x, **kw)[1].split("'")[1])
         else:
             self.assertEqual(compiled(x, a=1, b=2), fn(x, a=1, b=2))
             self.assertEqual(compiled(x, b=2, a=1), fn(x, b=2, a=1))
@@ -170,8 +239,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             try:
                 return target(**mapping)
-            except TypeError:
-                return x - 1
+            except TypeError as exc:
+                return x - 1, str(exc)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -188,6 +257,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 if mapping_type is defaultdict
                 else actual_type(pairs)
             )
+            if not valid:
+                self.assertEqual(fn(x, mapping)[1], "keywords must be strings")
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         # Subclass keys retain positional guards; exact builtin keys bind by name.
         self.assertEqual(counter.frame_count, 2 if subclass and valid else 1)

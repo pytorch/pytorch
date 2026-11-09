@@ -1426,7 +1426,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.tp_getattro_impl(tx, attr)
+                    vt = (
+                        self.tp_getattro_impl(tx, attr, _track_empty_hooks=False)
+                        if obj is self
+                        else obj.tp_getattro_impl(tx, attr)
+                    )
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1592,7 +1596,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return None
 
     def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        _track_empty_hooks: bool = True,
     ) -> VariableTracker:
         from .builder import _dict_input_snapshot
 
@@ -1628,16 +1636,25 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
-            if self.source is not None:
+            tracer = tx.output.current_tracer
+            if self.source is not None and tracer.parent is not None:
                 # These custom trackers bypass VariableBuilder's source recording,
                 # which nested-region reuse needs to collect their guards.
-                tx.output.current_tracer.traced_sources.update(
+                tracer.traced_sources.update(
                     (self.source, AttrSource(self.source, name))
                 )
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
+                hooks_type = type(hooks_dict)
+                if (
+                    name.startswith("_forward_")
+                    and hooks_type is not dict
+                    and hooks_type is not collections.OrderedDict
+                ):
+                    # The ordinary builder preserves subclass mapping protocols.
+                    return super().tp_getattro_impl(tx, name)
                 if self.source is not None and hooks_dict in tx.output.side_effects:
                     return VariableTracker.build(
                         tx, hooks_dict, source=AttrSource(self.source, name)
@@ -1658,7 +1675,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         else variables.ConstDictVariable
                     )
                     if hooks_source and name.startswith("_forward_"):
-                        install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
+                        if not torch._dynamo.config.skip_nnmodule_hook_guards:
+                            install_guard(
+                                hooks_source.make_guard(GuardBuilder.TYPE_MATCH)
+                            )
                         hooks_vt_cls = (
                             variables.NNModuleHookFlagsOrderedDictVariable
                             if name.endswith(("with_kwargs", "always_called"))
@@ -1671,7 +1691,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 else variables.NNModuleHooksDictVariable
                             )
                     result = hooks_vt_cls({}, source=hooks_source)
-                    if hooks_source is not None:
+                    # The private length probe cannot expose or mutate this tracker.
+                    if hooks_source is not None and (
+                        _track_empty_hooks
+                        or (
+                            hooks_type is not dict
+                            and hooks_type is not collections.OrderedDict
+                        )
+                    ):
                         return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return result
 

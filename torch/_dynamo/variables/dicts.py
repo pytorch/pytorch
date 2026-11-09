@@ -211,9 +211,19 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             guard_key_collisions(keys.values())
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
-        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
-            {keys[id(x)]: v for x, v in items.items()}
-        )
+        self.items: dict[HashableTracker, VariableTracker]
+        if storage_cls is collections.OrderedDict and isinstance(
+            items, collections.OrderedDict
+        ):
+            # Normalizing tracker keys must preserve both orders without hashing twice.
+            storage = cast(dict[object, VariableTracker], items)
+            self.items = collections.OrderedDict(
+                (keys[id(key)], value) for key, value in dict.items(storage)
+            )
+            for key in items:
+                self.items.move_to_end(keys[id(key)])
+        else:
+            self.items = storage_cls({keys[id(x)]: v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -268,13 +278,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
-        self.install_dict_order_guard(tx)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
+            storage = (
+                self.items.items()
+                if isinstance(self.items, SideEffectsProxyDict)
+                else dict.items(self.items)
+            )
             items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in self.items.items()
+                f"{tracked_repr(tx, cast(HashableTracker, key).vt)}: {tracked_repr(tx, value)}"
+                for key, value in storage
             ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
@@ -283,7 +298,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def _hashable_key(self, key: VariableTracker) -> HashableTracker:
         hashed = HashableTracker(key)
@@ -1091,6 +1106,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
+    def python_type(self) -> type:
+        return collections.OrderedDict
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
@@ -1167,6 +1185,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
+        self.install_dict_order_guard(tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
@@ -1369,12 +1388,31 @@ class NNModuleHooksDictVariable(ConstDictVariable):
     def is_python_constant(self) -> bool:
         return not self.items
 
+    def python_type(self) -> type:
+        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+        return super().python_type()
+
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
+    def _hashable_key(self, key: VariableTracker) -> HashableTracker:
+        self.materialize_keys()
+        return super()._hashable_key(key)
+
+    def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self.materialize_keys()
+        super()._store_item(key, value)
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self.materialize_keys()
+        super()._update_items(items)
+
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
-        # Detached containers reuse stored hashes and may never compare their keys.
+        # Key lookups, mutations and detached copies can observe IDs without
+        # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
             key.vt.realize()
         return self.items

@@ -160,9 +160,7 @@ class BuiltinMethodKeyTracker:
                 )
             )
 
-    def activate(
-        self, tx: "InstructionTranslatorBase", *, unguarded: bool = True
-    ) -> None:
+    def track(self, tx: "InstructionTranslatorBase", *, unguarded: bool = True) -> None:
         self.has_method_keys |= unguarded
         tracer = tx.output.current_tracer
         while tracer is not None:
@@ -172,7 +170,7 @@ class BuiltinMethodKeyTracker:
     def add_receiver(
         self, tx: "InstructionTranslatorBase", source: Source | None
     ) -> object:
-        self.activate(tx)
+        self.track(tx)
         if source is None:
             return None
         if source not in self.receivers:
@@ -209,10 +207,11 @@ class KeySummary:
         self.equality_types: dict[int, type] = {}
         self.has_methods = False
         self.custom = False
-        self.fixed_receiver = False
+        self.fixed_types: set[int] = set()
         self.metaclass = False
         self.connected = False
         self.pinned = False
+        self.pinned_types: set[int] = set()
         self.size = 0
         self.first: Source | None = None
         for key in keys:
@@ -221,19 +220,26 @@ class KeySummary:
     def add(
         self, key: "HashableTracker", tx: "InstructionTranslatorBase | None" = None
     ) -> None:
-        self.receivers.update(dict.fromkeys(key.method_receivers))
+        for source in key.method_receivers:
+            self.receivers[source] = None
         self.input_methods.update(key.input_methods)
-        self.equality_sources.update(key.equality_sources)
-        self.equality_types.update((id(kind), kind) for _, kind in key.equality_sources)
+        for source, kind in key.equality_sources:
+            self.equality_sources[source] = kind
+            self.equality_types[id(kind)] = kind
         self.has_methods |= key.has_builtin_method and not key.method_keys_guarded
         self.custom |= key.has_custom_equality
-        self.fixed_receiver |= key.has_fixed_receiver
+        for kind in key.fixed_receiver_types:
+            self.fixed_types.add(id(kind))
         self.metaclass |= key.has_custom_metaclass_equality
         if self.connected and tx is not None:
             self.connect(tx, key.method_receivers)
-            if self.pinned:
+            if self.pinned or self.pinned_types:
                 for source in key.method_receivers:
-                    if source is not None:
+                    if source is not None and (
+                        self.pinned
+                        or id(type(self.tracker.add_receiver(tx, source)))
+                        in self.pinned_types
+                    ):
                         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
     def connect(
@@ -241,6 +247,10 @@ class KeySummary:
         tx: "InstructionTranslatorBase",
         sources: Iterable[Source | None] | None = None,
     ) -> None:
+        if TracingContext.get().guards_context.skip_install:
+            self.connected = self.pinned = False
+            self.pinned_types.clear()
+            return
         self.connected = True
         for method in self.input_methods:
             install_guard(method.make_guard(GuardBuilder.ID_MATCH))
@@ -257,6 +267,8 @@ class KeySummary:
 def _guard_key_equalities(
     tx: "InstructionTranslatorBase", sources: Iterable[tuple[Source, type]]
 ) -> None:
+    if not sources:
+        return
     from .object_protocol import mro_attr_source
 
     _check_pending_key_equalities(tx, (kind for _, kind in sources))
@@ -277,6 +289,8 @@ def _guard_key_equalities(
 def _check_pending_key_equalities(
     tx: "InstructionTranslatorBase", kinds: Iterable[type]
 ) -> None:
+    if not tx.output.side_effects.store_attr_mutations:
+        return
     mutations = [
         obj.value
         for obj, attrs in tx.output.side_effects.store_attr_mutations.items()
@@ -309,7 +323,15 @@ def guard_key_collisions(
     if not tx.output.builtin_method_keys.has_method_keys:
         return None
     tracker = tx.output.builtin_method_keys
-    summaries = [tracker.summary(keys) for keys in collections]
+    # Safe ordinary probes cannot observe a method identity; keep the two-operand policy.
+    probe = collections[1] if len(collections) == 2 else ()
+    probe_equalities = None
+    if type(probe) is tuple and len(probe) == 1 and not probe[0].has_builtin_method:
+        equalities = probe[0].equality_sources
+        if not probe[0].has_custom_equality:
+            probe_equalities = equalities
+    summary_inputs = collections[:1] if probe_equalities is not None else collections
+    summaries = [tracker.summary(keys) for keys in summary_inputs]
     result = summaries[0] if collections and isinstance(collections[0], dict) else None
     if not any(summary.has_methods for summary in summaries):
         return result
@@ -318,10 +340,15 @@ def guard_key_collisions(
         _guard_key_equalities(tx, summary.equality_sources.items())
         if not TracingContext.get().guards_context.skip_install:
             summary.equality_sources.clear()
+    if probe_equalities is not None:
+        _guard_key_equalities(tx, probe_equalities)
+        if not summaries[0].custom and not summaries[0].fixed_types:
+            return result
     participants = [summary for summary in summaries if summary.receivers]
     custom = any(summary.custom for summary in summaries)
-    # Fixed receivers need sourced peers pinned without claiming custom equality.
-    pin_receivers = custom or any(summary.fixed_receiver for summary in summaries)
+    fixed_types = set().union(*(summary.fixed_types for summary in summaries))
+    # A fixed receiver can only alias sourced receivers with the same actual type.
+    pin_receivers = custom or bool(fixed_types)
     if custom:
         if any(summary.metaclass for summary in summaries):
             unimplemented(
@@ -347,6 +374,8 @@ def guard_key_collisions(
                 ],
             )
     # A literal-only operand cannot equal a method. Do not activate unrelated input keys.
+    if TracingContext.get().guards_context.skip_install:
+        return result
     if pin_receivers or len(collections) == 1 or len(participants) > 1:
         first = None
         for summary in participants:
@@ -356,11 +385,17 @@ def guard_key_collisions(
                 if first is None:
                     first = summary.first
                 tracker.connect(first, summary.first)
-            if pin_receivers and not summary.pinned:
+            if (custom and not summary.pinned) or not fixed_types.issubset(
+                summary.pinned_types
+            ):
                 for source in summary.receivers:
-                    if source is not None:
+                    if source is not None and (
+                        custom
+                        or id(type(tracker.add_receiver(tx, source))) in fixed_types
+                    ):
                         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-                summary.pinned = True
+                summary.pinned |= custom
+                summary.pinned_types.update(fixed_types)
     return result
 
 
@@ -433,7 +468,7 @@ class HashableTracker:
     method_keys_guarded: bool = False
     method_receivers: tuple[Source | None, ...] = ()
     has_custom_equality: bool = False
-    has_fixed_receiver: bool = False
+    fixed_receiver_types: tuple[type, ...] = ()
     has_custom_metaclass_equality: bool = False
     _key_types: Iterable[tuple[type | None, Source | None]] = ()
 
@@ -468,7 +503,7 @@ class HashableTracker:
         from .descriptors import BoundBuiltinMethodVariable
 
         input_methods = ()
-        lazy_key_types = None
+        lazy_key_types: list[tuple[type | None, Source | None]] | None = None
         if isinstance(vt, variables.LazyVariableTracker):
             from .builder import bound_builtin_method_descriptor
 
@@ -506,20 +541,25 @@ class HashableTracker:
             self.method_receivers = (vt.obj.source,)
             if vt.obj.source is None and not vt.has_fresh_container_receiver():
                 self.method_receivers = ()
-                self.has_fixed_receiver = True
+                self.fixed_receiver_types = (vt.obj.python_type(),)
             self.vt = vt
             return
         # Custom equality can observe hash collisions with builtin methods.
         key_types: list[tuple[type | None, Source | None]]
         try:
             if lazy_key_types is not None:
-                key_types = list(lazy_key_types)
+                key_types = lazy_key_types
             else:
-                class_source = TypeSource(vt.source) if vt.source else None
-                if class_source is None and isinstance(
-                    vt, variables.UserDefinedObjectVariable
+                if isinstance(vt, variables.UserDefinedObjectVariable) and (
+                    vt.source is None
+                    or (
+                        isinstance(vt.cls_source, TypeSource)
+                        and vt.cls_source.base is vt.source
+                    )
                 ):
                     class_source = vt.cls_source
+                else:
+                    class_source = TypeSource(vt.source) if vt.source else None
                 key_types = [(vt.python_type(), class_source)]
         except NotImplementedError:
             # Let generic hashing preserve its normal unsupported-type fallback.
@@ -531,7 +571,7 @@ class HashableTracker:
                 current_tx = None
             if current_tx is not None:
                 if self.method_keys_guarded:
-                    current_tx.output.builtin_method_keys.activate(
+                    current_tx.output.builtin_method_keys.track(
                         current_tx, unguarded=False
                     )
                 else:
@@ -600,7 +640,9 @@ class HashableTracker:
                 entry for item in items for entry in item.equality_sources
             )
             self.has_custom_equality |= any(item.has_custom_equality for item in items)
-            self.has_fixed_receiver = any(item.has_fixed_receiver for item in items)
+            self.fixed_receiver_types = tuple(
+                kind for item in items for kind in item.fixed_receiver_types
+            )
             self.has_custom_metaclass_equality = any(
                 item.has_custom_metaclass_equality for item in items
             )
@@ -627,34 +669,29 @@ class HashableTracker:
         from .object_protocol import type_is_immutable
 
         sources = []
-        for key_type, class_source in self._key_types:
-            if not any(key_type is safe_type for safe_type in _SAFE_KEY_TYPES):
-                from ..symbolic_convert import InstructionTranslator
+        for kind, source in self._key_types:
+            if any(kind is safe_type for safe_type in _SAFE_KEY_TYPES):
+                continue
+            from ..symbolic_convert import InstructionTranslator
 
-                tracker = InstructionTranslator.current_tx().output.builtin_method_keys
-                guarded_type = tracker.guarded_equalities.get(id(key_type))
-                # Reuse only classifications protected by completed equality guards.
-                if guarded_type is not None and class_source is not None:
-                    sources.append((class_source, guarded_type))
-                    continue
-                is_metaclass = key_type is not None and issubclass(key_type, type)
-                equality = (
-                    None
-                    if key_type is None
-                    else inspect.getattr_static(key_type, "__eq__", None)
-                )
-                if equality is not None and any(
-                    equality is safe for safe in _SAFE_KEY_EQUALITIES
-                ):
-                    if (
-                        key_type is not None
-                        and class_source is not None
-                        and not type_is_immutable(key_type)
-                    ):
-                        sources.append((class_source, key_type))
-                    continue
-                self.has_custom_equality = True
-                self.has_custom_metaclass_equality |= is_metaclass
+            tracker = InstructionTranslator.current_tx().output.builtin_method_keys
+            guarded = tracker.guarded_equalities.get(id(kind))
+            # Reuse only classifications protected by completed equality guards.
+            if guarded is not None and source is not None:
+                sources.append((source, guarded))
+                continue
+            equality = (
+                None if kind is None else inspect.getattr_static(kind, "__eq__", None)
+            )
+            if any(equality is safe for safe in _SAFE_KEY_EQUALITIES):
+                mutable = kind is not None and not type_is_immutable(kind)
+                if source is not None and mutable:
+                    sources.append((source, kind))
+                continue
+            self.has_custom_equality = True
+            self.has_custom_metaclass_equality |= kind is not None and issubclass(
+                kind, type
+            )
         return tuple(sources)
 
     @classmethod
