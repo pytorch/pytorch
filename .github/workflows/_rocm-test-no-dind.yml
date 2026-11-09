@@ -147,6 +147,20 @@ jobs:
             exit 1
           fi
 
+      # Same facts setup-rocm prints for the DinD path. free(1) reports the
+      # node's memory, not the pod's, so read the pod's cgroup values instead.
+      - name: Job pod GPU diagnostics
+        if: always()
+        shell: bash
+        run: |
+          source /etc/rocm_env.sh || true
+          amd-smi monitor -ptumv || true
+          amd-smi process || true
+          ls -l /dev/kfd /dev/dri || true
+          for f in memory.max memory.current; do
+            echo "cgroup ${f}: $(cat "/sys/fs/cgroup/${f}" 2>/dev/null || echo n/a)"
+          done
+
       - name: Get workflow job id
         id: get-job-id
         uses: pytorch/pytorch/.github/actions/get-workflow-job-id@main
@@ -302,6 +316,14 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: cat test/**/*_toprint.log || true
+
+      - name: GPU job diagnostics on failure
+        shell: bash
+        if: failure()
+        run: |
+          source /etc/rocm_env.sh || true
+          amd-smi process || true
+          ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}

@@ -45,7 +45,7 @@ runs:
       run: |
         amd-smi monitor -ptumv
         amd-smi list
-        rocm-smi --showpids || true
+        amd-smi process || true
 
     - name: Runner health check rocminfo
       if: always()

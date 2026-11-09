@@ -333,7 +333,7 @@ jobs:
         shell: bash
         if: failure()
         run: |
-          rocm-smi --showpids || true
+          amd-smi process || true
           free -m || true
           docker exec "${CONTAINER_NAME}" ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
