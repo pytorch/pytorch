@@ -70,6 +70,17 @@ and scalar outputs, repeats, complex stacking, and optimizer-off/on FX exports.
 The OpInfo harness uses the reference evaluator for boolean `SplitToSequence`,
 which is missing from older ONNX Runtime kernel tables.
 
+Recurrent, embedding, and residual core operators live in `recurrent.py`,
+`embedding.py`, and `residual.py`. GRU/LSTM preserve gate ordering, direction
+layout, optional biases, initial states, and interlayer dropout. Sequence length
+and batch size may be dynamic; the recurrent hidden size must be known.
+Embedding bags use explicitly typed `Loop`/`If` subgraphs with lexical captures,
+including empty bags, padding, per-sample weights, and auxiliary outputs.
+`test_native_recurrent_residual_ops.py` compares these graphs with PyTorch and
+exports models with optimization both enabled and disabled without legacy
+translations. Convolution and normalization remain on the existing fallback
+until their next migration layer.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests

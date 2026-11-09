@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import functools
+import itertools
 
 import torch
 from torch.testing import make_tensor
@@ -851,6 +852,661 @@ OPS_DB.extend(
             aten_name="tensor.int",
             dtypes=common_dtype.all_types_and(torch.half, torch.bfloat16),
             sample_inputs_func=sample_inputs_tensor_int,
+            supports_out=False,
+        ),
+    ]
+)
+
+
+def sample_inputs_grouped_mm(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    # Native grouped_mm requires 16-byte-aligned strides, including on CPU.
+    for shape_a, shape_b in (((2, 3, 8), (2, 8, 8)), ((1, 2, 8), (1, 8, 8))):
+        yield opinfo_core.SampleInput(make_arg(shape_a), args=(make_arg(shape_b),))
+
+    for shape_a, shape_b in (
+        ((24, 8), (3, 8, 8)),
+        ((3, 8, 8), (8, 24)),
+        ((8, 24), (24, 8)),
+    ):
+        for boundaries in ([4, 12, 24], [8, 8, 24]):
+            offsets = torch.tensor(boundaries, dtype=torch.int32, device=device)
+            yield opinfo_core.SampleInput(
+                make_arg(shape_a), args=(make_arg(shape_b), offsets)
+            )
+
+
+def sample_inputs_bilinear(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for bilinear operation."""
+    del op_info
+    del kwargs
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    # Test cases: (batch_size, in1_features, in2_features, out_features)
+    cases = [
+        (2, 3, 4, 5),  # Basic case
+        (1, 2, 2, 1),  # Minimal case
+        (3, 5, 7, 4),  # Different dimensions
+        (2, 1, 1, 3),  # Single input features
+    ]
+
+    for batch_size, in1_features, in2_features, out_features in cases:
+        input1 = make_arg((batch_size, in1_features))
+        input2 = make_arg((batch_size, in2_features))
+        weight = make_arg((out_features, in1_features, in2_features))
+        bias = make_arg((out_features,))
+
+        # Test with bias
+        yield opinfo_core.SampleInput(input1, args=(input2, weight, bias))
+
+        # Test without bias (only for first case to avoid too many tests)
+        if batch_size == 2:
+            yield opinfo_core.SampleInput(input1, args=(input2, weight, None))
+
+
+def sample_inputs_embedding_renorm(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    def make_input(shape):
+        return common_methods_invocations.make_tensor(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+
+    def make_long_input(shape, *, low, high, noncontiguous=False):
+        return common_methods_invocations.make_tensor(
+            shape,
+            device=device,
+            dtype=torch.long,
+            low=low,
+            high=high,
+            noncontiguous=noncontiguous,
+        )
+
+    for max_norm in (0.5, 1.0, 5.0):
+        for norm_type in (0.8, 1.0, 2.0, 2.5):
+            idx = make_long_input((6,), low=0, high=S)
+            weights = make_input((S, S)) * 2
+            yield common_methods_invocations.SampleInput(
+                weights,
+                args=(idx,),
+                kwargs={"max_norm": max_norm, "norm_type": norm_type},
+            )
+
+
+def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    def make_input(shape):
+        return common_methods_invocations.make_tensor(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+
+    def make_long_input(shape, *, low, high, noncontiguous=False):
+        return common_methods_invocations.make_tensor(
+            shape,
+            device=device,
+            dtype=torch.long,
+            low=low,
+            high=high,
+            noncontiguous=noncontiguous,
+        )
+
+    def make_per_sample_weight(flag, idx):
+        # a tensor of float / double weights, or None
+        # to indicate all weights should be taken to be 1
+        if flag:
+            return make_input(idx.reshape(-1).shape)
+        return None
+
+    offsets = [
+        torch.tensor([0, 2, 3], device=device, dtype=torch.long),
+        torch.tensor([0, 0, 2], device=device, dtype=torch.long),
+        torch.tensor([0, 2, 2, 4], device=device, dtype=torch.long),
+    ]
+    for offset in offsets:
+        for include_last_offset in (True, False):
+            for generate_per_sample_weight in (True, False):
+                for mode in (
+                    0,
+                    1,
+                    2,
+                ):  # ('sum', 'mean', 'max')
+                    # per_sample_weights only support mode='sum'
+                    if generate_per_sample_weight and mode in (
+                        1,
+                        2,
+                    ):  # ('mean', 'max'):
+                        continue
+
+                    # 1-D index tensor
+                    indices = make_long_input((S,), low=0, high=M)
+                    per_sample_weights = make_per_sample_weight(
+                        generate_per_sample_weight, indices
+                    )
+                    # 0
+                    yield common_methods_invocations.SampleInput(
+                        make_input((M, S)),
+                        args=(indices,),
+                        kwargs={
+                            "offsets": offset,
+                            "mode": mode,
+                            "per_sample_weights": per_sample_weights,
+                            "include_last_offset": include_last_offset,
+                        },
+                    )
+
+                    indices = make_long_input((S,), low=0, high=M, noncontiguous=True)
+                    per_sample_weights = make_per_sample_weight(
+                        generate_per_sample_weight, indices
+                    )
+                    # 1
+                    yield common_methods_invocations.SampleInput(
+                        make_input((M, S)),
+                        args=(indices,),
+                        kwargs={
+                            "offsets": offset,
+                            "mode": mode,
+                            "per_sample_weights": per_sample_weights,
+                            "include_last_offset": include_last_offset,
+                        },
+                    )
+
+                    if mode != 2:  # "max" mode in 2-D index tensor make aten func crash
+                        # 2-D index tensor
+                        indices = make_long_input((S, S), low=0, high=M)
+                        per_sample_weights = make_per_sample_weight(
+                            generate_per_sample_weight, indices
+                        )
+                        # 2
+                        yield common_methods_invocations.SampleInput(
+                            make_input((M, S)),
+                            args=(indices,),
+                            kwargs={
+                                "offsets": offset,
+                                "mode": mode,
+                                "per_sample_weights": per_sample_weights,
+                                "include_last_offset": include_last_offset,
+                            },
+                        )
+
+                        indices = make_long_input(
+                            (S, S), low=0, high=M, noncontiguous=True
+                        )
+                        per_sample_weights = make_per_sample_weight(
+                            generate_per_sample_weight, indices
+                        )
+                        # 3
+                        yield common_methods_invocations.SampleInput(
+                            make_input((M, S)),
+                            args=(indices,),
+                            kwargs={
+                                "offsets": offset,
+                                "mode": mode,
+                                "per_sample_weights": per_sample_weights,
+                                "include_last_offset": include_last_offset,
+                            },
+                        )
+
+
+def sample_inputs_embedding_bag_padding_idx(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    del kwargs
+
+    def make_input(shape):
+        return common_methods_invocations.make_tensor(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+
+    def make_long_input(shape, *, low, high, noncontiguous=False):
+        return common_methods_invocations.make_tensor(
+            shape,
+            device=device,
+            dtype=torch.long,
+            low=low,
+            high=high,
+            noncontiguous=noncontiguous,
+        )
+
+    def make_per_sample_weight(flag, idx):
+        # a tensor of float / double weights, or None
+        # to indicate all weights should be taken to be 1
+        if flag:
+            return make_input(idx.reshape(-1).shape)
+        return None
+
+    offsets = [
+        torch.tensor([0, 2, 3], device=device, dtype=torch.long),
+        # Below case not work for FullGraph mode, guess due to op.While() bug:
+        # when the initial condition is False, it still executes the loop body once.
+        # torch.tensor([0, 0, 2], device=device, dtype=torch.long),
+        # torch.tensor([0, 2, 2, 4], device=device, dtype=torch.long),
+    ]
+    for offset in offsets:
+        for include_last_offset in (True, False):
+            for generate_per_sample_weight in (True, False):
+                for mode in (
+                    0,
+                    1,
+                    2,
+                ):  # ('sum', 'mean', 'max')
+                    # per_sample_weights only support mode='sum'
+                    if generate_per_sample_weight and mode in (
+                        1,
+                        2,
+                    ):  # ('mean', 'max'):
+                        continue
+
+                    for padding_idx in (-1, 0, 1, 2, 3):
+                        # 1-D index tensor
+                        indices = make_long_input((S,), low=0, high=M)
+                        per_sample_weights = make_per_sample_weight(
+                            generate_per_sample_weight, indices
+                        )
+                        # 0
+                        yield common_methods_invocations.SampleInput(
+                            make_input((M, S)),
+                            args=(indices,),
+                            kwargs={
+                                "offsets": offset,
+                                "scale_grad_by_freq": False,
+                                "mode": mode,
+                                "sparse": False,
+                                "per_sample_weights": per_sample_weights,
+                                "include_last_offset": include_last_offset,
+                                "padding_idx": padding_idx,
+                            },
+                        )
+
+                        indices = make_long_input(
+                            (S,), low=0, high=M, noncontiguous=True
+                        )
+                        per_sample_weights = make_per_sample_weight(
+                            generate_per_sample_weight, indices
+                        )
+                        # 1
+                        yield common_methods_invocations.SampleInput(
+                            make_input((M, S)),
+                            args=(indices,),
+                            kwargs={
+                                "offsets": offset,
+                                "scale_grad_by_freq": False,
+                                "mode": mode,
+                                "sparse": False,
+                                "per_sample_weights": per_sample_weights,
+                                "include_last_offset": include_last_offset,
+                                "padding_idx": padding_idx,
+                            },
+                        )
+
+
+def sample_inputs_fake_quantize_per_tensor_affine(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info, kwargs  # Unused
+    make_arg = functools.partial(
+        opinfo_core.make_tensor,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+    # Test 1D, empty and scalar tensors (like sample_inputs_elementwise_unary)
+    shapes = [
+        (S,),
+        (1, 0, 3),
+        (),
+    ]
+
+    scale_zero_point_dtypes = [
+        # default (float, int)
+        (None, None)
+    ] + [
+        # tensor_qparams (tensor, tensor)
+        (t1, t2)
+        for t1 in common_dtype.all_types_and()
+        for t2 in common_dtype.all_types_and()
+    ]
+
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    quant_vals = [(0, 255), (-128, 127), (0, 127)]
+
+    cases = itertools.product(shapes, scale_zero_point_dtypes, quant_vals)
+    for shape, (scale_dtype, zero_point_dtype), (quant_min, quant_max) in cases:
+        scale = make_arg(
+            (),
+            dtype=scale_dtype or torch.float64,
+        )
+        if scale_dtype is None:
+            scale = scale.item()
+
+        zero_point = make_arg(
+            (),
+            dtype=zero_point_dtype or torch.int64,
+            # zero_point must be between quant_min and quant_max
+            low=quant_min,
+            high=quant_max,
+        )
+        if zero_point_dtype is None:
+            zero_point = zero_point.item()
+
+        args = (scale, zero_point, quant_min, quant_max)
+        yield opinfo_core.SampleInput(make_arg(shape, dtype=dtype), args=args)
+
+
+def sample_inputs_fake_quantize_per_channel_affine(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info, kwargs  # Unused
+    make_arg = functools.partial(
+        opinfo_core.make_tensor,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+    # Test 1D, 2D, 4D and empty tensors (scalar tensors not supported)
+    axes_and_shapes = [
+        # 1D, 2D, 4D
+        (axis, (S,) * dims)
+        for dims in (1, 2, 4)
+        for axis in range(dims)
+    ] + [
+        # empty
+        (0, (1, 0, 3)),
+        (2, (1, 0, 3)),
+        # empty channel axis causes an error due to
+        # an internal zero_point.min() calculation
+        # (1, (1, 0, 3)),
+    ]
+
+    # tensor_qparams
+    scale_dtype = torch.float
+    zero_point_dtypes = [torch.int32, torch.float, torch.half]
+
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    quant_vals = [(0, 255), (-128, 127), (0, 127)]
+
+    cases = itertools.product(axes_and_shapes, zero_point_dtypes, quant_vals)
+    for (axis, shape), zero_point_dtype, (quant_min, quant_max) in cases:
+        scale = make_arg((shape[axis],), dtype=scale_dtype)
+
+        zero_point = make_arg(
+            (shape[axis],),
+            dtype=zero_point_dtype or torch.int64,
+            # zero_point must be between quant_min and quant_max
+            low=quant_min,
+            high=quant_max,
+        )
+
+        args = (scale, zero_point, axis, quant_min, quant_max)
+        yield opinfo_core.SampleInput(make_arg(shape, dtype=dtype), args=args)
+
+
+def sample_inputs__log_softmax(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    **kwargs,
+):
+    del op_info  # Unused
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    cases = [
+        ((S,), (0,)),
+        ((S, S), (0,)),
+        ((S, S), (1,)),
+        ((S, S), (-1,)),
+        ((S, M, S), (2,)),
+        ((S, 0, 0), (-1,)),
+    ]
+
+    for (shape, dim), half_to_float in itertools.product(cases, (False,)):
+        # NOTE: softmax with half to float conversion is not supported on CPU
+        # So we don't test it here
+        kwargs = dict(half_to_float=half_to_float)
+        yield opinfo_core.SampleInput(make_arg(shape), args=dim, kwargs=kwargs)
+
+
+def sample_inputs_native_dropout(
+    op_info, device, dtype, requires_grad, *, valid_input_dim=None, **kwargs
+):
+    del op_info  # Unused
+    del kwargs  # Unused
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    if valid_input_dim:
+        cases = ((S,) * i for i in valid_input_dim)
+    else:
+        cases = ((S, S), (S,), ())
+    # ONNX requires 0 <= p < 1
+    p_vals = [0.0]
+
+    training_vals = [True, False]
+
+    for case, p, training in itertools.product(cases, p_vals, training_vals):
+        yield opinfo_core.SampleInput(make_arg(case), p=p, train=training)
+
+
+def sample_inputs__softmax(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    **kwargs,
+):
+    del op_info  # Unused
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    cases = [
+        ((S,), (0,)),
+        ((S, S), (0,)),
+        ((S, S), (1,)),
+        ((S, S), (-1,)),
+        ((S, M, S), (2,)),
+        ((S, 0, 0), (-1,)),
+    ]
+
+    for (shape, dim), half_to_float in itertools.product(cases, (False,)):
+        # NOTE: softmax with half to float conversion is not supported on CPU
+        # So we don't test it here
+        kwargs = dict(half_to_float=half_to_float)
+        yield opinfo_core.SampleInput(make_arg(shape), args=dim, kwargs=kwargs)
+
+
+def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    def mt(shape, **kwargs):
+        return make_tensor(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad, **kwargs
+        )
+
+    yield opinfo_core.SampleInput(mt(100), n_fft=10, return_complex=True)
+    yield opinfo_core.SampleInput(mt(100), n_fft=10, return_complex=False)
+    if dtype.is_complex:
+        yield opinfo_core.SampleInput(mt(100), n_fft=10)
+
+    yield opinfo_core.SampleInput(mt(10), n_fft=7, return_complex=True)
+    yield opinfo_core.SampleInput(
+        mt((10, 100)), n_fft=16, hop_length=4, return_complex=True
+    )
+
+    window = mt(16, low=0.5, high=2.0)
+    yield opinfo_core.SampleInput(
+        mt((2, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True)
+    )
+    yield opinfo_core.SampleInput(
+        mt((3, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True)
+    )
+    if not dtype.is_complex:
+        yield opinfo_core.SampleInput(
+            mt((10, 100)), n_fft=16, window=window, onesided=False, return_complex=True
+        )
+
+
+def sample_inputs__unique(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in common_methods_invocations.sample_inputs_unique(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        return_counts = sample.kwargs.pop("return_counts", None)
+        dim = sample.kwargs.pop("dim", None)
+        # take only those samples that do not ask for counts or a dim
+        if not return_counts and dim is None:
+            yield sample
+
+
+def sample_inputs__unique2(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in common_methods_invocations.sample_inputs_unique(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # take only those samples that do not ask for a dim
+        if sample.kwargs.pop("dim", None) is None:
+            yield sample
+
+
+def sample_inputs_unique_dim(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in common_methods_invocations.sample_inputs_unique(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        # take only those samples that ask for a dim
+        if sample.kwargs.get("dim") is not None:
+            yield sample
+
+
+OPS_DB.extend(
+    [
+        opinfo_core.OpInfo(
+            "bilinear",
+            op=torch.nn.functional.bilinear,
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_bilinear,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.embedding_bag",
+            aten_name="embedding_bag",
+            dtypes=common_dtype.floating_types_and_half(),
+            sample_inputs_func=sample_inputs_embedding_bag,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.embedding_bag.padding_idx",
+            aten_name="embedding_bag.padding_idx",
+            dtypes=common_dtype.floating_types_and_half(),
+            sample_inputs_func=sample_inputs_embedding_bag_padding_idx,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.embedding_renorm",
+            aten_name="embedding_renorm",
+            dtypes=common_dtype.floating_types_and_half(),
+            sample_inputs_func=sample_inputs_embedding_renorm,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.fake_quantize_per_tensor_affine",
+            aten_name="fake_quantize_per_tensor_affine",
+            op=torch.fake_quantize_per_tensor_affine,
+            dtypes=common_dtype.floating_types_and(torch.half, torch.bfloat16),
+            sample_inputs_func=sample_inputs_fake_quantize_per_tensor_affine,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.fake_quantize_per_channel_affine",
+            aten_name="fake_quantize_per_channel_affine",
+            op=torch.fake_quantize_per_channel_affine,
+            dtypes=common_dtype.floating_types_and(torch.half, torch.bfloat16),
+            sample_inputs_func=sample_inputs_fake_quantize_per_channel_affine,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._log_softmax",
+            op=torch.ops.aten._log_softmax,  # pylint: disable=protected-access
+            aten_name="_log_softmax",
+            dtypes=common_dtype.floating_types_and_half(),
+            sample_inputs_func=sample_inputs__log_softmax,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.native_dropout",
+            aten_name="native_dropout",
+            dtypes=common_dtype.all_types_and_half(),
+            sample_inputs_func=sample_inputs_native_dropout,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._softmax",
+            op=torch.ops.aten._softmax,  # pylint: disable=protected-access
+            aten_name="_softmax",
+            dtypes=common_dtype.floating_types_and_half(),
+            sample_inputs_func=sample_inputs__softmax,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.stft",
+            aten_name="stft",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.half, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_stft,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._unique.default",
+            aten_name="_unique.default",
+            dtypes=common_dtype.floating_types_and(
+                torch.float16, torch.int64, torch.int8
+            ),
+            sample_inputs_func=sample_inputs__unique,
+            supports_out=False,
+            supports_autograd=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._unique2.default",
+            aten_name="_unique2.default",
+            dtypes=common_dtype.floating_types_and(
+                torch.float16, torch.int64, torch.int8
+            ),
+            sample_inputs_func=sample_inputs__unique2,
+            supports_out=False,
+            supports_autograd=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.unique_dim.default",
+            aten_name="unique_dim.default",
+            dtypes=common_dtype.floating_types_and(
+                torch.float16, torch.int64, torch.int8
+            ),
+            sample_inputs_func=sample_inputs_unique_dim,
+            supports_out=False,
+            supports_autograd=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._grouped_mm",
+            aten_name="_grouped_mm",
+            op=getattr(torch.ops.aten, "_grouped_mm", lambda *args, **kwargs: None),
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_grouped_mm,
             supports_out=False,
         ),
     ]

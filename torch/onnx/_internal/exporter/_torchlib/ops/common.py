@@ -93,3 +93,12 @@ def complex_scalar(
         )
     components = [value.real, value.imag] if isinstance(value, complex) else [value, 0]
     return current_builder().constant(components, dtype=dtype)
+
+
+def finish_subgraph(graph: ir.Graph, outputs: Sequence[ir.Value]) -> ir.Graph:
+    """Set explicit outputs and avoid shadowing captured ancestor value names."""
+    graph.outputs.extend(outputs)
+    for index, node in enumerate(graph):
+        for output_index, output in enumerate(node.outputs):
+            output.name = f"{graph.name}_{index}_{output_index}"
+    return graph
