@@ -53,7 +53,7 @@ class TestTensorPreparation(TestCase):
 
 
 instantiate_device_type_tests(
-    TestTensorPreparation, globals(), only_for=("cpu", "cuda")
+    TestTensorPreparation, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
 
 
