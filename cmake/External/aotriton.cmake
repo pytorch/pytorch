@@ -152,13 +152,17 @@ if(NOT __AOTRITON_INCLUDED)
     if(WIN32)
       message(STATUS "Building AOTriton Windows dependencies")
       aotriton_build_windows_dependencies(dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
-      # Restore the checkout first so the patch step can be re-run.
-      find_package(Git REQUIRED)
       file(GLOB __AOTRITON_WIN32_PATCHES "${__AOTRITON_WIN32_PATCH_DIR}/*.patch")
       list(SORT __AOTRITON_WIN32_PATCHES)
-      set(__AOTRITON_PATCH_COMMAND
-        PATCH_COMMAND ${GIT_EXECUTABLE} checkout -- .
-        COMMAND ${GIT_EXECUTABLE} apply ${__AOTRITON_WIN32_PATCHES})
+      # Without patches `git apply` would read stdin, so only set the step
+      # when the directory has some.
+      if(__AOTRITON_WIN32_PATCHES)
+        # Restore the checkout first so the patch step can be re-run.
+        find_package(Git REQUIRED)
+        set(__AOTRITON_PATCH_COMMAND
+          PATCH_COMMAND ${GIT_EXECUTABLE} checkout -- .
+          COMMAND ${GIT_EXECUTABLE} apply ${__AOTRITON_WIN32_PATCHES})
+      endif()
     endif()
     message(STATUS "PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}")
     set(__AOTRITON_ROCM_ARGS "")
