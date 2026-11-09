@@ -482,6 +482,22 @@ static std::tuple<Tensor, Tensor, int64_t> mps_intersect_binary_search(
   });
 
   const auto match_count = static_cast<int64_t>(counter.item<int32_t>());
+
+  // The kernel takes its output slot from an atomic counter, so the pairs land in
+  // thread arrival order rather than key order. Both operands are coalesced, so
+  // the matches are a common subsequence of two sorted key lists and sorting them
+  // by their lhs position puts them back in key order. Callers rely on that:
+  // the result indices are gathered with these positions and the tensor is then
+  // marked coalesced.
+  if (match_count > 1) {
+    auto matchA = outA_idx.narrow(0, 0, match_count);
+    auto matchB = outB_idx.narrow(0, 0, match_count);
+    auto [sortedA, perm] = matchA.sort();
+    auto sortedB = matchB.index_select(0, perm);
+    matchA.copy_(sortedA);
+    matchB.copy_(sortedB);
+  }
+
   return std::make_tuple(std::move(outA_idx), std::move(outB_idx), match_count);
 }
 
