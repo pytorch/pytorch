@@ -639,6 +639,27 @@ static void fastCatOutDim0(
   TORCH_CHECK(outBytes == totalBytes);
 }
 
+void cat_as_bytes(
+    const MaterializedITensorListRef& tensors,
+    int64_t dim,
+    const Tensor& result) {
+  std::vector<Tensor> inputs;
+  for (const Tensor& tensor : tensors) {
+    if (cat_should_skip_tensor(tensor)) {
+      continue;
+    }
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        tensor.scalar_type() == result.scalar_type(),
+        "torch.cat: expected all inputs to be ",
+        result.scalar_type(),
+        ", which has no casts, but got ",
+        tensor.scalar_type());
+    inputs.push_back(tensor.unsqueeze(-1).view(kByte));
+  }
+  auto result_bytes = result.unsqueeze(-1).view(kByte);
+  at::cat_out(result_bytes, inputs, dim);
+}
+
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
  int64_t dim,
@@ -668,6 +689,11 @@ TORCH_IMPL_FUNC(cat_out_cpu)
     }
     // TODO: Add fast cat for higher dimensions and support multi-threaded fast
     // cat
+  }
+
+  if (hasNonPowerOfTwoElementSize(result.scalar_type())) {
+    cat_as_bytes(materialized, dim, result);
+    return;
   }
 
   // fast path for single thread when both inputs and result are contiguous and

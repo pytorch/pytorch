@@ -2010,6 +2010,7 @@ def gen_pyi(
             "float8_e8m0fnu",
             "float8_e5m3fnu",
             "float4_e2m1fn_x2",
+            "float6_e2m3fn_x4",
             "half",
             "uint8",
             "uint16",
