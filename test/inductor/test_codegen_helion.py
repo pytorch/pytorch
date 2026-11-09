@@ -440,17 +440,18 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("in2[tile_r, tile_x]", source)
         self.assertEqual("out1[" in source, not epilogue)
 
-    def test_horizontal_separate_k_loops(self):
-        # Each dot gets its own K loop here, and the second loop reads w again
-        # instead of reusing the first loop's tmp1.
+    def test_horizontal_dots_share_one_k_loop(self):
+        # The nodes fuse as [dot1, cast1, dot2, cast2]; both dots still go in
+        # one K loop, which loads w once.
         (source,) = self.compile(
             lambda w, a, b: ((a @ w).float(), (b @ w).float()),
             randn(16, 512),
             randn(512, 16),
             randn(512, 16),
         )
-        self.assertEqual(source.count("for tile_r in hl.tile(16):"), 2)
-        self.assertEqual(source.count(" = in1[tile_r, tile_x]"), 2)
+        self.assertEqual(source.count("for tile_r in hl.tile(16):"), 1)
+        self.assertEqual(source.count(" = in1[tile_r, tile_x]"), 1)
+        self.assertIn("acc1 = torch.addmm(acc1, tmp2, tmp1)", source)
 
     def test_horizontal_operand_views(self):
         (source,) = self.compile(
