@@ -150,6 +150,41 @@ class TestQuantizedTensor(TestCase):
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         self.assertTrue(torch.equal(x_q, y_q))
 
+    def test_qtensor_equal_sub_byte_dtypes(self):
+        # Regression for https://github.com/pytorch/pytorch/issues/203767:
+        # equal_quantized_cpu must use the packed storage byte count
+        # (numel/2 for quint4x2, numel/4 for quint2x4), not an over-read.
+        for dtype, elements_per_byte in [
+            (torch.quint4x2, 2),
+            (torch.quint2x4, 4),
+        ]:
+            numel = 65536
+            source = torch._empty_affine_quantized(
+                (numel,), scale=1.0, zero_point=0, dtype=dtype
+            )
+            source.untyped_storage().fill_(0)
+            expected_nbytes = numel // elements_per_byte
+            self.assertEqual(source.untyped_storage().nbytes(), expected_nbytes)
+
+            buf = io.BytesIO()
+            torch.save(source, buf)
+            payload = buf.getvalue()
+
+            for _ in range(5):
+                left = torch.load(io.BytesIO(payload), weights_only=True)
+                right = torch.load(io.BytesIO(payload), weights_only=True)
+                self.assertEqual(left.untyped_storage().nbytes(), expected_nbytes)
+                self.assertEqual(right.untyped_storage().nbytes(), expected_nbytes)
+                self.assertTrue(torch.equal(left, right))
+
+            # Non-identical packed bytes must compare unequal.
+            other = torch._empty_affine_quantized(
+                (numel,), scale=1.0, zero_point=0, dtype=dtype
+            )
+            other.untyped_storage().fill_(0)
+            other.untyped_storage()[0] = 1
+            self.assertFalse(torch.equal(source, other))
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
