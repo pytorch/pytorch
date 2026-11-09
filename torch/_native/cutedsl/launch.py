@@ -110,7 +110,9 @@ def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
     tensors, is exported read-only; tensors in `args`, bare or in lists, are outputs.
 
     Compiled kernels launched through here must treat outputs as write-only scratch: a
-    replay allocates them uninitialized and repeats only the launches.
+    replay allocates them uninitialized and repeats only the launches. While recording,
+    every compiled-kernel call must come through here; a direct call is missing from
+    the replay.
     """
     record = _RECORD.get()
     if record is not None:
@@ -124,8 +126,10 @@ class LaunchRecord:
     x's dtype, device, sizes, strides, storage offset, storage size and pointer alignment.
 
     Callers must ensure that no torch op writes data to a buffer a launch has seen
-    (resizes that do not grow the storage are fine) and that launch outputs are write-only
-    scratch: a replay allocates them uninitialized and repeats only the launches.
+    (resizes that do not grow the storage are fine), that launch outputs are write-only
+    scratch (a replay allocates them uninitialized and repeats only the launches), and
+    that every compiled-kernel call goes through launch(): finish() catches a direct
+    call only when its result feeds a launch or is returned unwritten.
     finish() returns None unless every operand views `x` or a buffer whose storage first
     appeared in a launch's output position, before any input position, and every output
     views a distinct such buffer. Torch-op results that a launch reads, or that are
