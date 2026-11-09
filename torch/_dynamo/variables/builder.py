@@ -5854,6 +5854,10 @@ class SourcelessBuilder:
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
             return GetAttrVariable(obj, "__new__", py_type=type(value))
+        elif is_cutedsl_jit_function(value):
+            from .cutedsl import CuteDSLKernelVariable
+
+            return CuteDSLKernelVariable(value, None, None)
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)

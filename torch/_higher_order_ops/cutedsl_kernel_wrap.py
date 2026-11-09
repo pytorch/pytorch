@@ -1086,9 +1086,10 @@ tracing_cutedsl_hopifier_singleton = TracingCuteDSLHOPifier()
 class TraceableCuteDSLKernelWrapper:
     """What wrap_cutedsl returns: calling it launches the host function eagerly, or
     records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export.
-    Dynamo captures a call of it as that node too (see CuteDSLKernelVariable); a call
-    that Dynamo refuses graph-breaks, and runs eagerly unless fullgraph=True or strict
-    export refuses it."""
+    Dynamo captures a call of it as that node too (see CuteDSLKernelVariable), and so
+    the call of this __call__ in the override of a subclass (super().__call__(...)),
+    through the Dynamo branch below; a call that Dynamo refuses graph-breaks, and
+    runs eagerly unless fullgraph=True or strict export refuses it."""
 
     kernel: Callable[..., Any]
     mutates_args: MutatesArgs
@@ -1099,7 +1100,21 @@ class TraceableCuteDSLKernelWrapper:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         from torch._library.triton import is_wrap_triton_enabled
+        from torch.compiler import is_dynamo_compiling
 
+        if (
+            is_dynamo_compiling()
+            and type(self).__call__ is not TraceableCuteDSLKernelWrapper.__call__
+        ):
+            # Dynamo captures a call of a wrapper itself (see CuteDSLKernelVariable),
+            # but traces an instance of a subclass that overrides __call__ as any
+            # object, so that the override runs, and gets here when the override
+            # calls this method (super().__call__(...)): the call is captured as that
+            # of a wrapper of the instance's host function and write set.
+            from torch._library.cutedsl import wrap_cutedsl
+
+            wrapper = wrap_cutedsl(self.kernel, mutates_args=self.mutates_args)
+            return wrapper(*args, **kwargs)
         if is_wrap_triton_enabled():
             return tracing_cutedsl_hopifier_singleton.call_cutedsl_kernel(
                 self, args, kwargs, None

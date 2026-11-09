@@ -3457,15 +3457,162 @@ def forward(self, x_1, y_1):
 
 @requires_cutedsl
 class CuteDSLDynamoTests(TestCase):
-    """torch.compile front end: a wrapper made outside the region (a global or one
-    passed in) becomes one HOP node; recompiles follow the arg classes."""
+    """torch.compile front end: the wrapper (global or created inline) becomes one
+    HOP node; recompiles follow the arg classes."""
 
     hw_classification = HardwareClassification.CUDA
+
+    def test_bad_wrap_cutedsl_calls_graph_break(self):
+        # A call that eager refuses too (of a wrapper, a functools.wraps wrapper of a
+        # host function, a @cute.kernel function, a kernel object or a bound @cute.jit
+        # method, which are not @cute.jit functions, or with missing or extra
+        # arguments) graph-breaks as a user error, whose explanation gives eager's
+        # remedy for a kernel object or a bound method, and the eager call then
+        # raises; a non-constant mutates_args, which eager takes, is the one call
+        # Dynamo could support.
+        from torch._dynamo import graph_break_hints
+
+        user_error = graph_break_hints.USER_ERROR[0]
+        supportable = graph_break_hints.SUPPORTABLE[0]
+
+        def f(x, y, args, kwargs):
+            out = torch.empty_like(x)
+            wrap_cutedsl(*args, **kwargs)(x, y, out, x.numel())
+            return out
+
+        def generator(x, y):
+            out = torch.empty_like(x)
+            names = (name for name in ["mOut"])
+            wrap_cutedsl(add_kernel, mutates_args=names)(x, y, out, x.numel())
+            return out
+
+        @functools.wraps(add_kernel)
+        def decorated(*args, **kwargs):
+            return add_kernel(*args, **kwargs)
+
+        x, y = _rand(1000), _rand(1000)
+        kernel_object = MulKernel(2.0)
+        not_jit = "wrap_cutedsl: host_fn is not a @cute.jit function"
+        improper = "wrap_cutedsl: improper arguments"
+        non_constant = "wrap_cutedsl: non-constant mutates_args"
+        only_jit = "only works on host functions decorated with @cute.jit"
+        no_methods = "does not support bound methods or kernel objects"
+        remedy = "takes the object as a cutlass.Constexpr parameter and calls"
+        missing = "missing 1 required keyword-only argument: 'mutates_args'"
+        two = "takes 1 positional argument but 2 were given"
+        extra = "got an unexpected keyword argument 'x'"
+        out_only = {"mutates_args": ["mOut"]}
+        for args, kwargs, message, gb_type in (
+            ((add_w,), out_only, only_jit, not_jit),
+            ((decorated,), out_only, only_jit, not_jit),
+            ((_add_k,), {"mutates_args": ["gOut"]}, only_jit, not_jit),
+            ((kernel_object,), out_only, no_methods, not_jit),
+            ((kernel_object.__call__,), out_only, no_methods, not_jit),
+            ((add_kernel,), {}, missing, improper),
+            ((add_kernel, ["mOut"]), {}, two, improper),
+            ((add_kernel,), {**out_only, "x": 1}, extra, improper),
+        ):
+            with self.subTest(args=args, kwargs=kwargs):
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(Exception, re.escape(message)) as eager:
+                    f(x, y, args, kwargs)
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    cf = torch.compile(f, backend="eager", fullgraph=True)
+                    cf(x, y, args, kwargs)
+                self.assertEqual(cm.exception.gb_type, gb_type)
+                self.assertIn(user_error, str(cm.exception))
+                self.assertNotIn(supportable, str(cm.exception))
+                if gb_type == not_jit:
+                    self.assertIn(remedy, " ".join(str(cm.exception).split()))
+                # Without fullgraph, eager's own error.
+                with self.assertRaises(type(eager.exception)) as cm:
+                    torch.compile(f, backend="eager")(x, y, args, kwargs)
+                self.assertEqual(str(cm.exception), str(eager.exception))
+        self.assertEqual(generator(x, y), x + y)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(generator, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(cm.exception.gb_type, non_constant)
+        self.assertIn(supportable, str(cm.exception))
+        self.assertIn("Pass mutates_args as 'unknown'", str(cm.exception))
+        self.assertNotIn(user_error, str(cm.exception))
+        self.assertEqual(torch.compile(generator, backend="eager")(x, y), x + y)
+
+    def test_inline_wrap_cutedsl_bad_mutates_args(self):
+        # Validated as in eager, None included: under fullgraph the call graph-breaks
+        # as a user error with eager's message, otherwise the eager wrap_cutedsl
+        # raises it: a TypeError for a value that is not "unknown" or an iterable of
+        # names, a ValueError for a name of a parameter that the kernel cannot write.
+        from torch._dynamo import graph_break_hints
+
+        def f(x, y, mutates_args):
+            out = torch.empty_like(x)
+            wrap_cutedsl(add_kernel, mutates_args=mutates_args)(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(16), _rand(16)
+        not_names = r"CuTeDSL kernel add_kernel: mutates_args must be .*, got "
+        cannot_write = r"CuTeDSL kernel add_kernel: mutates_args names "
+        for bad, error, pattern in (
+            (None, TypeError, not_names + "None"),
+            ("mOut", TypeError, not_names + "'mOut'"),
+            (["not_a_param"], ValueError, cannot_write + "'not_a_param'"),
+            (["n"], ValueError, cannot_write + "'n'"),
+        ):
+            with self.subTest(mutates_args=bad):
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, pattern
+                ) as cm:
+                    torch.compile(f, backend="eager", fullgraph=True)(x, y, bad)
+                self.assertEqual(cm.exception.gb_type, "CuTeDSL kernel call error")
+                self.assertIn(graph_break_hints.USER_ERROR[0], str(cm.exception))
+                with self.assertRaisesRegex(error, pattern) as cm:
+                    torch.compile(f, backend="eager")(x, y, bad)
+                self.assertNotIsInstance(
+                    cm.exception, torch._dynamo.exc.TorchDynamoException
+                )
+
+    def test_inline_wrapper_live_across_graph_break(self):
+        # A wrapper made in the frame is rebuilt at the graph break with its write
+        # set, so both parts compile instead of the frame falling back to eager, and
+        # the resumed graph launches the record of that write set.
+        def make(mutates_args):
+            def f(x, y):
+                w = wrap_cutedsl(add_kernel, mutates_args=mutates_args)
+                out = torch.zeros_like(x)
+                torch._dynamo.graph_break()
+                w(x, y, out, x.numel())
+                return out
+
+            return f
+
+        x, y = _rand(1000), _rand(1000)
+        for mutates_args, written in (
+            (["mOut"], ("mOut",)),
+            (("mOut",), ("mOut",)),
+            ("unknown", "unknown"),
+        ):
+            with self.subTest(mutates_args=mutates_args):
+                backend = EagerAndRecordGraphs()
+                cnt = CompileCounterWithBackend(backend)
+                cf = torch.compile(make(mutates_args), backend=cnt)
+                self.assertEqual(cf(x, y), x + y)
+                self.assertEqual(cnt.frame_count, 2)
+                _, resumed = backend.graphs
+                (node,) = _hop_nodes(resumed, cutedsl_kernel_wrapper_mutation)
+                record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                self.assertEqual(record, CuteDSLKernel(add_kernel, written))
 
     def test_wrapper_type_inside_compile(self):
         # A wrapper has its own type in the region: TraceableCuteDSLKernelWrapper, or
         # the subclass passed in. A subclass that overrides __call__ is not taken for
-        # a wrapper, so its override runs.
+        # a wrapper, so its override runs, and the call of the wrapper's own __call__
+        # in it (super().__call__) is captured under fullgraph, as one node launching
+        # the instance's host function with its write set. A call that Dynamo
+        # refuses there (the same tensor for two parameters that mutates_args
+        # "unknown" writes) graph-breaks with a CuTeDSL graph-break type, without
+        # fullgraph too, where no graph captures the launch: it runs eagerly, and
+        # the rest of the override runs.
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
             TraceableCuteDSLKernelWrapper,
         )
@@ -3495,11 +3642,32 @@ class CuteDSLDynamoTests(TestCase):
         self.assertEqual(cg(x, SubWrapper(add_kernel, ["mOut"])), x + 1)
         doubling = Doubling(add_kernel, ["mOut"])
         self.assertEqual(launch(doubling, x, y), 2 * (x + y))
-        cl = torch.compile(launch, backend="eager")
+        backend = AotEagerAndRecordGraphs()
+        cl = torch.compile(launch, backend=backend, fullgraph=True)
         self.assertEqual(cl(doubling, x, y), 2 * (x + y))
+        (gm,) = backend.graphs
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertEqual(record, CuteDSLKernel(add_kernel, ("mOut",)))
+        with self.subTest(refused='Doubling(add_kernel, "unknown")'):
+            torch._dynamo.reset()
+            unknown = Doubling(add_kernel, "unknown")
+            with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                torch.compile(launch, backend="eager", fullgraph=True)(unknown, x, x)
+            gb_type = "CuTeDSL kernel unsupported feature"
+            self.assertEqual(cm.exception.gb_type, gb_type)
+            torch._dynamo.utils.counters.clear()
+            backend = EagerAndRecordGraphs()
+            cl = torch.compile(launch, backend=backend)
+            self.assertEqual(cl(unknown, x, x), 2 * (x + x))
+            reasons = list(torch._dynamo.utils.counters["graph_break"])
+            self.assertTrue(any(r.startswith(gb_type) for r in reasons), reasons)
+            self.assertTrue(backend.graphs)
+            for gm in backend.graphs:
+                self.assertEqual(_hop_nodes(gm, cutedsl_kernel_wrapper_mutation), [])
 
     def test_wrapper_attributes_in_the_region(self):
-        # Dynamo takes a wrapper, passed in or read from a global, for its host
+        # Dynamo takes a wrapper, passed in or made in the region, for its host
         # function and write set: in the region it reads the wrapper's kernel, as
         # the host function (guarded on its identity for a wrapper passed in: one of
         # another kernel, of the same name here, recompiles), so that an identity or
@@ -3523,6 +3691,9 @@ class CuteDSLDynamoTests(TestCase):
                 w.mutates_args,
                 hasattr(w, "kernel") and hasattr(w, "mutates_args"),
             )
+
+        def made_in_the_region(x):
+            return read(wrap_cutedsl(same_name_sub_kernel, mutates_args="unknown"), x)
 
         def read_other(w, x):
             return x + w.note
@@ -3553,6 +3724,8 @@ class CuteDSLDynamoTests(TestCase):
         ):
             self.assertEqual(cf(w, x), (x + 1, *expected, True))
             self.assertEqual(cnt.frame_count, frame_count)
+        cf = torch.compile(made_in_the_region, backend="eager", fullgraph=True)
+        self.assertEqual(cf(x), (x + 1, sub, False, False, "unknown", True))
         explanation = (
             "Explanation: CuTeDSL kernel binary_kernel: Dynamo takes a CuTeDSL kernel "
             "wrapper (what torch._library.cutedsl.wrap_cutedsl returns) for its host "
@@ -3719,6 +3892,62 @@ class CuteDSLDynamoTests(TestCase):
         x, y = _rand(1000), _rand(1000)
         self.assertEqual(f(x, y), (x + y).relu())
         self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_inline_wrap_cutedsl_fullgraph(self, backend):
+        def f(x, y):
+            out = torch.empty_like(x)
+            wrap_cutedsl(add_kernel, mutates_args=["mOut"])(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, y), x + y)
+
+    def test_inline_wrap_cutedsl_of_a_kernel_read_without_a_source(self):
+        # A @cute.jit function that Dynamo reads without a source, here a staticmethod
+        # of a module made in the region, is taken by wrap_cutedsl as in eager.
+        class M(torch.nn.Module):
+            kernel = staticmethod(add_kernel)
+
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                wrap_cutedsl(self.kernel, mutates_args=["mOut"])(x, y, out, x.numel())
+                return out
+
+        def f(x, y):
+            return M()(x, y)
+
+        def live_across_graph_break(x, y):
+            w = wrap_cutedsl(M().kernel, mutates_args=["mOut"])
+            out = torch.empty_like(x)
+            torch._dynamo.graph_break()
+            w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        backend = EagerAndRecordGraphs()
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(x, y), x + y)
+        (gm,) = backend.graphs
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(record.fn, add_kernel)
+        self.assertEqual(record.mutates_args, ("mOut",))
+        # Dynamo cannot rebuild such a function at a graph break, nor the wrapper, so
+        # the frame runs eagerly.
+        torch._dynamo.utils.counters.clear()
+        cf = torch.compile(live_across_graph_break, backend="eager")
+        self.assertEqual(cf(x, y), x + y)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        self.assertTrue(any("torch._dynamo.graph_break()" in r for r in reasons))
+        failures = list(torch._dynamo.utils.counters["unimplemented"])
+        self.assertTrue(
+            any(
+                r.startswith("Reconstruction failure") and "CuteDSLKernelVariable" in r
+                for r in failures
+            ),
+            failures,
+        )
 
     def test_dynamo_graph_has_one_hop_node(self):
         backend = EagerAndRecordGraphs()

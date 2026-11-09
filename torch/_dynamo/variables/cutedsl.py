@@ -2,10 +2,11 @@
 Dynamo support for user-defined CuTeDSL kernels (``@cute.jit`` host functions): the
 counterpart of DynamoTritonHOPifier and TritonKernelVariable in functions.py.
 
-A host function reaches Dynamo either raw (the ``@cute.jit`` function itself) or
-wrapped (what ``torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=...)`` returns,
-made outside the compiled region). Both become a CuteDSLKernelVariable, and a call
-of a wrapper becomes a cutedsl_kernel_wrapper_mutation node; a raw call graph-breaks.
+A host function reaches Dynamo either raw (the ``@cute.jit`` function itself, read
+with or without a source) or wrapped
+(``torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=...)``, called inside or
+outside the compiled region). Both become a CuteDSLKernelVariable, and a call of a
+wrapper becomes a cutedsl_kernel_wrapper_mutation node; a raw call graph-breaks.
 """
 
 from collections.abc import Callable, Sequence
@@ -20,6 +21,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     CuteDSLHOPifier,
     is_dsl_runtime_object,
     MutatesArgs,
+    TraceableCuteDSLKernelWrapper,
 )
 
 from .. import graph_break_hints
@@ -28,6 +30,7 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._guards import Source
 
@@ -299,8 +302,8 @@ class CuteDSLKernelVariable(VariableTracker):
         return type(self.kernel) if self.wrapper_type is None else self.wrapper_type
 
     def as_python_constant(self) -> Any:
-        # The @cute.jit function; not the wrapper object, which this variable does
-        # not keep.
+        # The @cute.jit function; not the wrapper object, which one made in the
+        # region does not have.
         if self.is_wrapper:
             return super().as_python_constant()
         return self.kernel
@@ -310,8 +313,9 @@ class CuteDSLKernelVariable(VariableTracker):
     ) -> VariableTracker:
         # A wrapper stands for its host function and write set, the only attributes
         # Dynamo reads of it: the host function as the variable built from its
-        # source (guarded on its identity, see builder.py), and the write set as a
-        # constant (guarded on its value).
+        # source (guarded on its identity, see builder.py), or as a constant if it
+        # has none, and the write set as a constant (guarded on its value for a
+        # wrapper passed in).
         if not self.is_wrapper:
             return super().tp_getattro_impl(tx, name)
         if name == "kernel":
@@ -351,6 +355,20 @@ class CuteDSLKernelVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # A wrapper made by wrap_cutedsl inside the region has no source of its own:
+        # rebuild it from the host function's source.
+        if not self.is_wrapper or self.kernel_source is None:
+            return super().reconstruct(codegen)
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch._library.cutedsl", "wrap_cutedsl")
+        )
+        codegen(self.kernel_source)
+        codegen.append_output(codegen.create_load_const(self.mutates_args))
+        codegen.extend_output(
+            codegen.create_call_function_kw(2, ("mutates_args",), False)
+        )
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -362,4 +380,15 @@ class CuteDSLKernelVariable(VariableTracker):
             return super().call_function(tx, list(args), kwargs)
         return dynamo_cutedsl_hopifier_singleton.call_cutedsl_kernel(
             self, list(args), kwargs, tx
+        )
+
+    def with_mutates_args(self, mutates_args: object) -> "CuteDSLKernelVariable":
+        """The variable wrap_cutedsl(self.kernel, mutates_args=...) returns;
+        mutates_args is validated as in eager (None is refused)."""
+        return CuteDSLKernelVariable(  # noqa: RVT001
+            self.kernel,
+            mutates_args,
+            None,
+            kernel_source=self.kernel_source,
+            wrapper_type=TraceableCuteDSLKernelWrapper,
         )
