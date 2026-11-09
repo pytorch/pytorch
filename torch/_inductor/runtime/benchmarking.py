@@ -768,14 +768,24 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # (CUDA). On ROCm, flush by reading the buffer instead: zero_() leaves it
         # dirty in the L2 / Infinity Cache and the timed call then pays the
         # write-back. Read a float32 buffer, since summing int32 first writes an
-        # int64 copy.
+        # int64 copy. Read it twice: one pass does not evict operands the callable
+        # has just reused from the Infinity Cache.
         buffer = torch.empty(
             self.get_flush_size(device_type) // 4,
             dtype=torch.float32 if torch.version.hip else torch.int,
             device=device_type,
         )
         buffer.zero_()
-        flush = buffer.sum if torch.version.hip else buffer.zero_
+        if torch.version.hip:
+
+            def flush(read: Callable[[], Any] = buffer.sum) -> None:
+                read()
+                read()
+
+            # each flush reads the buffer twice; keep the warmup's total reads
+            memory_warmup_iters //= 2
+        else:
+            flush = buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)

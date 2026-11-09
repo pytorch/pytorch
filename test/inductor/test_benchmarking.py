@@ -765,8 +765,8 @@ class TestBenchmarker(TestCase):
 
     @parametrize("hip_value", (None, "mock-hip"))
     def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value):
-        # ROCm flushes by reading a float32 buffer (zero_() leaves dirty lines whose
-        # write-back the timed call pays); CUDA keeps the int32 zero_() flush.
+        # ROCm flushes by reading a float32 buffer twice (zero_() leaves dirty lines
+        # whose write-back the timed call pays); CUDA keeps the int32 zero_() flush.
         from torch._inductor.runtime import benchmarking as _bench
 
         calls = []
@@ -822,7 +822,10 @@ class TestBenchmarker(TestCase):
         (size,), kwargs = empty_calls[0]
         if hip_value:
             self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
-            self.assertEqual(calls, ["zero_"] + ["sum"] * (2 + 3 + 4))
+            # two read passes per flush; the warmup runs half as many flushes
+            self.assertEqual(
+                calls, ["zero_"] + ["sum"] * (2 * 2 + 2 * (3 // 2) + 2 * 4)
+            )
         else:
             self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
             self.assertEqual(calls, ["zero_"] * (1 + 2 + 3 + 4))
