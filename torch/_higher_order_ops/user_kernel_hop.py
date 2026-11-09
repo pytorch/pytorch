@@ -1,22 +1,29 @@
 """DSL-agnostic pieces of the user-kernel HOPs.
 
-A user-defined kernel (e.g. a ``@triton.jit`` kernel) is captured as a pair of HOPs:
-a mutation HOP that launches the kernel and writes its arguments in place, and a
-functional HOP that functionalization rewrites it into (clones of the written
-arguments, then the launch on the clones). Everything here is shared by every DSL's
-pair; each DSL's module (e.g. triton_kernel_wrap.py) adds the parts that depend on
-the kernel object: how to launch it, how to find its write set, and how to capture a
-call to it (the HOPifier).
+A user-defined kernel (a ``@triton.jit`` kernel, a ``@cute.jit`` host function) is
+captured as a pair of HOPs: a mutation HOP that launches the kernel and writes its
+arguments in place, and a functional HOP that functionalization rewrites it into
+(clones of the written arguments, then the launch on the clones). Everything here is
+shared by every DSL's pair; each DSL's module (triton_kernel_wrap.py,
+cutedsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to launch
+it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
+import collections
+import copy
+import dataclasses
+import enum
+import sys
 import threading
-from collections.abc import Callable
-from typing import Any, Generic, Never, TYPE_CHECKING, TypeVar
+import types
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -37,10 +44,287 @@ if TYPE_CHECKING:
 
 
 KernelT = TypeVar("KernelT")
+_T = TypeVar("_T")
 
 
 ###############################################################################
 # Kernel Side Table
+
+
+def _has_slot_state(value: object) -> bool:
+    """Whether the class of ``value`` or a base declares __slots__ other than
+    __dict__, __weakref__ and, for a dataclass instance, its fields. Like
+    copyreg._slotnames, but without caching the answer on the class: Dynamo replays
+    that store after the graph, outside copyreg's try/except, and it fails for
+    built-in types such as types.SimpleNamespace."""
+    fields: tuple[str, ...] = ()
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = tuple(f.name for f in dataclasses.fields(value))
+    for c in type(value).__mro__:
+        slots = c.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        if any(s not in ("__dict__", "__weakref__", *fields) for s in slots):
+            return True
+    return False
+
+
+def _has_builtin_state(cls: type) -> bool:
+    """Whether ``cls`` derives from a built-in type other than object and
+    types.SimpleNamespace that has a __new__ of its own (set, bytearray, deque,
+    array.array, numpy.ndarray, random.Random, BaseException, ...): its instances keep
+    state outside __dict__, such as their items, an RNG's state or an exception's
+    args."""
+    return any(
+        c not in (object, types.SimpleNamespace)
+        and isinstance(c.__dict__.get("__new__"), types.BuiltinMethodType)
+        for c in cls.__mro__
+    )
+
+
+def _float_component_keys(value: Any) -> tuple[object, ...] | None:
+    """For a complex value (Python or numpy) or a numpy floating scalar that is not a
+    Python float (np.float32, np.longdouble, ...), the key of each float component
+    (the real and imaginary parts, or the value itself), as constant_key keys a
+    float: its float.hex(), so -0.0 is not 0.0 and every NaN is the same, or the
+    exact ratio of a long double that no float holds. None for any other value.
+    numpy is not imported: without it, no value is one of its scalars."""
+    np = sys.modules.get("numpy")
+    if isinstance(value, complex) or (np and isinstance(value, np.complexfloating)):
+        components = (value.real, value.imag)
+    elif np and isinstance(value, np.floating) and not isinstance(value, float):
+        components = (value,)
+    else:
+        return None
+    keys: list[object] = []
+    for c in components:
+        as_float = float(c)
+        if as_float == c or as_float != as_float:  # exactly a float, or a NaN
+            keys.append(as_float.hex())
+        else:  # a long double that no float holds
+            keys.append(c.as_integer_ratio())
+    return tuple(keys)
+
+
+class ConstantRules:
+    """What a DSL tells constant_key and _snapshot about its own values. The
+    defaults treat every value as a plain Python one; a DSL whose side table dedupes
+    its constant args supplies its own (cutedsl_kernel_wrap.CUTEDSL_CONSTANT_RULES)."""
+
+    def is_dsl_value(self, value: object) -> bool:
+        """Whether ``value`` is of one of the DSL's own types, which is never keyed or
+        copied by its attributes."""
+        return False
+
+    def scalar_value(self, value: object) -> bool | int | float | None:
+        """The Python value that ``value``, a DSL scalar, is keyed by (with its type),
+        or None for any other value."""
+        return None
+
+
+def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | None:
+    """The attributes constant_key keys an object by, and _snapshot copies: the
+    fields of a dataclass instance followed by the other entries of its __dict__
+    (attributes set ad hoc or in __post_init__), or the __dict__ of a plain object
+    (one with no __slots__ attributes that is not callable or a module, of a class
+    that does not hash by value), such as a mutable config object. None for any other
+    value, the DSL's own values included, and for an object, a dataclass instance
+    too, whose class has a built-in base keeping state outside __dict__ (see
+    _has_builtin_state).
+
+    Limitation: an object with state in __slots__ attributes that are not dataclass
+    fields or in a built-in base (see _has_builtin_state), or a callable object other
+    than a dataclass instance (a functor), is keyed as itself, by identity unless its
+    class defines equality and hashing (a dataclass's compares its fields alone), and
+    refused if it is unhashable (as a dataclass with eq=True that is not frozen is):
+    mutating it between launches reuses the kernel compiled for its old contents, and a
+    new object with the same contents is compiled again. Such an object also stays in
+    memory, with anything it holds, a tensor included (constant_key does not look inside
+    it): a side-table entry holds it for the life of the process (see KernelSideTable),
+    and so does the eager compile cache (see torch/_native/cutedsl/user_kernel.py)."""
+    cls = type(value)
+    if rules.is_dsl_value(value) or _has_slot_state(value) or _has_builtin_state(cls):
+        return None
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        state = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+        state.update(
+            (k, v) for k, v in getattr(value, "__dict__", {}).items() if k not in state
+        )
+        return state
+    # TODO(zoranzhao): key a list, tuple or dict subclass by its attributes too, not by
+    # its items alone, so that it cannot get another value's constant.
+    if (
+        (cls.__hash__ is None or cls.__hash__ is object.__hash__)
+        and hasattr(value, "__dict__")
+        and not callable(value)
+        and not isinstance(value, types.ModuleType)
+    ):
+        return vars(value)
+    return None
+
+
+def constant_key(value: object, rules: ConstantRules) -> object:
+    """A hashable key for a constant kernel argument, equal for two values only when
+    they are interchangeable: lists, tuples, dicts and objects (see _object_state)
+    by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
+    same), numpy floats and complex values by type and the hex() of each float
+    component (see _float_component_keys), a DSL scalar by its type and Python value
+    (see ConstantRules), other values by their own equality. Any other unhashable
+    value, a tensor, and a defaultdict with a default_factory (which the key would
+    leave out), as the value or anywhere inside it, are refused with a TypeError,
+    and a value that contains itself with a ValueError."""
+    return _ContentWalk(rules).key(value)
+
+
+def _snapshot(value: object, rules: ConstantRules) -> object:
+    """``value`` with everything constant_key keys by content copied, so that the
+    caller mutating it later changes neither the stored value nor its key. A copy
+    that would be the value itself is refused with a TypeError (see _copy_of)."""
+    return _ContentWalk(rules).snapshot(value)
+
+
+def _copy_of(value: _T) -> _T:
+    """copy.copy(value) for _snapshot, refused with a TypeError if it is ``value``
+    itself (a class's __copy__ or __reduce__ can return the object itself): the
+    snapshot would be the caller's object, which _snapshot would write into and the
+    caller could still change."""
+    new = copy.copy(value)
+    if new is value:
+        raise TypeError(
+            f"a constant kernel argument of type {type(value).__name__} cannot be "
+            "copied: copy.copy returns the object itself"
+        )
+    return new
+
+
+class _ContentWalk:
+    """One walk of a constant kernel argument's contents, by constant_key or
+    _snapshot. A cycle would be followed forever, so entering a container that the
+    walk is already inside raises a ValueError naming the cycle."""
+
+    def __init__(self, rules: ConstantRules) -> None:
+        self.rules = rules
+        # The containers the walk is inside, outermost first, by id, each with the
+        # step it took out of it: a format and the index, key or attribute name.
+        self.path: dict[int, tuple[str, object]] = {}
+
+    def visit(
+        self,
+        container: object,
+        pairs: Iterable[tuple[object, object]],
+        step: str,
+        fn: Callable[[object], object],
+    ) -> list[object]:
+        """``fn`` of the item of each (key, item) pair of ``container``, called with
+        the container on the path; ``step`` formats the key."""
+        if id(container) in self.path:
+            start = list(self.path).index(id(container))
+            steps = list(self.path.values())[start:]
+            raise ValueError(
+                f"a constant kernel argument of type {type(container).__name__} "
+                f"refers to itself through {''.join(f.format(k) for f, k in steps)}"
+            )
+        results = []
+        for key, item in pairs:
+            self.path[id(container)] = (step, key)
+            results.append(fn(item))
+        self.path.pop(id(container), None)
+        return results
+
+    def key(self, value: object) -> object:
+        if isinstance(value, Tensor):
+            # Keyed by identity, a tensor would stay alive with its key, and it would
+            # reach the DSL without from_dlpack.
+            where = "".join(f.format(k) for f, k in self.path.values())
+            raise TypeError(
+                "a constant kernel argument holds a tensor"
+                + (f" at {where}" if where else "")
+                + ": pass each tensor as its own argument"
+            )
+        if isinstance(value, collections.defaultdict) and (
+            value.default_factory is not None
+        ):
+            raise TypeError(
+                f"a constant kernel argument of type {type(value).__name__} has a "
+                "default_factory, which its key would leave out: pass a dict"
+            )
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.key)
+            return (type(value), tuple(items))
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.key)
+            items = self.visit(value, value.items(), "[{!r}]", self.key)
+            return (type(value), tuple(keys), tuple(items))
+        scalar = self.rules.scalar_value(value)
+        if scalar is not None:
+            return (type(value), self.key(scalar))
+        float_keys = _float_component_keys(value)
+        if float_keys is not None:
+            return (type(value), float_keys)
+        if isinstance(value, float):
+            return (type(value), value.hex())
+        state = _object_state(value, self.rules)
+        if state is not None:
+            items = self.visit(value, state.items(), ".{}", self.key)
+            return (type(value), tuple(state), tuple(items))
+        try:
+            hash(value)
+        except TypeError:
+            fix = (
+                "pass a hashable value, or a list, tuple, dict, dataclass or plain "
+                "object of them"
+            )
+            if not self.rules.is_dsl_value(value) and _has_slot_state(value):
+                fix = (
+                    "it has state in __slots__ attributes that are not dataclass "
+                    "fields, so it is keyed as itself, not by content; make it "
+                    "hashable, or keep that state in dataclass fields or its __dict__"
+                )
+            raise TypeError(
+                f"a constant kernel argument of type {type(value).__name__} is "
+                f"unhashable: {fix}"
+            ) from None
+        return (type(value), value)
+
+    def snapshot(self, value: object) -> object:
+        if self.rules.scalar_value(value) is not None:
+            # A DSL scalar is keyed by its value, which its owner can still change;
+            # an enum member's cannot (copy.copy returns the member itself).
+            return value if isinstance(value, enum.Enum) else _copy_of(value)
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.snapshot)
+            if isinstance(value, list):
+                new_list = _copy_of(value)
+                new_list[:] = items
+                return new_list
+            if all(a is b for a, b in zip(items, value)):
+                return value
+            # A namedtuple is rebuilt with _make, any other tuple from the items.
+            return getattr(type(value), "_make", type(value))(items)
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.snapshot)
+            items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
+            new_dict = _copy_of(value)
+            new_dict.clear()
+            # Each item assigned, as pickle rebuilds a dict subclass: a Counter's
+            # update() counts the pairs, and dict.update() would bypass the order an
+            # OrderedDict keeps.
+            for key, item in zip(keys, items):
+                new_dict[key] = item
+            return new_dict
+        state = _object_state(value, self.rules)
+        if state is None:
+            return value
+        items = self.visit(value, state.items(), ".{}", self.snapshot)
+        cls = type(value)
+        # Made as copy.copy makes a plain object, not by copy.copy: a class's
+        # __copy__ or __reduce__ can return the object itself or a shared one (a
+        # RootLogger's returns the process's root logger), which the assignments
+        # below would overwrite.
+        new = object.__new__(cls) if cls.__new__ is object.__new__ else _copy_of(value)
+        for name, item in zip(state, items):
+            object.__setattr__(new, name, item)
+        return new
 
 
 # We cannot put user kernels into the FX graph as the graph nodes
@@ -48,12 +332,25 @@ KernelT = TypeVar("KernelT")
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable(Generic[KernelT]):
-    def __init__(self) -> None:
+    def __init__(self, constant_rules: ConstantRules | None = None) -> None:
         # Per instance, so that each DSL's table has its own index space.
         self.id_to_kernel: dict[int, KernelT] = {}
         self.kernel_to_id: dict[KernelT, int] = {}
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
+        # With constant_rules, equal constant args (see constant_key) share one index,
+        # so a table that is never reset does not grow with every eager launch, and
+        # each entry is a snapshot of the args it was added with. A constant keyed by
+        # identity (see _object_state) still adds an entry per object, which such a
+        # table keeps, with the object, for the life of the process: each capture adds
+        # its constants, and captured graphs hold their indexes, so entries cannot be
+        # evicted.
+        self.constant_rules = constant_rules
+        self._constant_args_index: dict[object, int] | None = (
+            {} if constant_rules is not None else None
+        )
+        # index -> {name: constant_key of the arg}, for a launch to reuse.
+        self._constant_args_keys: dict[int, dict[str, object]] = {}
 
     # Returns index on the table
     def add_kernel(self, kernel: KernelT) -> int:
@@ -77,8 +374,20 @@ class KernelSideTable(Generic[KernelT]):
     # for constant args.
     def add_constant_args(self, args: dict[str, object]) -> int:
         with self.lock:
+            key = None
+            rules = self.constant_rules
+            if self._constant_args_index is not None and rules is not None:
+                key = tuple(
+                    (k, constant_key(v, rules)) for k, v in sorted(args.items())
+                )
+                if key in self._constant_args_index:
+                    return self._constant_args_index[key]
+                args = {k: _snapshot(v, rules) for k, v in args.items()}
             idx = len(self.constant_args)
             self.constant_args[idx] = args
+            if key is not None:
+                self._constant_args_index[key] = idx  # type: ignore[index]
+                self._constant_args_keys[idx] = dict(key)
             return idx
 
     # Returns the constant args
@@ -90,12 +399,21 @@ class KernelSideTable(Generic[KernelT]):
             )
         return self.constant_args[idx]
 
+    def get_constant_args_keys(self, idx: int) -> dict[str, object]:
+        """The constant_key of each constant arg at ``idx``, as add_constant_args
+        computed it (none in a table without constant_rules)."""
+        self.get_constant_args(idx)
+        return self._constant_args_keys.get(idx, {})
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        if self._constant_args_index is not None:
+            self._constant_args_index = {}
+        self._constant_args_keys = {}
 
 
 def store_non_graphable_args(
@@ -332,6 +650,176 @@ def register_user_kernel_hop_dispatch(
     # Adds SAC support for user kernels
     redirect_to_mode(mutation_hop, _CachingTorchDispatchMode)
     redirect_to_mode(mutation_hop, _CachedTorchDispatchMode)
+
+
+###############################################################################
+# Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
+
+
+UserKernelLayoutConstraint = Literal["needs_fixed_stride_order", "flexible_layout"]
+
+
+# eq=False: infos compare and hash by identity, as register_user_kernel_hop compares
+# them, so a DSL's callables need not be hashable.
+@dataclasses.dataclass(frozen=True, eq=False)
+class UserKernelHOPInfo:
+    """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
+    the same way (reinplacing, the functional decomposition, Inductor's layout
+    constraint and mutation propagation, CSE, partitioning, ...).
+
+    Each DSL module registers one at import time; a pass looks a node's target up
+    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+
+    Those passes read the HOP nodes' kwargs by name, so a registered pair must be
+    traced with keyword arguments only, in this form:
+
+    - ``kwargs``: the kernel's arguments by parameter name. The mutation HOP writes
+      the tensors among them that ``get_mutated_tensors`` names.
+    - The functional HOP takes the mutation HOP's arguments plus
+      ``tensors_to_clone``, the names in ``kwargs`` whose tensors it clones and
+      writes instead, and, if any of those is a view, ``tensor_bases``: their
+      bases by name. It returns ``{name: written clone}`` for each name in
+      ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
+      may write in place.
+    - Any other argument is the DSL's own; the passes only hand it on.
+
+    The functional HOP's CompositeExplicitAutograd py_impl, which eager runs, must
+    call the mutation HOP once, on clones of the tensors named in
+    ``tensors_to_clone`` (functional_hop_dense does this). The post-grad
+    decomposition traces that impl, so a pair without one cannot be registered.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and the cache bypasses every graph that contains an
+    uncacheable HOP, such as CuTeDSL's (cacheable=False).
+    """
+
+    dsl: str
+    mutation: UserKernelWrapperHOP
+    functional: UserKernelWrapperHOP
+    # (hop_kwargs, kernel_kwargs) -> names of the kernel kwargs the kernel writes.
+    # Inductor's propagate_mutation passes the mutation HOP's kwargs as lowered
+    # (each FX node replaced by its lowered value, e.g. an IR node for a tensor, in
+    # "kwargs" too) and that node's "kwargs" with each FX node replaced by its meta
+    # value. Read only the DSL's own arguments (e.g. kernel_idx) from hop_kwargs,
+    # and the kernel's arguments from kernel_kwargs.
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
+    # HOP kwargs -> kernel name, for the reinplacing pass's log.
+    get_kernel_name: Callable[[Mapping[str, Any]], str]
+    # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
+    # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
+    # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
+    # one of this DSL's mutation HOP nodes.
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
+    reinplace_trigger: ReInplaceTrigger
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
+
+
+_user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+# DSL modules may register from different threads (import locks only serialize the
+# imports of one module), so a registration holds this lock across its ownership
+# checks and both writes, and every read of the registry takes it too: no reader
+# sees half of a pair, and two conflicting registrations cannot both pass the checks.
+_user_kernel_hops_lock = threading.Lock()
+
+
+def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    """Register a DSL's HOP pair with the passes that handle every DSL. Each DSL
+    module calls it once, at import time.
+
+    Everything is checked before the registry is written, so a refused registration
+    leaves it as it was. Raises:
+
+    - TypeError if the trigger is not a ReInplaceTrigger member (its name, for
+      example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
+      has no CompositeExplicitAutograd py_impl for the decomposition to trace.
+    - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
+    - RuntimeError if either HOP is registered already, with another info. Infos
+      compare by identity: registering the same object again is accepted and changes
+      nothing, but an equal copy of it is refused.
+    """
+    trigger = info.reinplace_trigger
+    if not isinstance(trigger, ReInplaceTrigger):
+        raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
+    if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
+        raise ValueError(
+            f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    if info.mutation is info.functional:
+        raise ValueError(
+            f"{info.mutation} cannot be both the mutation and the functional HOP of "
+            f"the {info.dsl} DSL"
+        )
+    hops = (info.mutation, info.functional)
+    with _user_kernel_hops_lock:
+        for hop in hops:
+            if not isinstance(hop, UserKernelWrapperHOP):
+                raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+            owner = _user_kernel_hops.get(hop, info)
+            if owner is not info:
+                raise RuntimeError(
+                    f"{hop} is already registered by the {owner.dsl} DSL with another "
+                    "UserKernelHOPInfo object; only that object can be registered again"
+                )
+        if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+            raise TypeError(
+                f"{info.functional} has no CompositeExplicitAutograd py_impl"
+            )
+        for hop in hops:
+            _user_kernel_hops[hop] = info
+
+
+def get_user_kernel_hop_info(
+    target: object, role: Literal["mutation", "functional"] | None = None
+) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``; given a
+    ``role``, only if ``target`` is the HOP of its pair with that role."""
+    if not isinstance(target, UserKernelWrapperHOP):
+        return None
+    with _user_kernel_hops_lock:
+        info = _user_kernel_hops.get(target)
+    if info is None or role is None:
+        return info
+    hop = info.mutation if role == "mutation" else info.functional
+    return info if target is hop else None
+
+
+def is_user_kernel_mutation_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "mutation") is not None
+
+
+def is_user_kernel_functional_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "functional") is not None
+
+
+def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
+    """Every registered DSL, in registration order."""
+    with _user_kernel_hops_lock:
+        return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################
