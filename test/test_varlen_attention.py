@@ -1516,7 +1516,8 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             if right >= 0:
                 mask &= j <= i + d + right
             qf, kf, vf = (t.float().transpose(0, 1) for t in (q, k, v))
-            out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
+            with sdpa_kernel(SDPBackend.MATH):
+                out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
             return out.transpose(0, 1)
 
         with _use_backend("fa2"):
