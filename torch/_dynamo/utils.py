@@ -3269,6 +3269,10 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
 def enumerate_items_with_dict_position(
     obj: dict[K, V],
 ) -> Iterable[tuple[int, K, V | Any]]:
@@ -3280,10 +3284,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
