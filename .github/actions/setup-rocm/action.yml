@@ -46,6 +46,7 @@ runs:
         amd-smi monitor -ptumv
         amd-smi list
         amd-smi process || true
+        bash .github/scripts/rocm_gpu_partition.sh || true
 
     - name: Runner health check rocminfo
       if: always()

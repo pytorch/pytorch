@@ -98,6 +98,8 @@ jobs:
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          MATRIX_RUNNER: ${{ matrix.runner }}
 
       - name: Runner check GPU count (distributed jobs)
         if: ${{ contains(matrix.config, 'distributed') }}
@@ -333,9 +335,12 @@ jobs:
         shell: bash
         if: failure()
         timeout-minutes: 5
+        env:
+          MATRIX_RUNNER: ${{ matrix.runner }}
         run: |
           amd-smi monitor -ptumv || true
           amd-smi process || true
+          bash .github/scripts/rocm_gpu_partition.sh || true
           free -m || true
           docker exec "${CONTAINER_NAME}" ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
