@@ -494,6 +494,7 @@ def flex_shard(
 
     Example::
 
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> mesh = init_device_mesh("cuda", (world_size,), mesh_dim_names=("fsdp",))
         >>> model = Transformer(args)
         >>> # Single bucket without reshard-after-forward:
