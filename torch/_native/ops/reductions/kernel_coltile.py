@@ -24,7 +24,7 @@ from .inner_tree_plan import _MAX_WARPS
 from .kernel_general import (
     _B200_CCS,
     _B200_DTYPES,
-    _B200_ONE_FIELD,
+    _B200_RAGGED_COL_ONE_FIELD,
     _combine_itree_partials,
     _flat,
     _INT32_LIMIT,
@@ -121,12 +121,11 @@ def select_ordered_col_config(
     default mapping and split plans decline.
 
     Entries are keyed by trait type. Split plans (partials > 1) without an entry take a
-    fallback on _ORDERED_COL_CCS that applies to any outputs and inherits full_tiles
-    (ragged splits still run clamped). Mappings apply to unbatched _ORDERED_COL_DTYPES
-    views with 32-bit accumulators and, if the mapping has out_dtypes, only to those
-    outputs. full_tiles says whether all of the plan's tiles are complete, i.e. a split
-    plan or an exact looped plan; only the split fallback reads it. With rows, B200
-    single-field views whose mapping has full tiles take measured tile widths, and C
+    fallback on _ORDERED_COL_CCS that applies to any outputs and inherits full_tiles.
+    Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
+    if the mapping has out_dtypes, only to those outputs. full_tiles requests full
+    tiles; ragged splits are clamped regardless. With rows, B200 single-field views
+    whose mapping has full tiles (cfg.full_tiles) take measured tile widths, and C
     128-257 a band of widths. Views that fill fewer than the mapping's min_blocks
     useful 32-column blocks get None.
     """
@@ -237,7 +236,7 @@ def select_col_config(
         welford = welford_outs == nouts == 1
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
-        one_field = trait_type in _B200_ONE_FIELD
+        one_field = trait_type in _B200_RAGGED_COL_ONE_FIELD
         if columns == 4095 and anchor == 16 << 20 and (one_field or welford):
             return cfg._replace(
                 rule="b200_ragged_c4095_ordered",
@@ -941,6 +940,8 @@ def _reduce_col_tile(
         npar=npar,
         vec=vec,
     )
+    if cfg.kernel_order not in ("linear", "inner_tree"):
+        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
