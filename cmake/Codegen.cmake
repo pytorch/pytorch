@@ -120,7 +120,7 @@ if(INTERN_BUILD_ATEN_OPS)
         endif()
         # We need to gate against CUDA version, because sm_107f is available on CUDA 13.4+
         if("${_arch}" STREQUAL "107f" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.4)
-          if(_existing_arch_flags MATCHES ".*compute_100.*")
+          if(_existing_arch_flags MATCHES ".*compute_10[07].*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_107f,code=sm_107f")
           endif()
         endif()

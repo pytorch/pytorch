@@ -44,6 +44,7 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_floatrounding.cu
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
 endif()

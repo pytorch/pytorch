@@ -40,7 +40,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch._refs import _broadcast_shapes, _check_to_dtype_rounded, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
 
@@ -196,42 +196,11 @@ def meta__standard_gamma(self, generator=None):
 
 
 # The C++ meta kernel uses TensorIterator, which does not support symbolic
-# shapes. The checks mirror check_to_dtype_rounded in
-# aten/src/ATen/native/RoundedConversion.cpp, in the same order.
+# shapes.
 @register_meta([aten._to_dtype_rounded.default, aten._to_dtype_rounded.out])
 @out_wrapper(exact_dtype=True)
 def meta__to_dtype_rounded(self, dtype, round, *, memory_format=None):
-    torch._check(
-        self.layout == torch.strided,
-        lambda: f"rounding is only supported for strided tensors, but got {self.layout}",
-    )
-    float8 = {
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-        torch.float8_e5m3fnu,
-        torch.float8_e8m0fnu,
-    }
-    narrower = {
-        torch.float64: {torch.float32, torch.float16, torch.bfloat16, *float8},
-        torch.float32: {torch.float16, torch.bfloat16, *float8},
-        torch.float16: {torch.bfloat16, *float8},
-        torch.bfloat16: {torch.float16, *float8},
-    }
-    torch._check(
-        dtype in narrower.get(self.dtype, ()),
-        lambda: "rounding is only supported when converting a float64, float32, "
-        "float16 or bfloat16 tensor to a narrower floating-point dtype (one that "
-        "cannot represent all its values exactly), but got a conversion from "
-        f"{self.dtype} to {dtype}",
-    )
-    modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
-    torch._check_value(
-        round in modes,
-        lambda: "the rounding mode must be one of 'to_nearest_even', 'toward_zero', "
-        f"'toward_positive' or 'toward_negative', but got '{round}'",
-    )
+    _check_to_dtype_rounded(self, dtype, round)
     return torch.empty_like(
         self, dtype=dtype, memory_format=memory_format or torch.preserve_format
     )

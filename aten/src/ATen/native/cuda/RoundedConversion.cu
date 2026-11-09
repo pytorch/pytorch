@@ -29,6 +29,7 @@ void to_dtype_rounded_kernel_cuda(
             kFloat,
             kHalf,
             kBFloat16,
+            // AT_FLOAT8_TYPES, except the ones dispatched above.
             kFloat8_e4m3fn,
             kFloat8_e5m2,
             kFloat8_e4m3fnuz,

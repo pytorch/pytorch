@@ -100,6 +100,10 @@ def _golden_input(m, n, dtype, prod):
     if prod:
         # Bound the product without rounding narrow factors to 1.
         vals = 1.0 + vals / max(8.0, n**0.5)
+    if dtype.itemsize == 2:
+        # The table was made by rounding to float32 first, as float64 -> float16
+        # and bfloat16 conversions did before they rounded once.
+        vals = vals.float()
     return vals.to(dtype).contiguous()
 
 
