@@ -8,6 +8,7 @@ non-strict export) and Dynamo.
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -418,6 +419,19 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
+    # A Constexpr config object read on the host: out = x * cfg.alpha.
+    @cute.jit
+    def cfg_scale_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        cfg: cutlass.Constexpr,
+        stream: cuda.CUstream,
+    ):
+        _mul_const_k(mX, mOut, n, cfg.alpha).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
 
 DEVICE = "cuda"
 
@@ -572,6 +586,16 @@ def _add_kernel_to_table(fn, mutates_args):
 def _add_kwargs(x, y, out, n=None):
     """HOP ``kwargs`` for add_kernel: tensors and the runtime scalar n."""
     return {"mX": x, "mY": y, "mOut": out, "n": out.numel() if n is None else n}
+
+
+def _make_cfg(alpha):
+    """A function with an alpha attribute, made by the same def on every call."""
+
+    def cfg():
+        pass
+
+    cfg.alpha = alpha
+    return cfg
 
 
 @requires_cutedsl
@@ -3455,10 +3479,16 @@ def forward(self, x_1, y_1):
         self.assertRegex(str(error), r"nodes \(cutedsl user kernels\) is not supported")
 
 
+# Written through a global in
+# CuteDSLDynamoTests.test_object_constant_modified_through_another_path_graph_breaks.
+global_inner = types.SimpleNamespace(alpha=3.0)
+
+
 @requires_cutedsl
 class CuteDSLDynamoTests(TestCase):
     """torch.compile front end: the wrapper (global or created inline) becomes one
-    HOP node; recompiles follow the arg classes."""
+    HOP node; recompiles follow the arg classes and the contents of object
+    constants."""
 
     hw_classification = HardwareClassification.CUDA
 
@@ -3755,6 +3785,341 @@ class CuteDSLDynamoTests(TestCase):
         self.assertEqual(cm.exception.gb_type, "setattr() on unsupported type")
         self.assertFalse(hasattr(add_out, "calls"))
 
+    def test_object_constants_fullgraph(self):
+        # Constants that are not Python constants are passed through the side table:
+        # a config object as a snapshot, guarded on its contents, a cutlass Numeric
+        # value as itself, guarded on its type and value, by which the side table
+        # keys it, bare or in a config object (where Dynamo's own guards do not
+        # check its type): an equal new one reuses the graph, and another value or
+        # type recompiles.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def bare(x, alpha):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        def in_a_cfg(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x = _rand(1000)
+        for f, wrap in ((bare, lambda alpha: alpha), (in_a_cfg, Cfg)):
+            with self.subTest(f=f.__name__):
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                for alpha, frame_count in (
+                    (cutlass.Float32(2.0), 1),
+                    (cutlass.Float32(2.0), 1),
+                    (cutlass.Float32(0.5), 2),
+                    (cutlass.Float16(0.5), 3),
+                ):
+                    self.assertEqual(cf(x, wrap(alpha)), alpha.value * x)
+                    self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_object_constant_modified_outside_the_region(self):
+        # The side table keeps a snapshot of the object, whose contents are guarded
+        # down through attributes (their names too, even ones that are not Python
+        # names, and those of a dataclass that are not fields; the fields of a
+        # dataclass with slots, which has no __dict__), lists and dicts (their keys
+        # too): a change made between calls recompiles, so the kernel sees it as in
+        # eager, while the same contents, in this object or a copy, reuse the graph.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Override:  # a change adds an attribute
+            def __init__(self, alpha):
+                self.base = alpha
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return getattr(self, "override", self.base)
+
+            @alpha.setter
+            def alpha(self, alpha):
+                self.override = alpha
+
+        @dataclasses.dataclass
+        class DataclassOverride:  # a change adds an attribute that is not a field
+            base: float
+
+            alpha = Override.alpha
+
+        @dataclasses.dataclass(slots=True)
+        class SlottedCfg:  # no __dict__
+            alpha: float
+
+        class Nested:
+            def __init__(self, alpha):
+                self.parts = [{"cfg": Cfg(alpha)}]
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.parts[0]["cfg"].alpha
+
+            @alpha.setter
+            def alpha(self, alpha):
+                self.parts[0]["cfg"].alpha = alpha
+
+        class Keyed:
+            def __init__(self, alpha):
+                self.table = {Cfg(alpha): None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+            @alpha.setter
+            def alpha(self, alpha):
+                next(iter(self.table)).alpha = alpha
+
+        def namespace(alpha):  # a keyword and a dotted name, as argparse dests
+            return types.SimpleNamespace(**{"alpha": alpha, "from": 0, "a.b": 0})
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x = _rand(1000)
+        makes = (
+            Cfg,
+            MulCfg,
+            SlottedCfg,
+            Override,
+            DataclassOverride,
+            Nested,
+            Keyed,
+            namespace,
+        )
+        for make in makes:
+            with self.subTest(make=make.__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                cfg = make(3.0)
+                self.assertEqual(cf(x, cfg), 3 * x)
+                self.assertEqual(cnt.frame_count, 1)
+                cfg.alpha = 5.0
+                self.assertEqual(cf(x, cfg), 5 * x)
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cf(x, cfg), 5 * x)
+                if make is not Keyed:  # a copied dict key fails Dynamo's equality guard
+                    self.assertEqual(cf(x, copy.deepcopy(cfg)), 5 * x)
+                self.assertEqual(cnt.frame_count, 2)
+
+    def test_unhashable_constant_graph_breaks(self):
+        class Opaque:
+            __slots__ = ("alpha",)
+            __hash__ = None
+
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "unhashable"):
+            torch.compile(f, backend="eager", fullgraph=True)(_rand(1000), Opaque(2.0))
+
+    def test_object_constant_attribute_name_not_a_str_graph_breaks(self):
+        # Dynamo guards an attribute only under an exact str name; eager also takes
+        # a str subclass, so the call graph-breaks and runs eagerly.
+        class Name(str):
+            __slots__ = ()
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x, cfg = _rand(1000), Cfg(3.0)
+        vars(cfg)[Name("tag")] = 0
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "not an exact str; name its attributes with exact str",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, cfg)
+        self.assertEqual(torch.compile(f, backend="aot_eager")(x, cfg), 3 * x)
+
+    def test_object_constant_modified_in_the_region_graph_breaks(self):
+        # Dynamo applies writes after the graph runs, so a kernel given an object (or
+        # a class) written earlier in the region, itself or through an attribute, a
+        # dict key, its class or a list its class holds, would see the old value: the
+        # call graph-breaks and runs eagerly, after the write.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        def cfg_class(alpha):
+            return type("CfgClass", (), {"alpha": alpha})
+
+        def class_attribute(alpha):
+            return cfg_class(alpha)()
+
+        def class_list(alpha):  # alpha is in a list the class holds
+            alpha_property = property(lambda self: self.parts[0])
+            return type("ListCfg", (), {"parts": [alpha], "alpha": alpha_property})()
+
+        class Holder:
+            def __init__(self, alpha):
+                self.cfg = Cfg(alpha)
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.cfg.alpha
+
+        class Keyed:
+            def __init__(self, alpha):
+                self.table = {Cfg(alpha): None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def launch(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def direct(x, cfg):
+            cfg.alpha = 5.0
+            return launch(x, cfg)
+
+        def nested(x, holder):
+            holder.cfg.alpha = 5.0
+            return launch(x, holder)
+
+        def through_key(x, keyed):
+            next(iter(keyed.table)).alpha = 5.0
+            return launch(x, keyed)
+
+        def through_class(x, cfg):
+            type(cfg).alpha = 5.0
+            return launch(x, cfg)
+
+        def through_class_list(x, cfg):
+            cfg.parts[0] = 5.0
+            return launch(x, cfg)
+
+        x = _rand(1000)
+        cases = (
+            (direct, Cfg),
+            (direct, cfg_class),
+            (nested, Holder),
+            (through_key, Keyed),
+            (through_class, class_attribute),
+            (through_class_list, class_list),
+        )
+        for f, make in cases:
+            with self.subTest(f=f.__name__, make=make.__name__):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "modified earlier in the compiled region, and the kernel would not "
+                    "see the change; make the change before the compiled region",
+                ):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, make(3.0))
+                cfg = make(3.0)
+                self.assertEqual(torch.compile(f, backend="aot_eager")(x, cfg), 5 * x)
+                self.assertEqual(cfg.alpha, 5.0)
+
+    def test_object_constant_modified_through_another_path_graph_breaks(self):
+        # As above, with what the kernel reads (an object the config object holds,
+        # as an attribute or a dict key, or the config object's class) written
+        # through another argument, a closure or a global, whichever path the region
+        # reads first.
+        class Inner:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Cfg:
+            def __init__(self, inner):
+                self.inner = inner
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.inner.alpha
+
+        class Keyed:
+            def __init__(self, inner):
+                self.table = {inner: None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+        class ClassCfg:
+            alpha = 3.0
+
+        def instance(cls):
+            return cls()
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+        shared = Inner(3.0)
+
+        def launch(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def through_argument(x, cfg, inner):
+            inner.alpha += 2.0
+            return launch(x, cfg)
+
+        def through_argument_after_cfg(x, cfg, inner):
+            inner.alpha = cfg.inner.alpha + 2.0
+            return launch(x, cfg)
+
+        def through_closure(x, cfg, inner):
+            shared.alpha += 2.0
+            return launch(x, cfg)
+
+        def through_global(x, cfg, inner):
+            global_inner.alpha += 2.0
+            return launch(x, cfg)
+
+        x = _rand(1000)
+        cases = (
+            (through_argument, Cfg, shared),
+            (through_argument_after_cfg, Cfg, shared),
+            (through_closure, Cfg, shared),
+            (through_global, Cfg, global_inner),
+            (through_argument, Keyed, shared),
+            (through_argument, instance, ClassCfg),
+        )
+        for f, make, inner in cases:
+            with self.subTest(f=f.__name__, make=make.__name__):
+                inner.alpha = 3.0
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "modified earlier in the compiled region",
+                ):
+                    cf = torch.compile(f, backend="eager", fullgraph=True)
+                    cf(x, make(inner), inner)
+                cf = torch.compile(f, backend="aot_eager")
+                self.assertEqual(cf(x, make(inner), inner), 5 * x)
+                self.assertEqual(inner.alpha, 5.0)
+
     def _assert_call_error(self, f, args, message):
         """``f(*args)`` graph-breaks under fullgraph as a user error whose explanation
         gives ``message``, the message of a TypeError or ValueError."""
@@ -3774,17 +4139,45 @@ class CuteDSLDynamoTests(TestCase):
         return str(cm.exception)
 
     def test_object_constant_holding_a_tensor_graph_breaks(self):
-        # A tensor in a tuple made in the region would be baked into the side table,
-        # which is never reset and so also keeps it alive: the call graph-breaks,
-        # with the error of the side table's walk, as a user error.
+        # As in a tuple or a list, a tensor or a DSL object inside an object
+        # constant (a dict key included) would be baked into the side table, which
+        # is never reset and so also keeps it alive: the call graph-breaks, with the
+        # error of the side table's walk, as a user error. A tensor in a tuple made
+        # in the region graph-breaks too.
+        class Cfg:
+            def __init__(self, alpha, held):
+                self.alpha = alpha
+                self.held = held
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
         w_spec = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def wrapped(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x = _rand(1000)
+        cfg = "CuTeDSL kernel cfg_scale_kernel: parameter 'cfg': "
+        nested = (
+            "a cute tensor, pointer or stream cannot be nested inside a constant "
+            "argument"
+        )
+        dsl_object = "a constant kernel argument holds a {} at {}: " + nested
+        for held, message in (
+            (x, cfg + self._walk_error(Cfg(3.0, x))),
+            ({x: None}, cfg + self._walk_error(Cfg(3.0, {x: None}))),
+            (from_dlpack(x), cfg + dsl_object.format("_Tensor", ".held")),
+            (_stream(), cfg + dsl_object.format("CUstream", ".held")),
+        ):
+            with self.subTest(held=type(held).__name__):
+                self._assert_call_error(wrapped, (x, Cfg(3.0, held)), message)
 
         def in_a_tuple(x, held):
             out = torch.empty_like(x)
             w_spec(x, out, x.numel(), (3.0, held(x)))
             return out
 
-        x = _rand(1000)
         spec = "CuTeDSL kernel spec_scale_kernel: parameter 'spec': "
         for held, message in (
             (lambda x: x, spec + self._walk_error((3.0, x))),
@@ -3794,16 +4187,34 @@ class CuteDSLDynamoTests(TestCase):
                 self._assert_call_error(in_a_tuple, (x, held), message)
 
     def test_constant_that_refers_to_itself_graph_breaks(self):
-        # A constant that holds itself cannot be keyed by its contents in the side
-        # table: a list or a dict holding itself, made outside the region or in it.
-        # The call graph-breaks instead of recursing forever, with the error of the
-        # side table's walk, as a user error.
+        # A constant that holds itself cannot be guarded on its contents (nor keyed
+        # by them in the side table): a config object with a back-pointer, one
+        # holding a logging.Logger (whose manager's loggerDict holds the logger), a
+        # list or a dict holding itself, made outside the region or in it. The call
+        # graph-breaks instead of recursing forever, with the error of the side
+        # table's walk, as a user error.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        back_pointer, with_logger = Cfg(3.0), Cfg(3.0)
+        back_pointer.parent = types.SimpleNamespace(child=back_pointer)
+        # A manager of its own, so that what is walked before the cycle does not
+        # depend on the process's other loggers and handlers.
+        manager = logging.Manager(logging.RootLogger(logging.WARNING))
+        with_logger.log = manager.getLogger("cfg")
         scales = [3]
         scales.append(scales)
         spec = {"alpha": 3.0}
         spec["self"] = spec
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
         w_scales = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
         w_spec = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def wrapped(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
 
         def list_argument(x, scales):
             out = torch.empty_like(x)
@@ -3826,6 +4237,10 @@ class CuteDSLDynamoTests(TestCase):
             return dict_argument(x, spec)
 
         x = _rand(1000)
+        cfg = "CuTeDSL kernel cfg_scale_kernel: parameter 'cfg': "
+        back_pointer_message = cfg + self._walk_error(back_pointer)
+        self.assertTrue(back_pointer_message.endswith(".parent.child"))
+        logger_message = cfg + self._walk_error(with_logger)
         list_message = "CuTeDSL kernel scale_by_first_kernel: parameter 'scales': "
         list_message += self._walk_error(scales)
         self.assertTrue(list_message.endswith("list refers to itself through [1]"))
@@ -3833,6 +4248,8 @@ class CuteDSLDynamoTests(TestCase):
         dict_message += self._walk_error(spec)
         self.assertTrue(dict_message.endswith("dict refers to itself through ['self']"))
         for f, arg, message in (
+            (wrapped, back_pointer, back_pointer_message),
+            (wrapped, with_logger, logger_message),
             (list_argument, scales, list_message),
             (list_made_in_the_region, scales, list_message),
             (dict_argument, spec, dict_message),
@@ -3842,8 +4259,9 @@ class CuteDSLDynamoTests(TestCase):
                 self._assert_call_error(f, (x, arg), message)
 
     def test_object_constants_inside_a_tuple(self):
-        # A constant is a Python literal, or a tuple or list of these: an object in a
-        # tuple graph-breaks.
+        # An object inside a tuple is passed like a bare one: as a snapshot, guarded
+        # on its contents. An object made in the region only exists after the graph
+        # runs, so passing one graph-breaks.
         class Scale:
             def __init__(self, v):
                 self.v = v
@@ -3853,17 +4271,557 @@ class CuteDSLDynamoTests(TestCase):
 
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
 
+        def f(x, scale):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (scale,))
+            return out
+
         def g(x):
             out = torch.empty_like(x)
             w(x, out, x.numel(), (Scale(2),))
             return out
 
         x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        three = Scale(3)
+        cases = ((three, 1), (three, 1), (Scale(4), 2), (Scale(3), 2))
+        for scale, frame_count in cases:
+            self.assertEqual(cf(x, scale), scale.v * x)
+            self.assertEqual(cnt.frame_count, frame_count)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "parameter 'scales': cannot pass the Scale"
         ):
             torch.compile(g, backend="eager", fullgraph=True)(x)
         self.assertEqual(torch.compile(g, backend="eager")(x), 2 * x)
+
+    def test_function_constants(self):
+        # A function from outside the region is passed as itself and guarded on its
+        # identity: its own guard (on its code) also passes for another function
+        # made by the same def. A @cute.jit function (e.g. a callback) is passed the
+        # same way. Dynamo has no object for a bound method (one is made on each
+        # access), so passing one graph-breaks.
+        @cute.jit
+        def jit_cfg():
+            pass
+
+        jit_cfg.alpha = 4.0
+
+        class Holder:
+            def method(self):
+                pass
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def g(x, holder):
+            return f(x, holder.method)
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        three = _make_cfg(3.0)
+        for cfg, frame_count in (
+            (three, 1),
+            (three, 1),
+            (_make_cfg(5.0), 2),
+            (jit_cfg, 3),
+        ):
+            self.assertEqual(cf(x, cfg), cfg.alpha * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "parameter 'cfg': cannot pass the method"
+        ):
+            torch.compile(g, backend="eager", fullgraph=True)(x, Holder())
+
+    def test_dict_constant_changed_outside_the_region(self):
+        # A dict passed in, bare or in a tuple or list argument, is guarded on its
+        # keys, their order and each value, as a dict inside an object constant is,
+        # with a number in it specialized, as in a tuple, once Dynamo makes it
+        # symbolic on the recompile: a change of its keys, of their order or of a
+        # number, or a function in it replaced by another made by the same def,
+        # recompiles, so the kernel sees the new dict as in eager, while an equal
+        # dict reuses the graph. A dict modified earlier in the region graph-breaks,
+        # as an object does.
+        def bare(spec):
+            return spec
+
+        def in_a_tuple(spec):
+            return (spec,)
+
+        def in_a_list(spec):
+            return [spec]
+
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, spec):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), spec)
+            return out
+
+        def modified(x, spec):
+            spec["alpha"] = 5.0
+            return f(x, spec)
+
+        x, three = _rand(1000), _make_cfg(3.0)
+        cases = (
+            ("keys", {"alpha": 3.0}, {"alpha": 3.0, "beta": 2.0}, 6.0),
+            ("key order", {"alpha": 3, "beta": 1}, {"beta": 1, "alpha": 3}, 3),
+            ("number", {"alpha": 3}, {"alpha": 5}, 5),
+            ("function", {"alpha": three}, {"alpha": _make_cfg(5.0)}, 5.0),
+        )
+        for wrap in (bare, in_a_tuple, in_a_list):
+            for case, first, second, scale in cases:
+                with self.subTest(wrap=wrap.__name__, case=case):
+                    torch._dynamo.reset()
+                    cnt = CompileCounterWithBackend("aot_eager")
+                    cf = torch.compile(f, backend=cnt, fullgraph=True)
+                    self.assertEqual(cf(x, wrap(first)), 3 * x)
+                    self.assertEqual(cf(x, wrap(dict(first))), 3 * x)
+                    self.assertEqual(cnt.frame_count, 1)
+                    self.assertEqual(cf(x, wrap(second)), scale * x)
+                    self.assertEqual(cnt.frame_count, 2)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "modified earlier in the compiled region"
+        ):
+            torch.compile(modified, backend="eager", fullgraph=True)(x, {"alpha": 3.0})
+        cf = torch.compile(modified, backend="aot_eager")
+        self.assertEqual(cf(x, {"alpha": 3.0}), 5 * x)
+
+    def test_dict_constant_made_in_the_region(self):
+        # A dict or an OrderedDict made in the region has no object to guard on, so
+        # it is walked like a tuple or list: a value from outside the region is
+        # guarded on what the side table keys it by (a function on its identity, a
+        # config object on its attributes), a symbolic value is specialized, and a
+        # tensor graph-breaks.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def holding(x, value, make):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), make(alpha=value))
+            return out
+
+        def holding_a_size(x, make):
+            return holding(x, x.shape[0] // 250, make)
+
+        for make in (dict, collections.OrderedDict):
+            with self.subTest(make=make.__name__):
+                torch._dynamo.reset()
+                x, three, cfg = _rand(1000), _make_cfg(3.0), Cfg(3.0)
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(holding, backend=cnt, fullgraph=True)
+                for fn, frame_count in ((three, 1), (three, 1), (_make_cfg(5.0), 2)):
+                    self.assertEqual(cf(x, fn, make), fn.alpha * x)
+                    self.assertEqual(cnt.frame_count, frame_count)
+                self.assertEqual(cf(x, cfg, make), 3 * x)
+                cfg.alpha = 5.0
+                self.assertEqual(cf(x, cfg, make), 5 * x)
+                cf = torch.compile(
+                    holding_a_size, backend="aot_eager", dynamic=True, fullgraph=True
+                )
+                for n in (1000, 2000):
+                    x = _rand(n)
+                    self.assertEqual(cf(x, make), (n // 250) * x)
+                message = "CuTeDSL kernel spec_scale_kernel: parameter 'spec': "
+                message += self._walk_error({"alpha": x})
+                self._assert_call_error(holding, (x, x, make), message)
+
+    def test_namedtuple_constant(self):
+        # A namedtuple is keyed like a tuple. One passed in reuses the graph when
+        # equal, and recompiles when a number in it changes, specialized as in a
+        # tuple once Dynamo makes it symbolic on the recompile. One made in the
+        # region is guarded through each value from outside the region in it, so a
+        # function in it replaced by another made by the same def recompiles.
+        Spec = collections.namedtuple("Spec", ["a", "b"])
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, spec):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), spec)
+            return out
+
+        def made_in_the_region(x, a):
+            return f(x, Spec(a, 1))
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        for spec, frame_count in ((Spec(3, 1), 1), (Spec(3, 1), 1), (Spec(5, 1), 2)):
+            self.assertEqual(cf(x, spec), spec.a * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        cf = torch.compile(made_in_the_region, backend="aot_eager", fullgraph=True)
+        for alpha in (3.0, 5.0):
+            self.assertEqual(cf(x, _make_cfg(alpha)), alpha * x)
+
+    def test_list_subclass_constant(self):
+        # A list subclass passed in is walked like a list: a number in it that
+        # changes between calls, which Dynamo makes symbolic on the recompile, is
+        # specialized as in a list (the subclass's variable is rebuilt, since clone()
+        # cannot copy it), and the kernel gets the object, of its own class, guarded
+        # on its contents.
+        class Scales(list):
+            pass
+
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), scales)
+            return out
+
+        x = _rand(1000)
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        for v, frame_count in ((3, 1), (3, 1), (5, 2), (7, 3)):
+            self.assertEqual(cf(x, Scales([v])), v * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        for gm, v in zip(backend.graphs, (3, 5, 7), strict=True):
+            (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+            constant_args_idx = node.kwargs["constant_args_idx"]
+            constant_args = cutedsl_kernel_side_table.get_constant_args(
+                constant_args_idx
+            )
+            self.assertIs(type(constant_args["scales"]), Scales)
+            self.assertEqual(constant_args["scales"], [v])
+
+    def test_frozenset_and_range_constants(self):
+        # A frozenset or a range passed in is guarded on its value, by which the
+        # side table keys it: an equal new one reuses the graph, and another
+        # recompiles. A frozenset made in the region is guarded through each value
+        # from outside the region in it, as a namedtuple is.
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, spec):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), spec)
+            return out
+
+        def made_in_the_region(x, fn):
+            return f(x, frozenset([fn]))
+
+        x = _rand(1000)
+        for first, equal, other in (
+            (frozenset([3]), frozenset([3]), frozenset([5])),
+            (range(3, 4), range(3, 4), range(5, 6)),
+        ):
+            with self.subTest(type=type(first).__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                self.assertEqual(cf(x, first), 3 * x)
+                self.assertEqual(cf(x, equal), 3 * x)
+                self.assertEqual(cnt.frame_count, 1)
+                self.assertEqual(cf(x, other), 5 * x)
+                self.assertEqual(cnt.frame_count, 2)
+        cf = torch.compile(made_in_the_region, backend="aot_eager", fullgraph=True)
+        for alpha in (3.0, 5.0):
+            self.assertEqual(cf(x, _make_cfg(alpha)), alpha * x)
+
+    def test_kernel_object_constant(self):
+        # A kernel object (an instance whose class's __call__ is a @cute.jit host
+        # function) passed as a Constexpr is guarded on its contents, as a config
+        # object is: an equal new object reuses the graph, and one changed between
+        # calls recompiles, as eager recompiles the kernel for it.
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x, kernel = _rand(1000), MulKernel(3.0)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        self.assertEqual(cf(x, kernel), 3 * x)
+        self.assertEqual(cf(x, MulKernel(3.0)), 3 * x)
+        self.assertEqual(cnt.frame_count, 1)
+        kernel.alpha = 5.0
+        self.assertEqual(cf(x, kernel), 5 * x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_container_constants_are_guarded_as_the_side_table_reads_them(self):
+        # Dynamo's guards read a dict, list or tuple through its storage, and the side
+        # table reads it through its methods (see constant_contents): a class that
+        # overrides one of those graph-breaks, and the call then runs eagerly, with
+        # eager's result before and after a change that only that method sees. An
+        # OrderedDict is guarded on its own order, so moving a key recompiles.
+        class Capped(dict):  # items() caps each value at its cap
+            def items(self):
+                return [(k, min(v, self.cap)) for k, v in dict.items(self)]
+
+        class First:  # reads the first value of its table
+            def __init__(self, table):
+                self.table = table
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table.values()))
+
+        def launcher(host_fn):
+            w = wrap_cutedsl(host_fn, mutates_args=["mOut"])
+
+            def launch(x, arg):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), arg)
+                return out
+
+            return launch
+
+        x, spec = _rand(1000), Capped(alpha=5.0)
+        spec.cap = 3.0
+        f = launcher(spec_scale_kernel)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "its class Capped overrides items, which the side table reads it through; "
+            "pass a plain dict",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, spec)
+        cf = torch.compile(f, backend="aot_eager")
+        self.assertEqual(cf(x, spec), 3 * x)
+        spec.cap = 10.0
+        self.assertEqual(cf(x, spec), 5 * x)
+        cfg = First(collections.OrderedDict(a=3.0, b=5.0))
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(launcher(cfg_scale_kernel), backend=cnt, fullgraph=True)
+        self.assertEqual(cf(x, cfg), 3 * x)
+        cfg.table.move_to_end("a")
+        self.assertEqual(cf(x, cfg), 5 * x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_constants_keyed_by_equality(self):
+        # An int or str subclass is keyed by equality, as an int or a str is, and
+        # guarded on its type and value: an equal new one, such as one built for each
+        # call, reuses the graph, while another value or another type recompiles. (A
+        # float subclass is not: see test_signed_zero_constants_get_their_own_graphs.)
+        class Alpha(int):
+            __slots__ = ()
+
+        class OtherAlpha(int):
+            __slots__ = ()
+
+        class Name(str):
+            __slots__ = ()
+
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def scaled(x, alpha):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        def keyed(x, spec):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), spec)
+            return out
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(scaled, backend=cnt, fullgraph=True)
+        for alpha, frame_count in (
+            (Alpha(3), 1),
+            (Alpha(3), 1),
+            (Alpha(5), 2),
+            (OtherAlpha(5), 3),
+        ):
+            self.assertEqual(cf(x, alpha), float(alpha) * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(keyed, backend=cnt, fullgraph=True)
+        for name, frame_count in (("alpha", 1), ("alpha", 1), ("beta", 2)):
+            self.assertEqual(cf(x, {Name(name): 3.0}), 3 * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_signed_zero_constants_get_their_own_graphs(self):
+        # The side table keys -0.0 and 0.0 apart (constant_key), and so do the
+        # guards, so each call launches its own snapshot: a numpy complex scalar
+        # (np.complex128 subclasses complex, which EQUALS_MATCH compares with ==) is
+        # guarded on its type and .item(), an exact complex, which EQUALS_MATCH
+        # compares bitwise, so an equal one made again reuses the graph; a complex or
+        # float subclass is guarded on its identity, so one made again recompiles.
+
+        # The DSL re-runs this def in the module's globals.
+        @cute.jit
+        def mul_real_kernel(
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            alpha: cutlass.Constexpr,
+            stream: cuda.CUstream,
+        ):
+            _mul_const_k(mX, mOut, n, float(alpha.real)).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+        class Alpha(complex):
+            __slots__ = ()
+
+        class Scale(float):
+            __slots__ = ()
+
+        w = wrap_cutedsl(mul_real_kernel, mutates_args=["mOut"])
+
+        def scaled(x, alpha):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), alpha)
+            return out
+
+        x = _rand(1000).abs() + 1  # x * alpha.real has the sign of alpha.real
+        for make, negative_zero, zero, last_frame_count in (
+            (np.complex128, complex(-0.0, 0.0), 0j, 2),
+            (np.complex64, complex(-0.0, 0.0), 0j, 2),
+            (Alpha, complex(-0.0, 0.0), 0j, 3),
+            (Scale, -0.0, 0.0, 3),
+        ):
+            with self.subTest(make=make.__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(scaled, backend=cnt, fullgraph=True)
+                for value, negative, frame_count in (
+                    (make(negative_zero), True, 1),
+                    (make(zero), False, 2),
+                    (make(negative_zero), True, last_frame_count),
+                ):
+                    out = cf(x, value)
+                    self.assertEqual(out, torch.zeros_like(x))
+                    signs = torch.full_like(x, negative, dtype=torch.bool)
+                    self.assertEqual(out.signbit(), signs)
+                    self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_constants_guarded_by_identity_stay_alive(self):
+        # A Fraction or a Decimal is keyed by equality, which no Dynamo guard
+        # checks for it, so it is guarded on its identity, and an equal new one
+        # recompiles. It cannot be weakly referenced, and the side table may hold an
+        # equal one instead of it: the compiled code keeps it alive, as a global of
+        # the compiled frame, so that its id cannot be taken by a new value of
+        # another value, which would pass the guard and launch the old snapshot.
+        import decimal
+        import fractions
+        import weakref
+
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def scaled(x, scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), scales)
+            return out
+
+        x = _rand(1000)
+        for make in (fractions.Fraction, decimal.Decimal):
+            with self.subTest(make=make.__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(scaled, backend=cnt, fullgraph=True)
+                for v, frame_count in ((3, 1), (3, 2), (5, 3)):
+                    value = make(v)
+                    with self.assertRaises(TypeError):
+                        weakref.ref(value)
+                    self.assertEqual(cf(x, (value,)), v * x)
+                    self.assertEqual(cnt.frame_count, frame_count)
+                    held = scaled.__globals__.values()
+                    self.assertTrue(any(g is value for g in held))
+
+    def test_numpy_scalar_arguments(self):
+        # Dynamo traces a numpy scalar as a 0-d array backed by a tensor. One made
+        # outside the region is passed as itself, as in eager (the launch converts
+        # one for a runtime scalar parameter), and guarded on its type and value: an
+        # equal new one, such as one built for each call, reuses the graph, while
+        # another value or another type recompiles (for a runtime scalar parameter
+        # too, where eager compiles once), bare, in a config object or in a tuple. A
+        # numpy scalar made in the region graph-breaks.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+        w_scales = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def constexpr(x, alpha):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        def runtime(x, k):
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), k)
+            return out
+
+        def in_cfg(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def in_tuple(x, scales):
+            out = torch.empty_like(x)
+            w_scales(x, out, x.numel(), scales)
+            return out
+
+        def made_in_the_region(x):
+            return constexpr(x, np.float32(2.0))
+
+        x = _rand(1000)
+        calls = ((np.int64(3), 1), (np.int64(3), 1), (np.int64(5), 2), (np.int32(5), 3))
+        for f in (constexpr, runtime):
+            with self.subTest(f=f.__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                for value, frame_count in calls:
+                    expected = x + float(value) if f is runtime else float(value) * x
+                    self.assertEqual(cf(x, value), expected)
+                    self.assertEqual(cnt.frame_count, frame_count)
+        for f, make in (
+            (in_cfg, lambda v: Cfg(np.float32(v))),
+            (in_tuple, lambda v: (np.int64(v),)),
+        ):
+            with self.subTest(f=f.__name__):
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                for v in (3, 3, 5, 5, 7, 3, 9):
+                    self.assertEqual(cf(x, make(v)), v * x)
+                self.assertEqual(cnt.frame_count, 4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"parameter 'alpha': cannot pass a numpy array, or a numpy scalar made in "
+            r"the compiled region",
+        ):
+            torch.compile(made_in_the_region, backend="eager", fullgraph=True)(x)
+
+    def test_constant_made_in_the_region_guards_each_value_once(self):
+        # A Python constant made in the region is guarded through each value from
+        # outside the region in it, together with what that value holds: a tuple
+        # argument in a namedtuple guards the function in it once, not again through
+        # the tuple.
+        from torch._dynamo.variables.cutedsl import DynamoCuteDSLHOPifier
+
+        Spec = collections.namedtuple("Spec", ["fns", "b"])
+        w = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, fns):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), Spec(fns, 1))
+            return out
+
+        x = _rand(1000)
+        guard_contents = DynamoCuteDSLHOPifier.guard_contents
+        with mock.patch.object(
+            DynamoCuteDSLHOPifier,
+            "guard_contents",
+            autospec=True,
+            side_effect=guard_contents,
+        ) as spy:
+            cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+            self.assertEqual(cf(x, (_make_cfg(3.0),)), 3 * x)
+        sources = [call.args[1].name for call in spy.call_args_list]
+        self.assertEqual(sources.count("L['fns'][0]"), 1, sources)
 
     def test_nested_symint_in_constexpr_tuple(self):
         # Specialized like a bare SymInt: one graph per value.
