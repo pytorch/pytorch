@@ -2001,6 +2001,16 @@
       ]
     }
   ],
+  "GB4061": [
+    {
+      "Gb_type": "Unsupported OrderedDict union result",
+      "Context": "new.python_type_name()",
+      "Explanation": "Dynamo cannot yet update a non-dictionary returned by an OrderedDict subclass constructor.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0119": [
     {
       "Gb_type": "Uninitialized nn.Module",
@@ -5524,6 +5534,14 @@
       ]
     }
   ],
+  "GB9996": [
+    {
+      "Gb_type": "Input OrderedDict linked-order mutation",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
+      "Hints": []
+    }
+  ],
   "GB0297": [
     {
       "Gb_type": "random.Random() with improper arguments",
@@ -6797,6 +6815,14 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB3043": [
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": []
     }
   ],
   "GB0356": [

@@ -4954,6 +4954,16 @@ def _is_shared_constant(value: Any) -> bool:
     return FunctionPicklerBase._is_literal(value)
 
 
+def _can_prune_dict_values(value: object) -> bool:
+    if type(value) is dict:
+        return True
+    return (
+        type(value) is collections.OrderedDict
+        and collections.OrderedDict not in copyreg.dispatch_table
+        and not vars(value)
+    )
+
+
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
 # breaks the module itself: __getattr__ indexes the three dicts for every name
 # outside __dict__, and __setattr__/__delattr__ index all four on any
@@ -5002,6 +5012,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                     stack.append(element)
                 elif isinstance(element, dict):
                     stack.append([*element.keys(), *element.values()])
+        # Also retain state of dictionaries whose pickle protocol can inspect it.
         # Everything reachable from a value a guard compares whole: a constant
         # or opaque value type under EQUALS_MATCH, and what __tensor_unflatten__
         # gets back through a traceable wrapper subclass's ctx under
@@ -5019,6 +5030,19 @@ class GuardsStatePickler(FunctionPicklerBase):
             for value in self.guard_tree_values.values()
             if pytree.is_constant_class(type(value))
             or is_opaque_constant_type(type(value))
+            or (
+                issubclass(type(value), dict)
+                and not _can_prune_dict_values(value)
+                and (
+                    not _pickles_from_dict(type(value))
+                    or inspect.getattr_static(type(value), "__getattribute__")
+                    is not object.__getattribute__
+                    or inspect.getattr_static(type(value), "__getattr__", None)
+                    is not None
+                    or inspect.getattr_static(type(value), "__slots__", None)
+                    is not None
+                )
+            )
         ]
         subclasses = [
             value
@@ -5031,6 +5055,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             stack.append(ctx)
             for attr in attrs:
                 inner = getattr(subclass, attr)
+                if isinstance(inner, torch.Tensor):
+                    self.guard_tree_values[id(inner)] = inner
                 if is_traceable_wrapper_subclass(inner):
                     subclasses.append(inner)
         while stack:
@@ -5038,11 +5064,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(value) in self._whole_compared_values:
                 continue
             self._whole_compared_values[id(value)] = value
-            if isinstance(value, (list, tuple, set, frozenset)):
-                stack.extend(value)
-            elif isinstance(value, dict):
-                stack.extend(value.keys())
-                stack.extend(value.values())
+            if issubclass(type(value), (list, tuple, set, frozenset, dict)):
+                # Traverse real container storage, attributes and slots without callbacks.
+                stack.extend(gc.get_referents(value))
             elif (
                 hasattr(value, "__dict__")
                 and not inspect.isclass(value)
@@ -5277,6 +5301,21 @@ class GuardsStatePickler(FunctionPicklerBase):
         if self._is_literal(value) or self._keep(value):
             return value
         return self._missing(reason)
+
+    def _prune_dictionary_values(
+        self, dictionaries: collections.abc.Iterable[dict[Any, Any]]
+    ) -> None:
+        for value in dictionaries:
+            if not _can_prune_dict_values(value):
+                continue
+            for item in dict.values(value):
+                if (
+                    not self._keep(item)
+                    and id(item) not in self._whole_compared_values
+                    and id(item) not in self._verbatim_elements
+                    and not _is_shared_constant(item)
+                ):
+                    self.missing_values[id(item)] = item
 
     def _keep_container_verbatim(self, container: object) -> bool:
         """Whether a function container (__defaults__/__dict__/...) is carried whole
@@ -6138,8 +6177,8 @@ def pickle_guards_state(
     builder: GuardBuilder,
 ) -> bytes:
     buf = io.BytesIO()
-    empty_values = {}
-    missing_values = {}
+    empty_values: dict[int, Any] = {}
+    missing_values: dict[int, Any] = {}
     guard_tree_values = dict(builder.guard_tree_values)
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
@@ -6148,14 +6187,34 @@ def pickle_guards_state(
     # try too: it recurses into the local values, so a deep pytree in a local
     # overflows there rather than in dump.
     try:
-        implicit_dicts = {}
+        required_dicts: dict[int, dict[Any, Any]] = {}
         for source in state.output_graph.guard_on_key_order:
             value = builder.get(source)
-            if id(value) not in guard_tree_values and isinstance(value, dict):
-                implicit_dicts[id(value)] = value
+            if isinstance(value, dict):
+                required_dicts[id(value)] = value
+            while True:
+                guard_tree_values[id(value)] = value
+                if not isinstance(source, ChainedSource):
+                    break
+                source = source.base
+                value = builder.get(source)
+        for value in tuple(guard_tree_values.values()):
+            if isinstance(
+                value, (torch._dynamo.utils.dict_keys, torch._dynamo.utils.odict_keys)
+            ):
+                owner = gc.get_referents(value)[0]
+                required_dicts[id(owner)] = owner
+                guard_tree_values[id(owner)] = owner
         # Rebuilding implicit managers requires dictionary structure, not every value.
         # Register all aliased/nested containers before pruning their unused entries.
-        guard_tree_values.update(implicit_dicts)
+        pickler = GuardsStatePickler(
+            guard_tree_values,
+            empty_values,
+            missing_values,
+            builder.value_guarded_containers,
+            buf,
+            protocol=_GUARDS_PROTOCOL,
+        )
         leaves = pytree.tree_leaves(state.output_graph.local_scope)
         for leaf in leaves:
             if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
@@ -6166,30 +6225,16 @@ def pickle_guards_state(
                         empty_values[id(base)] = base
                     except:  # noqa: E722
                         pass
-            elif id(leaf) not in guard_tree_values and not _is_shared_constant(leaf):
+            elif (
+                id(leaf) not in guard_tree_values
+                and id(leaf) not in pickler._whole_compared_values
+                and id(leaf) not in pickler._verbatim_elements
+                and not _is_shared_constant(leaf)
+            ):
                 # TODO See if we have lift this branch as the first one.
                 # Prune more objects in pytree hierarchy.
                 missing_values[id(leaf)] = leaf
-        pickler = GuardsStatePickler(
-            guard_tree_values,
-            empty_values,
-            missing_values,
-            builder.value_guarded_containers,
-            buf,
-            protocol=_GUARDS_PROTOCOL,
-        )
-
-        for value in implicit_dicts.values():
-            if type(value) is dict:
-                for item in value.values():
-                    # A bystander here may also belong to metadata compared whole.
-                    if (
-                        id(item) not in guard_tree_values
-                        and id(item) not in pickler._whole_compared_values
-                        and id(item) not in pickler._verbatim_elements
-                        and not _is_shared_constant(item)
-                    ):
-                        missing_values[id(item)] = item
+        pickler._prune_dictionary_values(required_dicts.values())
 
         if all(
             torch.compiler.keep_portable_guards_unsafe(
