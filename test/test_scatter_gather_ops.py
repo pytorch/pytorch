@@ -1,5 +1,6 @@
 # Owner(s): ["module: scatter & gather ops"]
 
+import itertools
 import random
 import unittest
 from typing import NamedTuple
@@ -14,6 +15,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
     dtypes,
@@ -154,6 +156,58 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    def test_scatter_out_variant_dynamic_shapes(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103
+
+        def scatter_src(x, index, src, out):
+            return torch.scatter(x, 1, index, src, out=out)
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        def scatter_value(x, index, out):
+            return torch.scatter(x, 1, index, 1.0, out=out)
+
+        for fn, needs_src in (
+            (scatter_src, True),
+            (scatter_add, True),
+            (scatter_value, False),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+            for width in (2, 3, 5):
+                x = torch.zeros(1, width, device=device, dtype=dtype)
+                index = torch.arange(width, device=device).unsqueeze(0)
+                src = torch.ones(1, width, device=device, dtype=dtype)
+                eager_out = torch.empty_like(x)
+                compiled_out = torch.empty_like(x)
+                args = (x, index, src, eager_out) if needs_src else (x, index, eager_out)
+                compiled_args = (
+                    (x, index, src, compiled_out) if needs_src else (x, index, compiled_out)
+                )
+                fn(*args)
+                compiled(*compiled_args)
+                self.assertEqual(eager_out, compiled_out)
+
+    def test_scatter_add_out_dynamic_shapes_empty_index(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        compiled = torch.compile(scatter_add, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3, 0, 5):
+            x = torch.zeros(1, width, device=device, dtype=dtype)
+            index = torch.arange(width, device=device).unsqueeze(0)
+            src = torch.ones(1, width, device=device, dtype=dtype)
+            eager_out = torch.empty_like(x)
+            compiled_out = torch.empty_like(x)
+            scatter_add(x, index, src, eager_out)
+            compiled(x, index, src, compiled_out)
+            self.assertEqual(eager_out, compiled_out)
 
 class TestScatterGatherDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -209,8 +263,18 @@ class TestScatterGatherDevice(TestCase):
     @serialTest()
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
-        # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
+        many_rows = 1031
+        if device.startswith("cuda"):
+            properties = torch.cuda.get_device_properties(device)
+            # Match max_num_threads=256 and max_block_waves=32 in IndexKernelUtils.cu.
+            # Use multiple passes plus a partial tail, rather than one row past the cap.
+            many_rows = 2 * properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1031
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
+                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8),
+                          # Non-power-of-two packing, partial row blocks, and the 32/33-vector boundary.
+                          (4096, 1031, 48), (4096, 1031, 160), (4096, 1031, 512), (4096, 1031, 528),
+                          # Force row-loop iterations on this GPU without multi-GB outputs.
+                          (64, many_rows, 4096), (64, many_rows * 64, 64)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
@@ -221,10 +285,12 @@ class TestScatterGatherDevice(TestCase):
             alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
             misaligned1 = alloc2[:, :-4].copy_(src)
             num_ind = n
-            for dim in (0, 1):
+            index_dtypes = (torch.int64, torch.int32) if device.startswith("cuda") and k == 48 else (torch.int64,)
+            dims = (0,) if m == 64 and n in (many_rows, many_rows * 64) else (0, 1)
+            for dim, index_dtype in itertools.product(dims, index_dtypes):
                 max_ind = src.shape[dim]
-                ind0 = torch.randint(max_ind, (num_ind,), device=device)
-                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=torch.int64)[::2].copy_(ind0)
+                ind0 = torch.randint(max_ind, (num_ind,), device=device, dtype=index_dtype)
+                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=index_dtype)[::2].copy_(ind0)
                 shape_ind = [1] * src.ndim
                 shape_ind[dim] = ind0.shape[0]
                 shape_out = list(src.shape)
@@ -412,6 +478,43 @@ class TestScatterGatherDevice(TestCase):
                 self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                         is_scalar=False, reduction=None)
 
+    @dtypes(torch.float32, torch.bfloat16, torch.int8)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("rows,row_bytes", [(64, 240), (64, 256), (64, 272), (16384, 256), (8, 65536)])
+    def test_scatter_copy_slices(self, device, dtype, index_dtype, rows, row_bytes):
+        width = row_bytes // dtype.itemsize
+        src = make_tensor((rows, 2, width // 2), device=device, dtype=dtype)
+        dst = torch.zeros((2 * rows, 2, width // 2), device=device, dtype=dtype)
+        index = torch.randperm(2 * rows, device=device, dtype=index_dtype)[:rows]
+        expected = dst.cpu().index_copy_(0, index.cpu().long(), src.cpu())
+        dst.scatter_(0, index[:, None, None].expand_as(src), src)
+        self.assertEqual(dst.cpu(), expected, atol=0, rtol=0)
+
+    @parametrize("op", ["scatter", "index_copy"])
+    def test_copy_misaligned_out(self, device, op):
+        dst = torch.zeros((64, 128), device=device)
+        src = torch.ones((32, 128), device=device)
+        index = torch.arange(32, device=device)
+        expected = dst.cpu().index_copy_(0, index.cpu(), src.cpu())
+        out = torch.empty(dst.numel() + 1, device=device)[1:].view_as(dst)
+        if op == "scatter":
+            index = index[:, None].expand_as(src)
+        result = getattr(torch, op)(dst, 0, index, src, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @serialTest()
+    @largeTensorTest("5GB")
+    def test_scatter_copy_large_slice(self, device):
+        # The last valid vector fits int32, but the final loop increment does not.
+        width = 2**29
+        src = torch.ones((1, width), device=device).expand(2, width)
+        dst = torch.zeros((1, width), device=device)
+        index = torch.zeros((2, 1), device=device, dtype=torch.int64).expand_as(src)
+        dst.scatter_(0, index, src)
+        self.assertEqual(dst[0, [0, width // 2, width - 1]], torch.ones(3, device=device))
+
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
@@ -463,7 +566,11 @@ class TestScatterGatherDevice(TestCase):
             atol, rtol = 0.2, 0.5
         # The large shape tests grid.y clipping at maxGridSize[1]=65535.
         # Use it only for small dtypes to avoid OOM on CI (22GB GPUs).
-        shapes = [(4096, 3072, 4096), (4096, 3072, 4100)]
+        # The short-row shapes cover 16/32/64/128-byte rows that must skip
+        # the vectorized/TMA fast paths.
+        shapes = [(4096, 3072, 4096), (4096, 3072, 4100),
+                  (4096, 3072, 4), (4096, 3072, 8),
+                  (4096, 3072, 16), (4096, 3072, 32)]
         if dtype.itemsize <= 2:
             shapes.append((4, 4, 16384 * 8192))
         else:
@@ -701,6 +808,84 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "op",
+        [
+            "scatter_add",
+            "scatter_reduce_sum",
+            "scatter_reduce_mean",
+            "scatter_scalar_add",
+            "index_add",
+            "index_add_many",
+            "index_reduce_mean",
+            "put_accumulate",
+        ],
+    )
+    def test_atomic_add_preserves_neighbours(self, device, dtype, op):
+        # Half-precision atomic adds may be packed with the other half of the
+        # 4-byte word holding the target, inside or outside self. The packed
+        # lane must leave that slot unchanged; -0.0 would flip under +0.0.
+        # See https://github.com/pytorch/pytorch/issues/202905
+        def view_5x5(b):
+            return b[:25].view(5, 5)
+
+        cases = [
+            (view_5x5, 1, 4),
+            (view_5x5, 0, 4),
+            (lambda b: view_5x5(b).t(), 1, 4),
+            (lambda b: b[1:26].view(5, 5), 1, 0),
+            (lambda b: b[:30].view(5, 6)[:, :5], 1, 4),
+            (lambda b: b[:10:2], 0, 1),
+            (lambda b: b[1:11:2], 0, 1),
+        ]
+
+        # Each case leaves the targeted slice at 1 and all other bits unchanged.
+        def apply(x, dim, i, idx, src):
+            if op == "scatter_add":
+                x.scatter_add_(dim, idx, src)
+            elif op == "scatter_reduce_sum":
+                x.scatter_reduce_(dim, idx, src, "sum")
+            elif op == "scatter_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.scatter_reduce_(dim, idx, src * 2, "mean")
+            elif op == "scatter_scalar_add":
+                x.scatter_(dim, idx, 1.0, reduce="add")
+            elif op == "index_add":
+                x.index_add_(dim, idx.flatten()[:1], src)
+            elif op == "index_add_many":
+                # More than 16 indices selects the large-index kernel, and
+                # alpha != 1 avoids delegating to scatter_add_.
+                n = 32
+                many = idx.flatten()[:1].repeat(n)
+                x.index_add_(dim, many, torch.cat([src] * n, dim) / 16, alpha=0.5)
+            elif op == "index_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.index_reduce_(dim, idx.flatten()[:1], src * 2, "mean")
+            elif op == "put_accumulate":
+                flat_idx = torch.arange(x.numel(), device=device).view(x.shape)
+                x.put_(flat_idx.select(dim, i), src, accumulate=True)
+            else:
+                raise AssertionError(f"unknown op {op}")
+
+        for make_self, dim, i in cases:
+            base = torch.full((32,), -0.0, device=device, dtype=dtype)
+            x = make_self(base)
+            shape = list(x.shape)
+            shape[dim] = 1
+            idx = torch.full(shape, i, device=device)
+            src = torch.ones(shape, device=device, dtype=dtype)
+            apply(x, dim, i, idx, src)
+
+            expected = torch.full((32,), -0.0, device=device, dtype=dtype)
+            make_self(expected).select(dim, i).fill_(1)
+            self.assertEqual(
+                base.view(torch.int16),
+                expected.view(torch.int16),
+                msg=f"dim={dim}, index={i}, self strides {x.stride()}, offset {x.storage_offset()}",
+            )
+
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
         for d in (0, 1):
@@ -716,6 +901,7 @@ class TestScatterGatherDevice(TestCase):
             with DeterministicGuard(True):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
+
 
 
 # ---------------------------------------------------------------------------
@@ -1284,19 +1470,22 @@ class TestScatterAddOverrideCorrectness(TestCase):
         tol = _override_tol(torch.bfloat16)
         self.assertEqual(out_mis, ref, atol=tol, rtol=tol)
 
-    @parametrize("dtype,N", [
-        # chunk_bytes < 128 (small D)
-        subtest((torch.float32, 8), name="fp32_N8_cb32"),
-        subtest((torch.float32, 16), name="fp32_N16_cb64"),
-        subtest((torch.bfloat16, 8), name="bf16_N8_cb16"),
-        subtest((torch.bfloat16, 16), name="bf16_N16_cb32"),
+    @parametrize("dtype,N,direct", [
+        # chunk_bytes < 128 (small D): rows below the 256B dispatch floor,
+        # so drive the TMA kernel directly to cover the smem stage
+        # stride padding.
+        subtest((torch.float32, 8, True), name="fp32_N8_cb32"),
+        subtest((torch.float32, 16, True), name="fp32_N16_cb64"),
+        subtest((torch.bfloat16, 8, True), name="bf16_N8_cb16"),
+        subtest((torch.bfloat16, 16, True), name="bf16_N16_cb32"),
         # 128 < chunk_bytes < 512 but not a multiple of 128 -- stage 1
-        # also misaligns here without the stage-stride padding.
-        subtest((torch.float32, 36), name="fp32_N36_cb144"),
-        subtest((torch.bfloat16, 72), name="bf16_N72_cb144"),
+        # also misaligns here without the stage-stride padding. Sized to
+        # stay above the 256B dispatch floor so the TMA path runs.
+        subtest((torch.float32, 68, False), name="fp32_N68_cb272"),
+        subtest((torch.bfloat16, 136, False), name="bf16_N136_cb272"),
     ])
     @unittest.skipUnless(SM90OrLater, "TMA path requires sm_90+")
-    def test_smem_stage_alignment_multi_iter(self, dtype, N):
+    def test_smem_stage_alignment_multi_iter(self, dtype, N, direct):
         # Regression for TMA stage-1 smem misalignment: stage 1 of the
         # 2-stage pipeline buffer lands at offset chunk_bytes, so any
         # chunk_bytes that isn't 128B-aligned (small D < 128, or D's
@@ -1305,7 +1494,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
         # stage 1. Stage 1 is only reached when a CTA does >= 2
         # iterations, i.e. M_src > grid_x. _plan_grid caps grid_x at
         # sm*64, so M_src must exceed that to expose the bug.
-        from torch._native.ops.scatter_add import cutedsl_impl
+        from torch._native.ops.scatter_add import cutedsl_impl, tma_kernel
 
         torch.manual_seed(0)
         sm = torch.cuda.get_device_properties(0).multi_processor_count
@@ -1313,15 +1502,20 @@ class TestScatterAddOverrideCorrectness(TestCase):
         self_t, idx, src, idx_1d = _make_override_triple(
             M_out, M_src, (N,), dtype=dtype
         )
-        # Assert the TMA path is the one that actually runs -- otherwise
-        # the test would silently regress to vec-scatter (which has no
-        # smem stage stride and can't reproduce this bug).
-        self.assertTrue(
-            cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
-            msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
-        )
         ref = _naive_scatter_add(self_t, idx_1d, src)
-        got = torch.scatter_add(self_t, 0, idx, src)
+        if direct:
+            # Below the dispatch floor: exercise the kernel directly.
+            tma_kernel.tma_scatter_add_into(self_t, idx_1d, src)
+            got = self_t
+        else:
+            # Assert the TMA path is the one that actually runs --
+            # otherwise the test would silently regress to vec-scatter
+            # (which has no smem stage stride and can't reproduce this bug).
+            self.assertTrue(
+                cutedsl_impl._is_tma_supported(self_t, 0, idx, src),
+                msg="test bug: TMA cond rejected; this test would not exercise the regressed path",
+            )
+            got = torch.scatter_add(self_t, 0, idx, src)
         torch.cuda.synchronize()
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)

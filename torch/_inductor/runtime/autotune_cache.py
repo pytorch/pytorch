@@ -36,7 +36,7 @@ from typing_extensions import override
 
 import torch
 from torch._guards import CompileContext
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, extra_options_to_hashable
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -53,7 +53,7 @@ from ..remote_cache import (
     RemoteCache,
     RemoteCacheJsonSerde,
 )
-from .hints import InductorMeta
+from .hints import InductorMeta, KERNEL_CONFIGS_NAME
 from .triton_compat import Config, HAS_WARP_SPEC
 
 
@@ -638,10 +638,16 @@ class AutotuneCacheBundler:
             bundler.put(basename, data)
 
 
+# The python wrapper's KERNEL_CONFIGS (see _KernelConfigs in codegen/wrapper.py): the
+# config each kernel's compile-time autotuning picked, which timing noise can change.
+_KERNEL_CONFIGS = re.compile(rf"(?m)^{KERNEL_CONFIGS_NAME} = \{{\n(?:    .*\n)*\}}$")
+
+
 # Remove the comments from the code (which include things like run ids and file
-# paths) and then hash the result.
+# paths) and the KERNEL_CONFIGS rows, and then hash the result.
 def _comment_stripped_hash(code: str) -> str:
     code = re.sub(r"#.*$", "", code, count=0, flags=re.MULTILINE)
+    code = _KERNEL_CONFIGS.sub(f"{KERNEL_CONFIGS_NAME} = {{}}", code)
     return torch._inductor.codecache.code_hash(code)
 
 
@@ -732,15 +738,22 @@ def _load_cached_autotuning(
             and cfg.num_stages == best_config.get("num_stages")
             and getattr(cfg, "maxnreg", None) == maxnreg
         ]
+        if len(matching_configs) > 1:
+            extra_options_key = extra_options_to_hashable(extra_options)
+            matching_configs = [
+                cfg
+                for cfg in matching_configs
+                if extra_options_to_hashable(getattr(cfg, "extra_options", None))
+                == extra_options_key
+            ]
         if len(matching_configs) == 1:
             matched_config = matching_configs[0]
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
 
-    # Reconstruct Config from cached data. This handles both coordesc
-    # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
-    # that aren't in the original config list.
+    # Reconstruct Config when no unique candidate matches, or when the
+    # cached config was found by coordinate descent.
     best_config.pop("found_by_coordesc", None)
     triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
     if found_by_coordesc:

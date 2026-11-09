@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -81,12 +82,13 @@ This workflow is being rolled out and not all of it is live yet, see [Current st
 Issues are a way to report feedback or make suggestions. PyTorch uses issues to track ongoing efforts and considerations for improving the codebase. Before opening an issue, please check to see if there's already an existing issue for your topic, as it may be more effective to contribute there!
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart LR
     new[New issue] --> ai(AI triage)
-    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged<br/>“triaged” + “module: *” / “oncall: *” labels"]
+    ai -- "fails, or “no automated triage”" --> manual(Manual triage) --> triaged
     triaged --> mtriage("Module-level triage<br/>any module maintainer")
-    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
+    mtriage --> full["Fully triaged<br/>“needs reproduction” / “needs research” /<br/>“needs design” / “actionable” / “won't fix”"]
     full -- "remove the label to request<br/>re-evaluation" --> triaged
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
@@ -123,22 +125,23 @@ Two other labels are orthogonal to the states above:
 ### PR lifecycle
 
 ```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
 flowchart TD
     draft[Draft PR] -- author marks ready --> ready[Ready PR]
-    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ready --> ai("AI triage<br/>CODEOWNERS, “module: *”, linked issue")
     ai -- fails pre-conditions --> closed[Closed]
-    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
-    ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
+    ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
+    ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
     triaged --> pre(Pre-review)
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
-    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
+    pre -- every assigned reviewer accepts --> dev["In development by author<br/>“in progress”"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
     auto -- changes needed --> dev
-    dev -- "#quot;no automated review#quot;" --> rfr
+    dev -- "“no automated review”" --> rfr
     rfr --> review(Human review)
     review -- "needs significant changes,<br/>automated review enabled" --> dev
-    review -- "needs significant changes,<br/>#quot;no automated review#quot;" --> rfr
+    review -- "needs significant changes,<br/>“no automated review”" --> rfr
     review -- any reviewer accepts --> accepted[Accepted]
     ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
     accepted -- "@pytorchbot merge" --> merged[Merged]
@@ -157,11 +160,13 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
 | Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
-| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. |
+| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
 
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
@@ -171,7 +176,7 @@ The `in progress` and `ready for review` labels are managed by bots: authors sho
 
 If a maintainer requests changes and your PR returns to `in progress`, please address their feedback before the PR returns to maintainer review. A fresh automated review checks that the feedback has been addressed, and the PR must meet all of the readiness criteria above again. The earlier passing review cannot move the PR back to `ready for review`. If you address comments without pushing, comment `@pytorchbot review` to run the automated review again.
 
-With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
 **Pre-conditions**:
 
@@ -236,7 +241,8 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
 * When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
-  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; compiled output is not redirected.)
+  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; the compiled output is installed into `build/install/<wheel tag>/` in the checkout and loaded from there.)
+  The install tree is keyed by wheel tag only. If you point `SKBUILD_BUILD_DIR` at a second build tree (another CUDA toolkit, a Debug build), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share `build/install/<wheel tag>/` and the last one installed wins.
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
@@ -360,6 +366,9 @@ To install the nightly binaries built with ROCm, you can pass in the flag `--roc
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
+
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
 
 You can also use this tool to pull the nightly commits into the current branch:
 
@@ -655,6 +664,17 @@ preserve it, so you do not need to repeat the prefix on each update.
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
 
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
+
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
 
@@ -664,23 +684,23 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
+The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
+
+A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
+
 ## GreenLight
 
 GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
 
-GreenLight is undergoing a phased rollout. For now it reviews PRs from a [smaller set](https://github.com/pytorch/test-infra/issues/8945) of those authors. The next step is to enable it for every author listed in `merge_rules.yaml`.
+A PR is eligible when one rule in `merge_rules.yaml` names you and covers every file the PR changes. A scan picks up your eligible open PRs every few minutes; one that becomes eligible while it is open may need a new push first. GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review).
 
-The current set is the list in the code block at the top of [pytorch/test-infra#8945](https://github.com/pytorch/test-infra/issues/8945). If you have write access to pytorch/test-infra, you can add yourself by editing the issue body: put your GitHub username as `@username` alone on a new line inside that block, and change nothing else. Every line in the block must be exactly one `@username`, a `#` comment, or blank; any other line makes GreenLight reject the whole list, and no new reviews start for anyone until the body is fixed. If you don't have write access, ask to be added in a comment on the issue and we will add you promptly.
+The Dr. CI comment on your PR (the pytorchbot comment) shows whether the PR is eligible, when GreenLight's review starts, and whether the result is `PR approved to be merged without human review` or `PR requires human review`. An approval appears on the PR as a review from `pytorchgreenlight[bot]`.
 
-Once you are listed, there is nothing else to do: a scan picks up your open PRs every few minutes, as long as one rule in `merge_rules.yaml` names you and covers every file the PR changes. A PR that was already open when you were added may need a new push first. GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review).
-
-The outcome appears as a `GREEN LIGHT` section in the Dr. CI comment on your PR (pytorchbot comment), with a short explanation and a link to the job that decided it. Once a review finishes it reads `PR approved to be merged without human review` or `PR requires human review`, and while one is running, `Green Light review in progress`. A verdict reached on an earlier commit is prefixed `OUTDATED (earlier commit)`; it does not authorize landing the current head. An approval is an ordinary GitHub approving review from `pytorchgreenlight` (shown on the PR as `pytorchgreenlight[bot]`) that satisfies the `Greenlight Review Bot` rule in [`.github/merge_rules.yaml`](.github/merge_rules.yaml). It adds no label and no CI check.
-
-You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a stacked merge (ghstack or GitHub-native) every PR that the merge lands is checked, so one PR without a current approval holds up all of them. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
 
 `PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
 
-GreenLight does not review drafts, PRs with unresolved requested changes, PRs already approved by someone listed in `merge_rules.yaml`, or PRs that have not been updated in the last 24 hours, and a diff over 2000 lines is declined automatically as too large to review. It also skips PRs labeled `Stale` and does not re-scan them; pushing does not help while the label is set, so remove it to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
+GreenLight does not review drafts, PRs with unresolved requested changes, or PRs already approved by someone listed in `merge_rules.yaml`. A diff over 2000 lines or 200 files is declined automatically as too large to review. GreenLight also skips PRs labeled `Stale`, even after a push; remove the label to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
 
 To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board. To report a wrong verdict on a merged PR, open its landed commit on HUD (for example, [commit 38395f3](https://hud.pytorch.org/pytorch/pytorch/commit/38395f306af10d0f565d5e14f8f55beb3cb44937)), expand the `GREEN LIGHT` section if it is collapsed, click `Report wrong verdict`, and describe what GreenLight got wrong. HUD then files an issue in pytorch/test-infra and adds it to the same board. The button only appears when you are signed in to HUD with write access to pytorch/pytorch.
 
@@ -977,10 +997,13 @@ BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
 BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
-For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
-options passed for the first time will persist; please run `ccmake build/`, run
-`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
-options.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
+that is no longer in the environment keeps the value the cache remembers from
+the first build, while a variable that is in the environment is re-applied on
+every build. Environment variables win over `-C` flags, `-C` flags win over
+`pyproject.toml`, and all three win over the cache. To change a cached option
+without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
+directly edit `build/CMakeCache.txt`.
 
 ### Profile build time
 

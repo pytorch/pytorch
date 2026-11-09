@@ -44,6 +44,18 @@ class DeviceInterface:
     """
 
     @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        """Whether Inductor's pad_mm pass may benchmark shapes for this device.
+
+        Opt in once the pass is benchmarked on that hardware; its Triton
+        probes must answer for the operand device. device_count and Worker
+        properties are optional -- without them the probes fall through and
+        the pad cache scopes by device type alone. Autoheuristic plans read
+        process-wide CUDA state: capability (0, 0) where no CUDA is visible.
+        """
+        return False
+
+    @staticmethod
     def get_cpp_device_options(
         aot_mode: bool, compile_only: bool
     ) -> (
@@ -217,6 +229,20 @@ class DeviceInterface:
         """
         return cls.Stream is not DeviceInterface.Stream
 
+    @staticmethod
+    def allow_tf32() -> bool:
+        """Whether the backend permits MM templates to set ALLOW_TF32.
+
+        CUDA applies an additional shape threshold at the call site. bmm,
+        tl.dot input precision, and device TFLOPS do not use this method.
+        """
+        return False
+
+    @staticmethod
+    def conv_allow_tf32() -> bool:
+        """Whether the backend permits conv templates to set ALLOW_TF32."""
+        return torch.backends.cudnn.fp32_precision == "tf32"
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -349,6 +375,10 @@ class CudaInterface(DeviceInterface):
     Stream = torch.cuda.Stream  # type: ignore[assignment]
 
     @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        return True
+
+    @staticmethod
     def is_gpu() -> bool:
         return True
 
@@ -424,6 +454,23 @@ class CudaInterface(DeviceInterface):
         return (
             torch.version.hip is not None
             or CudaInterface.Worker.get_device_properties(device).major >= 7
+        )
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return torch.backends.cuda.matmul.fp32_precision == "tf32"
+
+    @staticmethod
+    def conv_allow_tf32() -> bool:
+        # ROCm keeps the cuDNN-wide precision; MIOpen reads neither precision.
+        if torch.version.hip is not None:
+            return DeviceInterface.conv_allow_tf32()
+        # Eager cuDNN convolutions read the conv precision. Without cuDNN they
+        # ignore it, so full precision is the conservative choice.
+        return (
+            torch.backends.cudnn.enabled
+            and torch.backends.cudnn.is_available()
+            and torch.backends.cudnn.conv.fp32_precision == "tf32"  # type: ignore[attr-defined]
         )
 
     @staticmethod
@@ -595,6 +642,10 @@ class XpuInterface(DeviceInterface):
     Stream = torch.xpu.Stream  # type: ignore[assignment]
 
     @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        return True
+
+    @staticmethod
     def is_gpu() -> bool:
         return True
 
@@ -673,6 +724,10 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return bool(torch.backends.mkldnn.allow_tf32)
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -879,6 +934,18 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
+
+
+def get_device_type_for_current_stream(current_stream_fn: Any) -> str | None:
+    """Reverse lookup in the interface registry: the device type that a
+    current_stream function belongs to (None for torch.accelerator's).
+    Backends may register one interface under several keys (torch_npu uses
+    "npu" plus "npu:<i>" per device), so strip anything after the first
+    ":" (tests also key fake backends as "<type>:fake")."""
+    for device, interface in device_interfaces.items():
+        if getattr(interface, "current_stream", None) is current_stream_fn:
+            return device.split(":")[0]
+    return None
 
 
 def init_device_reg() -> None:
