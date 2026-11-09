@@ -282,6 +282,8 @@ class FSDPParamGroup:
         # resolved into the single shared
         # comm_ctx.reduce_scatter_max_input_buffers that post_backward reads.
         self.reduce_scatter_max_input_buffers: int = 1
+        # Current-stream reduction trades overlap for same-stream buffer reuse.
+        self.reduce_scatter_on_current_stream: bool = False
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
@@ -768,6 +770,11 @@ class FSDPParamGroup:
                 else:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
+                reduce_scatter_stream = (
+                    self.device_handle.current_stream()
+                    if self.reduce_scatter_on_current_stream
+                    else self.comm_ctx.reduce_scatter_stream
+                )
                 reduce_dtype = self._get_reduce_dtype(
                     fsdp_params_with_grad, unsharded_grads
                 )
@@ -778,7 +785,7 @@ class FSDPParamGroup:
                 )
                 partial_input = None
                 if partial_sizes:
-                    rs_stream = self.comm_ctx.reduce_scatter_stream
+                    rs_stream = reduce_scatter_stream
                     if self._partial_reduce_output is not None:
                         # The cast/repack below allocates on the RS stream before
                         # foreach_reduce orders it after the compute stream. Wait
@@ -807,7 +814,7 @@ class FSDPParamGroup:
                         if isinstance(self.mesh_info, FSDPMeshInfo)
                         else None  # pyre-fixme[6]
                     ),
-                    self.comm_ctx.reduce_scatter_stream,
+                    reduce_scatter_stream,
                     self._reduce_scatter_comm,
                     reduce_dtype,
                     self.device,
