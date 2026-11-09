@@ -131,7 +131,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             backend=backend,
         )
         self.assertIn(f'backend="{backend}"', source)
-        # Operands stay in their storage dtype, so Helion can match its GEMM.
+        # Operands keep their storage dtype (see HelionKernel.load_dot_operand).
         self.assertIn("tmp0 = in0[tile_y, tile_r]\n", source)
         self.assertIn("tmp1 = in1[tile_r, tile_x]\n", source)
         store = "out0[tile_y, tile_x] = acc"
@@ -439,6 +439,18 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertEqual(source.count("in0[tile_y, tile_r]"), 1)
         self.assertIn("in2[tile_r, tile_x]", source)
         self.assertEqual("out1[" in source, not epilogue)
+
+    def test_horizontal_separate_k_loops(self):
+        # Each dot gets its own K loop here, and the second loop reads w again
+        # instead of reusing the first loop's tmp1.
+        (source,) = self.compile(
+            lambda w, a, b: ((a @ w).float(), (b @ w).float()),
+            randn(16, 512),
+            randn(512, 16),
+            randn(512, 16),
+        )
+        self.assertEqual(source.count("for tile_r in hl.tile(16):"), 2)
+        self.assertEqual(source.count(" = in1[tile_r, tile_x]"), 2)
 
     def test_horizontal_operand_views(self):
         (source,) = self.compile(
