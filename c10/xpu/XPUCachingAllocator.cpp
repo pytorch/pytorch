@@ -2748,13 +2748,13 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
-  ShareableHandle shareIpcHandle(void* ptr) override {
+  ShareableHandle shareIpcHandle(void* ptr) {
     Block* block = get_allocated_block(ptr);
     TORCH_CHECK(block, "invalid device pointer: ", ptr);
     return device_allocators[block->device]->shareIpcHandle(block);
   }
 
-  std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) {
     c10::DeviceIndex curr_device = c10::xpu::current_device();
     IpcCacheKey key{curr_device, handle};
     std::lock_guard<std::mutex> lock(ipc_mutex);

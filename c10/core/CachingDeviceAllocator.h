@@ -235,11 +235,6 @@ struct AnnotationEntry {
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
-struct ShareableHandle {
-  ptrdiff_t offset;
-  std::string handle;
-};
-
 } // namespace c10::CachingDeviceAllocator
 
 namespace c10 {
@@ -283,16 +278,6 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   virtual std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex /*device*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "getMemoryInfo is not implemented for this allocator yet.");
-  }
-
-  virtual CachingDeviceAllocator::ShareableHandle shareIpcHandle(void* ptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "shareIpcHandle is not implemented for this allocator yet.");
-  }
-
-  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "getIpcDevPtr is not implemented for this allocator yet.");
   }
 };
 

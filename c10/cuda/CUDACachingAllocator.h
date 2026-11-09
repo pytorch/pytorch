@@ -56,7 +56,6 @@ using c10::CachingDeviceAllocator::CreateContextFn;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::RecordContext;
 using c10::CachingDeviceAllocator::SegmentInfo;
-using c10::CachingDeviceAllocator::ShareableHandle;
 using c10::CachingDeviceAllocator::TraceEntry;
 
 struct AllocatorState {
@@ -111,6 +110,11 @@ using OomRejectionObserver = std::function<void(
     size_t alloc_size,
     size_t total_allocated,
     size_t device_total)>;
+
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
 
 struct StreamSegmentSize {
   StreamSegmentSize(cudaStream_t s, bool small_, size_t sz)
@@ -218,6 +222,8 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support checkPoolLiveAllocations. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
+  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
         false,
