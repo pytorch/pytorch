@@ -1267,7 +1267,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             torch.empty(48, 1, device=device, dtype=torch.bfloat16).t(),
         )
         for out in outs:
-            self.assertEqual(torch._scaled_addmm(*args, out=out), expected)
+            torch._scaled_addmm(*args, out=out)
+            self.assertEqual(out, expected)
 
     @onlyAccelerator
     @skipMPS
