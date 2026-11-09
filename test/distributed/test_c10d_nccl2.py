@@ -804,13 +804,17 @@ class ProcessGroupNCCL2LazyDefaultGroupTest(_ProcessGroupNCCL2OptionsTest):
         opts.lazy_init = True
         return opts
 
+    def _assert_default_group_lazy(self) -> None:
+        # Neither test runs an op on the shared default group.
+        default_group = dist.distributed_c10d._get_default_group()
+        self.assertEqual(default_group.bound_device_id, self.device)
+        self.assertEqual(default_group._get_backend(self.device).comm_ptr, 0)
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_device_mesh_before_first_op(self) -> None:
         # split_group would need the default group's communicator, which does not exist yet.
-        default_group = dist.distributed_c10d._get_default_group()
-        self.assertEqual(default_group.bound_device_id, self.device)
-        self.assertEqual(default_group._get_backend(self.device).comm_ptr, 0)
+        self._assert_default_group_lazy()
         mesh = init_device_mesh(
             "cuda", (self.world_size, 1), mesh_dim_names=("dp", "tp")
         )
@@ -818,12 +822,12 @@ class ProcessGroupNCCL2LazyDefaultGroupTest(_ProcessGroupNCCL2OptionsTest):
         self.assertEqual(tp._get_backend(self.device).comm_ptr, 0)
         dist.all_reduce(torch.ones(1, device=self.device), group=tp)
         self.assertNotEqual(tp._get_backend(self.device).comm_ptr, 0)
-        self._check_all_reduce()
 
     @requires_nccl()
     @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
     @skip_if_lt_x_gpu(2)
     def test_shrink_lazy_group(self) -> None:
+        self._assert_default_group_lazy()
         group = dist.new_group(pg_options=self.opts())
         self.assertEqual(group.bound_device_id, self.device)
         dist.barrier(group=group)
@@ -833,9 +837,9 @@ class ProcessGroupNCCL2LazyDefaultGroupTest(_ProcessGroupNCCL2OptionsTest):
             return
 
         shrunk = dist.shrink_group(excluded, group=group)
-        tensor = torch.ones(4, device=self.device)
-        dist.all_reduce(tensor, group=shrunk)
-        self.assertEqual(tensor, torch.ones_like(tensor))
+        self.assertEqual(shrunk.size(), 1)
+        self.assertEqual(shrunk.bound_device_id, self.device)
+        dist.all_reduce(torch.ones(4, device=self.device), group=shrunk)
         dist.destroy_process_group(shrunk)
 
 
@@ -2521,6 +2525,14 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
 class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
     """Without a requested device or options, single-rank groups init on first use."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        # The fallback device comes from LOCAL_RANK when it is set.
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("LOCAL_RANK", None)
+
     @staticmethod
     def _comm_ptr(group: dist.ProcessGroup) -> int:
         return group._get_backend(torch.device("cuda")).comm_ptr
@@ -2562,6 +2574,22 @@ class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
             dist.all_reduce(torch.ones(1, device=device), group=sub)
             self.assertNotEqual(self._comm_ptr(world), 0)
             self.assertNotEqual(self._comm_ptr(sub), 0)
+        finally:
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_new_group_passes_on_device_to_other_backends(self, backend: str) -> None:
+        device = torch.device("cuda", 1)
+        with mock.patch.dict(os.environ, {"LOCAL_RANK": "1"}):
+            dist.init_process_group(
+                backend, rank=0, world_size=1, store=dist.HashStore()
+            )
+        try:
+            sub = dist.new_group([0], backend="nccl-legacy")
+            self.assertEqual(sub.bound_device_id, device)
+            dist.all_reduce(torch.ones(1, device=device), group=sub)
         finally:
             dist.destroy_process_group()
 

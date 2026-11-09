@@ -400,6 +400,7 @@ class _DistributedBackendOptions:
     process_group: ProcessGroup | None
     split_from: Backend | None
     enable_reconfigure: bool
+    device_requested: bool
 
 class Work:
     def is_completed(self) -> bool: ...

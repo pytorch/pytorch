@@ -44,8 +44,8 @@ else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
+        _can_split_from_now,
         _get_default_group,
-        _has_uninitialized_lazy_nccl2,
         _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
@@ -592,9 +592,9 @@ else:
                         dim_group = default_group
                     return dim_group.group_name  # type: ignore[union-attr]
 
-            # If bound_device_id exists and the communicator is not still lazy, the process
-            # group was eagerly initialized, so `split_group` can create all subgroups for a
-            # mesh dimension at once.
+            # If bound_device_id exists and its backend supports splitting (a lazy_init
+            # communicator only does once created), the process group was eagerly
+            # initialized, so `split_group` can create all subgroups for a mesh dimension at once.
             # In this case, we only need to make one API call (`split_group`) for the subgroup creation
             # for each mesh dimension. In a 2 * 4 mesh, we only need to make two API calls per ranks to create
             # all the subgroups.
@@ -602,13 +602,7 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                (
-                    (
-                        getattr(default_group, "bound_device_id", None) is not None
-                        and not _has_uninitialized_lazy_nccl2(default_group)
-                    )
-                    or dist_config.use_torchcomms
-                )
+                (_can_split_from_now(default_group) or dist_config.use_torchcomms)
                 and torch.accelerator.is_available()
                 and (
                     backend is None
