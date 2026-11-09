@@ -1907,6 +1907,28 @@ class CommonTemplate:
         for dtype in [torch.float32, torch.int32, torch.int64]:
             self.common(fn, (torch.arange(32, dtype=dtype),))
 
+    def test_scalar_overload_positional_alpha(self):
+        # add.Scalar/sub.Scalar declare alpha positionally, unlike the
+        # keyword-only alpha of their Tensor overloads.
+        def check(op, op_args, dtype):
+            def fn(a):
+                return (op(a, *op_args),)
+
+            if dtype.is_floating_point:
+                x = torch.randn(32, dtype=dtype, device=self.device)
+            else:
+                x = torch.randint(0, 10, (32,), dtype=dtype, device=self.device)
+            gm = make_fx(fn)(x)
+            self.assertEqual(compile_fx_inner(gm, [x])([x])[0], fn(x)[0])
+
+        for op, op_args, dtype in itertools.product(
+            (aten.add.Scalar, aten.sub.Scalar),
+            ((1,), (1, 2)),
+            (torch.float32, torch.int64),
+        ):
+            with self.subTest(op=op, args=op_args, dtype=dtype):
+                check(op, op_args, dtype)
+
     def test_add_const_float(self):
         def fn(a):
             return (a + 1.5,)
@@ -7480,6 +7502,29 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
+
+    # D/H padding exercises the masked load; W stays unpadded so ceil_mode adds a partial window there
+    @parametrize(
+        "padding, ceil_mode",
+        [
+            subtest(([0, 0, 0], False), name="no_padding"),
+            # Halide can't schedule the masked argmax reduction ("can't reorder RVars")
+            subtest(
+                ([1, 1, 0], True), name="padding_ceil_mode", decorators=[skip_if_halide]
+            ),
+        ],
+    )
+    def test_max_pool3d_large_kernel(self, padding, ceil_mode: bool):
+        # Window > 25 skips the low-memory decomposition for the non-unrolled reduction lowering
+        kernel = [3, 3, 3]
+        self.assertTrue(lowering.should_fallback_max_pool_with_indices(kernel, n_dim=3))
+
+        def fn(x):
+            return aten.max_pool3d_with_indices(
+                x, kernel, [1, 2, 3], padding, [1, 1, 1], ceil_mode
+            )
+
+        self.common(fn, (torch.randn([2, 4, 6, 7, 8]),))
 
     # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
     # non-logical-index path in _pool_argmax_inner_fn and still return physical
