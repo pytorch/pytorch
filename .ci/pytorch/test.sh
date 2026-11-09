@@ -501,6 +501,10 @@ test_python_smoke() {
   install_nvmath
   install_flash_attn_cute
   time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The CuTeDSL runtime is installed here, so the selected test_reductions checks run
+  # with the sum, mean, amax, amin and prod overrides active on SM90 where their
+  # conditions accept a call; declined calls stay on ATen.
+  time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -617,10 +621,9 @@ test_python_smoke_b200() {
   # calibrated tolerances. It runs in every CUDA job, but only here is the DSL
   # installed, so only here does it measure the override rather than eager.
   time python test/run_test.py --include test_nn -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # The CuTeDSL sum, mean, amax, amin and prod overrides serve only where the runtime is
-  # installed, as it is here. Of these NumPy reference checks, test_ref_small_input,
-  # test_ref_duplicate_values and fp32 test_ref_extremal_values reach them; scalar
-  # inputs decline and fp64 inputs stay on ATen.
+  # The CuTeDSL runtime is installed here, so the selected test_reductions checks run
+  # with the sum, mean, amax, amin and prod overrides active where their conditions
+  # accept a call; declined calls stay on ATen.
   time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running

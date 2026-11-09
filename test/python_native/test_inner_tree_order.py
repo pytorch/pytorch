@@ -495,7 +495,9 @@ class TestInnerTreeOrder(TestCase):
         ):
             with _order_on():
                 got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
-            self.assertEqual(got, x.sum(dim=1, dtype=dtype))
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1, dtype=dtype)
+            self.assertEqual(got, want)
 
     def test_strided_rows_use_the_trait_plan(self):
         """Serve strided ragged rows with the same trait-tuned DAG as contiguous rows."""

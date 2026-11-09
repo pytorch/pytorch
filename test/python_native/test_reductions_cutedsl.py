@@ -6,10 +6,11 @@
 import functools
 import os
 import unittest
+from unittest import mock
 
 import torch
 from torch._native import cutedsl_utils as cu
-from torch._native.ops.reductions import overrides as ov
+from torch._native.ops.reductions import cutedsl_impl, overrides as ov
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -52,6 +53,10 @@ class TestCuTeDSLReductionWiring(TestCase):
         major = torch.cuda.get_device_capability()[0]
         if torch.version.hip or major not in ov._ARCH_MAJORS:
             self.skipTest("the overrides serve SM90 and SM100-family CUDA GPUs only")
+        # The tests count served calls in replay entries, which sum and prod calls served
+        # first by register_to_dispatch's inner-tree family do not add.
+        if cutedsl_impl._INNER_TREE_ENABLED:
+            self.skipTest("PYTORCH_SUM_INNER_TREE routes sum and prod elsewhere first")
 
     def _run(self, call):
         """Return call's result and how many override calls served it."""
@@ -80,6 +85,17 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""
         xi = torch.randint(0, 9, (64, 64), device=device)
         self.assertEqual(self._run(lambda: torch.sum(xi, dim=-1))[1], 0)
+        xd = torch.randn(64, 64, device=device, dtype=torch.float64)
+        self.assertEqual(self._run(lambda: torch.sum(xd, dim=-1))[1], 0)
+
+    def test_unregistered_overloads_fall_back(self, device):
+        """Leave full prod and the out= overloads, which have no override, to ATen."""
+        x = torch.rand(64, 96, device=device) + 0.5
+        out = torch.empty(64, device=device)
+        self.assertEqual(self._run(lambda: torch.prod(x))[1], 0)
+        for op in ("sum", "mean", "prod", "amax", "amin"):
+            call = functools.partial(getattr(torch, op), x, dim=1, out=out)
+            self.assertEqual(self._run(call)[1], 0)
 
     @parametrize(
         "dim", [-1, 0, None], name_fn=lambda d: "all" if d is None else f"dim{d}"
@@ -160,8 +176,12 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Read copy-on-write inputs without materializing or mutating their storage."""
         base = torch.randn(128, 512, device=device)
         x = torch._lazy_clone(base)
-        self.assertEqual(self._run(lambda: torch.sum(x, dim=-1))[1], 1)
+        data_ptr = x.const_data_ptr()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
+        self._check(lambda: torch.sum(x, dim=-1), **_TOL[torch.float32])
         self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), data_ptr)
 
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):
@@ -215,7 +235,14 @@ class TestCuTeDSLReductionWiring(TestCase):
             self._check(call, **_TOL[out_dtype])
         # ATen casts the input to any other requested dtype before reducing.
         big = torch.tensor([[7e4, -7e4]] * 32, device=device)
-        for x, out_dtype in ((x32, torch.float64), (big, torch.float16)):
+        declined = (
+            (x32, torch.float64),
+            (big, torch.float16),
+            (x16, torch.bfloat16),
+            (xb, torch.float16),
+            (x32, torch.bfloat16),
+        )
+        for x, out_dtype in declined:
             self._check(functools.partial(fn, x, dim=1, dtype=out_dtype), fired=0)
 
     def test_reduce_all_widening(self, device):
@@ -242,20 +269,18 @@ class TestCuTeDSLReductionWiring(TestCase):
             traits as T,
         )
 
-        x = torch.randn(128, 512, device=device)
-        prev = os.environ.get(rt._INNER_TREE_ENV)
-        os.environ[rt._INNER_TREE_ENV] = "1"
-        try:
+        # Order-sensitive values (test_sum_cutedsl's), so the two orders' bits differ.
+        values = torch.arange(128 * 512, device=device, dtype=torch.float64)
+        x = (((values % 29) - 14) / 29 + ((values % 7) - 3) / 13).float().view(128, 512)
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
             got, fires = self._run(lambda: torch.sum(x, dim=-1))
-        finally:
-            if prev is None:
-                os.environ.pop(rt._INNER_TREE_ENV, None)
-            else:
-                os.environ[rt._INNER_TREE_ENV] = prev
         self.assertEqual(fires, 1)
         trait = T.SumOps(acc=cutlass.Float32)
         want = kg.reduce_dim(trait, "ref", x, [1], torch.float32, order="inner_tree")
         self.assertEqual(got, want, atol=0, rtol=0)
+        unordered, fires = self._run(lambda: torch.sum(x, dim=-1))
+        self.assertEqual(fires, 1)
+        self.assertFalse(torch.equal(unordered, got))
 
     def test_graph_capturable(self, device):
         """Keep core reduction overrides capture-safe and reading live input on replay."""
@@ -280,18 +305,22 @@ class TestCuTeDSLReductionWiring(TestCase):
             with _disabled():
                 ref = f()
             g.replay()
-            self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
+            self.assertEqual(out, ref, **_TOL[torch.float32])
             x.copy_(torch.randn_like(x))
         # A shape first seen inside capture records its launches there.
+        from torch._native.ops.reductions import kernel_general as kg
+
         y = torch.randn(4096, 768, device=device)
+        recorded = len(kg._REPLAYS)
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
             out = torch.sum(y, dim=-1)
+        self.assertEqual(len(kg._REPLAYS), recorded + 1)
         y.copy_(torch.randn_like(y))
         g.replay()
         with _disabled():
             ref = torch.sum(y, dim=-1)
-        self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(out, ref, **_TOL[torch.float32])
 
 
 instantiate_device_type_tests(TestCuTeDSLReductionWiring, globals(), only_for="cuda")

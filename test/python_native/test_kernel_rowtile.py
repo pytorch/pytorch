@@ -158,7 +158,9 @@ class TestKernelRowTile(TestCase):
             trait, "smoke_partials", x, [torch.float32] * trait.nfields, final=False
         )
         self.assertEqual(len(parts), trait.nfields)
-        torch.testing.assert_close(parts[0], x.mean(dim=1), atol=1e-5, rtol=1e-5)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.mean(dim=1)
+        torch.testing.assert_close(parts[0], want, atol=1e-5, rtol=1e-5)
         self.assertEqual(parts[2], torch.full((32,), 256.0, device="cuda"))
 
     def test_single_row_config_rungs_are_valid(self):
@@ -291,7 +293,9 @@ class TestKernelRowTile(TestCase):
             threads_per_row=1,
             use_tma=False,
         )
-        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-3, rtol=1e-3)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        torch.testing.assert_close(out, want, atol=1e-3, rtol=1e-3)
 
     def test_tma_staged_narrow_row_argmax(self):
         # TMA rotates smem reads to avoid bank conflicts; an index trait verifies that
@@ -647,11 +651,14 @@ class TestKernelRowTile(TestCase):
             (got,) = rt.reduce_row_tile(
                 trait, "ragged_width", x, [torch.float32], ragged_vector=True
             )
-            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1)
+            self.assertEqual(got, want, atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_width" in k]
         self.assertEqual(len(mine), 2, f"expected one plan per width, got {mine}")
 
-    def test_ragged_vector_rejects_inner_tree_and_tma(self):
+    def test_ragged_vector_rejects_inner_tree(self):
+        # test_ragged_vector_tile_rejects covers TMA.
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(64, 32, device="cuda")
         with self.assertRaisesRegex(ValueError, "require the linear order"):
@@ -661,15 +668,6 @@ class TestKernelRowTile(TestCase):
                 x,
                 [torch.float32],
                 order="inner_tree",
-                ragged_vector=True,
-            )
-        with self.assertRaisesRegex(ValueError, "cannot use TMA"):
-            rt.reduce_row_tile(
-                trait,
-                "ragged_tma",
-                x,
-                [torch.float32],
-                use_tma=True,
                 ragged_vector=True,
             )
 
@@ -727,11 +725,12 @@ class TestKernelRowTile(TestCase):
         }[op]
         kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
         got = rt.reduce_row_tile(trait, f"ragged_{op}", x, outs, **kw)
-        expected = {
-            "sum": lambda: (x.float().sum(dim=1),),
-            "argmax": lambda: (x.argmax(dim=1),),
-            "var_mean": lambda: torch.var_mean(x.float(), dim=1),
-        }[op]()
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = {
+                "sum": lambda: (x.float().sum(dim=1),),
+                "argmax": lambda: (x.argmax(dim=1),),
+                "var_mean": lambda: torch.var_mean(x.float(), dim=1),
+            }[op]()
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
 

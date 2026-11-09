@@ -16,7 +16,14 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
-from .traits import WARP, welford_outputs
+from .kernel_general import (
+    _SM107_CCS,
+    _SM107_DTYPES,
+    _SM107_LARGE_SIZES,
+    _SM107_ONE_FIELD,
+    _SM107_SIZES,
+)
+from .traits import ArgMaxOps, MeanOps, SumOps, WARP, welford_outputs
 
 
 _compile = _L.compile_kernel
@@ -214,34 +221,34 @@ _SM107_FULL_ITREE_ARCH = _ItreeArch(
 def select_full_itree_arch(
     cc: tuple[int, int],
     dtype: torch.dtype,
-    trait_key: str,
     N: int,
     M: int,
     *,
+    trait_type: type,
     field_bits: tuple[int, ...],
     out_dtypes: tuple[torch.dtype, ...],
     welford_outs: int,
     alignment: int,
     contiguous: bool,
 ) -> _ItreeArch | None:
+    """Return SM107's inner-tree profile for a measured full reduction, or None to keep
+    the device's _ITREE_ARCH row: fp32 sums, argmax with int32 indices, and Welford
+    traits with 32-bit fields and outputs in the input dtype."""
     if (
-        cc != (10, 7)
-        or dtype not in (torch.float32, torch.bfloat16)
+        cc not in _SM107_CCS
+        or dtype not in _SM107_DTYPES
         or M != 1
-        or N * dtype.itemsize not in (256 << 20, 2 << 30)
+        or N * dtype.itemsize not in _SM107_LARGE_SIZES
         or not contiguous
         or alignment < tile.TRANSFER_ALIGNMENT
     ):
         return None
-    outs = welford_outs
-    welford = field_bits == (32, 32, 32) and outs > 0 and out_dtypes == (dtype,) * outs
-    one_field = (trait_key, field_bits, out_dtypes) == ("sum", (32,), (torch.float32,))
-    index = (trait_key, field_bits, out_dtypes) == (
-        "argmaxi32",
-        (32, 32),
-        (torch.int64,),
-    )
-    if one_field or index:
+    welford_dtypes = (dtype,) * welford_outs
+    welford = field_bits == (32,) * 3 and welford_outs and out_dtypes == welford_dtypes
+    one_field = (field_bits, out_dtypes) == ((32,), (torch.float32,))
+    index = (field_bits, out_dtypes) == ((32, 32), (torch.int64,))
+    fp32_sum = one_field and trait_type is SumOps and dtype == torch.float32
+    if fp32_sum or index and trait_type is ArgMaxOps:
         return _SM107_FULL_ITREE_ARCH
     if not welford:
         return None
@@ -251,7 +258,7 @@ def select_full_itree_arch(
 
 
 def _full_itree_arch(
-    trait: Any, trait_key: str, x: torch.Tensor, out_dtypes: Sequence[torch.dtype]
+    trait: Any, x: torch.Tensor, out_dtypes: Sequence[torch.dtype]
 ) -> _ItreeArch | None:
     M, N = x.shape
     if M != 1:
@@ -259,9 +266,9 @@ def _full_itree_arch(
     return select_full_itree_arch(
         _hw.caps(x.device).cc,
         x.dtype,
-        trait_key,
         N,
         M,
+        trait_type=type(trait),
         field_bits=tuple(dt.width for dt in trait.fdtypes),
         out_dtypes=tuple(out_dtypes),
         welford_outs=welford_outputs(trait),
@@ -322,10 +329,10 @@ def inner_tree_fallback(reason: str) -> None:
 def select_row_order(
     cc: tuple[int, int],
     dtype: torch.dtype,
-    trait_key: str,
     N: int,
     M: int,
     *,
+    trait_type: type,
     nfields: int,
     nouts: int,
     welford_outs: int,
@@ -335,20 +342,21 @@ def select_row_order(
     """Pick the kernel order for an unordered row reduction: SM107's measured order at
     an exact anchor shape, and "linear" elsewhere."""
     if (
-        cc != (10, 7)
-        or dtype not in (torch.float32, torch.bfloat16)
+        cc not in _SM107_CCS
+        or dtype not in _SM107_DTYPES
         or N not in (256, 1024, 4096)
         or acc_bits != 32
-        or alignment < 16
+        or alignment < tile.TRANSFER_ALIGNMENT
     ):
         return "linear"
     # Seed measured anchors; intermediate sizes retain their existing policy.
     size = M * N * dtype.itemsize
-    if size not in (16 << 20, 64 << 20, 256 << 20, 2 << 30):
+    if size not in _SM107_SIZES:
         return "linear"
     welford = welford_outs == nouts
-    argmax = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
-    simple = nfields == 1 and nouts == 1 and trait_key in ("sum", "mean", "amax")
+    # Only argmax with int32 indices (32-bit accumulators) was measured.
+    argmax = trait_type is ArgMaxOps
+    simple = trait_type in _SM107_ONE_FIELD
     if not (simple or argmax or welford):
         return "linear"
     if N == 1024:
@@ -358,13 +366,13 @@ def select_row_order(
             inner = size == 16 << 20 and not argmax
         else:
             inner = size >= 256 << 20 or (
-                not argmax and (trait_key != "mean" or size >= 64 << 20)
+                not argmax and (trait_type is not MeanOps or size >= 64 << 20)
             )
     else:
         inner = (
             welford
             or argmax
-            or (dtype == torch.float32 and (trait_key == "mean" or size >= 256 << 20))
+            or (dtype == torch.float32 and (trait_type is MeanOps or size >= 256 << 20))
         )
     if inner:
         return "inner_tree"
@@ -650,7 +658,7 @@ def itree_combine_plan(
     itree: _ItreePlan,
     itemsize: int,
     device: torch.device | int | str | None = None,
-    nfields: int = 1,
+    nfields: int | None = None,
     nrows: int | None = None,
     *,
     trait: Any = None,
@@ -661,10 +669,14 @@ def itree_combine_plan(
     `itemsize` is the widest partial field's size, so each field's copy group stays within
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
-    block. A given `trait` supplies nfields and may enable uniform counts.
+    block. A given `trait` supplies nfields (default 1) and may enable uniform counts.
     """
     if trait is not None:
+        if nfields is not None and nfields != trait.nfields:
+            raise ValueError(f"{nfields=} disagrees with trait.nfields={trait.nfields}")
         nfields = trait.nfields
+    elif nfields is None:
+        nfields = 1
     arch = _itree_arch(device) if arch is None else arch
     if arch.combine_unroll < 0:
         raise ValueError("combine_unroll must be nonnegative")
@@ -999,10 +1011,11 @@ def reduce_row_itree(
     if out.device != x.device:
         raise AssertionError(f"out on {out.device}, but x on {x.device}")
     M, N = x.shape
-    itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
+    arch = _full_itree_arch(trait, x, [out.dtype])
+    itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device, arch=arch)
     if itree is None:
         return False
-    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
+    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out], arch=arch)
     return True
 
 
@@ -1041,7 +1054,7 @@ def reduce_row_tile(
         raise ValueError("ragged vectors cannot use TMA")
     itree, arch = None, None
     if order == "inner_tree" and final and threads_per_row is None:
-        arch = _full_itree_arch(trait, trait_key, x, out_dtypes[:nouts])
+        arch = _full_itree_arch(trait, x, out_dtypes[:nouts])
         itree = trait_itree_plan(
             trait, N, M, x.element_size(), device=x.device, arch=arch
         )

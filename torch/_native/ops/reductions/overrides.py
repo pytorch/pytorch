@@ -1,7 +1,16 @@
 """CUDA aten reduction overrides backed by the CuteDSL kernels.
 
 Conditions check capability and fall through to ATen for unsupported calls.
-Supported layouts use a fast path or the general TensorIterator decode.
+Supported layouts use a fast path or the general TensorIterator decode. No out=
+overload or full prod is registered, so those stay on ATen, whose results can differ
+bitwise from the served overloads'.
+
+Of the launch policies, these one-field operations reach only the one-field rules;
+index and Welford rules serve direct kernel calls.
+
+Opt out with torch.backends.python_native.cutedsl.disabled(), or per overload with
+disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin");
+bare "sum", "mean" or "prod" match no registration.
 
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
@@ -21,6 +30,7 @@ from ... import cutedsl_utils as cu
 from ...utils import capability as cap
 from ...utils.device import cuda_device_guard
 from ...utils.lazy import LazyModule
+from ...utils.tensor import const_data_ptr
 
 
 if TYPE_CHECKING:
@@ -101,7 +111,9 @@ def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
         and self.dtype in _SUPPORTED_DTYPES
         and not self.is_neg()
         and not self.is_conj()
-        and self.const_data_ptr() % 16 == 0  # type: ignore[attr-defined]
+        # Conservative: the kernels narrow their loads for lower alignment, but served
+        # calls are measured and tested from 16-byte aligned bases only.
+        and const_data_ptr(self) % 16 == 0
         and _dims_ok(dim, self.dim())
         and self.numel() != 0
     )

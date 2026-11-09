@@ -9,10 +9,10 @@ from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
-def cached_plan(cache: dict, key, build: Callable, *, op: str | None = None):
+def cached_plan(cache: dict | LRUCache, key, build: Callable, *, op: str | None = None):
     """Memoize build() by key, including None declines. When op is set, instrument
     the miss-only build so every real compile emits TLParse data.
     """
@@ -34,26 +34,49 @@ def cached_plan(cache: dict, key, build: Callable, *, op: str | None = None):
 _MISS = object()  # sentinel so a cached None (declined) is distinct from a miss
 
 
-class LRUCache(OrderedDict):
-    """A dict that keeps its `maxsize` most recently used entries. Only get and item
-    assignment hold its lock, so only they are safe to call concurrently (free-threaded
-    builds included); other dict methods are not."""
+class LRUCache:
+    """A mapping that keeps its `maxsize` most recently used entries. Every method holds
+    its lock, so concurrent use is safe (free-threaded builds included). Only `get` and
+    item assignment update recency; iteration and `items()` return snapshots.
+    """
 
     def __init__(self, maxsize: int) -> None:
-        super().__init__()
         self.maxsize = maxsize
+        self._d: OrderedDict[Any, Any] = OrderedDict()
         self._lock = threading.Lock()
 
     def get(self, key: Any, default: Any = None) -> Any:
         with self._lock:
-            if key not in self:
+            try:
+                value = self._d[key]
+            except KeyError:
                 return default
-            self.move_to_end(key)
-            return super().__getitem__(key)
+            self._d.move_to_end(key)
+            return value
 
     def __setitem__(self, key: Any, value: Any) -> None:
         with self._lock:
-            super().__setitem__(key, value)
-            self.move_to_end(key)
-            if len(self) > self.maxsize:
-                self.popitem(last=False)
+            self._d[key] = value
+            self._d.move_to_end(key)
+            if len(self._d) > self.maxsize:
+                self._d.popitem(last=False)
+
+    def __contains__(self, key: Any) -> bool:
+        with self._lock:
+            return key in self._d
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._d)
+
+    def __iter__(self) -> Iterator[Any]:
+        with self._lock:
+            return iter(list(self._d))
+
+    def items(self) -> list[tuple[Any, Any]]:
+        with self._lock:
+            return list(self._d.items())
+
+    def clear(self) -> None:
+        with self._lock:
+            self._d.clear()
