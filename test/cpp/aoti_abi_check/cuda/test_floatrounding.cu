@@ -2,7 +2,6 @@
 
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/FloatRounding.h>
-#include <torch/headeronly/util/TypeCast.h>
 
 #include <cuda_runtime.h>
 
@@ -32,13 +31,14 @@ namespace {
         cudaGetErrorString(err_));                                  \
   } while (0)
 
+using torch::headeronly::convert_with_rounding;
 using torch::headeronly::Half;
 using torch::headeronly::RoundingMode;
 
 constexpr int kModes = 4;
-// Per input: round_to_odd_float, convert<Half>, then convert_with_rounding to
-// Half from the double and from the float, in each mode.
-constexpr int kResults = 2 + 2 * kModes;
+// Per input: convert_with_rounding to Half from the double and from the float,
+// in each mode.
+constexpr int kResults = 2 * kModes;
 
 template <typename T>
 __host__ __device__ uint32_t bits(T value) {
@@ -54,13 +54,11 @@ __host__ __device__ uint32_t bits(T value) {
 }
 
 __host__ __device__ void round_all(double x, uint32_t* out) {
-  out[0] = bits(c10::detail::round_to_odd_float(x));
-  out[1] = bits(c10::convert<Half>(x));
   for (int m = 0; m < kModes; ++m) {
     const auto mode = static_cast<RoundingMode>(m);
-    out[2 + m] = bits(c10::convert_with_rounding<Half>(x, mode));
-    out[2 + kModes + m] =
-        bits(c10::convert_with_rounding<Half>(static_cast<float>(x), mode));
+    out[m] = bits(convert_with_rounding<Half>(x, mode));
+    out[kModes + m] =
+        bits(convert_with_rounding<Half>(static_cast<float>(x), mode));
   }
 }
 
@@ -71,8 +69,7 @@ __global__ void round_kernel(const double* x, uint32_t* out, int n) {
   }
 }
 
-// Device code (round_to_odd_float's __double2float_rz branch,
-// leading_zeros' __clzll) must give the host's bits.
+// Device code (leading_zeros' __clzll) must give the host's bits.
 TEST(TestFloatRoundingCuda, DeviceMatchesHost) {
   SKIP_IF_NO_CUDA();
   std::vector<double> xs = {
@@ -125,11 +122,6 @@ TEST(TestFloatRoundingCuda, DeviceMatchesHost) {
     uint32_t host[kResults];
     round_all(xs[i], host);
     for (int r = 0; r < kResults; ++r) {
-      if (std::isnan(xs[i]) && r == 1) {
-        // Half's own float conversion encodes NaN differently on device.
-        EXPECT_EQ(device[i * kResults + r] & 0x7E00, 0x7E00u);
-        continue;
-      }
       ASSERT_EQ(device[i * kResults + r], host[r])
           << "x=" << xs[i] << " result " << r;
     }

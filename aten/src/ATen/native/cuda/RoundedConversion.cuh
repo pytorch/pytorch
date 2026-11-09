@@ -69,7 +69,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
         std::is_same_v<dst_t, Float8_e4m3fn>,
         __nv_fp8_e4m3,
         __nv_fp8_e5m2>;
-    constexpr bool kSaturates = c10::detail::Saturates<dst_t>::value;
+    constexpr bool kSaturates = torch::headeronly::detail::Saturates<dst_t>::value;
     const float kDstMaxFinite = L::max();
     // The hardware only rounds to nearest, saturating. The other modes step
     // the result by one encoding toward x when it is on the wrong side of x.

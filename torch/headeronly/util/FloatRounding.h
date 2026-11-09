@@ -36,7 +36,7 @@
 #include <intrin.h>
 #endif
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 enum class RoundingMode : uint8_t {
   ToNearestEven,
@@ -106,29 +106,6 @@ struct LimitBits<float> {
   static constexpr uint32_t overflow = 0x7F800000;
 };
 
-// Rounds x to float, setting the last bit if inexact ("round to odd"). float
-// has at least two more mantissa bits than the narrower formats and covers
-// their ranges, so rounding the result to one of them again rounds x correctly.
-C10_HOST_DEVICE inline float round_to_odd_float(double x) {
-#if defined(__CUDA_ARCH__)
-  // Truncate, then set the last bit if inexact (false for NaN). Not used for
-  // HIP, where it is untested; the portable version below is correct there.
-  const float t = __double2float_rz(x);
-  return fp32_from_bits(
-      fp32_to_bits(t) | ((static_cast<double>(t) != x) & (x == x)));
-#else
-  const auto f = static_cast<float>(x);
-  const auto back = static_cast<double>(f);
-  auto bits = fp32_to_bits(f);
-  // A round-to-nearest result that is inexact (false for NaN) with an even
-  // last bit is stepped one ulp toward x, without branches.
-  const uint32_t step = (back != x) & (x == x) & ~bits & 1u;
-  const uint32_t up = (back < 0 ? -back : back) < (x < 0 ? -x : x);
-  bits += step * (2 * up - 1);
-  return fp32_from_bits(bits);
-#endif
-}
-
 // Requires x != 0. This is std::countl_zero, which needs C++20 and, in device
 // code, nvcc's --expt-relaxed-constexpr.
 C10_HOST_DEVICE inline int leading_zeros(uint64_t x) {
@@ -149,9 +126,11 @@ C10_HOST_DEVICE inline int leading_zeros(uint64_t x) {
 // rounding direction. Half and BFloat16 sources should be converted to float
 // first, which is exact.
 //
-// Src and Dst are described by their std::numeric_limits. Dst's finite
-// magnitudes, in increasing order, must have consecutive encodings starting at
-// 0, which holds for IEEE-like formats including their subnormals.
+// Src is float or double. Dst is float, Half, BFloat16 or a Float8 type:
+// formats are described by their std::numeric_limits (detail::LimitBits reads
+// the encodings of Dst's limits from their x member) and detail::Saturates.
+// Dst's finite magnitudes, in increasing order, must have consecutive encodings
+// starting at 0, which holds for IEEE-like formats including their subnormals.
 template <typename Dst, typename Src>
 C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   using detail::Bits;
@@ -280,9 +259,9 @@ C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   return from_bits(static_cast<uint32_t>(dst_enc) | dst_sign);
 }
 
-} // namespace c10
-
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
-using c10::convert_with_rounding;
-using c10::RoundingMode;
 HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::convert_with_rounding;
+using torch::headeronly::RoundingMode;
+} // namespace c10
