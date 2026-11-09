@@ -39,7 +39,7 @@ class TestColumnConfig(TestCase):
             columns=columns,
             batches=1,
             nfields=1,
-            trait_key="sum",
+            trait_type=T.SumOps,
             itemsize=itemsize,
             acc_bits=32,
             nouts=1,
@@ -90,21 +90,21 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.combine_columns, 0)
 
     @parametrize(
-        "dtype,key,rows,columns,partials,full_tiles,expected",
+        "dtype,trait_type,rows,columns,partials,full_tiles,expected",
         [
             # Looped views keep the default mapping, with or without full tiles.
-            (torch.float32, "sum", 8192, 4096, 1, False, None),
-            (torch.float16, "sum", 8192, 4096, 1, True, None),
-            (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
-            (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
-            (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
-            (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
-            (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
-            (torch.bfloat16, "amin", 32768, 4096, 4, True, (0, 32)),
+            (torch.float32, T.SumOps, 8192, 4096, 1, False, None),
+            (torch.float16, T.SumOps, 8192, 4096, 1, True, None),
+            (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
+            (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, True, (0, 16)),
+            (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, True, (0, 32)),
+            (torch.bfloat16, T.AMinOps, 32768, 4096, 4, True, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
-        self, dtype, key, rows, columns, partials, full_tiles, expected
+        self, dtype, trait_type, rows, columns, partials, full_tiles, expected
     ):
         """Pin B200 ordered column widths, which apply to any outputs."""
         for output in {dtype, torch.float32}:
@@ -112,10 +112,10 @@ class TestColumnConfig(TestCase):
                 cfg = ct.select_ordered_col_config(
                     (10, 0),
                     dtype,
-                    key,
                     columns,
                     1,
                     partials,
+                    trait_type=trait_type,
                     nfields=1,
                     acc_bits=32,
                     out_dtypes=(output,),
@@ -135,7 +135,7 @@ class TestColumnConfig(TestCase):
         args = dict(
             cc=(10, 0),
             dtype=torch.float32,
-            trait_key="sum",
+            trait_type=T.SumOps,
             columns=1024,
             batches=1,
             partials=8,
@@ -148,7 +148,7 @@ class TestColumnConfig(TestCase):
         for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}):
             with self.subTest(**updates):
                 self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
-        index = {"trait_key": "argmaxi32", "nfields": 2, "out_dtypes": (torch.int32,)}
+        index = {"trait_type": T.ArgMaxOps, "nfields": 2, "out_dtypes": (torch.int32,)}
         cfg = ct.select_ordered_col_config(**(args | index))
         want = ct.OrderedColConfig(0, tile_columns=ct.WARP, full_tiles=True)
         self.assertEqual(cfg, want)

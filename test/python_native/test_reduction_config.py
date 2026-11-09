@@ -46,8 +46,9 @@ _TRAITS = {
 
 def _contract(trait):
     """Selector keywords for trait's structure."""
-    nouts, welford = getattr(trait, "nouts", 1), T.welford_outputs(trait)
-    return dict(nfields=trait.nfields, nouts=nouts, welford_outs=welford)
+    contract = dict(nfields=trait.nfields, nouts=getattr(trait, "nouts", 1))
+    welford = T.welford_outputs(trait)
+    return contract | dict(trait_type=type(trait), welford_outs=welford)
 
 
 def _served(trait_key):
@@ -63,7 +64,7 @@ class TestReductionConfig(TestCase):
         args = dict(
             cc=(10, 3),
             dtype=torch.float32,
-            trait_key="sum",
+            trait_type=T.SumOps,
             count=1024,
             num_o=65536,
             red_pairs=((1024, 2),),
@@ -98,9 +99,10 @@ class TestReductionConfig(TestCase):
 
     @parametrize("cc", [(9, 0), (10, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
-        """Return generic defaults for a geometry no architecture's rules cover."""
-        strided = dict(count=2048, red_pairs=((2048, 2),), kept_pairs=((65536, 4096),))
-        self.assertEqual(self.general(cc=cc, **strided), kg._GeneralConfig())
+        """Apply B200's strided rule on B200 only; other architectures keep defaults."""
+        b200 = kg._GeneralConfig(block=32, rule="b200_strided_one_field")
+        want = b200 if cc == (10, 0) else kg._GeneralConfig()
+        self.assertEqual(self.general(cc=cc), want)
         self.assertEqual(
             rt.select_row_order(
                 cc,
@@ -138,8 +140,8 @@ class TestReductionConfig(TestCase):
     def test_b200_full_reduction_config(self):
         """Pin B200 full-reduction launch choices at measured operation and size anchors."""
         count = (256 << 20) // torch.float16.itemsize
-        args = (torch.float16, "argmaxi32", count)
-        kwargs = dict(nfields=2, nouts=1, acc_bits=32)
+        args = (torch.float16, count)
+        kwargs = dict(trait_type=T.ArgMaxOps, nfields=2, nouts=1, acc_bits=32)
         self.assertEqual(
             kg.select_all_config((10, 0), *args, **kwargs),
             kg._AllConfig(block=512, grid_mult=8),
@@ -147,40 +149,36 @@ class TestReductionConfig(TestCase):
         self.assertEqual(kg.select_all_config((9, 0), *args, **kwargs), kg._AllConfig())
         wide = kwargs | {"acc_bits": 64}
         self.assertEqual(kg.select_all_config((10, 0), *args, **wide), kg._AllConfig())
-        half = (torch.float16, "argmaxi32", count // 2)
+        half = (torch.float16, count // 2)
         self.assertEqual(
             kg.select_all_config((10, 0), *half, **kwargs), kg._AllConfig()
         )
-        plain = dict(nfields=1, nouts=1, acc_bits=32)
+        plain = dict(trait_type=T.SumOps, nfields=1, nouts=1, acc_bits=32)
         self.assertEqual(
-            kg.select_all_config((10, 0), torch.float16, "sum", count, **plain),
+            kg.select_all_config((10, 0), torch.float16, count, **plain),
             kg._AllConfig(),
         )
 
     @parametrize(
-        "count,trait_key,trait,expected",
+        "count,trait,expected",
         [
             (
                 257,
-                "sum",
                 "sum",
                 kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256"),
             ),
             (
                 257,
-                "var_mean",
                 "var_mean",
                 kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256"),
             ),
             (
                 1024,
-                "argmaxi32",
                 "argmax",
                 kg._GeneralConfig(block=32, rule="b200_strided_index"),
             ),
             (
                 4095,
-                "var1",
                 "var",
                 kg._GeneralConfig(
                     block=64,
@@ -188,10 +186,8 @@ class TestReductionConfig(TestCase):
                     uniform_tree=True,
                 ),
             ),
-            # Welford-ness is structural, so a two-output key needs no spelling.
             (
                 4095,
-                "var_mean",
                 "var_mean",
                 kg._GeneralConfig(
                     block=64,
@@ -202,19 +198,52 @@ class TestReductionConfig(TestCase):
             (
                 4096,
                 "mean",
-                "mean",
                 kg._GeneralConfig(block=32, rule="b200_strided_one_field"),
             ),
         ],
-        name_fn=lambda count, trait_key, trait, expected: f"{trait_key}_{count}",
+        name_fn=lambda count, trait, expected: f"{trait}_{count}",
     )
-    def test_b200_strided_config(self, count, trait_key, trait, expected):
+    def test_b200_strided_config(self, count, trait, expected):
         """Pin B200 general-kernel choices for measured strided geometries."""
         num_o = 4096
         pairs = (((count, 2),), ((num_o, 2 * count),))
-        args = ((10, 0), torch.float16, trait_key, count, num_o, *pairs)
+        args = ((10, 0), torch.float16, count, num_o, *pairs)
         cfg = kg.select_general_config(*args, **_contract(_TRAITS[trait]))
         self.assertEqual(cfg, expected)
+
+    def test_b200_rules_match_trait_types(self):
+        """Match rules by trait type within each rule's measured scope: argmin shares the
+        index rules of full and strided reductions but not of ragged columns, and max_dim
+        and nansum match no index or one-field rule."""
+        count = (256 << 20) // torch.float16.itemsize
+        index = dict(nfields=2, nouts=1, acc_bits=32)
+        for trait_type in (T.ArgMaxOps, T.ArgMinOps):
+            cfg = kg.select_all_config(
+                (10, 0), torch.float16, count, trait_type=trait_type, **index
+            )
+            self.assertEqual(cfg, kg._AllConfig(block=512, grid_mult=8))
+        num_o, count = 4096, 1024
+        strided = dict(count=count, red_pairs=((count, 2),), num_o=num_o)
+        strided |= dict(kept_pairs=((num_o, 2 * count),), dtype=torch.float16)
+        default = kg._GeneralConfig()
+        for trait, want in (
+            (T.ArgMinOps(), kg._GeneralConfig(block=32, rule="b200_strided_index")),
+            (T.MaxDimOps(), default),
+            (T.NanSumOps(), default),
+        ):
+            cfg = self.general(cc=(10, 0), **strided, **_contract(trait))
+            self.assertEqual(cfg, want, type(trait).__name__)
+        rows = (16 << 20) // (4095 * 4)
+        for trait, rule in (
+            (T.ArgMaxOps(), "b200_ragged_argmax_c4095_small"),
+            (T.ArgMinOps(), "default"),
+            (T.NanSumOps(), "default"),
+        ):
+            contract = _contract(trait)
+            nfields = contract.pop("nfields")
+            args = ((10, 0), torch.float32, rows, 4095, 1, nfields)
+            cfg = ct.select_col_config(*args, itemsize=4, acc_bits=32, **contract)
+            self.assertEqual(cfg.rule, rule, type(trait).__name__)
 
     def test_welford_outputs_follow_trait_structure(self):
         """Count variance outputs from the trait, so selectors need no key spelling."""
@@ -236,11 +265,11 @@ class TestReductionConfig(TestCase):
             cfg = kg.select_general_config(
                 (10, 0),
                 torch.float32,
-                "var1",
                 count,
                 num_o,
                 ((count, 2),),
                 ((num_o, 2 * count),),
+                trait_type=T.WelfordOps,
                 nfields=3,
                 nouts=1,
                 welford_outs=1,
@@ -254,14 +283,14 @@ class TestReductionConfig(TestCase):
             (
                 torch.float32,
                 1024,
-                {"trait_key": "argmaxi32", "nfields": 2},
+                {"trait_type": T.ArgMaxOps, "nfields": 2},
                 kg._GeneralConfig(block=64, rule="b200_strided_index"),
             ),
             (torch.float16, 258, {}, kg._GeneralConfig()),
             (
                 torch.float16,
                 1023,
-                {"trait_key": "argmaxi32", "nfields": 2},
+                {"trait_type": T.ArgMaxOps, "nfields": 2},
                 kg._GeneralConfig(),
             ),
             (torch.float16, 4096, {"alignment": 8}, kg._GeneralConfig()),
@@ -282,15 +311,12 @@ class TestReductionConfig(TestCase):
         )
         self.assertEqual(cfg, expected)
 
-    @parametrize(
-        "key,trait", [("sum", "sum"), ("argmaxi32", "argmax"), ("var0", "var")]
-    )
-    def test_b200_wide_strided_rules_need_many_outputs(self, key, trait):
+    @parametrize("trait", ["sum", "argmax", "var"])
+    def test_b200_wide_strided_rules_need_many_outputs(self, trait):
         """Below 2048 outputs only the c256 rule beats the default config."""
         for count, num_o, rule in ((256, 512, "b200_strided_c256"), (1024, 512, None)):
             cfg = self.general(
                 cc=(10, 0),
-                trait_key=key,
                 **_contract(_TRAITS[trait]),
                 count=count,
                 num_o=num_o,
@@ -300,48 +326,41 @@ class TestReductionConfig(TestCase):
             self.assertEqual(cfg.rule, rule or kg._GeneralConfig().rule)
 
     @parametrize(
-        "dtype,columns,trait_key,trait,expected_rule",
+        "dtype,columns,trait,expected_rule",
         [
-            (torch.float16, 257, "sum", "sum", "b200_ragged_c257"),
-            (torch.float16, 257, "std1", "std", "b200_ragged_welford_c257"),
-            (torch.float16, 257, "var_mean", "var_mean", "b200_ragged_welford_c257"),
-            (
-                torch.float32,
-                4095,
-                "argmaxi32",
-                "argmax",
-                "b200_ragged_argmax_c4095_small",
-            ),
-            (torch.float16, 4095, "mean", "mean", "b200_ragged_c4095_ordered"),
-            (torch.float32, 4095, "var_mean", "var_mean", "b200_ragged_c4095_ordered"),
+            (torch.float16, 257, "sum", "b200_ragged_c257"),
+            (torch.float16, 257, "std", "b200_ragged_welford_c257"),
+            (torch.float32, 4095, "argmax", "b200_ragged_argmax_c4095_small"),
+            (torch.float16, 4095, "mean", "b200_ragged_c4095_ordered"),
+            (torch.float32, 4095, "var", "b200_ragged_c4095_ordered"),
+            (torch.bfloat16, 4095, "std", "b200_ragged_c4095_ordered"),
+            # The Welford rules were measured with one output.
+            (torch.float16, 257, "var_mean", "default"),
+            (torch.float32, 4095, "var_mean", "default"),
         ],
-        name_fn=lambda dtype, columns, key, trait, rule: f"{key}_{columns}",
+        name_fn=lambda dtype, columns, trait, rule: f"{trait}_{columns}",
     )
-    def test_b200_ragged_column_config(
-        self, dtype, columns, trait_key, trait, expected_rule
-    ):
+    def test_b200_ragged_column_config(self, dtype, columns, trait, expected_rule):
         """Pin B200 ragged column choices where tail handling changes the best mapping."""
         itemsize = dtype.itemsize
         rows = (16 << 20) // (columns * itemsize)
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
-        args = ((10, 0), dtype, rows, columns, 1, nfields, trait_key)
+        args = ((10, 0), dtype, rows, columns, 1, nfields)
         cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
         self.assertEqual(cfg.rule, expected_rule)
 
     @parametrize(
-        "dtype,trait_key,trait,size,expected",
+        "dtype,trait,size,expected",
         [
             (
                 torch.bfloat16,
-                "sum",
                 "sum",
                 256 << 20,
                 ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "partition", 8, 16),
             ),
             (
                 torch.float32,
-                "argmaxi32",
                 "argmax",
                 16 << 20,
                 ct.ColConfig(
@@ -350,14 +369,12 @@ class TestReductionConfig(TestCase):
             ),
             (
                 torch.bfloat16,
-                "argmaxi32",
                 "argmax",
                 2 << 30,
                 ct.ColConfig("b200_ragged_argmax_c4095", 64, 1024, 1, "column"),
             ),
             (
                 torch.float16,
-                "mean",
                 "mean",
                 16 << 20,
                 ct.ColConfig(
@@ -371,32 +388,30 @@ class TestReductionConfig(TestCase):
             ),
             (
                 torch.bfloat16,
-                "var0",
                 "var",
                 64 << 20,
                 ct.ColConfig(
-                    "b200_ragged_welford_c4095", 64, 128, 1, "column", group=8
+                    "b200_ragged_welford_c4095", 64, 128, 1, "column", col_group=8
                 ),
             ),
             (
                 torch.float32,
-                "var_mean",
-                "var_mean",
+                "var",
                 2 << 30,
                 ct.ColConfig(
-                    "b200_ragged_welford_c4095", 64, 1928, 1, "column", group=8
+                    "b200_ragged_welford_c4095", 64, 1928, 1, "column", col_group=8
                 ),
             ),
         ],
-        name_fn=lambda dtype, key, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
+        name_fn=lambda dtype, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
     )
-    def test_b200_ragged_column_values(self, dtype, trait_key, trait, size, expected):
+    def test_b200_ragged_column_values(self, dtype, trait, size, expected):
         """Pin every field of the B200 ragged column rules, not just their names."""
         itemsize = dtype.itemsize
         rows = size // (4095 * itemsize)
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
-        args = ((10, 0), dtype, rows, 4095, 1, nfields, trait_key)
+        args = ((10, 0), dtype, rows, 4095, 1, nfields)
         cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
         self.assertEqual(cfg, expected)
 
@@ -428,7 +443,7 @@ class TestReductionConfig(TestCase):
             columns=257,
             batches=1,
             nfields=1,
-            trait_key="sum",
+            trait_type=T.SumOps,
             itemsize=2,
             acc_bits=32,
             nouts=1,
