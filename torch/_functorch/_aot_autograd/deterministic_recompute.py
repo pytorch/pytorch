@@ -24,6 +24,7 @@ import functools
 import logging
 import operator
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any
 
 import sympy
@@ -163,16 +164,25 @@ def _recomputed_copies(
 def _waits() -> tuple[Any, ...]:
     if not torch.distributed.is_available():
         return ()
-    return (torch.ops._c10d_functional.wait_tensor.default,)
+    return (
+        torch.ops._c10d_functional.wait_tensor.default,
+        torch.ops._c10d_functional.wait_tensors.default,
+    )
 
 
 def _is_view(target: Any) -> bool:
-    # _unsafe_view is a view whose schema doesn't say so. A collective's wait
-    # counts as a view too: it has no kernel, and Inductor lowers it to return
-    # its input's buffer (although wait_tensor's fake output has fresh storage),
-    # so a piece returning it would return its own input.
-    unsafe_view = torch.ops.aten._unsafe_view.default
-    return _is_view_op(target) or target in (unsafe_view, *_waits())
+    # The unsafe_ ops are views whose schemas don't say so. A getitem counts
+    # too: one of a multi-output view op (e.g. split) is a view, and callers
+    # that care tell the others apart by their op. A collective's wait
+    # counts as a view: it has no kernel, and Inductor lowers it to return its
+    # input's buffer (although wait_tensor's fake output has fresh storage), so
+    # a piece returning it would return its own input.
+    unsafe = (
+        torch.ops.aten._unsafe_view.default,
+        torch.ops.aten.unsafe_split.Tensor,
+        torch.ops.aten.unsafe_split_with_sizes.default,
+    )
+    return _is_view_op(target) or target in (operator.getitem, *unsafe, *_waits())
 
 
 # Ops that end the use of their tensors' storage without a write in their
@@ -300,15 +310,16 @@ def _share_region(
 
     s_inputs = _inputs(s_nodes)
 
-    # Left as partitioned for now: a multi-output op; a scalar (e.g. a SymInt
-    # size) or a graph attribute (e.g. a tensor constant), which can't be an
-    # operand; and an unbacked symbol (e.g. from .item() or nonzero), which
-    # Inductor can't bind coming out of a subgraph, nor in general passed in.
+    def _is_tuple_val(n: torch.fx.Node) -> bool:
+        return isinstance(n.meta.get("val"), (tuple, list))
+
+    # Left as partitioned for now: a scalar (e.g. a SymInt size) or a graph
+    # attribute (e.g. a tensor constant), which can't be an operand; and an
+    # unbacked symbol (e.g. from .item() or nonzero), which Inductor can't bind
+    # coming out of a subgraph, nor in general passed in.
     for n in (*s_inputs, *s_nodes):
         val = n.meta.get("val")
-        if isinstance(val, (tuple, list)):
-            return _skip(f"{n.name} is a multi-output op")
-        if n.op == "get_attr" or not isinstance(val, torch.Tensor):
+        if n.op == "get_attr" or not isinstance(val, (torch.Tensor, tuple, list)):
             return _skip(f"{n.name} is a scalar or a graph attribute")
         if free_unbacked_symbols(val):
             return _skip(f"{n.name} carries an unbacked symbol")
@@ -331,6 +342,16 @@ def _share_region(
             inline.add(n)
         if storage is not None:
             seen_storages.add(storage)
+    # A multi-output view op (e.g. split) stays inline, and so do its getitems
+    # (whether or not they are in the piece). (A getitem with a list value, of
+    # an op returning a nested list, isn't a view op.)
+    for n in s_nodes:
+        if not _is_tuple_val(n):
+            continue
+        if n.target is not operator.getitem and _is_view(n.target):
+            inline.add(n)
+        elif any(u in inline for u in n.users):
+            return _skip(f"{n.name} aliases a value but isn't a view op")
     if len(inline) == len(s_nodes):
         # Only views are recomputed: no kernels, nothing to drift.
         return _skip("it recomputes only views, so there is nothing to share")
@@ -355,6 +376,7 @@ def _share_region(
             needed.update(a for a in n.all_input_nodes if a in inline)
     erase_names = contracted_names | ({n.name for n in inline} - live)
     s_nodes = [n for n in s_nodes if n not in inline or n in needed]
+    s_set = set(s_nodes)
     s_inputs = _inputs(s_nodes)
     if unbound := _unbound_symbols(s_inputs, s_nodes):
         names = ", ".join(sorted(map(str, unbound)))
@@ -375,10 +397,47 @@ def _share_region(
             return _skip(f"its input {inp.name} isn't available in the backward")
         bw_operands.append(m)
 
+    # A multi-output op stays whole in the slice (invoke_subgraph outputs must
+    # be flat, so its getitems carry the values), and the slice returns whichever
+    # of its results either graph reads: the forward may read some outside the
+    # piece (e.g. it saves var_mean's variance for a later region), and the
+    # backward may read results the forward never uses (e.g. the mean and rstd
+    # of native_layer_norm, or SDPA's logsumexp).
+    fw_extra: dict[str, torch.fx.Node] = {}
+    bw_extra: dict[str, torch.fx.Node] = {}
+    extra_items: dict[str, tuple[torch.fx.Node, int]] = {}
+    for n in s_nodes:
+        if not _is_tuple_val(n) or n.name not in contracted_names:
+            continue
+        outside = [(fw_extra, u) for u in n.users if u not in s_set]
+        outside += [
+            (bw_extra, u) for u in bw_by_name[n.name].users if u.name not in s_names
+        ]
+        for extra, u in outside:
+            idx = u.args[1] if u.target is operator.getitem else None
+            if not isinstance(idx, int):
+                return _skip(f"{u.name} reads multi-output op {n.name} directly")
+            if not isinstance(n.meta["val"][idx], torch.Tensor):
+                return _skip(f"{u.name} isn't a tensor")
+            extra[u.name] = u
+            extra_items[u.name] = (n, idx)
+    # (The piece can't both read such a getitem and return it.)
+    if both := next((u for u in fw_extra.values() if u in s_inputs), None):
+        return _skip(f"its input {both.name} depends on its own recompute")
+
     # Return only values read outside the slice, in either graph.
     s_out_nodes = [
-        n for n in s_nodes if n.name in contracted_names and _used_outside(n)
+        n
+        for n in s_nodes
+        if not _is_tuple_val(n) and n.name in contracted_names and _used_outside(n)
     ]
+    # Two getitems of one result (only a custom pass would leave them) would
+    # return one buffer as two outputs; that is left as partitioned rather than
+    # relied on.
+    items = [tuple(n.args) for n in s_out_nodes if n.target is operator.getitem]
+    items += extra_items.values()
+    if len(items) != len(set(items)):
+        return _skip("it would return one result twice")
 
     # Each call goes right before the first node that reads the piece (see
     # _place). The forward otherwise falls back to right after the last slice
@@ -387,7 +446,7 @@ def _share_region(
     if not s_inputs:
         return _skip("it reads no tensor input")
     last_input = max(s_inputs, key=node_index.__getitem__)
-    fw_replaced = {n for n in s_nodes if n not in inline}
+    fw_replaced = {n for n in s_nodes if n not in inline} | set(fw_extra.values())
     insert_after, fw_moved, reason = _place(
         fw_replaced, s_inputs, last_input, node_index
     )
@@ -399,7 +458,8 @@ def _share_region(
     bw_index = {n: i for i, n in enumerate(bw_graph.nodes)}
     first_recompute = next(n for n in bw_graph.nodes if n.name in contracted_names)
     last_operand = max([first_recompute.prev, *bw_operands], key=lambda n: bw_index[n])
-    bw_replaced_nodes = {bw_by_name[name] for name in contracted_names}
+    bw_replaced = contracted_names | bw_extra.keys()
+    bw_replaced_nodes = {bw_by_name[name] for name in bw_replaced}
     bw_insert_after, bw_moved, reason = _place(
         bw_replaced_nodes, bw_operands, last_operand, bw_index
     )
@@ -408,10 +468,14 @@ def _share_region(
 
     # Inductor rewrites a graph's subgraph modules in place while compiling it,
     # so each graph gets its own (identical) copy rather than one shared object.
-    fw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes)
-    bw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes)
-    slice_out_vals = [n.meta.get("val") for n in s_out_nodes]
-    slice_index = {n.name: i for i, n in enumerate(s_out_nodes)}
+    extras = list(extra_items.values())
+    fw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes, extras)
+    bw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes, extras)
+    out_names = [n.name for n in s_out_nodes] + list(extra_items)
+    slice_out_vals = [n.meta.get("val") for n in s_out_nodes] + [
+        n.meta["val"][i] for n, i in extra_items.values()
+    ]
+    slice_index = {name: i for i, name in enumerate(out_names)}
 
     fw_outs = _splice_slice_call(
         fw_module,
@@ -424,6 +488,7 @@ def _share_region(
         erase_names=erase_names,
         insert_after=insert_after,
         move_below=fw_moved,
+        repoint=fw_extra,
     )
     bw_outs = _splice_slice_call(
         bw_module,
@@ -436,6 +501,7 @@ def _share_region(
         erase_names=erase_names,
         insert_after=bw_insert_after,
         move_below=bw_moved,
+        repoint=bw_extra,
     )
     return {fw_outs[n.name]: bw_outs[n.name] for n in s_out_nodes}
 
@@ -532,9 +598,11 @@ def _slice_module(
     inputs: list[torch.fx.Node],
     nodes: list[torch.fx.Node],
     outputs: list[torch.fx.Node],
+    items: Sequence[tuple[torch.fx.Node, int]] = (),
 ) -> torch.fx.GraphModule:
     """A subgraph computing ``nodes`` (in topological order) from placeholders
-    for ``inputs``, returning ``outputs``."""
+    for ``inputs``, returning ``outputs`` and then result ``i`` of each
+    multi-output node ``n`` in ``items``."""
     graph = torch.fx.Graph()
     env: dict[torch.fx.Node, torch.fx.Node] = {}
     for inp in inputs:
@@ -542,7 +610,11 @@ def _slice_module(
         env[inp].meta = copy.copy(inp.meta)
     for n in nodes:
         env[n] = graph.node_copy(n, lambda x: env[x])
-    graph.output(tuple(env[n] for n in outputs))
+    outs = [env[n] for n in outputs]
+    for n, i in items:
+        outs.append(graph.call_function(operator.getitem, (env[n], i)))
+        outs[-1].meta["val"] = n.meta["val"][i]
+    graph.output(tuple(outs))
     graph.lint()
     return torch.fx.GraphModule(owner, graph)
 
@@ -558,12 +630,15 @@ def _splice_slice_call(
     erase_names: set[str],
     insert_after: torch.fx.Node,
     move_below: list[torch.fx.Node],
+    repoint: dict[str, torch.fx.Node] | None = None,
 ) -> dict[str, torch.fx.Node]:
     """Insert ``invoke_subgraph(slice_gm, identifier, *operands)`` after
-    ``insert_after``, swap each node in ``replace`` for the matching output, move
-    the nodes in ``move_below`` (in order) right after the call's outputs, and
-    erase the nodes named in ``erase_names``. Returns the output getitems by the name
-    of the node they replaced."""
+    ``insert_after``, swap each node in ``replace`` for the matching output,
+    point each getitem in ``repoint`` (outside the slice, of a multi-output op
+    in it) at the call instead, move the nodes in ``move_below`` (in order)
+    right after the call's outputs, and erase the nodes named in
+    ``erase_names``. Returns the output getitems by the name of the node they
+    stand for."""
     from torch._higher_order_ops.invoke_subgraph import (
         invoke_subgraph,
         NestedCompileRegionOptions,
@@ -607,6 +682,12 @@ def _splice_slice_call(
     call.meta["eager_input_vals"] = ((None, identifier, *operand_vals), no_kwargs)
     anchor = call
     getitems = {}
+    for name, tgt in (repoint or {}).items():
+        # It keeps its name and meta: a saved getitem is paired with its
+        # backward placeholder by name.
+        tgt.args = (call, slice_index[name])
+        anchor.append(tgt)
+        getitems[name] = anchor = tgt
     for name, tgt in replace.items():
         idx = slice_index[name]
         with g.inserting_after(anchor):
