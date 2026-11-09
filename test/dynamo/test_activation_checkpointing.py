@@ -243,21 +243,26 @@ save_mm_context_fn = functools.partial(
 
 
 def shared_recompute_code(code, side):
-    """Map region index -> (function body, sources of the kernels it launches)
-    for each shared checkpoint-recompute subgraph in Inductor output ``code``,
-    where ``side`` is "fw" or "bw". The subgraph name, the kernel names (which
-    number kernels across the whole graph), the ``optimize_mem`` autotuning hint
-    (which the forward and backward compiles set differently) and the kernel's
-    cache path (a hash of its source, hint included) are normalized away so both
-    sides compare equal."""
+    """Map piece name (e.g. recompute_0, prefixed inside a nested_compile_region's
+    body) -> (function body, sources of the kernels it launches) for each shared
+    checkpoint-recompute subgraph in Inductor output ``code``, where ``side`` is
+    "fw" or "bw". The subgraph name, the kernel names (which number kernels
+    across the whole graph), provenance comments, the ``optimize_mem``
+    autotuning hint (which the forward and backward compiles set differently)
+    and the kernel's cache path (a hash of its source, hint included) are
+    normalized away so both sides compare equal."""
     shared = {}
-    for i in re.findall(rf"def recompute_(\d+)_{side}_mod\(args\):", code):
-        name = f"recompute_{i}_{side}_mod"
+    for name in re.findall(rf"def (\w*?recompute_\d+_{side}_mod)\(args\):", code):
         # The function's body: its indented (or blank) lines.
         match = re.search(rf"def {name}\(args\):\n((?:(?: +[^\n]*)?\n)+)", code)
         if match is None:
             raise AssertionError(f"no body for {name} in:\n{code}")
         body = match.group(1).rstrip().replace(name, "shared")
+        # (Provenance comments name the call node, which differs between the
+        # graphs inside a nested_compile_region's body.)
+        body = re.sub(
+            r"\n *# (Topologically Sorted|Unsorted) Source Nodes: [^\n]*", "", body
+        )
         kernels = list(dict.fromkeys(re.findall(r"(triton_\w+)\.run\(", body)))
         sources = []
         for j, k in enumerate(kernels):
@@ -268,7 +273,8 @@ def shared_recompute_code(code, side):
             source = re.sub(r"'optimize_mem': (True|False),? ?", "", source)
             sources.append(re.sub(rf"\b{k}\b", f"kernel{j}", source))
             body = re.sub(rf"\b{k}\b", f"kernel{j}", body)
-        shared[int(i)] = (body, sources)
+        # (Inductor prefixes a region body's subgraphs with the side, too.)
+        shared[re.sub(rf"partitioned_{side}_|_{side}_mod$", "", name)] = (body, sources)
     return shared
 
 
@@ -3238,29 +3244,103 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     def test_deterministic_recompute_memory_pool(self, device):
         # Nodes allocating in a user memory pool carry it in their metadata,
         # which the call replacing them wouldn't, so such a graph is left as
-        # partitioned.
+        # partitioned, and so is a nested_compile_region body called in one,
+        # whose nodes carry only the metadata.
         from torch._functorch._aot_autograd import deterministic_recompute
 
         pool = torch.cuda.MemPool()
 
+        def body(x, w):
+            return (x @ w).sin().cos()
+
         def fn(x, w):
             with torch.cuda.use_mem_pool(pool):
-                a = torch.utils.checkpoint.checkpoint(
-                    lambda x: (x @ w).sin().cos(), x, use_reentrant=False
-                )
+                a = torch.utils.checkpoint.checkpoint(body, x, w, use_reentrant=False)
             return a * a
 
-        check = functools.partial(count_shared_recompute_calls, expected=0)
+        @torch.compiler.nested_compile_region
+        def layer(x, w):
+            return torch.utils.checkpoint.checkpoint(body, x, w, use_reentrant=False)
+
+        def in_region(x, w):
+            with torch.cuda.use_mem_pool(pool):
+                a = layer(layer(x, w), w)
+            return a * a
+
+        def check(gm, args):
+            hop = torch.ops.higher_order.invoke_subgraph
+            for m in gm.modules():
+                for n in m.graph.find_nodes(op="call_function", target=hop):
+                    if "recompute_" in n.args[1]:
+                        raise AssertionError(f"{n.args[1]} is shared in {gm}")
+            return gm
+
         backend = aot_autograd(
             fw_compiler=check,
             bw_compiler=check,
             partition_fn=min_cut_rematerialization_partition,
         )
-        x = torch.randn(16, 16, device="cuda", requires_grad=True)
-        w = torch.randn(16, 16, device="cuda", requires_grad=True)
-        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
-            self._validate(fn, backend, x, w)
-        self.assertIn("is in a memory pool", logs.output[0])
+        for f, prefix in ((fn, ""), (in_region, "subgraph_0_0_")):
+            with self.subTest(f.__name__):
+                torch._dynamo.reset()
+                x = torch.randn(16, 16, device="cuda", requires_grad=True)
+                w = torch.randn(16, 16, device="cuda", requires_grad=True)
+                log = deterministic_recompute.log
+                with self.assertLogs(log, level="INFO") as logs:
+                    self._validate(f, backend, x, w)
+                self.assertRegex(logs.output[0], f": {prefix}\\w+ is in a memory pool")
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_nested_compile_region(self, device):
+        # A nested_compile_region called twice is partitioned on its own, so the
+        # checkpoint inside it is shared within the region's forward and
+        # backward, which Inductor lower identically.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def body(x, w):
+            return (x @ w).sin().cos()
+
+        @torch.compiler.nested_compile_region
+        def layer(x, w):
+            return torch.utils.checkpoint.checkpoint(body, x, w, use_reentrant=False)
+
+        def fn(x, w):
+            return layer(layer(x, w), w)
+
+        def check(gm, args):
+            targets = [
+                n.args[1]
+                for m in gm.modules()
+                for n in m.graph.find_nodes(op="call_function", target=invoke_subgraph)
+            ]
+            if sum("recompute_" in t for t in targets) != 1:
+                raise AssertionError(f"expected one shared recompute call: {targets}")
+            return gm
+
+        aot = aot_autograd(
+            fw_compiler=check,
+            bw_compiler=check,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        def args():
+            return [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)
+            ]
+
+        self._validate(fn, aot, *args())
+        torch._dynamo.reset()
+        _, (fw_code, bw_code) = run_and_get_code(
+            self._validate, fn, "inductor", *args()
+        )
+        fw = shared_recompute_code(fw_code, "fw")
+        self.assertEqual(len(fw), 1)
+        self.assertEqual(fw, shared_recompute_code(bw_code, "bw"))
+        ((_, sources),) = fw.values()
+        for source in sources:
+            self.assertIn("'deterministic': True", source)
 
     @parametrize("view", [False, True])
     @parametrize("backend", ["aot", "inductor"])
@@ -4670,6 +4750,66 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             self._validate(fn, backend, x)
         expected = "accumulates in an order that can change"
         self.assertTrue(any(expected in line for line in logs.output), logs.output)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_keeps_memory_budget(self, device):
+        # region_activation_memory_budget requires its annotation on every op
+        # of a nested_compile_region's body, so the calls replacing the
+        # checkpoint's recompute there carry it too, and so do the getitems of
+        # layer_norm's results that the piece returns; in norm_only, those are
+        # all the piece returns.
+        def body(x, w):
+            return F.layer_norm((x @ w).sin(), (w.shape[-1],)).cos()
+
+        def norm_only(x, w):
+            return F.layer_norm(x, (w.shape[-1],))
+
+        for gn in (body, norm_only):
+            with self.subTest(gn.__name__):
+                torch._dynamo.reset()
+
+                @torch.compiler.nested_compile_region
+                def layer(x, w, gn=gn):
+                    with torch.autograd.graph.region_activation_memory_budget(0.5):
+                        return torch.utils.checkpoint.checkpoint(
+                            gn, x, w, use_reentrant=False
+                        )
+
+                def fn(x, w1, w2, layer=layer):
+                    with torch.autograd.graph.region_activation_memory_budget(0.5):
+                        return layer(layer(x, w1), w2)
+
+                args = [
+                    torch.randn(16, 16, device=device, requires_grad=True)
+                    for _ in range(3)
+                ]
+                ref = [a.detach().clone().requires_grad_() for a in args]
+                gn(gn(ref[0], ref[1]), ref[2]).sum().backward()
+                pieces = []
+
+                def count(gm, args, pieces=pieces):
+                    hop = torch.ops.higher_order.invoke_subgraph
+                    for m in gm.modules():
+                        calls = m.graph.find_nodes(op="call_function", target=hop)
+                        pieces.extend(
+                            n.args[1] for n in calls if "recompute_" in n.args[1]
+                        )
+                    return gm
+
+                backend = aot_autograd(
+                    fw_compiler=count,
+                    bw_compiler=count,
+                    partition_fn=min_cut_rematerialization_partition,
+                )
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
+                compiled(*args).sum().backward()
+                expected = {
+                    "subgraph_0_0_recompute_0_fw",
+                    "subgraph_0_0_recompute_0_bw",
+                }
+                self.assertEqual(set(pieces), expected)
+                for a, r in zip(args, ref):
+                    self.assertEqual(a.grad, r.grad, atol=1e-5, rtol=1e-5)
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):

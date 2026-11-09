@@ -34,6 +34,10 @@ from torch._functorch import config
 from torch._inductor.fx_utils import get_mutated_input_nodes, get_node_storage
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.fx.passes.reinplace import _is_view_op
+from torch.fx.traceback import (
+    _get_memory_budget_annotation,
+    MEMORY_BUDGET_ANNOTATION_KEY,
+)
 
 
 log = logging.getLogger(__name__)
@@ -43,9 +47,12 @@ def deterministic_recompute(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     num_fwd_outputs: int,
+    prefix: str = "",
 ) -> None:
     """Rewrite the partitioned fw_module and bw_module in place so each piece of
-    the backward's recompute runs as a shared subgraph."""
+    the backward's recompute runs as a shared subgraph. ``prefix`` keeps the
+    pieces' invoke_subgraph identifiers unique within the compile, and tells in
+    the log which graph a node is in."""
     # Both trace the graphs again and can't trace the shared calls (compiled
     # autograd would graph-break on each backward call and compile its subgraph
     # without deterministic mode).
@@ -64,11 +71,12 @@ def deterministic_recompute(
             op = n.target
             marker = isinstance(op, torch._ops.OpOverload) and op.name() in pool_markers
             if marker or "mempool" in n.meta.get("custom", {}):
-                log.info("deterministic_recompute: %s is in a memory pool", n.name)
+                msg = "deterministic_recompute: %s%s is in a memory pool"
+                log.info(msg, prefix, n.name)
                 return
     fw_outs = fw_module.graph.find_nodes(op="output")[0].args[0]
     saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
-    copies, regions = _recomputed_copies(fw_module, bw_module, saved)
+    copies, regions = _recomputed_copies(fw_module, bw_module, saved, prefix)
 
     # A recomputed node that reads or produces a value carrying an unbacked
     # symbol (e.g. from .item() or nonzero, including those nodes themselves)
@@ -103,9 +111,10 @@ def deterministic_recompute(
         for n in fw_module.graph.nodes:
             if n in dropped and not any(a in dropped for a in n.all_input_nodes):
                 log.info(
-                    "deterministic_recompute: %s left as partitioned, with what "
+                    "deterministic_recompute: %s%s left as partitioned, with what "
                     "is computed from it: it reads or computes a value carrying "
                     "an unbacked symbol",
+                    prefix,
                     n.name,
                 )
         for nodes in regions.values():
@@ -143,8 +152,9 @@ def deterministic_recompute(
         direct = any(u.name not in copy_names for u in bw_body[c.name].users)
         if direct and isinstance(c.meta.get("val"), torch.Tensor):
             log.info(
-                "deterministic_recompute: %s left as partitioned: the backward "
+                "deterministic_recompute: %s%s left as partitioned: the backward "
                 "reads it directly",
+                prefix,
                 c.name,
             )
 
@@ -178,7 +188,7 @@ def deterministic_recompute(
     # process-global counter, so recompiling the same graph would get new names
     # and miss the FX graph cache.
     for i, piece in enumerate(pieces):
-        identifier = f"recompute_{i}"
+        identifier = f"{prefix}recompute_{i}"
         outputs = _share_region(
             fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
         )
@@ -199,11 +209,12 @@ def _recomputed_copies(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     saved: set[torch.fx.Node],
+    prefix: str = "",
 ) -> tuple[set[torch.fx.Node], dict[Any, list[torch.fx.Node]]]:
     """The forward nodes whose copies the backward recomputes, given the values
     the forward ``saved`` for it, and those of them in each checkpoint region
     (keyed by ac_graph_id, in graph order). Logs where the backward's recompute
-    stops matching the forward."""
+    stops matching the forward, naming the node after ``prefix``."""
     # Both graphs are extracted from the joint graph, so the backward's
     # recomputed copy of a forward node keeps its name; checkpointed nodes carry
     # their region's ac_graph_id. A matching name alone isn't trusted: a copy
@@ -238,8 +249,9 @@ def _recomputed_copies(
             # have other readers, or n itself).
             if not any(a in not_copies for a in missing):
                 log.info(
-                    "deterministic_recompute: %s left as partitioned: the "
+                    "deterministic_recompute: %s%s left as partitioned: the "
                     "backward recomputes it differently",
+                    prefix,
                     missing[0].name if missing else n.name,
                 )
             not_copies.add(n)
@@ -252,6 +264,18 @@ def _recomputed_copies(
         if (key := n.meta.get("ac_graph_id")) is not None:
             regions[key].append(n)
     return copies, regions
+
+
+def _keep_budget(dst: torch.fx.Node, *srcs: torch.fx.Node) -> None:
+    """A region_activation_memory_budget must annotate every op of the graph it
+    covers, including HOP bodies, so a node standing in for ``srcs`` keeps
+    theirs. Nothing else is copied: e.g. compile_with_inductor on a call but not
+    on its get_attr would break regional Inductor."""
+    for src in srcs:
+        budget = _get_memory_budget_annotation(src)
+        if budget is not None:
+            dst.meta.setdefault("custom", {})[MEMORY_BUDGET_ANNOTATION_KEY] = budget
+            return
 
 
 @functools.cache
@@ -802,6 +826,7 @@ def _slice_module(
     for n, i in items:
         outs.append(graph.call_function(operator.getitem, (env[n], i)))
         outs[-1].meta["val"] = n.meta["val"][i]
+        _keep_budget(outs[-1], n)
     graph.output(tuple(outs))
     graph.lint()
     return torch.fx.GraphModule(owner, graph)
@@ -868,6 +893,7 @@ def _splice_slice_call(
     operand_vals = [p.meta["val"] for p in slice_gm.graph.find_nodes(op="placeholder")]
     no_kwargs: dict[str, Any] = {}
     call.meta["eager_input_vals"] = ((None, identifier, *operand_vals), no_kwargs)
+    _keep_budget(call, *replace.values(), *(repoint or {}).values())
     anchor = call
     getitems = {}
     for name, tgt in (repoint or {}).items():
@@ -881,6 +907,7 @@ def _splice_slice_call(
         with g.inserting_after(anchor):
             gi = g.call_function(operator.getitem, args=(call, idx))
         gi.meta["val"] = slice_out_vals[idx]
+        _keep_budget(gi, tgt)
         tgt.replace_all_uses_with(gi)
         getitems[name] = anchor = gi
     for n in move_below:
