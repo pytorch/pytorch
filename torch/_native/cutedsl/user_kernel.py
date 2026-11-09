@@ -1,7 +1,9 @@
 """Compile and launch user-defined CuTeDSL kernels (``@cute.jit`` host functions).
 
-Used by the eager impl of ``cutedsl_kernel_wrapper_mutation``, which launches
-through a CuteDSLKernelLauncher, one per host function, argument names and
+Used by the eager impl of ``cutedsl_kernel_wrapper_mutation`` and by Inductor's
+Python wrapper, where each kernel becomes a CuteDSLKernelLauncher: the counterpart
+of the CachingAutotuner a user Triton kernel becomes in generated code. Eager
+launches go through launchers too, one per host function, argument names and
 constants. It lives outside torch._inductor so that an eager launch imports neither
 Inductor nor Dynamo.
 
@@ -92,7 +94,9 @@ def key_constants(
     """The constant_key of each of ``constant_args``, constants of kernel ``name`` by
     parameter, taking the ones in ``keys`` as given. A constant that constant_key
     refuses raises its TypeError or ValueError, naming the kernel and the parameter:
-    the eager launch and a launcher report it alike."""
+    the eager launch, a launcher and Inductor report it alike. Inductor keys the
+    defaults a call leaves out when it defines the call's launcher, or first, in
+    ir.UserDefinedCuteDSLKernel.split_args, if one of them cannot be copied."""
     from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
     from torch._higher_order_ops.user_kernel_hop import constant_key
 
@@ -129,6 +133,9 @@ def launch_cutedsl_kernel(
     info = get_host_fn_info(fn)
     name = info.name
     info.check_call(name, args.keys())
+    # ir.UserDefinedCuteDSLKernel.split_args splits a call with the same rules, so
+    # that an eager launch shares its compile with the generated code's launch of
+    # the same call.
     runtime_args, constant_args = info.split_args(name, args)
     # Keyed on every launch, as the caller may change a constant between launches;
     # the launcher binds snapshots, which keep matching the key.
@@ -147,8 +154,9 @@ def launch_cutedsl_kernel(
 
 
 class CuteDSLKernelLauncher:
-    """Launches host function ``fn`` with constants bound once: the eager launches
-    of ``fn`` with these argument names and constants (see launch_cutedsl_kernel).
+    """Launches host function ``fn`` with constants bound once: one user CuTeDSL
+    kernel in Inductor's generated Python wrapper, or the eager launches of ``fn``
+    with these argument names and constants (see launch_cutedsl_kernel).
 
     ``run(*args, stream=...)`` takes the kernel arguments (``arg_names``: tensors and
     runtime scalars, in host-function signature order) positionally. Everything else
@@ -156,8 +164,8 @@ class CuteDSLKernelLauncher:
     parameters neither names) are bound and keyed for the compile cache, reusing the
     constant_key of those in ``constant_keys``, and run() keeps the compiled
     functions it uses by device and argument signature, so a launch keys only its own
-    arguments. launch_cutedsl_kernel binds snapshots as constants, so their key
-    cannot go stale.
+    arguments. Both users bind snapshots as constants (see
+    ir.UserDefinedCuteDSLKernel.split_args), so their key cannot go stale.
     """
 
     def __init__(
@@ -235,7 +243,8 @@ class CuteDSLKernelLauncher:
                 f"got {len(args)}"
             )
         device = _launch_device(self._kernel_name, args)
-        # DLPack export and the launch need the tensors' device to be current.
+        # DLPack export and the launch need the tensors' device to be current, as it
+        # is under the device guard of Inductor's generated code.
         current = device.index == torch.cuda.current_device()
         with contextlib.nullcontext() if current else torch.cuda.device(device):
             if stream is None:
@@ -279,7 +288,8 @@ class CuteDSLKernelLauncher:
         per_fn = _compiled.setdefault(self.fn, {})
         compiled = per_fn.get(shared_key)
         if compiled is None:
-            # The bound constants are compiled as copies (see _compile).
+            # The bound constants, in generated code the side table's own snapshots,
+            # are compiled as copies (see _compile).
             compile_args = dict(self._fixed_args)
             compile_args.update(zip(self.arg_names, values))
             compile_args[self._stream_param] = stream

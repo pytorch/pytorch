@@ -8799,10 +8799,10 @@ class SubgraphBuffer(ExternKernel):
 
 class UserDefinedKernel(ExternKernel):
     """
-    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel): an
-    opaque launch that returns nothing (NoneLayout) and writes some of its tensor
-    arguments in place. Each written argument gets a MutationOutput, which orders
-    later readers after the launch and keeps it alive.
+    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel,
+    UserDefinedCuteDSLKernel): an opaque launch that returns nothing (NoneLayout) and
+    writes some of its tensor arguments in place. Each written argument gets a
+    MutationOutput, which orders later readers after the launch and keeps it alive.
     """
 
     def __init__(
@@ -9131,6 +9131,117 @@ class UserDefinedTritonKernel(UserDefinedKernel):
                 for key in self.arg_accesses.read_writes.writes
                 if isinstance(kernel_args.get(key.name), TensorBox)
             ]
+        )
+
+
+class UserDefinedCuteDSLKernel(UserDefinedKernel):
+    """
+    A user-defined CuTeDSL kernel: a @cute.jit host function captured through
+    torch._library.cutedsl.wrap_cutedsl.
+
+    Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
+    Python wrapper launches the host function on the current stream of the kernel's
+    device. The C++ and FX wrappers refuse it.
+    """
+
+    def __init__(
+        self,
+        *,
+        kernel_idx: int,
+        constant_args_idx: int,
+        kernel_args: dict[str, Any],
+    ) -> None:
+        from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            cutedsl_kernel_side_table,
+            cutedsl_kernel_wrapper_mutation,
+            get_host_fn_info,
+        )
+        from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
+
+        super().__init__(kernel_args)
+        self.kernel_idx = kernel_idx
+        self.kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
+        self.host_fn_info = get_host_fn_info(self.kernel.fn)
+        self.ordered_kwargs_for_cpp_kernel = [
+            name for name in self.host_fn_info.params if name in kernel_args
+        ]
+        # The write set, as graph.py's propagate_mutation reads it for this node.
+        hop = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        if hop is None:
+            raise AssertionError("the CuTeDSL user-kernel HOPs are not registered")
+        mutated = hop.get_mutated_tensors(
+            {"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+            self._as_tensors(kernel_args),
+        )
+        self.register_mutations([kernel_args[name] for name in mutated])
+
+    @staticmethod
+    def _as_tensors(args: dict[str, Any]) -> dict[str, Any]:
+        """``args`` with an empty meta tensor for each IR node: the CuTeDSL helpers
+        that classify a call's arguments (CuteDSLHostFnInfo.split_args,
+        get_cutedsl_mutated_tensors) only ask whether one is a tensor."""
+        tensor = torch.empty(0, device="meta")
+        return {k: tensor if isinstance(v, IRNode) else v for k, v in args.items()}
+
+    def split_args(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The kernel arguments passed at launch (tensors and runtime scalars, in
+        signature order) and the constants the generated code binds once, split by
+        CuteDSLHostFnInfo.split_args as the eager launch splits a call, with an IR
+        node counting as a tensor. A runtime scalar is a value the generated code can
+        print (see python_scalar; codegen refuses a symbolic one). A parameter the call
+        left out takes a copy of its default, as the side table copies passed
+        constants; unlike those, defaults are not guarded by Dynamo: changing one
+        later does not recompile. If a default cannot be copied (such as one that
+        refers to itself), the call is refused with the error the eager launch gives
+        it, as that launch keys the constants before it copies them (see
+        key_constants)."""
+        from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            CUTEDSL_CONSTANT_RULES,
+            python_scalar,
+        )
+        from torch._higher_order_ops.user_kernel_hop import _snapshot
+        from torch._native.cutedsl.user_kernel import key_constants
+
+        passed = {
+            name: self.get_kwargs_value(name)
+            for name in self.ordered_kwargs_for_cpp_kernel
+        }
+        runtime, constants = self.host_fn_info.split_args(
+            self.kernel.name, self._as_tensors(passed)
+        )
+        runtime_args = {
+            k: passed[k] if isinstance(passed.get(k), IRNode) else python_scalar(v)
+            for k, v in runtime.items()
+        }
+        try:
+            constant_args = {
+                k: v if k in passed else _snapshot(v, CUTEDSL_CONSTANT_RULES)
+                for k, v in constants.items()
+            }
+        except Exception:
+            # The eager launch's error, whatever the copy raised: that launch keys
+            # the constants, in signature order, before it copies them, so
+            # key_constants raises for the first default that constant_key refuses
+            # (it refuses every one that refers to itself), and if it refuses none,
+            # the copy's own error stands, as there. Keying the defaults on success
+            # would walk them twice: the launcher's definition keys every constant.
+            defaults = {k: v for k, v in constants.items() if k not in passed}
+            key_constants(self.kernel.name, defaults)
+            raise
+        return runtime_args, constant_args
+
+    @override
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        runtime_args, constant_args = self.split_args()
+        name = wrapper.define_user_defined_cutedsl_kernel(
+            self.kernel, constant_args=constant_args, runtime_args=runtime_args
+        )
+        self.codegen_comment(wrapper, name)
+        wrapper.generate_user_defined_cutedsl_kernel_call(
+            name,
+            self.kernel,
+            runtime_args=runtime_args,
+            device=self.get_device_or_error(),
         )
 
 
