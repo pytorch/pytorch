@@ -225,7 +225,7 @@ function install_134 {
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
-  install_cuda 13.4.2 cuda_13.4.2_linux
+  install_cuda 13.4.3 cuda_13.4.3_linux
 
   install_cublas $CUBLAS_VERSION
 
