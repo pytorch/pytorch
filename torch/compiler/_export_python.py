@@ -9,6 +9,7 @@ import os
 import re
 import textwrap
 import threading
+import warnings
 import zlib
 from collections.abc import Callable
 from typing import cast, TypeVar
@@ -40,6 +41,8 @@ def export_python(
     *,
     backend: str = "inductor",
     dynamic: bool | None = None,
+    mode: str | None = None,
+    options: dict[str, object] | None = None,
     check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
@@ -105,6 +108,16 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
+        mode: As ``torch.compile(mode=)``, for the inductor backend: the capture
+            compiles under that mode's inductor config, so ``"max-autotune"`` tunes
+            the graph's kernels, GEMM templates included, and the file holds the
+            kernels and configs it chose. A served file does not run under CUDA
+            graphs, so ``triton.cudagraphs`` (which ``"max-autotune"`` and
+            ``"reduce-overhead"`` turn on) is left off for the capture, with a
+            warning.
+        options: As ``torch.compile(options=)``: inductor config for the capture,
+            with ``triton.cudagraphs`` left off as for ``mode``. Pass ``mode`` or
+            ``options``, not both.
         check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
             too, as during compiler-internal tracing) on every served call, on copies
             of the tensor arguments, and raise
@@ -130,7 +143,13 @@ def export_python(
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         enabled = os.environ.get("TORCH_EXPORT_PYTHON_CHECK") == "1"
         exported = _ExportedPython(
-            fn, path, backend, dynamic, enabled if check is None else check
+            fn,
+            path,
+            backend,
+            dynamic,
+            mode,
+            options,
+            enabled if check is None else check,
         )
 
         @functools.wraps(fn)
@@ -233,6 +252,8 @@ class _ExportedPython:
         path: str | os.PathLike[str],
         backend: str,
         dynamic: bool | None,
+        mode: str | None,
+        options: dict[str, object] | None,
         check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
@@ -246,6 +267,22 @@ class _ExportedPython:
         self._path = os.fspath(path)
         self._cache_path = self._path + ".cache"
         self._backend = backend
+        if mode is not None and options is not None:
+            raise ValueError(
+                "export_python: pass mode or options, not both, as torch.compile does."
+            )
+        if backend != "inductor" and (mode is not None or options is not None):
+            raise ValueError(
+                f"export_python: mode and options configure the inductor backend, "
+                f"not {backend!r}."
+            )
+        # torch.compile's own resolution and validation of mode and options.
+        self._inductor_config = (
+            torch._TorchCompileInductorWrapper(mode, options, dynamic).config
+            if backend == "inductor"
+            else {}
+        )
+        self._drop_cudagraphs = self._inductor_config.pop("triton.cudagraphs", False)
         self._tracer = DynamoTracer(dynamic=dynamic, fullgraph=True)
         self._check = check
         self._runnable: PrecompiledRunnable | None = None
@@ -343,6 +380,13 @@ class _ExportedPython:
         )
         try:
             with contextlib.ExitStack() as stack:
+                if self._drop_cudagraphs:
+                    warnings.warn(
+                        "export_python: a served file does not run under CUDA graphs, "
+                        "so the capture leaves triton.cudagraphs off (mode="
+                        "'max-autotune' and 'reduce-overhead' turn it on).",
+                        stacklevel=4,
+                    )
                 if self._backend == "inductor":
                     from torch._inductor import config as inductor_config
 
@@ -350,7 +394,12 @@ class _ExportedPython:
                     # the config each inductor-generated kernel tuned to and launches
                     # with.
                     stack.enter_context(
-                        inductor_config.patch({"triton.autotune_at_compile_time": True})
+                        inductor_config.patch(
+                            {
+                                "triton.autotune_at_compile_time": True,
+                                **self._inductor_config,
+                            }
+                        )
                     )
                 stack.enter_context(cap)
                 try:

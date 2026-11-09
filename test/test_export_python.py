@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import functools
 import importlib
 import os
 import re
@@ -67,6 +68,9 @@ def shifted(x):
 
 def reduce(x):
     return (x.sin() * 2).sum(dim=-1)
+
+def linear_relu(x, w):
+    return (x @ w).relu()
 
 from torch.nn.attention.flex_attention import flex_attention
 
@@ -360,6 +364,19 @@ class TestExportPython(_ExportPythonTestCase):
             """,
         )
 
+    def test_mode_and_options_are_checked_as_torch_compile_checks_them(self):
+        export = functools.partial(
+            torch.compiler.export_python, os.path.join(self.dir, "f.py")
+        )
+        with self.assertRaisesRegex(ValueError, "mode or options, not both"):
+            export(mode="max-autotune", options={"max_autotune": True})(
+                self.module.scaled
+            )
+        with self.assertRaisesRegex(ValueError, "configure the inductor backend"):
+            export(backend="eager", mode="max-autotune")(self.module.scaled)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected optimization option"):
+            export(options={"not_an_option": True})(self.module.scaled)
+
     def test_a_main_module_function_is_refused(self):
         def fn(x):
             return x + 1
@@ -402,6 +419,32 @@ class TestExportPythonCUDA(_ExportPythonTestCase):
             (launcher,) = getattr(module, {name!r}).launchers
             if launcher.config.num_warps != {warps}:
                 raise AssertionError(launcher.config)
+            """,
+        )
+
+    def test_max_autotune_composes(self):
+        # mode= is torch.compile's: the capture tunes under max-autotune and the file
+        # holds what it chose, served without compiling and without CUDA graphs.
+        path = os.path.join(self.dir, "linear_relu.py")
+        x, w = (torch.randn(256, 256, device="cuda") for _ in range(2))
+        with self.assertWarnsRegex(UserWarning, "CUDA graphs"):
+            out = self._export("linear_relu", path, mode="max-autotune")(x, w)
+        self.assertEqual(out, (x @ w).relu(), atol=1e-3, rtol=1e-3)
+        code = _graph_code(path)
+        self.assertIn("'max_autotune': True", code)
+        self.assertNotIn("def partition_0", code)
+        torch.save((x, w, out), os.path.join(self.dir, "io.pt"))
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch.compiler.precompile import no_compilation
+            x, w, out = torch.load({os.path.join(self.dir, "io.pt")!r})
+            run = torch.compiler.export_python(path={path!r})(m.linear_relu)
+            with no_compilation():
+                torch.testing.assert_close(run(x, w), out)
+            # A tuned GEMM sums in another order than cuBLAS; the check allows that.
+            checked = torch.compiler.export_python(path={path!r}, check=True)
+            torch.testing.assert_close(checked(m.linear_relu)(x, w), out)
             """,
         )
 
