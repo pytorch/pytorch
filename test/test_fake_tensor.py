@@ -6177,9 +6177,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "CppFakeTensorMode is not supported here yet"
         with self.assertRaisesRegex(NotImplementedError, msg):
             require_python_fake_mode(detect_fake_mode([fake]))
-        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        self.assertIs(require_python_fake_mode(py_mode), py_mode)
-        self.assertIsNone(require_python_fake_mode(None))
 
         # Python modes are found as before, including under a user mode, and
         # not inside unset_fake_temporarily()
@@ -6466,19 +6463,63 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(inherited, [keys])
         check(detached, (2, 3))
         self.assertIsNone(maybe_get_fake_dispatch_keys(detached))
+        # Python's FakeTensorMode is out of the FAKE mode slot while it
+        # dispatches, so the op's kernel sees no fake mode, as here
+        seen = []
+
+        def probe_meta(t):
+            seen.append(torch._guards.active_fake_mode())
+            return t.new_empty(t.shape)
+
+        with torch.library._scoped_library("_test_fake_fallback_probe", "DEF") as lib:
+            lib.define("probe(Tensor x) -> Tensor")
+            lib.impl("probe", probe_meta, "Meta")
+            probe = torch.ops._test_fake_fallback_probe.probe
+            with mode:
+                check(probe(x), (2, 3))
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+            check(probe(x), (2, 3))
+            with torch._subclasses.fake_tensor.FakeTensorMode() as python_mode:
+                probe(python_mode.from_tensor(real))
+        self.assertEqual(seen, [None, None, None])
 
         meta = torch.eye(2).to_sparse().to("meta")
         sparse = torch._C._from_meta_and_device(meta, real.device, mode)
-        # Sparse inputs run their sparse Meta kernels, with invariant checks off
-        with torch.sparse.check_sparse_tensor_invariants(False):
-            with torch._C._AutoDispatchBelowADInplaceOrView():
-                self.assertIs(torch.ops.aten._coalesced_(sparse, True), sparse)
-            cloned = sparse.clone()
-            # add's Meta kernel would make a dense output
-            added = sparse + sparse
+        # Sparse inputs run their sparse Meta kernels
+        with torch._C._AutoDispatchBelowADInplaceOrView():
+            self.assertIs(torch.ops.aten._coalesced_(sparse, True), sparse)
+        cloned = sparse.clone()
+        # add's Meta kernel would make a dense output
+        added = sparse + sparse
         for out in (cloned, added):
             check(out, (2, 2))
             self.assertTrue(out.is_sparse)
+        # with sparse invariant checks (which TestCase turns on) off, as Python
+        # does, but on this thread only
+        self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+        checks = []
+
+        def sparse_probe_meta(t):
+            checks.append(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+            return t.clone()
+
+        with torch.library._scoped_library("_test_fake_fallback_sparse", "DEF") as lib:
+            lib.define("probe(Tensor x) -> Tensor")
+            lib.impl("probe", sparse_probe_meta, "SparseMeta")
+            check(torch.ops._test_fake_fallback_sparse.probe(sparse), (2, 2))
+        self.assertEqual(checks, [False])
+        self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+        # A tensor a sparse fake holds comes back as a new fake each time, as in
+        # Python, and changing it leaves the sparse fake alone
+        values = sparse._values()
+        check(values, meta._values().shape)
+        check(sparse._indices(), meta._indices().shape)
+        self.assertIsNot(sparse._values(), values)
+        values.resize_(5)
+        self.assertEqual(sparse._values().shape, meta._values().shape)
+        csr_meta = torch.eye(2).to_sparse_csr().to("meta")
+        csr = torch._C._from_meta_and_device(csr_meta, real.device, mode)
+        check(csr.crow_indices(), csr_meta.crow_indices().shape)
         # Python runs silu's Python Meta registration rather than its
         # decomposition, as the fallback does
         check(torch.ops.aten.silu(x), (2, 3))
@@ -6499,19 +6540,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             with allow_non_fake_inputs_temporarily(mode):
                 return x + real
 
-        # TestCase turns sparse invariant checks on
-        def sparse_values():
-            with torch.sparse.check_sparse_tensor_invariants(False):
-                return sparse._values()
-
-        def with_invariant_checks():
-            with torch.sparse.check_sparse_tensor_invariants(True):
-                return sparse + sparse
-
-        def without_sparse_kernel():
-            with torch.sparse.check_sparse_tensor_invariants(False):
-                return torch.ops.aten.log_sigmoid_forward(sparse)
-
         unsupported = {
             # Even with allow_non_fake_inputs
             "non-fake tensor inputs": non_fake_input,
@@ -6524,10 +6552,9 @@ class TestCppFakeTensorModeBindings(TestCase):
             "ops with a Python fake implementation": lambda: x.view(6),
             "CompositeImplicitAutograd ops below autograd": lambda: x.reshape(6),
             "the Python dispatcher": under_python_dispatcher,
-            # Python returns the same fake of the values on each call
-            "outputs held by a sparse input": sparse_values,
-            "sparse inputs with sparse invariant checks enabled": with_invariant_checks,
-            "sparse inputs to ops without a sparse Meta kernel": without_sparse_kernel,
+            "sparse inputs to ops without a sparse Meta kernel": lambda: torch.ops.aten.log_sigmoid_forward(
+                sparse
+            ),
             # Its decomposition checks the device, which reads meta here
             "ops Python decomposes": lambda: torch.ops.aten.log_sigmoid_forward(x),
         }
@@ -6558,6 +6585,18 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(static._has_symbolic_sizes_strides)
         with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
             static.expand(symbolic.shape[0], 3)
+
+    def test_require_python_fake_mode(self):
+        from torch._guards import require_python_fake_mode
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        # Callers that need a Python FakeTensorMode reject a C++ one
+        msg = "CppFakeTensorMode is not supported here yet"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            require_python_fake_mode(CppFakeTensorMode())
+        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        self.assertIs(require_python_fake_mode(py_mode), py_mode)
+        self.assertIsNone(require_python_fake_mode(None))
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
