@@ -38,8 +38,10 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     isRocmArchAnyOf,
+    MI350_ARCH,
     NAVI4_ARCH,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfTorchDynamo,
     run_tests,
     parametrize,
@@ -5777,7 +5779,10 @@ class TestSDPAAccelerator(NNTestCase):
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @onlyCUDA
-    @skipIfRocm  # CK's mem-efficient backward ignores deterministic mode
+    # The AOTriton fp32 attn_fwd kernel (BLOCK_M=256, BLOCK_N=64) is not
+    # run-to-run deterministic on gfx950, so repeated forward passes differ
+    # before the backward even runs. The backward itself is deterministic.
+    @skipIfRocmArch(MI350_ARCH)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     def test_mem_eff_backwards_determinism(self, device):
         # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
