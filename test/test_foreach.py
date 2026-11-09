@@ -1824,18 +1824,20 @@ class TestForeachDevice(TestCase):
         for other_dtype in floating_types_and(torch.half, torch.bfloat16):
             if other_dtype == dtype:
                 continue
-            selfs = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
+            self_tensors = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
             others = [make_tensor(s, dtype=other_dtype, device=device) for s in sizes]
-            ref = [ref_op_(s.clone(), o, alpha=0.5) for s, o in zip(selfs, others)]
+            ref = [
+                ref_op_(s.clone(), o, alpha=0.5) for s, o in zip(self_tensors, others)
+            ]
             ForeachFuncWrapper(foreach_op_)(
-                (selfs, others),
+                (self_tensors, others),
                 device=device,
                 expect_fastpath=other_dtype != torch.float64,
                 alpha=0.5,
             )
-            self.assertEqual(selfs, ref, atol=0, rtol=0)
+            self.assertEqual(self_tensors, ref, atol=0, rtol=0)
             with self.assertRaisesRegex(RuntimeError, "Boolean alpha"):
-                foreach_op_(selfs, others, alpha=True)
+                foreach_op_(self_tensors, others, alpha=True)
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
