@@ -438,9 +438,8 @@ test_tsan() {
 }
 
 test_cuspy() {
-  # Only this config pins libcupti 13.5; the shared images keep requirements-ci.txt's cupti.
-  pip_install 'cupti-python>=13.5,<14' 'nvidia-cuda-cupti>=13.5,<14'
-  # The Cuspy tests skip below CUDA 13.5 + libcupti 13.5; fail instead of passing vacuously.
+  # The Cuspy tests skip below CUDA 13.5 + libcupti 13.5 (the CUDA 13.5 image preinstalls
+  # libcupti 13.5); fail instead of passing vacuously.
   (cd test && python -c "from torch.testing._internal.common_cuda import TEST_CUPTI_V13_5; assert TEST_CUPTI_V13_5, 'Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5'")
   time python test/run_test.py --include \
     profiler/test_cuspy \
