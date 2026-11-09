@@ -4,7 +4,6 @@
 # numerical coverage.
 
 import collections
-import contextlib
 import itertools
 import os
 import pathlib
@@ -40,6 +39,7 @@ from torch._native.cutedsl.dtypes import cute2torch
 from torch._native.cutedsl.plan_cache import LRUCache
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
+    kernel_coltile as ct,
     kernel_general as kg,
     kernel_rowtile as rt,
     kernel_xcta as xc,
@@ -52,17 +52,12 @@ def _plan_tags(trait_key):
     return {key[0][1] for key in kg._PLAN if len(key[0]) > 2 and key[0][2] == trait_key}
 
 
-@contextlib.contextmanager
-def _inner_tree_order():
-    prev = os.environ.get(rt._INNER_TREE_ENV)
-    os.environ[rt._INNER_TREE_ENV] = "1"
-    try:
-        yield
-    finally:
-        if prev is None:
-            os.environ.pop(rt._INNER_TREE_ENV, None)
-        else:
-            os.environ[rt._INNER_TREE_ENV] = prev
+def _route_tags(trait_key):
+    """The tags of every plan trait_key's calls launched, from all reduction kernels."""
+    tags = _plan_tags(trait_key)
+    for cache in (rt._CACHE, ct._CACHE, xc._PLAN):
+        tags |= {key[0] for key in cache if key[1] == trait_key}
+    return tags
 
 
 class _DecodeProbe:
@@ -376,9 +371,10 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
 
-    # 4095 over 64 threads leaves leftover subtrees and a masked 63-lane remainder; count ==
-    # block is a single load. Stride and the view offset are runtime geometry, so they reuse
-    # kernels; shift offsets the input values.
+    # 4095 over 64 threads leaves leftover subtrees and a 63-value tail load with one masked
+    # lane; count == block is a single load, and 200 over 128 one whole load and a tail.
+    # Stride and the view offset are runtime geometry, so cache_sig omits them; shift scales
+    # and offsets the input values.
     @parametrize(
         "count,block,dtype,stride,offset,shift,var_mean",
         [
@@ -386,6 +382,7 @@ class TestKernelGeneral(TestCase):
             (4095, 64, torch.float32, 1, 0, False, False),
             (4096, 64, torch.float32, 1, 0, False, False),
             (128, 128, torch.float32, 1, 0, False, False),
+            (200, 128, torch.float32, 1, 0, False, False),
             (4095, 64, torch.float32, 2, 0, False, False),
             (4095, 64, torch.float32, 2, 1, False, False),
             (4095, 64, torch.float16, 1, 0, False, False),
@@ -417,6 +414,17 @@ class TestKernelGeneral(TestCase):
             block=block,
             uniform_tree=True,
         )
+        plain = kg.ReduceBlock(
+            trait,
+            count=count,
+            num_o=rows,
+            red_pairs=((count, 1),),
+            kept_pairs=((rows, count),),
+            nouts=len(outs),
+            block=block,
+            uniform_tree=True,
+        )
+        self.assertEqual(op.cache_sig, plain.cache_sig)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
         kg._launch(op, key, [kg._flat(x)], outs)
         with torch.backends.python_native.cutedsl.disabled():
@@ -427,9 +435,10 @@ class TestKernelGeneral(TestCase):
 
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
-        # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one.
+        # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one;
+        # 256 = 2 * 128 loads as often but takes a tail-free kernel, as does 384 = 3 * 128.
         trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
-        for count in (300, 383):
+        for count in (256, 300, 383, 384):
             x = torch.randn(17, count, device="cuda")
             out = torch.empty(17, device="cuda")
             op = kg.ReduceBlock(
@@ -441,6 +450,8 @@ class TestKernelGeneral(TestCase):
                 block=128,
                 uniform_tree=True,
             )
+            self.assertEqual(op.tile.uniform_tree_loads, count // 128)
+            self.assertEqual(op.tile.uniform_tree_tail, bool(count % 128))
             kg._launch(
                 op, ("uniform_share", "var") + op.cache_sig, [kg._flat(x)], [out]
             )
@@ -448,8 +459,36 @@ class TestKernelGeneral(TestCase):
                 want = torch.var(x.double(), dim=1).float()
             self.assertEqual(out, want, atol=1e-5, rtol=1e-5)
         self.assertEqual(
-            len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 1
+            len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 3
         )
+
+    def test_uniform_welford_tree_changes_bits(self):
+        """uniform_tree=True must take the tree: its bits differ from the online chain's,
+        and both stay within tolerance of fp64."""
+        torch.manual_seed(0)
+        rows, count = 17, 4096
+        x = torch.randn(rows, count, device="cuda")
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        outs = []
+        for uniform_tree in (True, False):
+            op = kg.ReduceBlock(
+                trait,
+                count=count,
+                num_o=rows,
+                red_pairs=((count, 1),),
+                kept_pairs=((rows, count),),
+                block=64,
+                uniform_tree=uniform_tree,
+            )
+            outs.append(torch.empty(rows, device="cuda"))
+            key = ("uniform_bits", "var") + op.cache_sig
+            kg._launch(op, key, [kg._flat(x)], outs[-1:])
+        with torch.backends.python_native.cutedsl.disabled():
+            want = torch.var(x.double(), dim=1).float()
+        for out in outs:
+            self.assertEqual(out, want, atol=1e-5, rtol=1e-5)
+        tree, online = outs
+        self.assertFalse(torch.equal(tree, online))
 
     @parametrize(
         "op,dtype",
@@ -472,7 +511,8 @@ class TestKernelGeneral(TestCase):
         self.assertGreater(chunk, cfg.block, "threads no longer stride their chunks")
         parts = [x.new_empty(G, dtype=cute2torch[f]) for f in trait.fdtypes]
         outs = [torch.empty(1, device="cuda", dtype=d) for d in out_dtypes]
-        # _reduce_all's two grid-striding stages, at the launch select_all_config picks.
+        # A copy of _reduce_all's two grid-striding stages at the launch select_all_config
+        # picks for B200 index anchors; test_reduction_config pins the selector.
         s1 = kg.ReduceBlock(
             trait,
             count=chunk,
@@ -602,12 +642,16 @@ class TestKernelGeneral(TestCase):
             kept_pairs=(),
             uniform_tree=True,
         )
+        self.assertEqual(kg.ReduceBlock(**tree).tile.uniform_tree_loads, 1024 // 128)
         msg = "the uniform Welford tree needs"
         long = 128 * tile.UNIFORM_TREE_MAX_LOADS + 1
+        long64 = 64 * tile.UNIFORM_TREE_MAX_LOADS + 1
         for bad in (
             dict(trait=trait),
+            dict(count=0, red_pairs=((0, 1),)),
             dict(count=64, red_pairs=((64, 1),)),
             dict(count=long, red_pairs=((long, 1),)),
+            dict(block=64, count=long64, red_pairs=((long64, 1),)),
             dict(red_pairs=((32, 1), (32, 64))),
             dict(from_partials=True),
             dict(gidx_from="chunk"),
@@ -623,12 +667,15 @@ class TestKernelGeneral(TestCase):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
 
     def _assert_replays(
-        self, key, make, dims, trait=None, out_dtype=torch.float32, ref=None
+        self, key, make, dims, tags, trait=None, out_dtype=torch.float32, ref=None
     ):
         """Replay key's recordings on a fresh input from make() and match a fresh call and
-        a torch reference, by default fp32 sums against fp64 ones."""
+        a torch reference, by default fp32 sums against fp64 ones. The calls must launch
+        exactly the plans tagged `tags`."""
         trait = trait or (lambda: T.SumOps(acc=cutlass.Float32))
-        first = kg.replay_reduce(trait, key, make(), dims, out_dtype)
+        # Holding x0 keeps the fresh input from reusing its allocation.
+        x0 = make()
+        first = kg.replay_reduce(trait, key, x0, dims, out_dtype)
         recorded = first.clone()
         entries = lambda: {k: r for k, r in kg._REPLAYS.items() if k[0] == key}  # noqa: E731
         replays = entries()
@@ -660,6 +707,7 @@ class TestKernelGeneral(TestCase):
             self.assertIsNone(out._base)
         self.assertNotEqual(got[0].data_ptr(), got[1].data_ptr())
         self.assertEqual(first, recorded, atol=0, rtol=0)
+        self.assertEqual(_route_tags(key), tags)
 
     @parametrize(
         "case",
@@ -678,46 +726,74 @@ class TestKernelGeneral(TestCase):
             "all_strided",
         ],
     )
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_replay_matches_a_fresh_call(self, case):
+        split, col = {"gensplit1", "gensplit2"}, {"coltile", "coltile2b"}
         shapes = {
-            "row": ((64, 256), [1]),
-            "ragged_row": ((64, 1023), [1]),
-            "wide_row": ((4, 1 << 20), [1]),
-            "prime_row": ((3, 1000003), [1]),
-            "column": ((4096, 256), [0]),
-            "batched_column": ((8, 512, 64), [1]),
-            "general": ((8, 16, 16), [0, 2]),
-            "general_split": ((512, 4, 512), [0, 2]),
-            "offset_row": ((3, 64, 256), [1]),
-            "all_oneshot": ((1000,), None),
-            "all_xcta": ((1 << 22,), None),
-            "all_strided": ((1 << 21,), None),
+            "row": ((64, 256), [1], {"rowtile"}),
+            "ragged_row": ((64, 1023), [1], {"rowtile"}),
+            "wide_row": ((4, 1 << 20), [1], {"xcta"}),
+            "prime_row": ((3, 1000003), [1], split),
+            "column": ((4096, 256), [0], col),
+            "batched_column": ((8, 512, 64), [1], col),
+            "general": ((8, 16, 16), [0, 2], {"reduce"}),
+            "general_split": ((512, 4, 512), [0, 2], split),
+            "offset_row": ((3, 64, 256), [1], {"rowtile"}),
+            "all_oneshot": ((1000,), None, {"rowtile"}),
+            "all_xcta": ((1 << 22,), None, {"xcta"}),
+            "all_strided": ((1 << 21,), None, split),
         }
-        shape, dims = shapes[case]
+        cc = torch.cuda.get_device_capability()
+        if case == "ragged_row" and cc != (10, 0):
+            self.skipTest("the ragged-row route is measured on B200 only")
+        if case == "batched_column" and cc not in kg._BATCHED_COL_CCS:
+            self.skipTest("the batched column route is measured on H100 and B200 only")
+        shape, dims, tags = shapes[case]
         view = {"offset_row": lambda t: t[1], "all_strided": lambda t: t[::2]}
         make = lambda: view.get(case, lambda t: t)(torch.randn(shape, device="cuda"))  # noqa: E731
-        self._assert_replays(f"replay_{case}", make, dims)
+        key = f"replay_{case}"
+        self._assert_replays(key, make, dims, tags)
+        if case == "ragged_row":
+            # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+            plans = lambda: {k for k in rt._CACHE if k[:2] == ("rowtile", key)}  # noqa: E731
+            routed = plans()
+            trait, kw = T.SumOps(acc=cutlass.Float32), {"ragged_vector": True}
+            rt.reduce_row_tile(trait, key, make(), [torch.float32], **kw)
+            self.assertEqual(plans(), routed)
 
-    @parametrize("case", ["row", "column", "general", "all"])
+    @parametrize("case", ["row", "column", "ordered_column", "general", "all"])
     def test_replay_matches_a_fresh_inner_tree_call(self, case):
-        shape, dims = {
-            "row": ((64, 256), [1]),
-            "column": ((4096, 256), [0]),
-            "general": ((512, 4, 512), [0, 2]),
-            "all": ((1 << 22,), None),
+        # "column" has too few columns for the ordered column kernel, so it takes the
+        # indexed tree. "ordered_column" clears the ordered kernel's split band for narrow
+        # views (C = 128 from R = 32768) with exact partitions, so one stage-1 kernel's
+        # partials fold through the shared indexed-tree combine.
+        shape, dims, tags = {
+            "row": ((64, 256), [1], {"rowitree"}),
+            "column": ((4096, 256), [0], {"genitree"}),
+            "ordered_column": ((65536, 128), [0], {"ordered_col1", "genitree2"}),
+            "general": ((512, 4, 512), [0, 2], {"genitree1", "genitree2"}),
+            "all": ((1 << 22,), None, {"rowitree1", "rowitree2"}),
         }[case]
+        cc = torch.cuda.get_device_capability()
+        if case == "ordered_column" and cc not in kg._ORDERED_COL_CCS:
+            self.skipTest("the ordered column route is measured on B200 only")
         make = lambda: torch.randn(shape, device="cuda")  # noqa: E731
         # Record, replay and the fresh call all run under the inner-tree order.
-        with _inner_tree_order():
-            self._assert_replays(f"replay_itree_{case}", make, dims)
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
+            self._assert_replays(f"replay_itree_{case}", make, dims, tags)
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_replay_shares_grid_stride_plans_across_offsets(self):
         # A prime length makes the cross-CTA split decline, leaving the grid-striding
         # all1/all2 launches, whose plans box the input offset per call.
         L, key = 1000003, "replay_all_prime"
         for offset in (0, 1):
             make = lambda o=offset: torch.randn(L + o, device="cuda")[o:]  # noqa: E731
-            self._assert_replays(key, make, None)
+            self._assert_replays(key, make, None, {"all1", "all2"})
         plans = [k for k in kg._PLAN if k[0][2] == key]
         self.assertEqual(sorted(k[0][1] for k in plans), ["all1", "all2"])
 
@@ -727,6 +803,8 @@ class TestKernelGeneral(TestCase):
             "replay_argmax",
             lambda: torch.randn(1 << 16, device="cuda"),
             None,
+            # Index traits decline the cross-CTA split and 256 KiB exceeds one-shot rows.
+            {"all1", "all2"},
             trait=lambda: T.ArgMaxOps(acc=cutlass.Float32),
             out_dtype=torch.int64,
             ref=torch.argmax,
@@ -741,8 +819,13 @@ class TestKernelGeneral(TestCase):
         self.assertIsNone(replay)
         x.normal_()
         got = kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
-        self.assertEqual(got, x.argmax().int())
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax().int()
+        self.assertEqual(got, want)
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_replay_keys_on_alignment_and_inner_tree_order(self):
         trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
         aligned = torch.randn(64, 256, device="cuda")
@@ -751,8 +834,10 @@ class TestKernelGeneral(TestCase):
         shifted = torch.empty(0, device="cuda").set_(storage, 0, (64, 256), (256, 1))
         for x in (aligned, shifted, aligned):
             got = kg.replay_reduce(trait, "replay_keys", x, 1, torch.float32)
-            self.assertEqual(got, x.sum(dim=1))
-        with _inner_tree_order():
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1)
+            self.assertEqual(got, want)
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
             got = kg.replay_reduce(trait, "replay_keys", aligned, 1, torch.float32)
         want = kg.reduce_dim(
             trait(), "x", aligned, 1, torch.float32, order="inner_tree"
@@ -765,7 +850,9 @@ class TestKernelGeneral(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         for x in (base[1], base[2]):
             got = kg.reduce_dim(trait, "offset_plan", x, [0, 2], torch.float32)
-            self.assertEqual(got, x.sum(dim=(0, 2)))
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=(0, 2))
+            self.assertEqual(got, want)
         self.assertEqual(len([k for k in kg._PLAN if k[0][2] == "offset_plan"]), 1)
 
     def test_no_suppressed_asserts_survive(self):

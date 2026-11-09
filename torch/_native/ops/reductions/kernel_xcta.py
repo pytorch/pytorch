@@ -18,7 +18,7 @@ import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
-from ...cutedsl.plan_cache import _MISS, cached_plan, LRUCache
+from ...cutedsl.plan_cache import cached_plan, LRUCache
 from ...utils.device import check_current
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
@@ -57,7 +57,7 @@ def select_xcta_config(
 ) -> _XctaConfig:
     # B200 single-row Welford at 256 MiB and 2 GiB takes longer sub-rows.
     if (
-        cc == (10, 0)
+        cc in _RB._B200_CCS
         and dtype in _RB._B200_DTYPES
         and M == 1
         and N * dtype.itemsize in (256 << 20, 2 << 30)
@@ -244,12 +244,13 @@ def _reduce_row_xcta(
         _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
         device,
     )
-    # One lookup: a concurrent insert or eviction must not read as a refusal.
-    geom = _GEOM.get(gkey, _MISS)
-    if geom is _MISS:
-        geom = _GEOM[gkey] = _build_geom(
+    geom = cached_plan(
+        _GEOM,
+        gkey,
+        lambda: _build_geom(
             trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target
-        )
+        ),
+    )
     if geom is None:  # memoized refusal (prime / poorly-factored N) -> K0
         return None
     C, s, fn, rexts, rstrides, kexts, kstrides, cnt, pn, s1nc, s1nw = geom

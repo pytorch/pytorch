@@ -27,14 +27,23 @@ import cutlass
 from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
 
-# Welford outputs of the traits the test keys name.
+# Trait types and Welford outputs of the traits the test labels name.
+_TYPES = {
+    "sum": T.SumOps,
+    "mean": T.MeanOps,
+    "amax": T.AMaxOps,
+    "argmaxi32": T.ArgMaxOps,
+    "var0": T.WelfordOps,
+    "var1": T.WelfordOps,
+    "varmean0": T.VarMeanOps,
+}
 _WELFORD_OUTS = {"var0": 1, "var1": 1, "varmean0": 2}
 
 
 class TestColumnConfig(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
+    def select(self, dtype=torch.float32, size=256, columns=4096, key="sum", **kwargs):
         itemsize = dtype.itemsize
         args = dict(
             cc=(10, 3),
@@ -43,14 +52,14 @@ class TestColumnConfig(TestCase):
             columns=columns,
             batches=1,
             nfields=1,
-            trait_key="sum",
+            trait_type=_TYPES[key],
             itemsize=itemsize,
             acc_bits=32,
             nouts=1,
             alignment=16,
+            welford_outs=_WELFORD_OUTS.get(key, 0),
         )
         args.update(kwargs)
-        args.setdefault("welford_outs", _WELFORD_OUTS.get(args["trait_key"], 0))
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
@@ -223,14 +232,7 @@ class TestColumnConfig(TestCase):
         self, dtype, size, columns, key, fields, rule, expected
     ):
         """Pin each SM107 unordered-column launch family at its measured size anchors."""
-        cfg = self.select(
-            dtype,
-            size,
-            columns,
-            cc=(10, 7),
-            trait_key=key,
-            nfields=fields,
-        )
+        cfg = self.select(dtype, size, columns, key, cc=(10, 7), nfields=fields)
         got = (cfg.npar, cfg.vec, cfg.partial_layout, cfg.combine_columns)
         self.assertEqual(got + (cfg.kernel_order,), expected)
         self.assertEqual(cfg.rule, rule)
@@ -263,7 +265,7 @@ class TestColumnConfig(TestCase):
             # bf16 minimums, and a column_anchor seed for a simple trait.
             (torch.float32, "mean", 262144, 256, 32, 1, (torch.float32,), (32, 16)),
             (torch.float32, "var0", 65536, 1024, 8, 3, (torch.float32,), (64, 16)),
-            # One-output Welford traits share the var0 entry.
+            # One-output Welford traits of any correction share one entry.
             (torch.float32, "var1", 65536, 1024, 8, 3, (torch.float32,), (64, 16)),
             (torch.float32, "var0", 65536, 256, 8, 3, (torch.float32,), (0, 16)),
             (torch.bfloat16, "sum", 131072, 256, 16, 1, (torch.float32,), (8, 16)),
@@ -306,10 +308,10 @@ class TestColumnConfig(TestCase):
         return ct.select_ordered_col_config(
             (10, 7),
             dtype,
-            key,
             columns,
             1,
             partials,
+            trait_type=_TYPES[key],
             nfields=fields,
             nouts=len(outputs),
             welford_outs=_WELFORD_OUTS.get(key, 0),
@@ -339,10 +341,11 @@ class TestColumnConfig(TestCase):
     )
     def test_sm107_hand_offs(self, dtype, size, columns, key, fields, order):
         """Pin which SM107 columns hand off to the ordered kernel."""
-        cfg = self.select(
-            dtype, size, columns, cc=(10, 7), trait_key=key, nfields=fields
-        )
+        cfg = self.select(dtype, size, columns, key, cc=(10, 7), nfields=fields)
         self.assertEqual(cfg.kernel_order, order)
+        if size < 256:
+            rule = f"rubin_c{columns}_ordered" if order == "inner_tree" else "default"
+            self.assertEqual(cfg.rule, rule)
 
     @parametrize(
         "dtype,size,columns,key,fields,out",
@@ -355,8 +358,9 @@ class TestColumnConfig(TestCase):
     def test_sm107_hand_offs_need_ordered_outputs(
         self, dtype, size, columns, key, fields, out
     ):
-        """Outputs the ordered kernel cannot store keep SM107 columns on the linear kernel."""
-        args = dict(cc=(10, 7), trait_key=key, nfields=fields)
+        """Outputs other than those SM107's mappings were measured with (_sm107_outputs)
+        keep SM107 columns on the linear kernel."""
+        args = dict(cc=(10, 7), key=key, nfields=fields)
         natural = torch.float32 if fields == 1 else dtype
         cfg = self.select(dtype, size, columns, out_dtypes=(natural,), **args)
         self.assertEqual(cfg.kernel_order, "inner_tree")
@@ -385,10 +389,10 @@ class TestColumnConfig(TestCase):
         cfg = ct.select_ordered_col_config(
             (10, 7),
             torch.float32,
-            "mean",
             1024,
             1,
             64,
+            trait_type=T.MeanOps,
             nfields=1,
             nouts=1,
             welford_outs=0,
@@ -405,10 +409,10 @@ class TestColumnConfig(TestCase):
         cfg = ct.select_ordered_col_config(
             (10, 7),
             torch.bfloat16,
-            key,
             4096,
             1,
             1,
+            trait_type=_TYPES[key],
             nfields=3,
             nouts=nouts,
             welford_outs=nouts,
@@ -433,21 +437,21 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.combine_columns, 0)
 
     @parametrize(
-        "dtype,key,rows,columns,partials,full_tiles,expected",
+        "dtype,trait_type,rows,columns,partials,full_tiles,expected",
         [
             # Looped views keep the default mapping, with or without full tiles.
-            (torch.float32, "sum", 8192, 4096, 1, False, None),
-            (torch.float16, "sum", 8192, 4096, 1, True, None),
-            (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
-            (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
-            (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
-            (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
-            (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
-            (torch.bfloat16, "amin", 32768, 4096, 4, True, (0, 32)),
+            (torch.float32, T.SumOps, 8192, 4096, 1, False, None),
+            (torch.float16, T.SumOps, 8192, 4096, 1, True, None),
+            (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
+            (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, True, (0, 16)),
+            (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, True, (0, 32)),
+            (torch.bfloat16, T.AMinOps, 32768, 4096, 4, True, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
-        self, dtype, key, rows, columns, partials, full_tiles, expected
+        self, dtype, trait_type, rows, columns, partials, full_tiles, expected
     ):
         """Pin B200 ordered column widths, which apply to any outputs, independent of
         SM107 guards."""
@@ -456,10 +460,10 @@ class TestColumnConfig(TestCase):
                 cfg = ct.select_ordered_col_config(
                     (10, 0),
                     dtype,
-                    key,
                     columns,
                     1,
                     partials,
+                    trait_type=trait_type,
                     nfields=1,
                     nouts=1,
                     welford_outs=0,
@@ -481,7 +485,7 @@ class TestColumnConfig(TestCase):
         args = dict(
             cc=(10, 0),
             dtype=torch.float32,
-            trait_key="sum",
+            trait_type=T.SumOps,
             columns=1024,
             batches=1,
             partials=8,
@@ -496,7 +500,7 @@ class TestColumnConfig(TestCase):
         for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}):
             with self.subTest(**updates):
                 self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
-        index = {"trait_key": "argmaxi32", "nfields": 2, "out_dtypes": (torch.int32,)}
+        index = {"trait_type": T.ArgMaxOps, "nfields": 2, "out_dtypes": (torch.int32,)}
         cfg = ct.select_ordered_col_config(**(args | index))
         want = ct.OrderedColConfig(0, tile_columns=ct.WARP, full_tiles=True)
         self.assertEqual(cfg, want)
