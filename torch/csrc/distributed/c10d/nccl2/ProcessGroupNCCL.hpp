@@ -244,8 +244,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     // A lazy_init communicator is created by every member on the first
     // operation, so ranks agree once it has started.
-    return !options_c10d_->lazy_init ||
-        init_state_ != InitializationState::UNINITIALIZED;
+    return !lazy_init_ || init_state_ != InitializationState::UNINITIALIZED;
   }
   bool isInitialized() override;
   bool supportsShrinking() const override {
@@ -504,6 +503,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
+  // The device to use when none is requested: LOCAL_RANK, else the global
+  // rank, modulo the device count.
+  at::Device defaultDevice() const;
   // options_c10d_->config with commName resolved for a new communicator.
   ncclConfig_t commConfig();
   void finalize();
@@ -705,6 +707,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+  // options_c10d_->lazy_init, or a single-rank group bound without a device.
+  bool lazy_init_;
 
   std::mutex ephemeral_timeout_mutex_;
   std::chrono::milliseconds ephemeral_timeout_active_{0};

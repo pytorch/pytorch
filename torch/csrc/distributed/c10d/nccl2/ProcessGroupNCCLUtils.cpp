@@ -419,10 +419,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() {
-  if (options_c10d_->lazy_init &&
-      init_state_ == InitializationState::UNINITIALIZED &&
-      getBoundDeviceId().has_value()) {
-    ensureInitialized(*getBoundDeviceId());
+  if (lazy_init_ && init_state_ == InitializationState::UNINITIALIZED) {
+    // An unbound single-rank group keeps its default device in device_.
+    const auto device = getBoundDeviceId().value_or(device_);
+    if (device.has_index()) {
+      ensureInitialized(device);
+    }
   }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,

@@ -1680,8 +1680,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "enable_reconfigure",
           &::c10d::DistributedBackendOptions::enable_reconfigure)
       .def_readwrite(
-          "device_requested",
-          &::c10d::DistributedBackendOptions::device_requested);
+          "device_id", &::c10d::DistributedBackendOptions::device_id);
 
   py::class_<
       ::c10d::DMAConnectivity,
@@ -4553,11 +4552,9 @@ Attributes:
             operation instead of when the group is bound to a device, so a
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
-            False. A single-rank group built by ``init_process_group`` or
-            ``new_group`` without options, a ``device_id``, or
-            ``enable_reconfigure`` uses ``lazy_init=True``. ``new_group``
-            counts the default group's device as requested once the default
-            group's communicator exists.
+            False. A single-rank group is also created on first use, and
+            left unbound, when it gets no device: neither a ``device_id`` nor
+            a device ``new_group`` inherits from a bound default group.
 
 Example::
     >>> import torch.distributed as dist
