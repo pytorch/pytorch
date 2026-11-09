@@ -1,12 +1,14 @@
 """Share the backward's recompute with the forward.
 
-The partitioner recomputes a checkpointed region by copying its forward ops
+The partitioner recomputes a checkpointed region, and anything else it chooses
+to recompute (e.g. under activation_memory_budget), by copying the forward ops
 into the backward graph. The forward and backward are compiled separately, so
 the two copies can lower to different kernels and the recompute can drift
 numerically from the forward (gh-186572). With
-torch._functorch.config.deterministic_recompute, each convex piece of a
-checkpointed region's recompute is outlined into a subgraph that both graphs
-invoke, compiled with Inductor deterministic=True so both lowerings match.
+torch._functorch.config.deterministic_recompute, each convex piece of the
+recompute (per checkpointed region, plus one region for the rest) is outlined
+into a subgraph that both graphs invoke, compiled with Inductor
+deterministic=True so both lowerings match.
 
 The pass runs after partitioning because that is the first point where the
 recomputed ops are known: a selective-checkpointing policy is evaluated per aten
@@ -185,22 +187,61 @@ def deterministic_recompute(
         if not tensors or exact_inputs:
             exact.add(c)
     direct -= exact
-    # A constant outside every region that the backward reads directly is read
-    # from its own copy there, which could differ; say so.
-    outside = (copies & constants) - in_regions - exact
-    for c in fw_module.graph.nodes:
-        if c in outside:
-            if any(u.name not in copy_names for u in bw_body[c.name].users):
-                log.info(
-                    "deterministic_recompute: %s%s left as partitioned: the "
-                    "backward reads it directly",
-                    prefix,
-                    c.name,
-                )
     copied = (copies & constants) - direct
     copied |= set(fw_module.graph.find_nodes(op="get_attr"))
 
+    # A node that another region reads (e.g. a weight cast that CSE merged
+    # across checkpointed calls of one layer) isn't private to its region: the
+    # backward needs it whenever any of those regions runs. It gets a piece of
+    # its own, together with what it's computed from in its region (which has
+    # to run first anyway), instead of tying the rest of its region to the
+    # earliest of those times.
+    # (A recomputed input from another region is shared itself; a multi-output
+    # op keeps its readers. A reader that isn't recomputed is in another region
+    # only if it has an ac_graph_id; otherwise it's an ordinary forward op.)
+    region_of = {n: key for key, nodes in regions.items() for n in nodes}
+
+    def _in_other_region(n: torch.fx.Node, u: torch.fx.Node) -> bool:
+        if u in region_of:
+            return region_of[u] != region_of[n]
+        key = u.meta.get("ac_graph_id")
+        return key is not None and key != region_of[n]
+
+    candidates = in_regions - constants
+    shared = {n for n in candidates if any(_in_other_region(n, u) for u in n.users)}
+
+    def _close(stack: list[torch.fx.Node]) -> None:
+        while stack:
+            n = stack.pop()
+            readers = n.users if isinstance(n.meta.get("val"), (tuple, list)) else ()
+            for a in (*n.all_input_nodes, *readers):
+                if a in candidates and a not in shared:
+                    shared.add(a)
+                    stack.append(a)
+
+    _close(list(shared))
+    # Recompute outside checkpoint regions isn't needed at one time in the
+    # backward the way a checkpointed region is, so the same applies between its
+    # pieces: a node another of its pieces reads (e.g. a residual add the next
+    # layer's recompute reads) gets a piece of its own, until none does.
     order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
+    while True:
+        rest = [n for n in regions.get(None, ()) if n not in shared and n not in direct]
+        # (A node replayed into several pieces, e.g. w.t() of a weight, maps to
+        # None.)
+        piece_of: dict[torch.fx.Node, int | None] = {}
+        for i, piece in enumerate(_split_region(rest, copied, order)):
+            for n in piece:
+                piece_of[n] = None if n in piece_of else i
+        new = {
+            n
+            for n, i in piece_of.items()
+            if i is not None and any(piece_of.get(u, i) != i for u in n.users)
+        }
+        if not new:
+            break
+        shared |= new
+        _close(list(new))
 
     changed = False
     # The backward node holding each value a shared piece returns, so later
@@ -242,8 +283,9 @@ def deterministic_recompute(
     order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
     pieces: list[list[torch.fx.Node]] = []
     for nodes in regions.values():
-        rest = [n for n in nodes if n not in direct and n in order]
-        pieces += _split_region(rest, copied, order)
+        nodes = [n for n in nodes if n not in direct and n in order]
+        pieces += _split_region([n for n in nodes if n in shared], copied, order)
+        pieces += _split_region([n for n in nodes if n not in shared], copied, order)
     _share(_dependency_order(pieces, order))
     if changed:
         for gm in (fw_module, bw_module):
@@ -263,8 +305,9 @@ def _recomputed_copies(
 ) -> tuple[set[torch.fx.Node], dict[Any, list[torch.fx.Node]]]:
     """The forward nodes whose copies the backward recomputes, given the values
     the forward ``saved`` for it, and those of them in each checkpoint region
-    (keyed by ac_graph_id, in graph order). Logs where the backward's recompute
-    stops matching the forward, naming the node after ``prefix``."""
+    (keyed by ac_graph_id, in graph order; None for those outside regions).
+    Logs where the backward's recompute stops matching the forward, naming the
+    node after ``prefix``."""
     # Both graphs are extracted from the joint graph, so the backward's
     # recomputed copy of a forward node keeps its name; checkpointed nodes carry
     # their region's ac_graph_id. A matching name alone isn't trusted: a copy
@@ -309,10 +352,10 @@ def _recomputed_copies(
             continue
         copies.add(n)
         # Recompute the partitioner chose outside checkpoint regions (e.g. under
-        # activation_memory_budget) is a copy in no region; pieces recompute
-        # what they read from it if it's cheap (see _share_region).
-        if (key := n.meta.get("ac_graph_id")) is not None:
-            regions[key].append(n)
+        # activation_memory_budget) forms one more region. A getitem goes with
+        # its op, even if a custom pass moved only one of them out of a region.
+        op = n.args[0] if n.target is operator.getitem else n
+        regions[op.meta.get("ac_graph_id")].append(n)
     return copies, regions
 
 
@@ -642,8 +685,8 @@ def _share_region(
     node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
 
     # The piece's two calls read their inputs from different graphs. An input
-    # each graph computes separately (a copy no earlier piece shares, e.g.
-    # recompute outside the region) could differ between them, so the piece
+    # each graph computes separately (a copy no earlier piece shares, e.g. one
+    # of a piece left as partitioned) could differ between them, so the piece
     # recomputes it itself instead, with the attributes it reads, and returns
     # it if something else reads it, so that later pieces read it too. That
     # moves its work into the piece, which runs wherever the call is placed and
@@ -725,8 +768,8 @@ def _share_region(
         elif n not in inline and not isinstance(val, (torch.Tensor, tuple, list)):
             return _skip(f"{n.name} isn't a tensor or a scalar")
     if len(inline) == len(s_nodes):
-        # Only views are recomputed: no kernels, nothing to drift.
-        return _skip("it recomputes only views, so there is nothing to share")
+        # Only views and scalars are recomputed: no kernels, nothing to drift.
+        return _skip("it recomputes only views and scalars: nothing to share")
     contracted_names = {n.name for n in s_nodes if n not in inline}
 
     # A node is used outside the slice if a node outside it reads it, in either

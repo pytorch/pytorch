@@ -481,11 +481,14 @@ enable_complex_wrapper: bool = False
 # Experimental: make the backward's recompute lower identically to the forward,
 # so recomputed activations can't drift from it numerically (gh-186572); see
 # _aot_autograd/deterministic_recompute.py. This covers activation-checkpointed
-# regions at the top level and in nested_compile_region bodies, but not in a
-# region called from another region, nor inside other HOPs such as torch.cond
-# (those aren't logged). It costs memory and time: the shared recompute runs
-# as its own subgraph, so the forward also writes out values only the backward
-# reads, and neither graph can fuse across it.
+# regions at the top level and in nested_compile_region bodies (but not in a
+# region called from another region, nor inside other HOPs such as torch.cond,
+# which aren't logged), and the recompute the partitioner chooses itself (cheap
+# ops such as pointwise ones by default, more under activation_memory_budget).
+# It costs memory and time: the shared recompute runs as its own subgraph, so
+# the forward also writes out values only the backward reads, which under a
+# budget can take more memory than no budget at all, and neither graph can fuse
+# across it (bandwidth-bound regions measured up to ~1.6x slower).
 # Recompute it can't share is left as partitioned (TORCH_LOGS=aot says why).
 # Not applied with enable_complex_wrapper or compiled autograd; rejected under
 # non-strict train-step tracing.
