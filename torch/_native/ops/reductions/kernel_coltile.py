@@ -75,7 +75,9 @@ _ORDERED_LANE_UNROLL = 4
 
 
 class OrderedColConfig(NamedTuple):
-    # Useful 32-column blocks (partials * columns / WARP), whatever tile_columns is.
+    # Minimum useful 32-column blocks (partials * columns / WARP), whatever tile_columns
+    # is. Views the selector skips (batched, or below min_blocks) take the default
+    # mapping, so a non-default entry compiles a second kernel for the same R.
     min_blocks: int
     worker_warps: int = _ORDERED_WORKER_WARPS
     tile_columns: int = WARP
@@ -84,8 +86,9 @@ class OrderedColConfig(NamedTuple):
     out_dtypes: tuple[torch.dtype, ...] | None = None
 
 
-# kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS; entries for
-# other architectures serve direct reduce_ordered_col calls alone.
+# kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
+# _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered); entries
+# for other architectures serve direct reduce_ordered_col calls alone.
 _ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[type, OrderedColConfig]] = {}
 
 
@@ -118,16 +121,18 @@ def select_ordered_col_config(
     default mapping and split plans decline.
 
     Entries are keyed by trait type. Split plans (partials > 1) without an entry take a
-    clamp-free fallback on _ORDERED_COL_CCS, which applies to any outputs. Mappings apply
-    to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and, if the mapping
-    has out_dtypes, only to those outputs. full_tiles means a split plan or an exact
-    looped plan; with rows, B200 single-field views whose mapping has full tiles then
-    take measured tile widths, and C 128-257 a band of widths. Views that fill fewer than
-    the mapping's min_blocks useful 32-column blocks get None.
+    fallback on _ORDERED_COL_CCS that applies to any outputs and inherits full_tiles
+    (ragged splits still run clamped). Mappings apply to unbatched _ORDERED_COL_DTYPES
+    views with 32-bit accumulators and, if the mapping has out_dtypes, only to those
+    outputs. full_tiles says whether all of the plan's tiles are complete, i.e. a split
+    plan or an exact looped plan; only the split fallback reads it. With rows, B200
+    single-field views whose mapping has full tiles take measured tile widths, and C
+    128-257 a band of widths. Views that fill fewer than the mapping's min_blocks
+    useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
     # Looped exact columns ran within 1% with and without address clamps on B200, so
-    # only split plans take the clamp-free fallback.
+    # only split plans take the fallback.
     if (
         cfg is None
         and cc in kg._ORDERED_COL_CCS
@@ -146,7 +151,8 @@ def select_ordered_col_config(
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors. The default route reaches C
         # 128-191 from R = 32768 (kg._ORDERED_SPLIT_NARROW_MIN_R) and C >= 192 from
-        # R = 24577.
+        # R = 24577. On ragged (clamped) splits, R 32769-49153 and C 128-256, the band
+        # widths ran up to 1.7x the default mapping (fp32/bf16 sum, count_nonzero, all).
         elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
             width = WARP if partials >= 16 and columns == 257 else 16
             cfg = cfg._replace(tile_columns=width)
@@ -433,15 +439,15 @@ class _OrderedColReduce:
         self.trait = trait
         self.plan = plan
         self.R = R
-        # C and the batch count are runtime, so each R compiles once. Each leaf costs an
-        # address multiply-add that a compile-time C folds into the load, but the clamp
-        # keeps addresses independent: against per-C kernels, B200 sum, argmax and
-        # var_mean (fp32/bf16) ran at 1.04x geomean (0.79-1.70x) for looped R 128-8192
-        # and 1.18x (0.69-1.68x) for split R 32768-131072, and a new C skips a 0.8 s
-        # (median) compile. Full tiles read rows in order, where per-C kernels fold the
-        # offsets into loads: there runtime C ran at 0.93x looped and 0.97x split
-        # (best tile mode each; short looped argmax 0.68-0.79x). Row views take a
-        # 64-bit stride once R * C needs one.
+        # C and the batch count are runtime, so each R compiles once per mapping (see
+        # OrderedColConfig.min_blocks). Each leaf costs an address multiply-add that a
+        # compile-time C folds into the load, but the clamp keeps addresses independent:
+        # against per-C kernels, B200 sum, argmax and var_mean (fp32/bf16) ran at 1.04x
+        # geomean (0.79-1.70x) for looped R 128-8192 and 1.18x (0.69-1.68x) for split R
+        # 32768-131072, and a new C skips a 0.8 s (median) compile. Full tiles read rows
+        # in order, where per-C kernels fold the offsets into loads: there runtime C ran
+        # at 0.93x looped and 0.97x split (best tile mode each; short looped argmax
+        # 0.68-0.79x). Row views take a 64-bit stride once R * C needs one.
         self.wide = R * C >= _INT32_LIMIT
         self.nouts = nouts
         # Split plans launch one block row per partition.
@@ -935,8 +941,6 @@ def _reduce_col_tile(
         npar=npar,
         vec=vec,
     )
-    if cfg.kernel_order not in ("linear", "inner_tree"):
-        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
