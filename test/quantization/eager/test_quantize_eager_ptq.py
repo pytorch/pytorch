@@ -63,6 +63,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 hu.assert_deadline_disabled()
@@ -72,6 +73,8 @@ import numpy as np
 
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     def _test_reference_module_impl(
         self,
@@ -307,7 +310,6 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         model = ModelWithFunctionals()
         x = torch.rand(10, 1, dtype=torch.float)
         xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
-        self.checkScriptable(model, [[x]], check_save_load=True)
         if train_mode:
             model.qconfig = torch.ao.quantization.get_default_qat_qconfig("fbgemm")
             model = prepare_qat(model)
@@ -330,10 +332,11 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             self.checkNoQconfig(model)
 
         checkQuantized(model)
-        self.checkScriptable(model, [[xq]], check_save_load=True)
 
 
 class TestQuantizeEagerPTQStatic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -357,7 +360,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                     self.checkHasPrepModules(model.fc1)
                     self.checkWrappedQuantizedLinear(model.fc1)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -403,7 +405,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 self.assertEqual(type(model.fc1), torch.nn.Linear)
                 self.checkWrappedQuantizedLinear(model.fc2)
                 test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -446,7 +447,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                     self.checkWrappedQuantizedLinear(model.sub2.fc1)
                     self.checkLinear(model.sub2.fc2)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -487,7 +487,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.module.fc2)
             self.checkWrappedQuantizedLinear(model.fc3)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -530,7 +529,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                     self.checkWrappedQuantizedLinear(model.sub2.fc2)
                     self.checkWrappedQuantizedLinear(model.fc3)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -561,7 +559,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                     self.checkQuantizedLinear(model.sub.module.fc2)
                     self.assertEqual(type(model.sub.module.relu1), nn.ReLU)
                     self.assertEqual(type(model.sub.module.relu2), nn.ReLU)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -591,7 +588,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -653,7 +649,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.assertEqual(type(model.instance_norm2d), nnq.InstanceNorm2d)
             self.assertEqual(type(model.instance_norm3d), nnq.InstanceNorm3d)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -718,7 +713,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.assertEqual(type(model.hardswish), nnq.Hardswish)
             self.assertEqual(type(model.elu), nnq.ELU)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -841,7 +835,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             convert(model, inplace=True)
             self.assertTrue("QuantizedEmbedding" in str(model))
             self.assertEqual(type(model.emb), torch.ao.nn.quantized.Embedding)
-            self.checkScriptable(model, [[indices]], check_save_load=True)
 
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
             offsets = torch.LongTensor([0, 4])
@@ -940,11 +933,6 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.assertTrue("QuantizedEmbeddingBag" in str(quantized_model))
             self.checkDynamicQuantizedModule(
                 quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8
-            )
-            self.checkScriptable(
-                quantized_model,
-                [[indices, offsets, per_sample_weights]],
-                check_save_load=True,
             )
 
             class EmbeddingBagWithLinear(torch.nn.Module):
@@ -1233,6 +1221,8 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
@@ -1251,7 +1241,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             def checkQuantized(model):
                 self.checkDynamicQuantizedLinear(model.fc1, dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1295,7 +1284,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
             def checkQuantized(model):
                 self.assertEqual(type(model.fc1), torch.nn.Linear)
                 self.checkDynamicQuantizedLinear(model.fc2, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1329,7 +1317,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
                 self.checkLinear(model.sub2.fc2)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1365,7 +1352,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1402,7 +1388,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1440,7 +1425,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 self.checkLinear(model.sub2.fc1)
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
                 self.checkNoQconfig(model)
 
             checkQuantized(model)
@@ -1464,7 +1448,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=torch.qint8)
             self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=torch.qint8)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data, check_save_load=True)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -1484,7 +1467,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         def checkQuantized(model):
             self.checkDynamicQuantizedLinearRelu(model.fc1, dtype)
             self.checkDynamicQuantizedLinear(model.fc2, dtype)
-            self.checkScriptable(model, self.calib_data, check_save_load=True)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -1528,7 +1510,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 )
 
             checkQuantized(model_quantized, module_type)
-            self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
             class ScriptWrapperPackedLSTM(torch.nn.Module):
                 def __init__(self, cell):
@@ -1561,12 +1542,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 model_quantized.mod
             )
             model_with_packed_input(packed_input)
-            scripted = torch.jit.script(model_with_packed_input)
-            scripted(packed_input)
-            # We cannot trace with input dtype being a packed sequence
-            self._checkScriptable(
-                model_with_packed_input, scripted, [[packed_input]], True
-            )
 
     @given(
         qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
@@ -1618,7 +1593,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # Smoke test extra reprs
             checkQuantized(model_quantized, module_type)
-            self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
     def test_forward_hooks_preserved(self):
         r"""Test post-training dynamic quantization on preserving

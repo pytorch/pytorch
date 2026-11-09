@@ -9,7 +9,6 @@ import pprint
 import pickle
 import collections
 import unittest
-import os
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -49,8 +48,7 @@ from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
 
-if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
-    # This test is not supported on ARM
+if torch.version.cuda and not torch.cuda.is_available():
     print(
         "Skipping due to failing when cuda build runs on non cuda machine, "
         + "see https://github.com/pytorch/pytorch/pull/150059 for example"
@@ -351,13 +349,7 @@ def implements_tensor_like(torch_function):
 def generate_tensor_like_torch_implementations():
     untested_funcs = []
     testing_overrides = get_testing_overrides()
-    # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
-    # function sample_functional.  Depending on what order you run pytest
-    # collection, this may trigger the error here.  This is a hack to fix
-    # the problem.  A more proper fix is to make the "not tested" check
-    # a test on its own, and to make sure the monkeypatch is only installed
-    # for the span of the relevant test (and deleted afterwards)
-    testing_ignore = {"sample_functional", "autocast"}
+    testing_ignore = {"autocast"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides and func.__name__ not in testing_ignore:
@@ -1996,6 +1988,12 @@ class TestTorchFunctionRedispatch(TestCase):
         filtered = self._filter_log(call_log, {"bar"})
         call_log_str = '\n'.join(f"{entry[0]}" for entry in filtered)
         self.assertExpectedInline(call_log_str, """bar""")
+
+    def test_const_data_ptr(self):
+        x = torch.ones(1)
+        wrapped = RedispatchTensor(x)
+        self.assertEqual(wrapped.const_data_ptr(), x.const_data_ptr())
+        self.assertEqual(len(wrapped.call_log), 1)
 
     def test_skip_to_inner(self):
         call_log = []

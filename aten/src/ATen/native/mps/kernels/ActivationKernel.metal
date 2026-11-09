@@ -45,23 +45,6 @@ REGISTER_BINARY_ALPHA_OP(shrink_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 
-struct relu_functor {
-  template <typename T>
-  inline T operator()(const T x) {
-    return x < T(0) ? T(0) : x;
-  }
-};
-
-REGISTER_UNARY_OP(relu, float, float);
-REGISTER_UNARY_OP(relu, half, half);
-REGISTER_UNARY_OP(relu, bfloat, bfloat);
-REGISTER_UNARY_OP(relu, long, long);
-REGISTER_UNARY_OP(relu, int, int);
-REGISTER_UNARY_OP(relu, short, short);
-REGISTER_UNARY_OP(relu, char, char);
-REGISTER_UNARY_OP(relu, uchar, uchar);
-REGISTER_UNARY_OP(relu, bool, bool);
-
 struct hardsigmoid_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -121,14 +104,10 @@ REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
 struct elu_functor {
   template <typename T>
-  inline T operator()(const T self_, const ELUParams<T> params) {
-    using op_T = opmath_t<T>;
-    auto alpha = static_cast<op_T>(params.alpha);
-    auto scale = static_cast<op_T>(params.scale);
-    auto input_scale = static_cast<op_T>(params.input_scale);
-    auto self = static_cast<op_T>(self_);
-    auto neg_res = alpha * (::metal::precise::exp(self * input_scale) - 1);
-    return static_cast<T>(scale * (self < 0 ? neg_res : self));
+  inline T operator()(const T self_, const ELUParams params) {
+    auto self = static_cast<float>(self_);
+    auto neg_res = params.alpha * c10::metal::expm1f(self * params.input_scale);
+    return static_cast<T>(params.scale * (self < 0 ? neg_res : self));
   }
 };
 
@@ -137,13 +116,12 @@ struct elu_backward_functor {
   inline T operator()(
       const T grad_output_,
       const T self_,
-      ELUBackwardParams<T> params) {
-    using op_T = opmath_t<T>;
-    auto alpha = static_cast<op_T>(params.alpha);
-    auto scale = static_cast<op_T>(params.scale);
-    auto input_scale = static_cast<op_T>(params.input_scale);
-    auto grad_output = static_cast<op_T>(grad_output_);
-    auto self = static_cast<op_T>(self_);
+      ELUBackwardParams params) {
+    auto alpha = params.alpha;
+    auto scale = params.scale;
+    auto input_scale = params.input_scale;
+    auto grad_output = static_cast<float>(grad_output_);
+    auto self = static_cast<float>(self_);
 
     if (params.is_result) {
       auto neg_coef = input_scale * (self + alpha * scale);
@@ -156,21 +134,65 @@ struct elu_backward_functor {
   }
 };
 
-#define REGISTER_ELU_OP(T)            \
-  typedef ELUParams<T> ELUParams_##T; \
-  REGISTER_UNARY_ALPHA_OP(elu, T, ELUParams_##T, T);
+REGISTER_UNARY_ALPHA_OP(elu, float, ELUParams, float);
+REGISTER_UNARY_ALPHA_OP(elu, half, ELUParams, half);
+REGISTER_UNARY_ALPHA_OP(elu, bfloat, ELUParams, bfloat);
 
-REGISTER_ELU_OP(float);
-REGISTER_ELU_OP(half);
-REGISTER_ELU_OP(bfloat);
+REGISTER_BINARY_ALPHA_OP(elu_backward, float, ELUBackwardParams, float);
+REGISTER_BINARY_ALPHA_OP(elu_backward, half, ELUBackwardParams, half);
+REGISTER_BINARY_ALPHA_OP(elu_backward, bfloat, ELUBackwardParams, bfloat);
 
-#define REGISTER_ELU_BACKWARD_OP(T)                   \
-  typedef ELUBackwardParams<T> ELUBackwardParams_##T; \
-  REGISTER_BINARY_ALPHA_OP(elu_backward, T, ELUBackwardParams_##T, T);
+struct softplus_functor {
+  template <typename T>
+  inline T operator()(const T self_, const SoftplusParams params) {
+    using op_T = opmath_t<T>;
+    const auto self = static_cast<op_T>(self_);
+    const auto bx = self * params.beta;
+    return static_cast<T>(
+        bx > params.threshold
+            ? self
+            : ::c10::metal::log1p(::metal::precise::exp(bx)) / params.beta);
+  }
+};
 
-REGISTER_ELU_BACKWARD_OP(float);
-REGISTER_ELU_BACKWARD_OP(half);
-REGISTER_ELU_BACKWARD_OP(bfloat);
+struct softplus_backward_functor {
+  template <typename T>
+  inline T operator()(
+      const T grad_output_,
+      const T self_,
+      const SoftplusParams params) {
+    using op_T = opmath_t<T>;
+    const auto grad_output = static_cast<op_T>(grad_output_);
+    const auto bx = static_cast<op_T>(self_) * params.beta;
+    const auto z = ::metal::precise::exp(bx);
+    return static_cast<T>(
+        bx > params.threshold ? grad_output : grad_output * z / (z + op_T(1)));
+  }
+};
+
+REGISTER_UNARY_ALPHA_OP(softplus, float, SoftplusParams, float);
+REGISTER_UNARY_ALPHA_OP(softplus, half, SoftplusParams, half);
+REGISTER_UNARY_ALPHA_OP(softplus, bfloat, SoftplusParams, bfloat);
+
+REGISTER_BINARY_ALPHA_OP(softplus_backward, float, SoftplusParams, float);
+REGISTER_BINARY_ALPHA_OP(softplus_backward, half, SoftplusParams, half);
+REGISTER_BINARY_ALPHA_OP(softplus_backward, bfloat, SoftplusParams, bfloat);
+
+struct hardtanh_backward_functor {
+  template <typename T>
+  inline T operator()(
+      const T grad_output,
+      const T self_,
+      const HardtanhParams params) {
+    const auto self = static_cast<opmath_t<T>>(self_);
+    return self <= params.min_val || self >= params.max_val ? T(0)
+                                                            : grad_output;
+  }
+};
+
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, float, HardtanhParams, float);
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, half, HardtanhParams, half);
+REGISTER_BINARY_ALPHA_OP(hardtanh_backward, bfloat, HardtanhParams, bfloat);
 
 struct leaky_relu_functor {
   template <typename T>
@@ -200,6 +222,62 @@ REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, float, float, float);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, half, half, half);
 REGISTER_BINARY_ALPHA_OP(leaky_relu_backward, bfloat, bfloat, bfloat);
 
+// `x <= threshold ? value : other`, so that NaN inputs propagate through
+// `other`. Forward passes (self, self), backward passes (self, grad_output)
+// with value 0.
+struct threshold_functor {
+  template <typename T>
+  inline T operator()(const T x, const T other, const ThresholdParams<T> p) {
+    return x <= p.threshold ? p.value : other;
+  }
+};
+
+#define REGISTER_THRESHOLD_OP(T)                  \
+  typedef ThresholdParams<T> ThresholdParams_##T; \
+  REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T)
+
+REGISTER_THRESHOLD_OP(float);
+REGISTER_THRESHOLD_OP(half);
+REGISTER_THRESHOLD_OP(bfloat);
+REGISTER_THRESHOLD_OP(long);
+REGISTER_THRESHOLD_OP(int);
+REGISTER_THRESHOLD_OP(short);
+REGISTER_THRESHOLD_OP(char);
+REGISTER_THRESHOLD_OP(uchar);
+
+struct prelu_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight) {
+    return float(x) > 0 ? x : static_cast<T>(float(weight) * float(x));
+  }
+};
+
+REGISTER_BINARY_OP(prelu, float, float);
+REGISTER_BINARY_OP(prelu, half, half);
+REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+
+struct prelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight, const T grad) {
+    return float(x) > 0 ? grad : static_cast<T>(float(weight) * float(grad));
+  }
+};
+
+struct prelu_backward_weight_functor {
+  template <typename T>
+  inline T operator()(const T x, const T, const T grad) {
+    return float(x) > 0 ? T(0) : static_cast<T>(float(x) * float(grad));
+  }
+};
+
+REGISTER_TERNARY_OP(prelu_backward, float, float);
+REGISTER_TERNARY_OP(prelu_backward, half, half);
+REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
+
+REGISTER_TERNARY_OP(prelu_backward_weight, float, float);
+REGISTER_TERNARY_OP(prelu_backward_weight, half, half);
+REGISTER_TERNARY_OP(prelu_backward_weight, bfloat, bfloat);
+
 struct silu_functor {
   template <typename T>
   inline T operator()(const T x) {
@@ -211,18 +289,14 @@ struct silu_functor {
 REGISTER_UNARY_OP(silu, float, float);
 REGISTER_UNARY_OP(silu, half, half);
 REGISTER_UNARY_OP(silu, bfloat, bfloat);
-REGISTER_UNARY_OP(silu, int, int);
-REGISTER_UNARY_OP(silu, short, short);
-REGISTER_UNARY_OP(silu, char, char);
-REGISTER_UNARY_OP(silu, uchar, uchar);
-REGISTER_UNARY_OP(silu, bool, bool);
 
 struct silu_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
     float sf = float(self);
     float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
-    return static_cast<T>(float(grad_output) * sig * (1.0f + sf - sf * sig));
+    return static_cast<T>(
+        float(grad_output) * sig * (1.0f + sf * (1.0f - sig)));
   }
 };
 
@@ -417,7 +491,7 @@ REGISTER_BINARY_OP(glu, bfloat, bfloat);
 template <typename T>
 kernel void glu_dense(
     device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
+    device const T* input [[buffer(1)]],
     constant long& inner_half [[buffer(2)]],
     uint2 tpig [[thread_position_in_grid]]) {
   const long L = inner_half;
@@ -430,7 +504,7 @@ kernel void glu_dense(
 #define REGISTER_GLU_DENSE_OP(DTYPE)                                        \
   template [[host_name("glu_dense_" #DTYPE)]] kernel void glu_dense<DTYPE>( \
       device DTYPE * out [[buffer(0)]],                                     \
-      constant DTYPE * input [[buffer(1)]],                                 \
+      device const DTYPE* input [[buffer(1)]],                              \
       constant long& inner_half [[buffer(2)]],                              \
       uint2 tpig [[thread_position_in_grid]])
 
@@ -461,8 +535,8 @@ struct glu_backward_functor {
 template <typename T>
 kernel void glu_backward(
     device void* grad_input [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* grad_output [[buffer(2)]],
+    device const char* input [[buffer(1)]],
+    device const char* grad_output [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* grad_input_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -489,8 +563,8 @@ kernel void glu_backward(
   template [[host_name("glu_backward_" #DTYPE)]] kernel void \
   glu_backward<DTYPE>(                                       \
       device void* grad_input [[buffer(0)]],                 \
-      constant void* input [[buffer(1)]],                    \
-      constant void* grad_output [[buffer(2)]],              \
+      device const char* input [[buffer(1)]],                \
+      device const char* grad_output [[buffer(2)]],          \
       constant long* sizes [[buffer(3)]],                    \
       constant long* grad_input_strides [[buffer(4)]],       \
       constant long* input_strides [[buffer(5)]],            \
@@ -510,8 +584,8 @@ REGISTER_GLU_BACKWARD_OP(bfloat);
 template <typename T>
 kernel void glu_backward_dense(
     device T* grad_input [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grad_output [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* grad_output [[buffer(2)]],
     constant long& inner_half [[buffer(3)]],
     uint2 tpig [[thread_position_in_grid]]) {
   const long L = inner_half;
@@ -527,8 +601,8 @@ kernel void glu_backward_dense(
   template [[host_name("glu_backward_dense_" #DTYPE)]] kernel void \
   glu_backward_dense<DTYPE>(                                       \
       device DTYPE * grad_input [[buffer(0)]],                     \
-      constant DTYPE * input [[buffer(1)]],                        \
-      constant DTYPE * grad_output [[buffer(2)]],                  \
+      device const DTYPE* input [[buffer(1)]],                     \
+      device const DTYPE* grad_output [[buffer(2)]],               \
       constant long& inner_half [[buffer(3)]],                     \
       uint2 tpig [[thread_position_in_grid]])
 

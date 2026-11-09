@@ -13,7 +13,7 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
       std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
-      uint32_t tag,
+      uint32_t /*tag*/,
       uint64_t seq,
       std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(

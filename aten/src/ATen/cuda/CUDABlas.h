@@ -71,13 +71,13 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
@@ -173,12 +173,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     at::blas::ScalingType mat1_scaling_type,
+    at::blas::SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     at::blas::ScalingType mat2_scaling_type,
+    at::blas::SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,

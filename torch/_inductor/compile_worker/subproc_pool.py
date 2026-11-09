@@ -14,13 +14,13 @@ import time
 import traceback
 import typing
 from collections.abc import Callable
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, IO, TypeVar
-from typing_extensions import Never, ParamSpec
+from typing import Any, IO, Never, TypeVar
+from typing_extensions import ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -933,7 +933,7 @@ class SubprocMain:
             watchdog.clear_current_job()
 
 
-AnyPool = ProcessPoolExecutor | SubprocPool
+AnyPool = ProcessPoolExecutor | SubprocPool | ThreadPoolExecutor
 
 
 def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:

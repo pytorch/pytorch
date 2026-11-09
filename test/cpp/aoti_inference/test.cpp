@@ -2,11 +2,13 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -37,11 +39,12 @@ namespace {
 // Function to check if test data files exist and are valid
 bool testDataFilesExist() {
   std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
-  std::array<std::string, 4> required_files = {
-      "data.pt",
-      "script_data.pt",
-      "script_model_cpu.pt",
-      "script_model_cuda.pt"};
+  std::vector<std::string> required_files = {
+      "data.pt", "script_data.pt", "script_model_cpu.pt"};
+  // compile_model.py only writes CUDA data when a GPU is visible.
+  if (torch::cuda::is_available()) {
+    required_files.emplace_back("script_model_cuda.pt");
+  }
 
   for (const auto& filename : required_files) {
     std::string filepath = bindir + "/" + filename;
@@ -63,6 +66,8 @@ void ensureTestDataGenerated() {
     }
 
     std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+    // The build directory is not shipped to CI test jobs, so create it here.
+    std::filesystem::create_directories(bindir);
 
     // Calculate path to source directory: build/test_aoti_inference -> build ->
     // pytorch
@@ -72,23 +77,29 @@ void ensureTestDataGenerated() {
 
     // Generate test data files (data.pt, etc.) by running test.py directly
     std::string test_script = source_dir + "/test.py";
-    std::string test_data_cmd = "cd " + bindir + " && python " + test_script;
+    std::string test_data_cmd =
+        "cd \"" + bindir + "\" && python \"" + test_script + "\"";
     std::cout << "Generating test data: " << test_data_cmd << std::endl;
     int result1 = std::system(test_data_cmd.c_str());
-    if (result1 != 0) {
-      std::cerr << "Warning: Test data generation failed with code " << result1
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result1 == 0,
+        "Test data generation failed with status ",
+        result1,
+        ": ",
+        test_data_cmd);
 
     // Generate model files (script_*.pt) by running compile_model.py directly
     std::string compile_script = source_dir + "/compile_model.py";
-    std::string models_cmd = "cd " + bindir + " && python " + compile_script;
+    std::string models_cmd = "cd \"" + bindir + "\" && python \"" +
+        compile_script + "\" \"" + AOTI_CUSTOM_CLASS_LIB + "\"";
     std::cout << "Generating model files: " << models_cmd << std::endl;
     int result2 = std::system(models_cmd.c_str());
-    if (result2 != 0) {
-      std::cerr << "Warning: Model generation failed with code " << result2
-                << std::endl;
-    }
+    TORCH_CHECK(
+        result2 == 0,
+        "Model generation failed with status ",
+        result2,
+        ": ",
+        models_cmd);
   });
 }
 
@@ -273,6 +284,8 @@ void test_aoti_constants_update(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The random constants stay on CPU; update_constant_buffer_from_cpu
+  // auto-copies them to the container's device.
   torch::inductor::TensorConstantMap missing_map, rand_map, real_map;
   missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
   rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({10})));
@@ -300,13 +313,13 @@ void test_aoti_constants_update(
   // Somehow EXPECT_THROW doesn't work here when running tests in a row, but
   // works when running AotInductorTest.RuntimeUpdateConstantsCuda individually.
   try {
-    runner->update_constant_buffer(missing_map, false, true);
+    runner->update_constant_buffer_from_cpu(missing_map, false, true);
   } catch (const std::runtime_error& e) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr("API call failed at"));
   }
 
   // Update random weight to buffer #1.
-  runner->update_constant_buffer(missing_map, false, false);
+  runner->update_constant_buffer_from_cpu(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
@@ -321,7 +334,7 @@ void test_aoti_constants_update(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // Update with full random map.
-  runner->update_constant_buffer(rand_map, false, false);
+  runner->update_constant_buffer_from_cpu(rand_map, false, false);
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ false);
   }
@@ -452,6 +465,8 @@ void test_aoti_double_buffering(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The random constants stay on CPU; update_constant_buffer_from_cpu
+  // auto-copies them to the container's device.
   torch::inductor::TensorConstantMap rand_map, real_map;
   rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
   rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4, 4})));
@@ -485,7 +500,8 @@ void test_aoti_double_buffering(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // We update random weights to buffer #1. But do not swap in the weight yet.
-  runner->update_inactive_constant_buffer(rand_map);
+  runner->update_constant_buffer_from_cpu(
+      rand_map, /* use_inactive = */ true, /* check_full_update = */ true);
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ true);
   }
@@ -765,8 +781,10 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
   torch::inductor::TensorConstantMap rand_map, real_map;
-  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4096, 4096})));
-  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4096, 4096})));
+  rand_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
+  rand_map.emplace(
+      "L__self___w_add", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
   real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
@@ -1452,6 +1470,66 @@ void test_aoti_const_fold_separate_stream(
            "completed";
   }
 }
+
+// run() holds the container's mutex shared, including while it waits for the
+// GPU to finish with the only model instance, so the run() threads below keep
+// the mutex continuously held. swap_constant_buffer() needs it exclusively.
+void test_swap_constant_buffer_with_concurrent_runs() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path = data_loader.attr("model_so_path").toStringRef();
+  auto input_tensors = data_loader.attr("inputs").toTensorList().vec();
+  auto w_pre = data_loader.attr("w_pre").toTensor();
+  auto w_add = data_loader.attr("w_add").toTensor();
+  torch::inductor::TensorConstantMap real_map;
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path, /* num_models = */ 1);
+  runner->update_inactive_constant_buffer(real_map);
+
+  const auto device_index = input_tensors[0].device().index();
+  constexpr int num_threads = 4;
+  std::atomic<int> num_warmed_up{0};
+  std::atomic<bool> stop{false};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < num_threads; t++) {
+    threads.emplace_back([&]() {
+      // The model loads and launches kernels through the CUDA driver API,
+      // which needs a current context; a new thread has none until a runtime
+      // call such as cudaSetDevice makes the primary context current.
+      c10::cuda::set_device(device_index, /* force = */ true);
+      runner->run(input_tensors);
+      num_warmed_up.fetch_add(1);
+      while (!stop.load()) {
+        runner->run(input_tensors);
+      }
+    });
+  }
+  // Swap only once every thread has finished a run(), so that one-time setup
+  // is done and the threads are contending for the model.
+  while (num_warmed_up.load() < num_threads) {
+    std::this_thread::yield();
+  }
+
+  auto swapped =
+      std::async(std::launch::async, [&]() { runner->swap_constant_buffer(); });
+  const bool swapped_while_running =
+      swapped.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+  stop.store(true);
+  for (auto& t : threads) {
+    t.join();
+  }
+  swapped.get();
+  ASSERT_TRUE(swapped_while_running)
+      << "swap_constant_buffer() waited for run() calls to stop";
+}
 #endif // USE_CUDA || USE_ROCM
 
 // RECORD_USER_SCOPE callbacks are raw function pointers and cannot capture, so
@@ -1565,15 +1643,20 @@ void test_aoti_observer(const std::string& device) {
   // A failing operation still reports on_end, with succeeded == false. Without
   // that flag a failed call would land in the observer's latency distribution
   // as if it had completed normally.
+  //
+  // Omitting a constant doesn't fail here (assert_all_constants warns and
+  // skips TensorConstants); a wrong-device one does, on any build.
   const size_t ends_before = observer->ends.size();
-  torch::inductor::TensorConstantMap missing_map;
-  missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
+  torch::inductor::TensorConstantMap wrong_device_map;
+  wrong_device_map.emplace(
+      "L__self___w_pre",
+      new at::Tensor(at::randn({4, 4}, at::TensorOptions().device(at::kMeta))));
   try {
     runner->update_constant_buffer(
-        missing_map,
+        wrong_device_map,
         /* use_inactive = */ false,
         /* check_full_update = */ true);
-    ADD_FAILURE() << "expected an incomplete constants update to throw";
+    ADD_FAILURE() << "expected a constant on the wrong device to throw";
   } catch (const std::exception&) {
   }
   ASSERT_EQ(observer->ends.size(), ends_before + 1);
@@ -1589,7 +1672,7 @@ void test_aoti_observer(const std::string& device) {
   for (auto& pair : real_map) {
     delete pair.second;
   }
-  for (auto& pair : missing_map) {
+  for (auto& pair : wrong_device_map) {
     delete pair.second;
   }
 }
@@ -1649,6 +1732,10 @@ void test_aoti_record_function(const std::string& device) {
   };
   EXPECT_TRUE(sawScope("AOTIModelContainerRunner::run"));
   EXPECT_TRUE(sawScope("AOTIModelContainerRunner::swap_constant_buffer"));
+
+  // Swap back: the buffer above was never populated and fails for reasons
+  // unrelated to callbacks.
+  runner->swap_constant_buffer();
 
   // Callbacks are torn down again, so later tests are unaffected.
   const size_t recorded = recordedScopeNames().size();
@@ -1781,6 +1868,10 @@ TEST_F(AotInductorTest, ConstFoldSeparateStreamCuda) {
 
 TEST_F(AotInductorTest, ConstFoldSeparateStreamWithAffinityCuda) {
   test_aoti_const_fold_separate_stream(true, 100);
+}
+
+TEST_F(AotInductorTest, SwapConstantBufferWithConcurrentRunsCuda) {
+  test_swap_constant_buffer_with_concurrent_runs();
 }
 #endif // USE_CUDA || USE_ROCM
 

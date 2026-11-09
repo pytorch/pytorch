@@ -4,8 +4,8 @@
 // -- rather than in libtorch_cuda / libtorch_python's init.cpp. It is imported
 // lazily by torch/distributed/_token_switch.py, so the normal Python
 // extension-import machinery loads libnccl_ep (and raises ImportError if the
-// optional nccl4py wheel that provides it is absent). libtorch_cuda therefore
-// never references ncclEp* and torch imports with or without nccl4py.
+// optional nccl-extensions wheel that provides it is absent). libtorch_cuda
+// never references ncclEp* and torch imports with or without nccl-extensions.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 
@@ -62,9 +62,25 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("out_topk_idx"));
 
   m.def(
+      "_nccl_ep_dispatch_backward",
+      &nccl_ep_dispatch_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("out_tokens"));
+
+  m.def(
       "_nccl_ep_combine",
       &nccl_ep_combine,
       py::arg("handle"),
       py::arg("expert_tokens"),
       py::arg("out_tokens"));
+
+  m.def(
+      "_nccl_ep_combine_backward",
+      &nccl_ep_combine_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("grad_topk_weights"),
+      py::arg("out_tokens"),
+      py::arg("out_topk_weights"));
 }

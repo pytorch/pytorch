@@ -16,8 +16,9 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -37,7 +38,9 @@ class UnevenShardedModel(torch.nn.Module):
         return self.net3(self.net2(self.relu(self.net1(x))))
 
 
-class TestTpCheckpoint(DTensorTestBase):
+class TestTpCheckpoint(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir

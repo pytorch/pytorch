@@ -12,6 +12,7 @@ from collections.abc import Callable
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     IS_JETSON,
     IS_MACOS,
     IS_WINDOWS,
@@ -25,6 +26,27 @@ log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
+    def test_retired_torchscript_exports(self):
+        for name in (
+            "fork",
+            "freeze",
+            "interface",
+            "load",
+            "optimize_for_inference",
+            "save",
+            "script",
+            "script_method",
+            "set_fusion_strategy",
+            "trace",
+            "trace_module",
+            "wait",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    name in torch.jit.__all__, IS_FBCODE and name != "script_method"
+                )
+                self.assertEqual(hasattr(torch.jit, name), IS_FBCODE)
+
     def test_no_new_reexport_callables(self):
         """
         This test aims to stop the introduction of new re-exported callables into
@@ -347,9 +369,6 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test",
             "torch.testing._internal.distributed.rpc.faulty_agent_rpc_test",
             "torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture",
-            "torch.testing._internal.distributed.rpc.jit.dist_autograd_test",
-            "torch.testing._internal.distributed.rpc.jit.rpc_test",
-            "torch.testing._internal.distributed.rpc.jit.rpc_test_faulty",
             "torch.testing._internal.distributed.rpc.rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
@@ -358,6 +377,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
             "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
@@ -367,10 +387,20 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
-            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
-            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass.operators
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass.operators
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_pipeline",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_scheduling",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_wgrad_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -401,9 +431,7 @@ class TestPublicBindings(TestCase):
             "torch.ao.pruning._experimental.data_sparsifier.lightning.tests.test_callbacks",
             "torch.csrc.jit.tensorexpr.scripts.bisect",
             "torch.csrc.lazy.test_mnist",
-            "torch.distributed._shard.checkpoint._fsspec_filesystem",
             "torch.distributed._tensor.examples.visualize_sharding_example",
-            "torch.distributed.checkpoint._fsspec_filesystem",
             "torch.distributed.examples.memory_tracker_example",
             "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
             "torch.utils._cxx_pytree",
@@ -422,11 +450,21 @@ class TestPublicBindings(TestCase):
             # aren't available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.cutedsl.",
+                "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
+                "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
+                "torch._native.ops.norm.rmsnorm_kernels",
                 "torch._native.ops.polar.",
-                "torch._native.ops.reductions.inner_tree_kernel",
+                "torch._native.ops.reductions.kernel_general",
+                "torch._native.ops.reductions.kernel_rowtile",
+                "torch._native.ops.reductions.tile",
+                "torch._native.ops.reductions.kernel_xcta",
+                "torch._native.ops.reductions.kernel_coltile",
+                "torch._native.ops.reductions.ordered",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
+                "torch._inductor.kernel.flex_gemm.quack_ops.",
                 "torch._vendor.quack",
                 "torch.profiler._cuspy.",
             )
