@@ -574,18 +574,13 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Add Android Nnapi delegate library
   add_library(nnapi_backend SHARED
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
-          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
-  # Pybind11 requires explicit linking of the torch_python library
   if(BUILD_LIBTORCHLESS)
     target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB})
   else()
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
-  target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
-  if(MSVC AND TORCH_PYTHON_LINK_OPTIONS)
-    target_link_options(nnapi_backend PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
-  endif()
+  target_link_libraries(nnapi_backend PRIVATE fmt::fmt-header-only)
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
