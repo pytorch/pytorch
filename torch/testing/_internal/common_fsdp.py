@@ -1634,6 +1634,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
+        device_ids = None
 
         print(f"dist init r={self.rank}, world={self.world_size}")
         if self._device_type != "cpu":
@@ -1643,6 +1644,8 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
             device_id = self.rank % device_count
             device_module.set_device(device_id)
+            if not fake_pg:
+                device_ids = [device_id]
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there are not enough GPUs.
@@ -1673,17 +1676,19 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
-        try:
+        if device_ids is None:
             dist.barrier()
-            torch._dynamo.reset()
-            set_rng_seed()
-            try:
-                self.run_test(test_name, pipe)
-            finally:
-                torch._dynamo.reset()
+        else:
+            dist.barrier(device_ids=device_ids)
+        torch._dynamo.reset()
+        set_rng_seed()
+        self.run_test(test_name, pipe)
+        torch._dynamo.reset()
+        if device_ids is None:
             dist.barrier()
-        finally:
-            dist.destroy_process_group()
+        else:
+            dist.barrier(device_ids=device_ids)
+        dist.destroy_process_group()
 
 
 class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):

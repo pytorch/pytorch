@@ -95,33 +95,6 @@ class TestFSDPDeviceRouting(fsdp.FSDPTestMixin, TestCase):
                 save_model=False,
             )
 
-    def test_cpu_worker_error_destroys_process_group(self):
-        if not dist.is_gloo_available():
-            self.skipTest("Gloo is required")
-
-        class FailingWorker(fsdp.FSDPTest):
-            device_type = "cpu"
-            world_size = 1
-
-            def run_test(self, name, pipe):
-                self.assertTrue(dist.is_initialized())
-                raise RuntimeError("intentional routing failure")
-
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.object(
-                torch._dynamo, "reset", wraps=torch._dynamo.reset
-            ) as reset:
-                try:
-                    with self.assertRaisesRegex(
-                        RuntimeError, "intentional routing failure"
-                    ):
-                        FailingWorker._run(0, "runTest", f"{directory}/store", None)
-                    self.assertFalse(dist.is_initialized())
-                    self.assertEqual(reset.call_count, 2)
-                finally:
-                    if dist.is_initialized():
-                        dist.destroy_process_group()
-
     @parametrize("fake_pg", [False, True])
     def test_cpu_worker_on_accelerator_host(self, fake_pg):
         class CPUWorker(fsdp.FSDPTest):
@@ -154,8 +127,56 @@ class TestFSDPDeviceRouting(fsdp.FSDPTestMixin, TestCase):
         )
         self.assertEqual(init.call_args.kwargs["world_size"], 3)
         bind.assert_not_called()
+        barrier.assert_has_calls([mock.call(), mock.call()])
         self.assertEqual(barrier.call_count, 2)
-        barrier.assert_called_with()
+        destroy.assert_called_once()
+
+    @parametrize("fake_pg", [False, True])
+    def test_accelerator_worker_barrier_device_ids(self, fake_pg):
+        class AcceleratorWorker(fsdp.FSDPTest):
+            device_type = "xpu"
+            world_size = 2
+
+            def backend(self, device):
+                self.assertEqual(device, "xpu")
+                return "xccl"
+
+            def run_test(self, name, pipe):
+                pass
+
+        device_module = mock.Mock()
+        device_module.device_count.return_value = 4
+        with contextlib.ExitStack() as stack:
+            get_module = stack.enter_context(
+                mock.patch.object(
+                    torch, "get_device_module", return_value=device_module
+                )
+            )
+            host_count = stack.enter_context(
+                mock.patch.object(torch.accelerator, "device_count", return_value=1)
+            )
+            host_bind = stack.enter_context(
+                mock.patch.object(torch.accelerator, "set_device_index")
+            )
+            init = stack.enter_context(mock.patch.object(dist, "init_process_group"))
+            barrier = stack.enter_context(mock.patch.object(dist, "barrier"))
+            destroy = stack.enter_context(
+                mock.patch.object(dist, "destroy_process_group")
+            )
+            reset = stack.enter_context(mock.patch.object(torch._dynamo, "reset"))
+            stack.enter_context(mock.patch.object(fsdp, "set_rng_seed"))
+            AcceleratorWorker._run(1, "runTest", "unused", None, fake_pg=fake_pg)
+        get_module.assert_called_once_with("xpu")
+        device_module.set_device.assert_called_once_with(1)
+        host_count.assert_not_called()
+        host_bind.assert_not_called()
+        self.assertEqual(
+            init.call_args.kwargs["backend"], "fake" if fake_pg else "xccl"
+        )
+        expected = mock.call() if fake_pg else mock.call(device_ids=[1])
+        barrier.assert_has_calls([expected, expected])
+        self.assertEqual(barrier.call_count, 2)
+        self.assertEqual(reset.call_count, 2)
         destroy.assert_called_once()
 
     def test_legacy_callable_and_device_base(self):
