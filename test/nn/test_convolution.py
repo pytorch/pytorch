@@ -3829,11 +3829,50 @@ class TestConvolutionNNDevice(NNTestCase):
             torch.ops.aten.slow_conv_dilated3d, input, weight, bias, kwargs
         )
 
+    @onlyAccelerator
+    def test_conv_inputs_device_mismatch(self, device):
+        device_mismatches = (
+            ("cpu", device, "cpu"),
+            ("cpu", "cpu", device),
+            ("cpu", device, device),
+            ("cpu", device, None),
+            (device, "cpu", device),
+            (device, device, "cpu"),
+            (device, "cpu", "cpu"),
+            (device, "cpu", None),
+        )
+        for input_device, weight_device, bias_device in device_mismatches:
+            input = torch.randn(1, 2, 5, device=input_device)
+            weight = torch.randn(3, 2, 3, device=weight_device)
+            bias = (
+                torch.randn(3, device=bias_device) if bias_device is not None else None
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "Expected all tensors to be on the same device"
+            ):
+                if bias is None:
+                    F.conv1d(input, weight)
+                else:
+                    F.conv1d(input, weight, bias)
+
 
 class TestConvolutionNNCPU(NNTestCase):
     """CPU-specific convolution tests."""
 
     hw_classification = HardwareClassification.CPU
+
+    @unittest.skipIf(
+        torch.backends.nnpack.is_available()
+        and not torch.backends.mkldnn.is_available(),
+        "NNPACK's FFT-based convolution spreads NaN across the tile",
+    )
+    @parametrize_test("batch_size", [4, 16, 32])
+    def test_conv1d_nan_does_not_spread(self, batch_size):
+        # See https://github.com/pytorch/pytorch/issues/157237
+        x = torch.randn(batch_size, 1, 24)
+        x[3, 0, 9] = float("nan")
+        y = F.conv1d(x, torch.randn(1, 1, 3))
+        self.assertEqual(y[3, 0].isnan().nonzero().flatten().tolist(), [7, 8, 9])
 
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
@@ -4110,6 +4149,37 @@ class TestConvolutionNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("rank", [0, 1, 2])
+    def test_cudnn_convolution_invalid_rank(self, device, transpose, rank):
+        x = torch.rand((4,) * rank, device=device)
+        args = (x, x, [0])
+        if transpose:
+            args += ([0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* to have at least 3 dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1], [1], 1, False, False, False)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @parametrize_test("transpose", [False, True])
+    @parametrize_test("weight_rank", [0, 1, 2, 3, 5])
+    def test_cudnn_convolution_mismatched_rank(self, device, transpose, weight_rank):
+        x = torch.rand(1, 1, 4, 4, device=device)
+        weight = torch.rand((1,) * weight_rank, device=device)
+        args = (x, weight, [0, 0])
+        if transpose:
+            args += ([0, 0],)
+        op = torch.cudnn_convolution_transpose if transpose else torch.cudnn_convolution
+        msg = "Expected .* and weight to have the same number of dimensions"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            op(*args, [1, 1], [1, 1], 1, False, False, False)
 
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm

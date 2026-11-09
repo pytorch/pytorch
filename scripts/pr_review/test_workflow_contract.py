@@ -46,10 +46,14 @@ import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Callable
 
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+# The collector whose output keys stage A's system prompt must name.
+import fetch_pr_comments  # noqa: E402
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
@@ -78,6 +82,12 @@ HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 # disables the test in the parent too, silently.
 REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
 PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
+# THE skills stage A installs and may read: pr-review, and the sibling skills
+# installed beside it, which an installed skill may refer to as `../<name>/`.
+# This is the one list a change widening the review's trusted skill surface has
+# to edit; the install step, the Read grants, the prompt hash and those links
+# are each checked against it.
+INSTALLED_SKILLS = ("pr-review", "cuda-streams")
 # The two claude-code-action steps: stage A reviews, stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
 
@@ -152,9 +162,8 @@ def refuse_execution_outside_steps(
     passing them: a job whose keys are not at four spaces (legal YAML, and the
     regexes below assume four), and a quoted key carrying a backslash escape
     (`"\u0064efaults":` decodes to `defaults` and matches nothing here). Both
-    were found by review as silent bypasses. Stage 1 is additionally fenced by
-    `test_stage1_uses_only_spellings_this_class_can_read`; Stage 2 and the
-    suite-CI file have no such grammar test, which is why the check lives here.
+    were found by review as silent bypasses. All three workflows are also
+    fenced by `test_all_three_workflows_are_written_in_the_readable_subset`.
     """
     job_block_text = strip_comments(job_block(text, job))
     whole = strip_comments(text)
@@ -217,10 +226,10 @@ def refuse_unsafe_env_keys(
     it broken the same day: `BASH_FUNC_python3%%: '() { return 0; }'` replaces
     `python3` itself for every step in scope — bash imports exported functions
     from the environment — and it is on nobody's list of dangerous variables.
-    So the rule is inverted, as `test_stage1_uses_only_spellings_this_class_can
-    _read` already does for grammar: a name must be plain `SCREAMING_SNAKE`,
-    which `BASH_FUNC_python3%%` is not, and must not be one of the startup
-    variables, which are the legal-looking names that still execute code.
+    So the rule is inverted, as `refuse_unmodelled_spellings` already does for
+    grammar: a name must be plain `SCREAMING_SNAKE`, which `BASH_FUNC_python3%%`
+    is not, and must not be one of the startup variables, which are the
+    legal-looking names that still execute code.
 
     AND `env:` MUST BE A BLOCK. `env: {SHELLOPTS: noexec}` is a legal flow
     mapping that `indented_blocks` skips entirely — it yields no lines, so a
@@ -274,8 +283,8 @@ def refuse_unsafe_env_keys(
             # job holding the AWS session; `GIT_CONFIG_GLOBAL: pr/.gitconfig`
             # gives the job's `git` a PR-authored `diff.external`; `LD_PRELOAD`
             # is the classic. All three are plain SCREAMING_SNAKE and on
-            # nobody's denylist, which is why Stage 1 has had an allowlist
-            # since round 5 and this is now the same rule for the other two.
+            # nobody's denylist, which is why all three workflows are held to
+            # an allowlist here.
             case.assertIn(
                 name,
                 allowed,
@@ -666,7 +675,14 @@ def sole_outputs(case: unittest.TestCase, written: str) -> dict:
     return dict(pairs)
 
 
-def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
+def run_step(
+    text: str,
+    marker: str,
+    td: str,
+    env: dict,
+    stubs: dict,
+    rewrite: Callable[[str], str] | None = None,
+) -> tuple:
     """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
 
     Text assertions establish that a guard is written down. Only running it
@@ -688,6 +704,9 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     inherited from whoever ran the suite. It is NOT a model of a runner's
     environment — callers must pass what the step's own `env:` declares.
 
+    `rewrite`, if given, maps the extracted body to the one executed, e.g. to
+    point `/tmp/` at the temp directory.
+
     Returns `(CompletedProcess, Path to the step's $GITHUB_OUTPUT)`.
     """
     hits = list(re.finditer(rf"(?m)^      - name: {re.escape(marker)}[ \t]*$", text))
@@ -697,6 +716,8 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     body = textwrap.dedent(
         scalar_block(rest if nxt is None else rest[: nxt.start() + 1], "run")
     )
+    if rewrite is not None:
+        body = rewrite(body)
     bin_dir = Path(td) / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, script in stubs.items():
@@ -768,6 +789,7 @@ def run_corroboration(
     event_head_branch: str = "b",
     labels: tuple[str, ...] = ("in progress",),
     trigger_event: str = "labeled",
+    trigger_label: str = "in progress",
 ):
     """Execute `prepare`'s corroboration step against a stubbed `gh`.
 
@@ -816,6 +838,7 @@ def run_corroboration(
             "PR_NUMBER": "1",
             "HEAD_SHA": STUB_API_HEAD,
             "TRIGGER_EVENT": trigger_event,
+            "TRIGGER_LABEL": trigger_label,
             "REPO": "o/r",
             "EVENT_HEAD_REPO": event_head_repo,
             "EVENT_HEAD_BRANCH": event_head_branch,
@@ -967,11 +990,11 @@ def indented_block(text: str, key: str) -> list[str]:
 def refuse_unmodelled_spellings(case: unittest.TestCase, text: str, what: str) -> None:
     """Require `text` to be written in the narrow YAML subset these readers parse.
 
-    Extracted from Stage 1's grammar test so Stage 2 and the suite CI get the
-    same fence. Round 8 closed four separate defects that were all one shape —
-    a flow mapping or a bare list marker in a file with no grammar — while
-    Stage 1, which has had this since round 5, produced none of them. A grammar
-    on one of three files is not a grammar.
+    Run on all three workflows by
+    `test_all_three_workflows_are_written_in_the_readable_subset`. A flow
+    mapping or a bare list marker is invisible to every line-oriented reader
+    here, so a file outside the subset can hide a key those readers check. A
+    grammar on one of three files is not a grammar.
     """
     lines = text.split("\n")
     i = 0
@@ -1125,9 +1148,10 @@ class TestPreparePermissions(unittest.TestCase):
 class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
     """Every host the review job actually talks to must be allowlisted.
 
-    The trace upload is this job's single write capability. It is best-effort
-    (`|| echo ::warning::`), so a blocked endpoint costs a silent, permanent
-    loss of every transcript plus a reasoning_uri pointing at nothing.
+    The job's S3 writes (the traces and the review inputs) are its only write
+    capability. They are best-effort (a failure is a `::warning::`), so a
+    blocked endpoint costs a silent, permanent loss of every transcript and
+    snapshot, plus a reasoning_uri pointing at nothing.
     """
 
     def setUp(self):
@@ -1215,14 +1239,18 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         # Stage A: pr-review as an interactive session runs it, read-only.
         "a": (
             "Skill,"
-            # The trusted copy of pr-review, installed as a user skill.
-            "Read(~/.claude/skills/pr-review/**),"
-            "Read(/${{ github.workspace }}/pr/**),"
+            # The trusted copies of the installed skills, one grant each. A
+            # denied read reaches the model as an ordinary tool failure: it
+            # carries on and reviews without the skill.
+            + "".join(f"Read(~/.claude/skills/{s}/**)," for s in INSTALLED_SKILLS)
+            + "Read(/${{ github.workspace }}/pr/**),"
             "Grep(/${{ github.workspace }}/pr/**),"
             "Glob(/${{ github.workspace }}/pr/**),"
             "Read(//tmp/pr-diff.txt),"
             "Read(//tmp/pr-files.txt),"
             "Read(//tmp/pr-comments.json),"
+            # Changes since the commit the latest automated review saw.
+            "Read(//tmp/pr-interdiff.txt),"
             # pr-review's sub-agents. They inherit this session's rules.
             "Agent"
         ),
@@ -1414,7 +1442,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         text = STAGE2.read_text()
         offenders = []
-        for job in ("prepare", "announce", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish", "withdraw"):
             lines = job_block(text, job).splitlines()
             starts = [
                 i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)
@@ -1453,15 +1481,18 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 "model output to a log.",
             )
 
-    def test_only_pytorch_bot_may_trigger_the_review(self):
-        """pytorch-bot applies the label on a maintainer's behalf; a wildcard
-        would let any bot that can label a pull request start the review.
+    def test_only_named_bots_may_trigger_the_review(self):
+        """pytorch-bot applies the label on a maintainer's behalf, and
+        meta-codesync pushes a co-dev PR's re-exports; a wildcard would let any
+        bot that can label or push to a pull request start the review.
         """
         review = strip_comments(job_block(STAGE2.read_text(), "review"))
         for step_id in MODEL_STEP_IDS:
             inputs = "\n".join(with_block(model_step(review, step_id)))
             bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
-            self.assertEqual(bots, ['"pytorch-bot[bot]"'], f"step {step_id}")
+            self.assertEqual(
+                bots, ['"pytorch-bot[bot],meta-codesync[bot]"'], f"step {step_id}"
+            )
 
     def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.
@@ -1474,9 +1505,9 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
         self.assertEqual(
             jobs,
-            ["prepare", "announce", "review", "publish"],
+            ["prepare", "announce", "review", "publish", "withdraw"],
             f"Stage 2's jobs are {jobs}. Every role, environment and "
-            "checkout assertion in this file names one of these four; a fifth "
+            "checkout assertion in this file names one of these five; a sixth "
             "is covered by none of them.",
         )
 
@@ -1596,12 +1627,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
-            # Stage A's skill. It carries the review logic, so omitting it lets
-            # the whole checklist be rewritten under an unmoved hash.
-            ".agents/skills/pr-review/SKILL.md",
-            ".agents/skills/pr-review/review-checklist.md",
-            ".agents/skills/pr-review/bc-guidelines.md",
-            ".agents/skills/pr-review/ci-runner-naming.md",
+            # Decides which changes a re-review treats as the author's.
+            "scripts/pr_review/interdiff.py",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
@@ -1610,21 +1637,76 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         self.assertEqual(
             hashed,
             required,
-            f"the prompt hash covers {sorted(hashed)}, not {sorted(required)}",
+            f"the prompt hash names {sorted(hashed)}, not {sorted(required)}",
         )
         for path in sorted(required):
             self.assertTrue(
                 (REPO / path).is_file(), f"the hash names a missing file: {path}"
             )
-        # Stage A may read any file of its pr-review copy, named in SKILL.md or
-        # not, so each must move the hash; and that copy is the trusted one.
-        skill = REPO / ".agents" / "skills" / "pr-review"
-        readable = {str(p.relative_to(REPO)) for p in skill.rglob("*") if p.is_file()}
-        self.assertLessEqual(readable, hashed, "a pr-review file is not hashed")
-        self.assertIn(
-            "cp -rT trusted/.agents/skills/pr-review ~/.claude/skills/pr-review",
-            model_step(strip_comments(self.review), "aprompt"),
+        # The installed skills carry the review logic, and stage A may read any
+        # file of them, so each skill's whole directory is hashed: exactly the
+        # installed ones, which are exactly the ones stage A copies.
+        self.assertEqual(
+            set(hashed_skill_dirs(step)),
+            {f".agents/skills/{s}" for s in INSTALLED_SKILLS},
+            "the prompt hash does not cover exactly the installed skills",
         )
+        # Exactly these skills, copied from the trusted checkout, and nothing
+        # else: one copied but not listed would be in front of stage A's
+        # `Skill` tool with its files outside the hash. The whole step body is
+        # pinned, because any other spelling of a copy (`$HOME/...`, a glob)
+        # escapes a pattern search.
+        install = model_step(strip_comments(self.review), "aprompt")
+        body = [ln.strip() for ln in indented_block(install, "run:") if ln.strip()]
+        self.assertEqual(
+            body,
+            ["set -euo pipefail", "mkdir -p ~/.claude/skills"]
+            + [
+                f"cp -rT trusted/.agents/skills/{s} ~/.claude/skills/{s}"
+                for s in INSTALLED_SKILLS
+            ],
+            "stage A does not install exactly INSTALLED_SKILLS",
+        )
+        skills = REPO / ".agents" / "skills"
+        for name in INSTALLED_SKILLS:
+            self.assertTrue((skills / name / "SKILL.md").is_file())
+        self.assertEqual(skill_reference_problems(skills, INSTALLED_SKILLS), [])
+
+    def test_the_skill_reference_lint_fails_and_passes_where_it_should(self):
+        """The lint on a fake tree with skill `a` installed and `other` not."""
+        bad = [
+            ("x.md", "[s](../other/SKILL.md)"),  # @lint-ignore
+            ("x.md", "`../other/SKILL.md`"),
+            ("sub/x.md", "see `../../other/x`."),
+            ("x.md", "../a/../other/x"),
+            ("x.md", "../absent/SKILL.md"),
+            ("x.md", "the `other`\nskill"),
+            ("x.md", "the `absent` skill"),
+            ("x.md", "~/.claude/skills/other/SKILL.md"),
+            ("x.md", "the other skill"),
+            ("x.txt", ".agents/skills/./a/x"),
+            ("x.md", ".claude/skills/a/x"),
+        ]
+        good = [
+            ("x.md", "~/.claude/skills/a/SKILL.md and the `a` skill"),
+            ("x.md", "../a/SKILL.md"),
+            ("sub/x.md", "../other/x"),
+            ("x.md", "my-other skill; other skillset"),
+        ]
+        for (rel, text), fails in [(c, True) for c in bad] + [(c, False) for c in good]:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                skills = Path(tmp)
+                for d in ("a", "other"):
+                    (skills / d).mkdir()
+                    (skills / d / "SKILL.md").write_text("x")
+                (skills / "a" / rel).parent.mkdir(parents=True, exist_ok=True)
+                (skills / "a" / rel).write_text(text)
+                self.assertEqual(bool(skill_reference_problems(skills, ("a",))), fails)
+        with tempfile.TemporaryDirectory() as tmp:
+            skills = Path(tmp)
+            (skills / "real").mkdir()
+            (skills / "a").symlink_to(skills / "real")
+            self.assertTrue(skill_reference_problems(skills, ("a",)))
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
         """RUN the step: naming a file is not hashing it, and four text pins
@@ -1641,10 +1723,27 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         step = "\n".join(indented_block(self.review_prepare(), "run:"))
         # Order matters to the digest and is the workflow's to choose, so it is
-        # read from the step rather than pinned. WHICH files are named is
-        # pinned, exactly, by the test above.
+        # read from the step rather than pinned. WHICH files and skill
+        # directories are named is pinned, exactly, by the test above.
         named = re.findall(r"([\w./-]+\.(?:py|sh|md|yml))", step)
         self.assertEqual(len(named), len(set(named)), f"a file is named twice: {named}")
+        dirs = hashed_skill_dirs(step)
+        # A fake tree for each skill directory: the real skills' file lists
+        # are not this test's to know. Not only `*.md`, and names a
+        # newline-separated `find | xargs` would split, so a narrowed `find`
+        # or dropped NUL handling leaves a file out of the hash.
+        tree = {
+            f"{d}/{rel}"
+            for d in dirs
+            for rel in (
+                "SKILL.md",
+                "guide.md",
+                "sub/nested.md",
+                "scripts/tool",
+                ".hidden",
+                "sub/has space.txt",
+            )
+        }
 
         def run(bodies: dict) -> tuple:
             with tempfile.TemporaryDirectory() as td:
@@ -1658,7 +1757,16 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 return proc, out.read_text()
 
         def digest(bodies: dict) -> str:
-            return hashlib.sha256(b"".join(bodies[rel] for rel in named)).hexdigest()
+            # The named files' bytes in order, then one `sha256sum` line per
+            # skill file, sorted by path, so a skill file's path counts as well
+            # as its bytes.
+            lines = b"".join(
+                f"{hashlib.sha256(bodies[rel]).hexdigest()}  {rel}\n".encode()
+                for rel in sorted(r for r in bodies if r not in named)
+            )
+            return hashlib.sha256(
+                b"".join(bodies[rel] for rel in named) + lines
+            ).hexdigest()
 
         def check(bodies: dict, why: str) -> None:
             # SUCCESS AND THE RECOMPUTED VALUE, on every case. Asserting only
@@ -1674,15 +1782,37 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 f"files it names ({digest(bodies)[:16]}) as its one output",
             )
 
-        bodies = {rel: f"content of {rel}\n".encode() for rel in named}
+        bodies = {rel: f"content of {rel}\n".encode() for rel in [*named, *tree]}
         check(bodies, "unperturbed")
-        for rel in named:
+        for rel in bodies:
             with self.subTest(perturbed=rel):
                 # The digest is recomputed from the perturbed fixture, so this
                 # asserts the hash MOVED TO THE RIGHT VALUE rather than merely
                 # moved — and a file dropped from the `cat` leaves it unmoved
                 # while the expected value changes.
                 check(dict(bodies, **{rel: bodies[rel] + b"x"}), f"perturbed {rel}")
+        for rel in named:
+            with self.subTest(missing=rel):
+                # Fails closed: a hash of whatever was readable would label a
+                # run as something it was not.
+                proc, written = run({k: v for k, v in bodies.items() if k != rel})
+                self.assertNotEqual(proc.returncode, 0, f"{rel} missing")
+                self.assertNotIn("hash=", written, f"{rel} missing")
+        for d in dirs:
+            with self.subTest(missing=d):
+                proc, written = run(
+                    {k: v for k, v in bodies.items() if not k.startswith(f"{d}/")}
+                )
+                self.assertNotEqual(proc.returncode, 0, f"{d} missing")
+                self.assertNotIn("hash=", written, f"{d} missing")
+            with self.subTest(added_to=d):
+                # A file nobody listed is hashed too: that is the point of
+                # hashing the directory.
+                check(dict(bodies, **{f"{d}/sub/new file": b"new\n"}), f"added to {d}")
+            with self.subTest(renamed_in=d):
+                moved = dict(bodies)
+                moved[f"{d}/renamed.md"] = moved.pop(f"{d}/guide.md")
+                check(moved, f"renamed in {d}")
 
     def review_prepare(self) -> str:
         """The `Hash the trusted prompt surface` step, in `prepare`."""
@@ -1693,13 +1823,70 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         return rest[: nxt.start()] if nxt else rest
 
 
+def skill_reference_problems(skills: Path, installed) -> list:
+    """Ways the installed skills under `skills` could send stage A to a skill
+    copy it does not install, whose only reachable copy is then the PR's."""
+    problems = []
+    root = skills.resolve()
+    uninstalled = [d.name for d in skills.iterdir() if d.name not in installed]
+    for name in installed:
+        # `find -type f` skips a symlink that `cp -rT` copies into stage A's
+        # reach, so one would be readable without moving the hash; that
+        # includes the skill directory itself.
+        tree = [skills / name, *(skills / name).rglob("*")]
+        if any(p.is_symlink() for p in tree):
+            problems.append(f"{name} is or contains a symlink")
+            continue
+        for path in sorted(p for p in tree if p.is_file()):
+            text = path.read_text(errors="replace")
+            where = path.relative_to(skills)
+            # A repo path to a skill resolves only in the PR checkout
+            # (`.claude/skills` links to it), installed or not.
+            if re.search(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text):
+                problems.append(
+                    f"{where} names a skill by its repo path; use ../<name>/"
+                )
+            # A home path or a backticked name must name an installed skill,
+            # whether or not the other one exists in the tree.
+            named = re.findall(r"~/\.claude/skills/([\w-]+)", text)
+            named += re.findall(r"(?<![\w-])`([\w-]+)`\s+skills?\b", text)
+            for other in sorted(set(named) - set(installed)):
+                problems.append(f"{where} names the uninstalled {other} skill")
+            # Named in plain prose, an uninstalled skill is one the `Skill`
+            # tool cannot load.
+            for other in uninstalled:
+                if re.search(rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text):
+                    problems.append(f"{where} names the uninstalled {other} skill")
+            # A relative reference, resolved whole from its file, that lands in
+            # another skill's directory, existing or not.
+            for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
+                target = (path.parent / rel).resolve()
+                if target.is_relative_to(root) and target != root:
+                    other = target.relative_to(root).parts[0]
+                    if other not in installed:
+                        problems.append(
+                            f"{where} refers to the uninstalled {other} skill"
+                        )
+    return problems
+
+
+def hashed_skill_dirs(step: str) -> list:
+    """The skill directories the prompt-hash step hands to `find`, in order."""
+    # Joined across `\`-newline continuations, as the shell joins them.
+    step = step.replace("\\\n", " ")
+    found = re.findall(r"\bfind\s+((?:\.agents/skills/[\w-]+\s+)+)-type f", step)
+    assert len(found) == 1, f"expected one `find` over skill directories: {found}"
+    return found[0].split()
+
+
 class TestCredentialDuration(unittest.TestCase):
     """Each role assumption requests exactly the lifetime its job needs.
 
     `prepare` and `publish` take the 900s STS minimum. The review job takes
     3600s, the role's ceiling, because its model step may run for 55 minutes; its
-    role is Bedrock-only. Omitting the line does not fail anything — it silently
-    defaults the credential to an hour — so every value is pinned.
+    role grants Bedrock and S3 writes under `pr_review_traces/`. Omitting the
+    line does not fail anything — it silently defaults the credential to an
+    hour — so every value is pinned.
     """
 
     EXPECTED = ("900", "3600", "900")
@@ -1766,10 +1953,12 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         "scripts/pr_review/**",
         ".github/workflows/hardened-pr-review.yml",
         ".github/workflows/hardened-pr-review-run.yml",
-        # The skill: an edit to it changes what the review reports and moves
-        # the prompt hash, and without this line it schedules no run of the
-        # suite that asserts either.
-        ".agents/skills/pr-review/**",
+        # Every skill, not just the installed ones: an edit to an installed
+        # skill changes what the review reports and moves the prompt hash,
+        # and without this line it schedules no run of the suite that asserts
+        # either. One broad entry costs a run of a few seconds and never goes
+        # stale when a skill is installed.
+        ".agents/skills/**",
         # This file's OWN path. Without it, an edit that rewires or weakens the
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
@@ -2264,8 +2453,8 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
 
         Whole entries, because substring membership is not the same test and
         the difference defeats exactly the coverage this filter provides: both
-        `"!.agents/skills/pr-review/**"` — an EXCLUSION — and
-        `".agents/skills/pr-review/**/*.py"` — a NARROWING that misses
+        `"!.agents/skills/**"` — an EXCLUSION — and
+        `".agents/skills/**/*.py"` — a NARROWING that misses
         `SKILL.md` — contain the required string while the filter no longer
         schedules the run.
         """
@@ -2538,6 +2727,98 @@ class TestOptOutLabel(unittest.TestCase):
     def test_pr_without_the_label_stays_eligible(self):
         self.assertEqual(self._eligible(("in progress",)), "true")
 
+    def test_a_run_the_opt_out_label_triggered_never_reviews(self):
+        """Even once the label is removed again: that run only withdraws."""
+        with tempfile.TemporaryDirectory() as td:
+            proc, out, _argv = run_corroboration(
+                "c" * 40, td, trigger_label="no automated review"
+            )
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(sole_outputs(self, written).get("eligible"), "false")
+
+    def test_the_withdraw_job_literal_matches_stage2_label(self):
+        """A job `if:` cannot read `env`, so the literal is hand-copied."""
+        text = strip_comments(STAGE2.read_text())
+        label = env_values(text.split("\njobs:", 1)[0], "OPT_OUT_LABEL")
+        self.assertEqual(
+            job_if(job_block(text, "withdraw")),
+            f"needs.prepare.outputs.trigger_label == '{label[0].strip(chr(34))}'",
+        )
+
+
+def stage1_admits(*, action, label=None, draft=False, labels=()) -> bool:
+    """Whether Stage 1's `capture` gate runs for this event."""
+    tree = parse_bool_expr(
+        job_if(strip_comments(job_block(STAGE1.read_text(), "capture")))
+    )
+    truth = {}
+    for atom in expr_atoms(tree):
+        if m := re.fullmatch(r"github\.event\.action (==|!=) '(\w+)'", atom):
+            truth[atom] = (action == m.group(2)) == (m.group(1) == "==")
+        elif m := re.fullmatch(r"github\.event\.label\.name == '([^']*)'", atom):
+            truth[atom] = label == m.group(1)
+        elif m := re.fullmatch(
+            r"contains \( github\.event\.pull_request\.labels\.\*\.name , '([^']*)' \)",
+            atom,
+        ):
+            truth[atom] = m.group(1) in labels
+        elif atom == "github.event.pull_request.draft":
+            truth[atom] = draft
+        elif atom == "github.repository == 'pytorch/pytorch'":
+            truth[atom] = True
+        else:
+            raise AssertionError(f"Stage 1's gate has an unmodelled condition {atom!r}")
+    return eval_expr(tree, truth)
+
+
+class TestStage1Gate(unittest.TestCase):
+    """Which pull-request events start a run, evaluated from the `if:`."""
+
+    def test_adding_the_review_label_starts_a_review(self):
+        self.assertTrue(
+            stage1_admits(
+                action="labeled", label="in progress", labels=("in progress",)
+            )
+        )
+
+    def test_an_opted_out_pr_is_not_reviewed(self):
+        both = ("in progress", "no automated review")
+        self.assertFalse(
+            stage1_admits(action="labeled", label="in progress", labels=both)
+        )
+        self.assertFalse(stage1_admits(action="synchronize", labels=both))
+
+    def test_adding_the_opt_out_label_starts_a_withdrawal_even_on_a_draft(self):
+        for draft in (False, True):
+            with self.subTest(draft=draft):
+                self.assertTrue(
+                    stage1_admits(
+                        action="labeled",
+                        label="no automated review",
+                        draft=draft,
+                        labels=("in progress", "no automated review"),
+                    )
+                )
+
+    def test_other_labels_and_drafts_start_nothing(self):
+        self.assertFalse(
+            stage1_admits(action="labeled", label="cla signed", labels=("in progress",))
+        )
+        self.assertFalse(
+            stage1_admits(
+                action="labeled",
+                label="in progress",
+                draft=True,
+                labels=("in progress",),
+            )
+        )
+        self.assertFalse(
+            stage1_admits(
+                action="synchronize", labels=("in progress", "ready for review")
+            )
+        )
+
 
 class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
     """`base_sha` and `is_fork` must reach a row only from the trusted API.
@@ -2666,10 +2947,9 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
     each call site so a workflow added later is covered by the loop.
     """
 
-    # Stage 1 keeps its own, narrower list on
-    # `TestStage1RunsNoPullRequestContent.ALLOWED_ENV_KEYS`; that test is the
-    # one that owns Stage 1's surface, and this loop uses it rather than a
-    # second copy that could drift from it.
+    # Stage 1's narrower list is `TestStage1RunsNoPullRequestContent.
+    # ALLOWED_ENV_KEYS`, kept beside the rest of Stage 1's surface; this loop is
+    # its only reader, and uses it rather than a second copy that could drift.
     STAGE2_ENV_KEYS = frozenset(
         (
             "APPEND_SYSTEM_PROMPT",
@@ -2692,10 +2972,13 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "HARNESS",
             "HARNESS_VERSION",
             "HEAD_SHA",
+            "HEAD_TREE_SHA",
             "IS_FORK",
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "PREVIOUS_MERGE_BASE_SHA",
+            "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
             "PR_COMMENTS",
@@ -2761,14 +3044,12 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
                 )
 
     def test_all_three_workflows_are_written_in_the_readable_subset(self):
-        """The grammar Stage 1 has had since round 5, on the other two files.
+        """The only whole-file grammar check, on all three workflows.
 
-        Round 8 closed four defects that were all one shape — a flow mapping or
-        a bare list marker somewhere no line-oriented reader models — and every
-        one was in Stage 2 or the suite CI. Stage 1, which this already
-        covered, produced none. A grammar on one of three files is not a
-        grammar, so it is applied to all three here and the Stage 1 test now
-        calls the same function.
+        A flow mapping or a bare list marker is a spelling no line-oriented
+        reader here models. A grammar on one of three files is not a grammar,
+        so it is applied to all three. Comments are stripped first: YAML
+        comments carry no structure.
         """
         for path in (STAGE1, STAGE2, SUITE_CI):
             with self.subTest(workflow=path.name):
@@ -2986,12 +3267,13 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         ("review", "pr"): "${{ needs.prepare.outputs.head_sha }}",
         ("announce", None): "${{ github.sha }}",
         ("publish", None): "${{ github.sha }}",
+        ("withdraw", None): "${{ github.sha }}",
     }
 
     def test_no_job_checks_out_pull_request_code_it_is_not_allowed_to(self):
         text = STAGE2.read_text()
         seen = {}
-        for job in ("prepare", "announce", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish", "withdraw"):
             for step in steps_using(job_block(text, job), "actions/checkout"):
                 inputs = mapping_items(with_block(step))
                 key = (job, inputs.get("path"))
@@ -3023,21 +3305,24 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         )
         self.assertEqual(
             sorted(set(runs)),
-            ["trusted/scripts/pr_review/extract_verdict.py"],
+            [
+                "trusted/scripts/pr_review/extract_verdict.py",
+                "trusted/scripts/pr_review/interdiff.py",
+            ],
             f"the review job runs {sorted(set(runs))}; every program it "
             "executes must come from the trusted checkout.",
         )
 
     def test_neither_stage_declares_a_workflow_level_collapse_group(self):
-        """The defect TestStage1CollapseGroupIsJobLevel exists for, on the
-        OTHER file, where it is worse.
+        """The defect TestStage1CollapseGroupIsJobLevel exists for, on both
+        files; it is worse on Stage 2.
 
         GitHub claims a workflow-level group before evaluating a job's `if:`,
         so a run the workflow is going to skip still joins it. Stage 2 receives
         a `workflow_run` completion for EVERY Stage 1 run, including the ones
         `prepare` refuses — so one group at column 0 lets a refused run cancel
-        a review already in flight. Stage 1 is pinned against this; Stage 2 was
-        not, and the reasoning transfers word for word.
+        a review already in flight. This is the only pin for either stage, and
+        the reasoning is the same for both.
         """
         for path in (STAGE1, STAGE2):
             with self.subTest(workflow=path.name):
@@ -3060,7 +3345,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         self.assertEqual(
             {
                 job: mapping_items(indented_block(job_block(text, job), "permissions:"))
-                for job in ("prepare", "announce", "review", "publish")
+                for job in ("prepare", "announce", "review", "publish", "withdraw")
             },
             {
                 "prepare": {
@@ -3076,6 +3361,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
                     "id-token": "write",
                     "pull-requests": "write",
                 },
+                "withdraw": {"contents": "read", "pull-requests": "write"},
             },
             "a Stage 2 job's token scopes are not the ones this design was "
             "reviewed with. Widening one is a deliberate edit to this literal.",
@@ -3280,8 +3566,8 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
     * `environment: bedrock` + the shared role — i.e. reverting both together
       to the old interim state. Nothing fails; the untrusted job silently
       regains PutObject on `pr_review_verdicts/`, the forgery path this design
-      exists to remove. This is the dangerous one, and asserting the exact
-      expected pair below is what catches it.
+      exists to remove. This is the dangerous one, and the two tests below
+      that each pin one half of the pair are what catch it.
 
     Dropping the environment line entirely fails closed and is merely broken.
 
@@ -3326,14 +3612,6 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
             "the review job must declare `environment: claude-untrusted` — that "
             "declaration is the only thing that mints the OIDC `sub` the "
             "untrusted role's trust policy accepts",
-        )
-
-    def test_the_two_never_disagree(self):
-        """The pairing, asserted as a pair so a half-edit cannot pass."""
-        self.assertEqual(
-            (self.review_env, self.review_role),
-            (self.EXPECTED_ENV, self.EXPECTED_ROLE),
-            "the review job's `environment:` and REVIEW_ROLE must flip together",
         )
 
     def test_review_job_never_names_the_publisher_environment(self):
@@ -3389,7 +3667,9 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     with a single trigger and no stale file anywhere.
 
     So the group lives on `capture`, which a rejected run never enters, and the
-    workflow level carries none. `.github/scripts/ensure_actions_will_cancel.py`
+    workflow level carries none (pinned by
+    `test_neither_stage_declares_a_workflow_level_collapse_group`).
+    `.github/scripts/ensure_actions_will_cancel.py`
     is the reason one was kept after the ciforge incident; it selects files with
     `"pull_request" in on`, an exact key match, so this file left its scope when
     the trigger moved and the checker exits 0 without it.
@@ -3397,31 +3677,6 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
 
     def setUp(self):
         self.text = STAGE1.read_text()
-
-    def test_there_is_no_workflow_level_group_at_all(self):
-        """THE KEY, not the cancellation. Both narrowings were measured wrong.
-
-        An earlier version forbade only `cancel-in-progress: true`, on the
-        reasoning that a non-cancelling group is harmless. It is not: GitHub
-        cancels a PENDING run when another enters the same group, so with A
-        running and an eligible B pending, a rejected C entering the group
-        cancels B before C's own job condition is evaluated. And `true` has
-        spellings — `True`, `'true'`, `${{ … }}` — each of which a value regex
-        misses while restoring the defect in full.
-
-        Nothing here needs a workflow-level group, so the whole key goes.
-        """
-        self.assertIsNone(
-            re.search(
-                r"(?m)^[\"\']?concurrency[\"\']?[ \t]*:", strip_comments(self.text)
-            ),
-            "Stage 1 declares a workflow-level `concurrency:` again. It is "
-            "claimed before the job `if:`, so a run this workflow SKIPS joins "
-            "it and can cancel — or displace as pending — a review in flight. "
-            "No suffix fixes that: three of the four declared trigger types "
-            "carry no label to differentiate by. The collapse group belongs on "
-            "the `capture` job, which a rejected run never enters.",
-        )
 
     def test_capture_job_keeps_a_collapse_group(self):
         """The group must not be dropped either — bursts should still collapse."""
@@ -3628,7 +3883,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
     # Update these deliberately when you change the shell, which is the whole
     # point: in this file that has to be an act, not an edit.
     # Over the RAW body, comments included — see the test for why.
-    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "d37176225e66e4c4"}
+    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "579ddf242c61ad23"}
     # The exact action each step may use. "Pinned to a SHA" is not enough on
     # its own: `actions/github-script` at a real pinned SHA, with a
     # `with.script: |` body, executes JavaScript that can read the PR payload
@@ -3859,15 +4114,15 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         Every other reader in this class works on `strip_comments(self.raw)`,
         which drops whole-line `#` comments — including comments inside a
         `run:` body. So `# PR context: ${{ github.event.pull_request.body }}`
-        added to the capture script was invisible to the expression scan AND
+        added to the capture script was invisible to those readers AND
         left the pinned digest unchanged, while the runner substituted a
         multi-line, attacker-authored body into the script text before bash saw
         a comment at all. A body containing a newline then contributes a line
         bash executes. Measured: all 328 tests green.
 
-        Read from RAW, therefore, and refuse the construct outright — Stage 1
-        passes everything it needs through `env:`, which is the rule the rest of
-        this class already enforces for non-comment lines.
+        Read from RAW, therefore, and refuse `${{` in `run:` bodies outright,
+        comment lines included; the allowlist test reads only uncommented
+        text. Stage 1 passes everything it needs through `env:`.
         """
         # From the RAW capture job, entry by entry. `block_scalars` matches only
         # at the OUTERMOST key indent of the text it is given, so handing it the
@@ -3952,10 +4207,12 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
     # a file — or run a command substitution — BEFORE the pinned script, so it
     # executes arbitrary code while leaving every `run:` digest untouched.
     # `LD_PRELOAD`, `PYTHONSTARTUP`, `GIT_*_PAGER` and `ENV` are the same
-    # shape. Six values, all GitHub-generated, plus the trusted label.
+    # shape. Seven values, all GitHub-generated, plus the two trusted labels.
     ALLOWED_ENV_KEYS = frozenset(
         (
             "REVIEW_LABEL",
+            "OPT_OUT_LABEL",
+            "OPT_OUT_ADDED",
             "PR_NUM",
             "HEAD_SHA",
             "BASE_SHA",
@@ -3964,69 +4221,6 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "TRIGGER_EVENT",
         )
     )
-
-    def test_every_environment_key_is_on_the_allowlist(self):
-        """Pinning the SCRIPT does not pin what bash runs before it.
-
-        The digest covers the `run:` body. It does not cover the environment
-        the shell starts in, and several standard variables turn that
-        environment into an execution vector on their own.
-        """
-        # THE WHOLE FILE. Scanning "the prefix before `jobs:`" plus "the
-        # capture job" left a third region uncovered: a top-level `env:`
-        # written AFTER the jobs mapping is valid YAML, reaches the job, and
-        # sat in neither. Whole-file GRAMMAR coverage does not make a narrower
-        # semantic scan complete — they are separate properties.
-        #
-        # ACCEPTED OVER-REACH: this collects EVERY mapping named `env`, not
-        # only the three that configure a runtime environment. A workflow
-        # declaring `on.workflow_dispatch.inputs.env` would have its
-        # `description:`/`type:` keys rejected as variable names. That is a
-        # false positive on a legal edit, and it is the deliberate trade for
-        # this file: two jobs' worth of YAML, one allowlist, and a failure
-        # that says exactly what to do. Narrow it to the three real scopes if
-        # this file ever grows an input named `env`.
-        for block in indented_blocks(self.text, "env"):
-            for ln in block:
-                m = re.match(r"^\s*[\"']?([A-Za-z_][\w-]*)[\"']?\s*:", ln)
-                if not m:
-                    continue
-                self.assertIn(
-                    m.group(1),
-                    self.ALLOWED_ENV_KEYS,
-                    f"an `env:` mapping in Stage 1 sets {m.group(1)!r}, which "
-                    "this class does not model. Some variable names make the "
-                    "shell execute code before the pinned script runs "
-                    "(BASH_ENV, ENV, LD_PRELOAD, PYTHONSTARTUP); decide which "
-                    "this is, then add it to ALLOWED_ENV_KEYS.",
-                )
-
-    def test_stage1_uses_only_spellings_this_class_can_read(self):
-        """FAIL CLOSED ON A GRAMMAR, instead of chasing spellings one at a time.
-
-        Five review rounds each found another legal YAML spelling that a
-        reader here did not model — `-  run:` with two spaces, a bare `-`
-        marker, `"extra":` quoted, `extra :` with a space before the colon, a
-        flow mapping, a key written after `jobs:`, an `&anchor` on an `env:`
-        header. Each fix was correct and each left the next one open, because
-        the language has more spellings than a text reader has rules and the
-        bypass is always one keystroke from the last fix.
-
-        So the direction is inverted: this asserts the file is written in the
-        NARROW SUBSET the readers above are built for, and anything outside it
-        is a loud failure naming this test rather than a silent mis-read. Same
-        trade `TestTheReadersPremisesStillHold` makes for the Stage 2 readers.
-
-        THE WHOLE FILE, not the capture job. Scoping it to the job left
-        workflow-level configuration outside the subset, and that is where the
-        two nastiest vectors live: `defaults : {run: {shell: 'bash -c "…"'}}`
-        before `jobs:` changes the interpreter of a script whose digest never
-        moves. A grammar that covers only part of a file is not a grammar.
-
-        Reformatting the workflow stays legal; reformatting it into a spelling
-        nothing here can parse does not.
-        """
-        refuse_unmodelled_spellings(self, self.text, "Stage 1")
 
     def test_no_step_reaches_the_network_or_evaluates_fetched_text(self):
         """Defence in depth behind the step-set pin, and it names the hazard.
@@ -4155,27 +4349,6 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "workspace and a tag can be moved by whoever owns it.",
             )
 
-    def test_no_shell_interpolates_a_workflow_expression(self):
-        """THE script-injection contract, and the reason the `env:` block exists.
-
-        `${{ }}` is substituted into the script TEXT before bash sees it, so a
-        value containing a quote or a `$(` becomes code. Passing values through
-        `env:` and reading them as `"$VAR"` cannot do that, whatever they hold.
-        Checked by executing the extracted shell as well — see below — because
-        a trailing `#` satisfies a substring assertion and `strip_comments`
-        only drops whole-line comments.
-        """
-        for step in self._step_entries():
-            for _, body in block_scalars(step, "run"):
-                script = "\n".join(body)
-                self.assertNotIn(
-                    "${{",
-                    script,
-                    "a Stage 1 `run:` interpolates a workflow expression "
-                    "directly into the script; route it through `env:` and "
-                    "quote it instead.",
-                )
-
     def test_no_shell_reads_the_workspace(self):
         """Nothing is checked out there, so a read finds nothing today. It is
         forbidden anyway: paired with a checkout added later it is the whole
@@ -4265,6 +4438,9 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "a comparison: the result is a boolean, never the repo name"
             ),
             "github.event.action": "one of the four declared trigger types",
+            "github.event.label.name == 'no automated review'": (
+                "a comparison: the result is a boolean, never the label name"
+            ),
             "github.event_name": "the trigger's own name, GitHub-set; reaches "
             "the capture job's concurrency group and nothing else — see "
             "test_the_capture_group_is_keyed_by_event",
@@ -4312,6 +4488,8 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "IS_FORK": "true",
             "TRIGGER_EVENT": "labeled",
             "REVIEW_LABEL": "in progress",
+            "OPT_OUT_LABEL": "no automated review",
+            "OPT_OUT_ADDED": "false",
         }
         env.update(overrides)
         with tempfile.TemporaryDirectory() as td:
@@ -4392,6 +4570,26 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                     self.assertIsNotNone(doc, f"{field} produced no artifact")
                     # Carried as a JSON string value, not as anything else.
                     self.assertIn(payload, doc.values())
+
+    def test_adding_the_opt_out_label_records_it_as_the_trigger(self):
+        """Stage 2 withdraws instead of reviewing on this label."""
+        rc, doc, _ = self._execute(OPT_OUT_ADDED="true")
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["trigger_label"], "no automated review")
+
+    def test_a_payload_in_the_opt_out_inputs_never_runs(self):
+        payload = 'x"; touch INJECTED; #'
+        for env in (
+            {"OPT_OUT_ADDED": payload},
+            {"OPT_OUT_ADDED": "true", "OPT_OUT_LABEL": payload},
+        ):
+            with self.subTest(env=env):
+                rc, doc, injected = self._execute(**env)
+                self.assertFalse(injected)
+                self.assertEqual(rc, 0)
+                self.assertIn(
+                    doc["trigger_label"], ("in progress", payload), "not data"
+                )
 
     def test_a_substitution_in_a_field_is_data_not_a_command(self):
         """`$(...)` specifically: the form that needs no quote to escape."""
@@ -4534,6 +4732,8 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                     "IS_FORK": "true",
                     "TRIGGER_EVENT": "labeled",
                     "REVIEW_LABEL": "in progress",
+                    "OPT_OUT_LABEL": "no automated review",
+                    "OPT_OUT_ADDED": "false",
                 },
             )
             written = sorted(
@@ -4835,6 +5035,13 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
         self.assertIn(f"Read(/{self.PATH})", stage_a)
         self.assertIn(self.PATH, stage_a_system_prompt())
 
+    def test_the_sanitizer_reads_the_pr_body_for_the_stack_policy(self):
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        sanitize = "Sanitize the verdict"
+        self.assertLess(names.index("Write the PR conversation"), names.index(sanitize))
+        step = self._step(self.review, sanitize)
+        self.assertIn(f"--pr-comments-file {self.PATH}", step)
+
     def test_the_fetch_fails_closed_before_the_started_row(self):
         fetch = self._step(self.prepare, "Fetch the PR conversation")
         self.assertEqual(
@@ -4850,6 +5057,209 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
             "the conversation is fetched after the `started` row, so a fetch "
             "failure leaves a started row with no review behind it.",
         )
+
+
+class TestTheReviewInputsAreKept(unittest.TestCase):
+    """The review job uploads the files the model is handed, best-effort.
+
+    The review role may write only `pr_review_traces/`, so another prefix loses
+    every snapshot silently; and a snapshot failure must never fail the review.
+    """
+
+    NAME = "Upload the review inputs to S3"
+    INPUTS = ("pr-diff.txt", "pr-files.txt", "pr-comments.json")
+
+    def setUp(self):
+        self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        (self.step,) = [
+            s
+            for s in re.split(r"(?m)^      -(?: |$)", self.review)
+            if s.startswith(f"name: {self.NAME}\n")
+        ]
+
+    def test_every_s3_bucket_url_in_the_review_job_is_under_the_traces_prefix(self):
+        # The four `s3://${S3_BUCKET}/` literals: the inputs' DEST and the
+        # three trace uploads. A new one must be added here deliberately.
+        targets = re.findall(r"s3://\$\{S3_BUCKET\}/(\S*)", self.review)
+        self.assertEqual(len(targets), 4, targets)
+        for t in targets:
+            self.assertTrue(t.startswith("pr_review_traces/"), t)
+
+    def test_it_runs_on_credentials_after_every_input_is_written_and_before_the_model(
+        self,
+    ):
+        self.assertEqual(
+            uncommented(re.search(r"(?m)^        if: (.*)$", self.step).group(1)),
+            "steps.aws.outcome == 'success'",
+        )
+        model_step(self.review, "aws")
+        self.assertNotIn("continue-on-error", self.step)
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        here = names.index(self.NAME)
+        self.assertLess(names.index("Configure AWS credentials via OIDC"), here)
+        self.assertLess(names.index("Build the diff and apply the size gate"), here)
+        self.assertLess(names.index("Write the PR conversation"), here)
+        self.assertLess(here, names.index('"Stage A: pr-review"'))
+
+    def _run(self, aws_exit: int, block_staging=False):
+        with tempfile.TemporaryDirectory() as td:
+            for f in self.INPUTS:
+                Path(td, f).write_text(f"content of {f}")
+            if block_staging:
+                Path(td, "pr-review-input").write_text("a file, not a directory")
+            log = Path(td) / "argv.log"
+            # `timeout` records its limit and runs the rest; `aws` records what
+            # it was ASKED to upload: the recursive source must be the staging
+            # directory, and each file is logged with its content.
+            stubs = {
+                "timeout": f'#!/bin/bash\necho "timeout $*" >> {log}\nshift\nexec "$@"\n',
+                "aws": (
+                    f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                    f'if [ "$3" = --recursive ]; then [ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                    f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
+                    f"fi\nexit {aws_exit}\n"
+                ),
+            }
+            proc, _ = run_step(
+                STAGE2.read_text(),
+                self.NAME,
+                td,
+                {
+                    "S3_BUCKET": "b",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "7",
+                    "HEAD_SHA": "h" * 40,
+                    "BASE_SHA": "b" * 40,
+                    "MERGE_BASE_SHA": "m" * 40,
+                    "HEAD_TREE_SHA": "t" * 40,
+                },
+                stubs,
+                rewrite=lambda body: re.sub(r"\$\{\{[^}]*\}\}", "CTX", body).replace(
+                    "/tmp/", f"{td}/"
+                ),
+            )
+            staged = Path(td, "pr-review-input")
+            staged_manifest = Path(td, "pr-review-manifest.json")
+            manifest, uploaded = None, []
+            if staged.is_dir():
+                uploaded = sorted(p.name for p in staged.iterdir())
+            if staged_manifest.exists():
+                manifest = json.loads(staged_manifest.read_text())
+            recorded = log.read_text().replace(td, "TD") if log.exists() else ""
+        return proc, manifest, uploaded, recorded
+
+    def test_it_uploads_the_inputs_and_a_manifest(self):
+        proc, manifest, uploaded, recorded = self._run(0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(uploaded, sorted(self.INPUTS))
+        # Each upload runs under a timeout, and the manifest goes last, alone.
+        dest = "s3://b/pr_review_traces/CTX/CTX_CTX_input/"
+        inputs = f"s3 cp --recursive TD/pr-review-input {dest}"
+        marker = f"s3 cp TD/pr-review-manifest.json {dest}manifest.json"
+        self.assertEqual(
+            recorded.splitlines(),
+            [
+                f"timeout 120 aws {inputs}",
+                inputs,
+                *(f"{f}=content of {f}" for f in sorted(self.INPUTS)),
+                f"timeout 30 aws {marker}",
+                marker,
+            ],
+        )
+        self.assertEqual(
+            manifest,
+            {
+                "repo": "o/r",
+                "pr_number": 7,
+                "head_sha": "h" * 40,
+                "base_sha": "b" * 40,
+                "merge_base_sha": "m" * 40,
+                "head_tree_sha": "t" * 40,
+            },
+        )
+        self.assertNotIn("::warning::", proc.stdout)
+
+    def test_a_failed_upload_only_warns_and_writes_no_manifest(self):
+        proc, _, _, recorded = self._run(1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertEqual(recorded.count("aws s3 cp"), 1, recorded)
+        self.assertRegex(recorded, r"(?m)^s3 cp --recursive ")
+        self.assertNotIn("manifest.json", recorded)
+
+    def test_a_staging_failure_only_warns_and_uploads_nothing(self):
+        proc, _, _, recorded = self._run(0, block_staging=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertNotIn("s3 cp", recorded)
+
+    def test_the_manifest_sources_and_key_are_the_runs_own(self):
+        """`_run` binds the env itself, so the bindings and key are pinned here."""
+        for name, value in {
+            "REPO": "github.repository",
+            "PR_NUMBER": "needs.prepare.outputs.pr_number",
+            "HEAD_SHA": "needs.prepare.outputs.head_sha",
+            "BASE_SHA": "needs.prepare.outputs.base_sha",
+            "MERGE_BASE_SHA": "needs.prepare.outputs.merge_base_sha",
+            "HEAD_TREE_SHA": "steps.diff.outputs.head_tree_sha",
+        }.items():
+            self.assertEqual(env_values(self.step, name), [f"${{{{ {value} }}}}"])
+        stem = (
+            "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/"
+            "${{ github.run_id }}_${{ github.run_attempt }}"
+        )
+        self.assertIn(f'"{stem}.json"', self.review)
+        self.assertIn(f'DEST="{stem}_input/"', self.step)
+
+    def test_merge_base_plus_the_diff_rebuilds_the_recorded_tree(self):
+        """The replay recipe, on a real repo: merge base + pr-diff.txt from the
+        real diff step gives head_tree_sha (an edit, add, delete, rename, chmod)."""
+        with tempfile.TemporaryDirectory() as td:
+            # No developer or system git config reaches the fixture or the step.
+            sealed = {"HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
+            sealed["GIT_CONFIG_GLOBAL"] = os.devnull
+            env = {"PATH": "/usr/bin:/bin", **sealed}
+
+            def sh(script):
+                return subprocess.run(
+                    ["bash", "-ec", script],
+                    cwd=td,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            base = sh(
+                "git init -q pr; cd pr; git config user.email t@t; git config user.name t\n"
+                "seq 20 > a.py; seq 30 > old.py; echo bye > gone.py; echo hi > run.sh\n"
+                "git add -A; git commit -qm base; git rev-parse HEAD"
+            )
+            sh(
+                "cd pr; echo 21 >> a.py; echo new > new.py; git rm -q gone.py\n"
+                "git mv old.py moved.py; chmod +x run.sh; git add -A; git commit -qm head"
+            )
+            proc, out = run_step(
+                STAGE2.read_text(),
+                "Build the diff and apply the size gate",
+                f"{td}/pr",
+                {
+                    "MERGE_BASE_SHA": base,
+                    "MAX_CHANGED_FILES": "100",
+                    "MAX_DIFF_BYTES": "9999",
+                    **sealed,
+                },
+                {},
+                rewrite=lambda body: body.replace("/tmp/", f"{td}/"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            tree = sole_outputs(self, out.read_text())["head_tree_sha"]
+            self.assertEqual(tree, sh("git -C pr rev-parse 'HEAD^{tree}'"))
+            replayed = sh(
+                f"git -C pr worktree add -q --detach ../replay {base}; cd replay\n"
+                "git apply --index ../pr-diff.txt; git write-tree"
+            )
+            self.assertEqual(replayed, tree)
 
 
 class TestPublishMovesNoLabels(unittest.TestCase):
@@ -4880,11 +5290,12 @@ class TestPublishMovesNoLabels(unittest.TestCase):
 
 
 class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
-    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+    """`announce` touches only automated reviews, with GITHUB_TOKEN and nothing else.
 
     It runs beside the review job, so it must not become a second publisher: no
     environment (the publisher role trusts the `bedrock` one), no AWS step, no
-    direct API call, and only post_review.py's `--mark-pending` mode.
+    direct API call, and only post_review.py's `--mark-pending` mode, or its
+    `--too-large` mode on a run `review` and `publish` sit out.
     """
 
     def setUp(self):
@@ -4895,10 +5306,14 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         self.assertNotIn("configure-aws-credentials", self.job)
         self.assertNotIn("id-token", self.job)
 
-    def test_it_only_marks_the_previous_review(self):
+    def test_it_only_marks_the_previous_review_or_says_too_large(self):
         runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
         self.assertEqual(
-            runs, ["python3 scripts/pr_review/post_review.py --mark-pending"]
+            runs,
+            [
+                "python3 scripts/pr_review/post_review.py --mark-pending",
+                "python3 scripts/pr_review/post_review.py --too-large",
+            ],
         )
         for needle in ("gh api", "gh pr", "/labels"):
             self.assertNotIn(needle, self.job)
@@ -4916,6 +5331,11 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
                 "PR_NUMBER": pr,
                 "REVIEWED_SHA": sha,
                 "RUN_ID": run_id,
+                "OPT_OUT_LABEL": label,
+            },
+            ("announce", "Say the PR is too large to review"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
                 "OPT_OUT_LABEL": label,
             },
             ("publish", "Post the automated review on the PR"): {
@@ -4941,6 +5361,40 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         step = publish.split("- name: Put back the previous review", 1)[1]
         self.assertIn("if: always()", step.split("run:", 1)[0])
         self.assertIn("post_review.py --restore-pending", step)
+
+
+class TestWithdrawHoldsOnlyTheToken(unittest.TestCase):
+    """`withdraw` dismisses change requests with GITHUB_TOKEN and nothing else.
+
+    Same shape as `announce`: no environment, no AWS step, no direct API
+    call, and only post_review.py's `--withdraw-opted-out` mode.
+    """
+
+    def setUp(self):
+        self.job = strip_comments(job_block(STAGE2.read_text(), "withdraw"))
+
+    def test_it_names_no_environment_and_assumes_no_role(self):
+        self.assertNotIn("environment:", self.job)
+        self.assertNotIn("configure-aws-credentials", self.job)
+        self.assertNotIn("id-token", self.job)
+
+    def test_it_only_withdraws(self):
+        runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
+        self.assertEqual(
+            runs, ["python3 scripts/pr_review/post_review.py --withdraw-opted-out"]
+        )
+        for needle in ("gh api", "gh pr", "/labels"):
+            self.assertNotIn(needle, self.job)
+
+    def test_it_gets_the_inputs_main_reads(self):
+        step = self.job.split("- name: Withdraw the automated change requests", 1)[1]
+        self.assertEqual(
+            env_values(step, "PR_NUMBER"), ["${{ needs.prepare.outputs.pr_number }}"]
+        )
+        self.assertEqual(
+            env_values(step, "OPT_OUT_LABEL"), ["${{ env.OPT_OUT_LABEL }}"]
+        )
+        self.assertEqual(env_values(step, "GH_TOKEN"), ["${{ secrets.GITHUB_TOKEN }}"])
 
 
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
@@ -5029,18 +5483,6 @@ class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     def test_both_the_delete_and_the_rescan_read_nul_separated(self):
         self.assertEqual(self.scrub.count("printf '%s\\0'"), 1)
         self.assertEqual(self.scrub.count("read -r -d ''"), 3)
-
-    def test_the_delete_uses_a_double_dash(self):
-        self.assertIn('rm -f -- "$link"', self.scrub)
-
-    def test_attacker_chosen_names_are_quoted_into_the_log(self):
-        # %s would let a newline in the name forge a `::error::` workflow command.
-        self.assertNotIn("printf '  %s\\n' \"$link\"", self.scrub)
-        self.assertIn("printf '  %q\\n' \"$link\"", self.scrub)
-
-    def test_it_still_fails_closed(self):
-        self.assertIn("::error::escaping symlink still present", self.scrub)
-        self.assertIn("exit 1", self.scrub)
 
 
 class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
@@ -5336,6 +5778,15 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         for rec in recs:
             self.assertIn(rec, prompt)
 
+    def test_the_skill_labels_non_blocking_points_the_way_stage_b_reads_them(self):
+        # Stage B records a point the review labels non-blocking as `minor`;
+        # if the skill stops writing that label, every point posts as a blocker.
+        skill = " ".join(PR_REVIEW_SKILL.read_text().split())
+        self.assertIn('write "non-blocking" in it', skill)
+        self.assertIn('Write "non-blocking" in each non-blocking point', skill)
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn("A point the review labels non-blocking is `minor`", prompt)
+
     def test_the_schema_offers_exactly_what_the_sanitizer_accepts(self):
         m = re.search(r"--json-schema '([^']*)'", self.stage_b)
         self.assertIsNotNone(m, "stage B declares no --json-schema")
@@ -5356,6 +5807,53 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         m = re.search(r"`message` to at most (\d+) characters", prompt)
         self.assertIsNotNone(m, "stage B no longer states a message budget")
         self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
+
+    def test_a_blocking_point_is_major_and_changes_requested(self):
+        # The sanitizer refuses ready_for_human_review with a major finding, so
+        # whatever makes a finding major must also make the verdict
+        # changes_requested, even under Needs Discussion (pytorch#202251).
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "unless the review names a defect that must be fixed before approval:"
+            ' then it is "changes_requested"',
+            prompt,
+        )
+        # Not every point that holds up approval is a defect to fix.
+        self.assertIn(
+            "An open question, a request for data or discussion, or files left"
+            " unreviewed is not such a defect.",
+            prompt,
+        )
+        self.assertIn(
+            "reason for Request Changes or as a defect that must be fixed before"
+            " approval",
+            prompt,
+        )
+        # The summary keeps the Recommendation and explains an override.
+        self.assertIn("summary and its Recommendation", prompt)
+        self.assertIn("under Approve or Needs Discussion, or only non-blocking", prompt)
+
+    def test_a_non_blocking_point_never_posts_as_a_blocker(self):
+        # blocking_findings posts every finding as a blocker under
+        # changes_requested with no major one, so a review whose points are all
+        # labelled non-blocking must not become changes_requested.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "A point the review labels non-blocking is `minor`, never `major`.",
+            prompt,
+        )
+        self.assertIn(
+            "If the review labels every point it raises non-blocking, the verdict is"
+            ' "ready_for_human_review", even under Request Changes.',
+            prompt,
+        )
+
+    def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
+        # parse_diff's KNOWN LIMITS: findings on these files are discarded,
+        # and a change request left with none is refused.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        for kind in ("pure rename", "mode-only change", "binary file"):
+            self.assertIn(kind, prompt)
 
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
@@ -5879,10 +6377,34 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
             f"the workflow-level MAX_CHANGED_FILES is {caps[0]!r}, not a count",
         )
 
+    def test_announce_says_too_large_instead_of_marking(self):
+        """Marking would leave a review in progress that no run replaces; the
+        notice is the only thing the author sees on this path."""
+        block = strip_comments(job_block(self.text, "announce"))
+        self.assertEqual(job_if(block), "needs.prepare.outputs.fresh == 'true'")
+        gates = {}
+        for name in (
+            "Mark the previous automated review in progress",
+            "Say the PR is too large to review",
+        ):
+            step = block.split(f"- name: {name}", 1)[1]
+            step = re.split(r"\n      - ", step, maxsplit=1)[0]
+            gates[name] = re.findall(r"(?m)^\s*if:\s*(.*)$", step)
+        self.assertEqual(
+            gates,
+            {
+                "Mark the previous automated review in progress": [
+                    "needs.prepare.outputs.too_large != 'true'"
+                ],
+                "Say the PR is too large to review": [
+                    "needs.prepare.outputs.too_large == 'true'"
+                ],
+            },
+        )
+
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
-        """`publish` too: it is `always()`, so skipping `review` is not enough.
-        `announce` too: it would mark a review no run will replace."""
-        for job in ("announce", "review", "publish"):
+        """`publish` too: it is `always()`, so skipping `review` is not enough."""
+        for job in ("review", "publish"):
             # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
             # unordered, so moving an unchanged `runs-on:` above `if:` emptied
             # that region and red the test — the identical defect already found
@@ -5963,7 +6485,6 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         self.text = STAGE2.read_text()
         self.review = job_block(self.text, "review")
         self.stripped = strip_comments(self.review)
-        self.prepare = strip_comments(job_block(self.text, "prepare"))
 
     def _step(self, marker: str, hay: str | None = None) -> str:
         hay = self.stripped if hay is None else hay
@@ -5985,13 +6506,6 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         self.assertNotIn("merge-base", self.stripped)
         self.assertNotIn("--deepen", self.stripped)
         self.assertNotIn("--unshallow", self.stripped)
-
-    def test_prepare_resolves_it_from_the_compare_endpoint_and_validates_it(self):
-        self.assertIn("merge_base_commit.sha", self.prepare)
-        self.assertRegex(self.prepare, r"/compare/")
-        self.assertRegex(
-            self.prepare, r'"merge_base_sha=\$MERGE_BASE"\s*>>\s*"\$GITHUB_OUTPUT"'
-        )
 
     def _run_corroboration(self, merge_base: str, td: str, **identities):
         return run_corroboration(merge_base, td, **identities)
@@ -6108,6 +6622,184 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         self.assertIn("did not arrive", proc.stdout + proc.stderr)
 
 
+class TestTheInterdiffReachesTheReview(unittest.TestCase):
+    """A re-review is told what the author changed since the last automated review.
+
+    `prepare` reads the commit that review saw and its merge base from the API;
+    the review job fetches both and runs interdiff.py from the trusted checkout,
+    before any credential. The commit can be gone after a force-push, so that
+    path must still exit 0: the file then holds a note, and the review runs.
+    """
+
+    PATH = "/tmp/pr-interdiff.txt"
+    PREVIOUS, PREVIOUS_BASE, MERGE_BASE = "d" * 40, "e" * 40, "f" * 40
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.prepare = strip_comments(job_block(self.text, "prepare"))
+        self.review = strip_comments(job_block(self.text, "review"))
+
+    def _fetch_conversation(self, previous: str, compare: str | None, td: str):
+        """The conversation step, with fetch_pr_comments.py stubbed to report `previous`."""
+        argv = Path(td) / "gh_calls"
+        argv.write_text("")
+        python = f"""#!/bin/bash
+printf '%s' '{json.dumps({"items": [], "previous_review_sha": previous})}' > pr-comments.json
+"""
+        # None: the compare call fails, as on a transient API error.
+        gh = _GH_STUB if compare is not None else "#!/bin/bash\nexit 1\n"
+        return run_step(
+            self.text,
+            "Fetch the PR conversation",
+            td,
+            {
+                "GH_ARGV": str(argv),
+                "COMPARE_JSON": json.dumps({"merge_base_commit": {"sha": compare}}),
+                "GH_TOKEN": "stub-token",
+                "REPO": "o/r",
+                "PR_NUMBER": "1",
+                "HEAD_SHA": STUB_API_HEAD,
+                "BASE_SHA": STUB_API_BASE,
+            },
+            {"python3": python, "gh": gh},
+        ), argv
+
+    def test_the_previous_commit_and_its_merge_base_are_exported(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, out), argv = self._fetch_conversation(
+                self.PREVIOUS, self.PREVIOUS_BASE, td
+            )
+            written, calls = out.read_text(), argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        outputs = sole_outputs(self, written)
+        self.assertEqual(outputs.get("previous_review_sha"), self.PREVIOUS)
+        self.assertEqual(outputs.get("previous_merge_base_sha"), self.PREVIOUS_BASE)
+        # The earlier commit's fork point with the base, not this head's.
+        self.assertEqual(
+            [tuple(ln.split("\t")) for ln in calls.splitlines()],
+            [
+                (
+                    f"repos/o/r/compare/{STUB_API_BASE}...{self.PREVIOUS}?per_page=1",
+                    ".merge_base_commit.sha",
+                )
+            ],
+        )
+
+    def test_a_malformed_previous_commit_aborts_the_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), _argv = self._fetch_conversation(
+                "not-a-sha", self.PREVIOUS_BASE, td
+            )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("bad previous_review_sha", proc.stdout + proc.stderr)
+
+    def test_an_unusable_merge_base_is_empty_not_a_failure(self):
+        for compare in (None, "null", "not-a-sha"):
+            with tempfile.TemporaryDirectory() as td:
+                (proc, out), _argv = self._fetch_conversation(
+                    self.PREVIOUS, compare, td
+                )
+                written = out.read_text()
+            self.assertEqual(proc.returncode, 0, f"{compare!r}: {proc.stderr}")
+            self.assertEqual(
+                sole_outputs(self, written).get("previous_merge_base_sha"), "", compare
+            )
+
+    def test_no_earlier_review_makes_no_compare_call(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, out), argv = self._fetch_conversation("", self.PREVIOUS_BASE, td)
+            written, calls = out.read_text(), argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        outputs = sole_outputs(self, written)
+        self.assertEqual(
+            (
+                outputs.get("previous_review_sha"),
+                outputs.get("previous_merge_base_sha"),
+            ),
+            ("", ""),
+        )
+        self.assertEqual(calls, "")
+
+    def test_both_shas_reach_the_review_job_as_outputs(self):
+        outputs = mapping_items(indented_block(self.prepare, "outputs:"))
+        step = self._build_step()
+        for name in ("previous_review_sha", "previous_merge_base_sha"):
+            self.assertEqual(
+                norm_expr(outputs[name]),
+                f"${{{{ steps.conversation.outputs.{name} }}}}",
+            )
+            self.assertEqual(
+                env_values(step, name.upper()),
+                [f"${{{{ needs.prepare.outputs.{name} }}}}"],
+            )
+        self.assertEqual(
+            env_values(step, "MERGE_BASE_SHA"),
+            ["${{ needs.prepare.outputs.merge_base_sha }}"],
+        )
+
+    def _build_step(self) -> str:
+        hits = re.split(r"(?m)^      -(?: |$)", self.review)
+        (step,) = [
+            s
+            for s in hits
+            if s.startswith("name: Build the interdiff since the last review\n")
+        ]
+        return step
+
+    def _run_build(self, previous: str, td: str, fetch_status: int = 0):
+        calls = Path(td) / "calls"
+        calls.write_text("")
+        log = f'#!/bin/bash\necho "$(basename "$0") $*" >> {calls}\n'
+        return run_step(
+            self.text,
+            "Build the interdiff since the last review",
+            td,
+            {
+                "PREVIOUS_REVIEW_SHA": previous,
+                "PREVIOUS_MERGE_BASE_SHA": self.PREVIOUS_BASE,
+                "MERGE_BASE_SHA": self.MERGE_BASE,
+                "MAX_DIFF_BYTES": "1000",
+            },
+            {"git": log + f"exit {fetch_status}\n", "python3": log},
+        ), calls
+
+    def test_a_commit_gone_after_a_force_push_still_builds_the_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build(self.PREVIOUS, td, fetch_status=128)
+            ran = calls.read_text().splitlines()
+        self.assertEqual(
+            proc.returncode, 0, "a failed fetch failed the review: " + proc.stderr
+        )
+        self.assertEqual(
+            ran[0],
+            f"git -C pr fetch --no-tags --depth=1 origin {self.PREVIOUS} {self.PREVIOUS_BASE}",
+        )
+        self.assertEqual(
+            ran[1],
+            f"python3 trusted/scripts/pr_review/interdiff.py --repo pr --previous {self.PREVIOUS} "
+            f"--previous-base {self.PREVIOUS_BASE} --base {self.MERGE_BASE} --files /tmp/pr-files.z "
+            f"--out {self.PATH} --max-bytes 1000",
+        )
+
+    def test_a_malformed_sha_aborts_the_step(self):
+        with tempfile.TemporaryDirectory() as td:
+            (proc, _out), calls = self._run_build("not-a-sha", td)
+            ran = calls.read_text()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(ran, "", "the step ran git or the script on a malformed sha")
+
+    def test_it_runs_after_the_size_gate_and_before_any_credential(self):
+        self.assertIn("if: steps.diff.outputs.too_large == 'false'", self._build_step())
+        size = self.review.find("- name: Build the diff and apply the size gate")
+        build = self.review.find("- name: Build the interdiff since the last review")
+        creds = self.review.find("- name: Configure AWS credentials via OIDC")
+        self.assertTrue(-1 < size < build < creds, (size, build, creds))
+
+    def test_the_model_is_granted_and_told_the_path(self):
+        self.assertIn(f"Read(/{self.PATH})", model_step(self.review, "a"))
+        self.assertIn(self.PATH, stage_a_system_prompt())
+
+
 class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
     """Executed, not read: the two guards that authenticate the request.
 
@@ -6145,6 +6837,7 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
         "base_sha": STUB_API_BASE,
         "is_fork": "false",
         "trigger_event": "labeled",
+        "trigger_label": "in progress",
     }
 
     def _run_coords(self, td: str, *, artifact=None, event_head_sha=STUB_API_HEAD):
@@ -6158,7 +6851,11 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
             STAGE2.read_text(),
             "Validate and authenticate the request",
             td,
-            {"EVENT_HEAD_SHA": event_head_sha},
+            {
+                "EVENT_HEAD_SHA": event_head_sha,
+                "REVIEW_LABEL": "in progress",
+                "OPT_OUT_LABEL": "no automated review",
+            },
             {},
         )
 
@@ -6179,9 +6876,26 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
                 "pr_number": "7",
                 "head_sha": STUB_API_HEAD,
                 "trigger_event": "labeled",
+                "trigger_label": "in progress",
             },
             f"the authenticated coordinates are {written!r}",
         )
+
+    def test_the_trigger_label_is_one_of_the_two_trusted_labels(self):
+        for label, ok in (
+            ("no automated review", True),
+            ("cla signed", False),
+            ("", False),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td:
+                proc, out = self._run_coords(td, artifact={"trigger_label": label})
+                written = out.read_text()
+            if ok:
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn(f"trigger_label={label}", written)
+            else:
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertNotIn("trigger_label=", written)
 
     def test_an_artifact_naming_another_commit_is_refused(self):
         """A forged artifact could otherwise name any commit in the repo."""
@@ -6470,11 +7184,11 @@ def stage_a_system_prompt() -> str:
 
 
 COMMENTS = "/tmp/pr-comments.json"
-# Every gh/git command the pr-review skill runs, and what stage A's system prompt
+# Every gh/git command the installed skills run, and what stage A's system prompt
 # names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
     # Local CLI mode.
-    "gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
+    "gh pr view <PR_NUMBER> --json title,body,author,labels,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
     "gh pr diff <PR_NUMBER>": "/tmp/pr-diff.txt",
     "gh pr view <PR_NUMBER> --json comments,reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments": COMMENTS,
@@ -6503,20 +7217,120 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
 
     def test_every_skill_command_is_covered_offline(self):
         found = set()
-        for md in PR_REVIEW_SKILL.parent.glob("*.md"):
+        # Every skill stage A installs, subdirectories included.
+        skills = REPO / ".agents" / "skills"
+        mds = [
+            md
+            for name in INSTALLED_SKILLS
+            for md in sorted((skills / name).rglob("*.md"))
+        ]
+        for md in mds:
             for ln in md.read_text().splitlines():
                 if re.match(r"(gh|git) [a-z]", ln.strip()):
                     found.add(ln.strip())
         self.assertEqual(
             found,
             set(SKILL_COMMANDS),
-            "the pr-review skill's gh/git commands changed; stage A runs offline, "
+            "the installed skills' gh/git commands changed; stage A runs offline, "
             "so map each new one in its system prompt, then update SKILL_COMMANDS",
         )
         offline = stage_a_system_prompt()
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAShowsTheLabels(unittest.TestCase):
+    """The review is offline, so it learns the PR's labels only from the file; the
+    prompt and the file's keys must stay in step, or it asks for labels already set."""
+
+    def test_the_prompt_names_the_label_keys_that_collect_emits(self):
+        def api(endpoint, body=None):
+            if endpoint.endswith("/pulls/1"):
+                return {"user": {"login": "author"}, "labels": []}
+            return []
+
+        out = fetch_pr_comments.collect(api, "pytorch/pytorch", 1)
+        offline = stage_a_system_prompt()
+        for key in ("labels", "labels_truncated"):
+            self.assertIn(key, out, f"collect() no longer emits {key!r}")
+            self.assertIn(f"`{key}`", offline, f"stage A no longer names {key!r}")
+        self.assertIn("already in `labels`", offline)
+
+
+class TestStageAFanOut(unittest.TestCase):
+    """Stage A's Fan-out section and the skill's Step 2 and Step 5 rules it relies on.
+    A reviewer renamed in one place and not the other, or a hand-off sentence moved
+    out of its section, would ask for reviewers or rules that no longer exist."""
+
+    @staticmethod
+    def sections() -> dict[str, str]:
+        """Stage A's system prompt by `## ` heading, in order."""
+        parts = re.split(r"(?m)^## (.+)\n", stage_a_system_prompt())
+        return dict(zip(parts[1::2], parts[2::2]))
+
+    @staticmethod
+    def skill_step(n: int) -> str:
+        """SKILL.md's Step n, up to the next heading."""
+        step = re.search(
+            rf"^### Step {n}:.*?\n(.*?)(?=^##)",
+            PR_REVIEW_SKILL.read_text(),
+            re.S | re.M,
+        )
+        assert step is not None, f"premise changed: SKILL.md has no Step {n}"
+        return step.group(1)
+
+    def test_sections_are_in_the_order_above_and_below_assume(self):
+        self.assertEqual(list(self.sections()), ["Offline", "Fan-out", "Security"])
+
+    def test_fan_out_names_the_skill_reviewers(self):
+        listed = re.search(r"(\w+) reviewers \(([^)]*)\)", self.sections()["Fan-out"])
+        self.assertIsNotNone(
+            listed, "the Fan-out section no longer lists the reviewers"
+        )
+        names = [n.strip().lower() for n in re.split(r",\s*", listed.group(2))]
+        skill = re.findall(r"^- \*\*([^*]+?):?\*\*", self.skill_step(2), re.M)
+        self.assertEqual(
+            names,
+            [n.lower() for n in skill],
+            "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
+        )
+        word = listed.group(1)
+        count = (
+            int(word)
+            if word.isdigit()
+            else {"three": 3, "four": 4, "five": 5, "six": 6}.get(word)
+        )
+        self.assertIsNotNone(
+            count, f"unknown reviewer count {word!r}; extend the table"
+        )
+        self.assertEqual(
+            count, len(names), "the Fan-out section's reviewer count is out of date"
+        )
+
+    def test_sub_agents_get_the_offline_and_security_rules(self):
+        sections = self.sections()
+        self.assertTrue(
+            sections["Offline"]
+            .rstrip()
+            .endswith("Your final message is the whole review."),
+            "the Fan-out hand-off drops the Offline section's last line; it must stay the final-message line",
+        )
+        self.assertIn(
+            "the Offline section above, without its last line", sections["Fan-out"]
+        )
+        self.assertIn("the Security section below, verbatim", sections["Fan-out"])
+        self.assertIn(
+            "Sub-agent reports are built from pull request content",
+            sections["Security"],
+        )
+
+    def test_skill_requires_the_fan_out_and_a_fact_check(self):
+        self.assertIn("whatever the PR's size", self.skill_step(2))
+        self.assertIn(
+            "When Step 4 leaves findings and you have the Agent tool, spawn at least one agent",
+            self.skill_step(5),
+        )
 
 
 if __name__ == "__main__":
