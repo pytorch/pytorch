@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import collections
 import contextlib
 import copy
 import functools
@@ -212,16 +213,17 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
 
 
 def count_shared_recompute_calls(gm, args, expected):
-    """Assert gm calls ``expected`` shared checkpoint-recompute subgraphs, each
-    reading all of its operands."""
+    """Assert gm calls ``expected`` shared checkpoint-recompute subgraphs (a
+    cheap one may be called more than once), each reading all of its
+    operands."""
     from torch._higher_order_ops import invoke_subgraph
 
-    calls = [
-        n
+    pieces = {
+        n.args[1]
         for n in gm.graph.find_nodes(op="call_function", target=invoke_subgraph)
         if n.args[1].startswith("recompute_")
-    ]
-    if len(calls) != expected:
+    }
+    if len(pieces) != expected:
         raise AssertionError(f"expected {expected} shared recompute calls in {gm}")
     for name, mod in gm.named_children():
         if not name.startswith("recompute_"):
@@ -2993,9 +2995,10 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     ):
         """aot_autograd backend asserting each graph makes ``shared`` shared
         recompute calls and, if given, runs fw_mms / bw_mms matmuls (counted
-        inside the shared subgraphs too), passes each call (in piece order) the
-        given number of ``operands``, and runs the backward's shared calls and
-        matmuls in ``bw_order`` (e.g. ["recompute", "mm"]). Each backward call
+        inside the shared subgraphs too), passes each piece (in piece order) the
+        given number of ``operands``, and runs the backward's shared calls (the
+        first of each piece) and matmuls in ``bw_order`` (e.g. ["recompute",
+        "mm"]). Each backward call
         must read what the forward's call read: the same primal or saved value,
         the same output of an earlier call, or the backward's replay of the
         same RNG draw."""
@@ -3028,18 +3031,19 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     same = a.name == name and by_name(a)
                     if not same and (out is None or call_output(a) != out):
                         raise AssertionError(f"{a} isn't the forward's {name} in {gm}")
+            calls = gm.graph.find_nodes(op="call_function", target=invoke_subgraph)
+            first = {piece(n): n for n in reversed(calls)}.values()
             if order is not None:
                 actual = [
                     "recompute" if n.target is invoke_subgraph else "mm"
                     for n in gm.graph.nodes
-                    if n.target in (invoke_subgraph, torch.ops.aten.mm.default)
+                    if n in first or n.target is torch.ops.aten.mm.default
                 ]
                 if actual != order:
                     raise AssertionError(f"expected order {order}, got {actual}:\n{gm}")
             if operands is not None:
-                calls = gm.graph.find_nodes(op="call_function", target=invoke_subgraph)
-                calls.sort(key=lambda n: int(piece(n).rsplit("_", 1)[1]))
-                if [len(n.args) - 2 for n in calls] != operands:
+                by_piece = sorted(first, key=lambda n: int(piece(n).rsplit("_", 1)[1]))
+                if [len(n.args) - 2 for n in by_piece] != operands:
                     raise AssertionError(f"expected {operands} operands in {gm}")
             if mms is not None:
                 actual = sum(
@@ -5846,6 +5850,63 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             compiled(*args).sum().backward()
         self.assertIn("is computed in each graph", "\n".join(logs.output))
 
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch(
+        deterministic_recompute=True, activation_memory_budget=1.0
+    )
+    def test_deterministic_recompute_calls_cheap_piece_at_each_reader(self, device):
+        # y, a cheap function of the input x, is read by its layer's region and
+        # by the final sum; the backward reads it at its start (s's gradient)
+        # and again when it recomputes that layer. Unshared, Inductor would
+        # recompute y in each reader's kernel, so y's piece is called again
+        # before each later reader, in both graphs, rather than its output
+        # staying alive in between. Inductor's peak-memory reordering keeps
+        # those calls next to their readers instead of running them all first
+        # (they read only a graph input and allocate little).
+        def region(h, y, w):
+            return (((h * y) @ w).sin() @ w).sin() @ w
+
+        def fn(x, w, s):
+            h, ys = x, []
+            for k in range(3):
+                ys.append((x * (k + 2)).cos())
+                h = h + checkpoint(region, h, ys[-1], w, use_reentrant=False)
+            for y in ys:
+                h = h + y * s
+            return h
+
+        hop = torch.ops.higher_order.invoke_subgraph
+        aten = torch.ops.aten
+        calls = {"fw": collections.Counter(), "bw": collections.Counter()}
+
+        def count(gm, args, side):
+            for n in gm.graph.find_nodes(op="call_function", target=hop):
+                sub = getattr(gm, n.args[0].target)
+                ops = [m.target for m in sub.graph.nodes if m.op == "call_function"]
+                if ops == [aten.mul.Tensor, aten.cos.default]:
+                    calls[side][n.args[1]] += 1
+            return gm
+
+        backend = aot_autograd(
+            fw_compiler=functools.partial(count, side="fw"),
+            bw_compiler=functools.partial(count, side="bw"),
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        x, w, s = (torch.randn(256, 256, device=device) for _ in range(3))
+        args = [t.requires_grad_() for t in (x, w * 0.02, s)]
+        self._validate(fn, backend, *args)
+        for counts in calls.values():
+            self.assertEqual(len(counts), 3)
+            self.assertTrue(all(n > 1 for n in counts.values()), counts)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        _, (_, bw_code) = run_and_get_code(lambda: compiled(*args).sum().backward())
+        order = re.findall(r"= (recompute_\d+)_bw_mod\(", bw_code)
+        ys = {name.removesuffix("_bw") for name in calls["bw"]}
+        first_region = next(i for i, name in enumerate(order) if name not in ys)
+        self.assertTrue(any(name in ys for name in order[first_region:]), order)
+
     @torch._functorch.config.patch(activation_memory_budget=0.1)
     def test_deterministic_recompute_returns_replayed_inputs(self, device):
         # Under the budget, the partitioner recomputes the residual adds outside
@@ -6980,6 +7041,64 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=nop, bw_compiler=nop, partition_fn=partition)
         torch.compile(fn, backend=backend, fullgraph=True)(*args).sum().backward()
         return graphs[0]
+
+    @parametrize("case", ["alive", "dead", "held", "written", "adjacent"])
+    def test_call_cheap_pieces_at_readers(self, case):
+        # A cheap piece (a * b) gets another call right before a reader that
+        # doesn't directly follow the previous one, if its operands are alive
+        # there anyway: another node reads them later (alive; the reader right
+        # after reads the new call too), or they're graph inputs the caller
+        # holds (held). Not if the call would keep them alive longer than the
+        # output it lets go (dead), after an in-place write to one (written),
+        # or for a reader right after the previous one (adjacent).
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _call_cheap_pieces_at_readers,
+        )
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        aten = torch.ops.aten
+        val = torch.randn(4, 4)
+
+        def node(g, target, *args):
+            n = g.call_function(target, args)
+            n.meta["val"] = val.clone()
+            return n
+
+        piece = torch.fx.Graph()
+        pa, pb = piece.placeholder("a"), piece.placeholder("b")
+        piece.output((node(piece, aten.mul.Tensor, pa, pb),))
+        root = torch.nn.Module()
+        root.recompute_0_mod = torch.fx.GraphModule(torch.nn.Module(), piece)
+
+        g = torch.fx.Graph()
+        a, b, c = (g.placeholder(name) for name in "abc")
+        for p in (a, b, c):
+            p.meta["val"] = val.clone()
+        mod = g.get_attr("recompute_0_mod")
+        call = g.call_function(invoke_subgraph, (mod, "recompute_0", a, b))
+        call.meta["val"] = (val.clone(),)
+        item = node(g, operator.getitem, call, 0)
+        outs = [node(g, aten.neg.default, item)]
+        if case == "written":
+            outs.append(node(g, aten.copy_.default, a, c))
+        if case != "adjacent":
+            outs.append(node(g, aten.sin.default, c))
+        outs.append(node(g, aten.cos.default, item))
+        if case == "alive":
+            outs.append(node(g, aten.exp.default, item))
+        if case not in ("dead", "held"):
+            outs.append(node(g, aten.add.Tensor, a, b))
+        g.output(tuple(outs))
+        gm = torch.fx.GraphModule(root, g)
+
+        _call_cheap_pieces_at_readers(gm, inputs_held=case == "held")
+        calls = g.find_nodes(op="call_function", target=invoke_subgraph)
+        self.assertEqual(len(calls), 2 if case in ("alive", "held") else 1)
+        later = [n for n in g.nodes if n.target in (aten.cos.default, aten.exp.default)]
+        self.assertTrue(all(n.args[0].args[0] is calls[-1] for n in later))
+        if len(calls) == 2:
+            # The added call is right before the later reader.
+            self.assertIs(later[0].prev.args[0], calls[-1])
 
     def test_recomputed_copies(self):
         # Each region's recompute is found by name, op and inputs: whatever of
