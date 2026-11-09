@@ -13,10 +13,11 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
+    expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
-    onlyOn,
     skipXPU,
 )
 from torch.testing._internal.common_dtype import all_types_and
@@ -408,7 +409,7 @@ class TestLibtorchAgnostic(TestCase):
         t = torch.randn(2, 3, device=device)
         self.assertFalse(libtorch_agnostic.ops.my_is_pinned(t))
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_is_pinned_true(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
@@ -494,7 +495,8 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(out, torch_op(a, b))
         self.assertEqual(id(result), id(out))
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @expectedFailureMPS
     @skipIfTorchVersionLessThan(2, 10)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
@@ -928,7 +930,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(stream_id, expected_stream_id)
 
     @skipIfTorchVersionLessThan(2, 13)
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_stream_native_handle(self, device):
         import libtorch_agn_2_13 as libtorch_agnostic
 
@@ -1160,7 +1162,7 @@ class TestLibtorchAgnostic(TestCase):
             libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_tensor_device(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
