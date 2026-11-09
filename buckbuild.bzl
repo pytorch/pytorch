@@ -1313,7 +1313,7 @@ def define_buck_targets(
         name = "torch_mobile_observer",
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
-        ] + ([] if IS_OSS else [ROOT_PATH + "torch/fb/observers:MobileObserverUtil.cpp"]),
+        ] + ([] if IS_OSS else [ROOT_PATH + "torch/fb/observers:files[MobileObserverUtil.cpp]"]),
         compiler_flags = ["-fexceptions"] + select({
             "DEFAULT": [],
             "ovr_config//os:macos": ["-fvisibility=default"],
@@ -1324,7 +1324,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/mobile/observer.h"),
             ],
         ) | ({} if IS_OSS else {
-            "torch/fb/observers/" + h: ROOT_PATH + "torch/fb/observers:" + h
+            "torch/fb/observers/" + h: ROOT_PATH + "torch/fb/observers:files[" + h + "]"
             for h in ["ObserverUtil.h", "MobileObserverUtil.h"]
         }),
         fbobjc_compiler_flags = [

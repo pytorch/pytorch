@@ -68,14 +68,14 @@ def define_ovrsource_targets():
     ]
 
     gen_cmake_header(
-        src = "//xplat/caffe2/torch/headeronly/macros:cmake_macros.h.in",
+        src = "//xplat/caffe2/torch/headeronly/macros:files[cmake_macros.h.in]",
         defines = common_c10_cmake_defines + mobile_c10_cmake_defines,
         header = "torch/headeronly/macros/cmake_macros.h",
         prefix = "ovrsource_torch_headeronly_mobile_",
     )
 
     gen_cmake_header(
-        src = "//xplat/caffe2/torch/headeronly/macros:cmake_macros.h.in",
+        src = "//xplat/caffe2/torch/headeronly/macros:files[cmake_macros.h.in]",
         defines = common_c10_cmake_defines + non_mobile_c10_cmake_defines,
         header = "torch/headeronly/macros/cmake_macros.h",
         prefix = "ovrsource_torch_headeronly_non_mobile_",
