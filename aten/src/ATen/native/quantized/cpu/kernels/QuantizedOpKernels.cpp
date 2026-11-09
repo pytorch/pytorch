@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
 #include <ATen/Dispatch.h>
@@ -3031,7 +3032,7 @@ void quantized_normalize_kernel(
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
               int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
-              for (int i = 0; i < validDqvecLen; ++i) {
+              for (const auto i : c10::irange(validDqvecLen)) {
                 auto &dq = dqXVec[i];
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
@@ -3064,7 +3065,7 @@ void quantized_normalize_kernel(
                 .store(Y_ptr + vecStartIdx);
             }
           }
-          for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+          for (const auto remIdx : c10::irange(N - kNonVecRemInLayer, N)) {
             const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
             const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
             auto qXVal = X_ptr[remIdx];
@@ -3094,10 +3095,10 @@ void qmean_inner_dim_kernel(
   size_t num_dims_to_squeeze = is_all_reduce ? self.dim() : opt_dim.value().size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
-  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(in_dims.size() - num_dims_to_squeeze)) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -3144,10 +3145,10 @@ void qstd_inner_dim_kernel(
                                self.dim();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take std of in each group
-  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(in_dims.size() - num_dims_to_squeeze)) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -3320,7 +3321,7 @@ void quantized_groupnorm_nhwc_kernel(
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
-              for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+              for (const auto fvecIdx : c10::irange(dqXVec.size())) {
                 auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3329,9 +3330,7 @@ void quantized_groupnorm_nhwc_kernel(
                   .store(Y_ptr + vecStartIdx);
             }
             // Remaining scalar
-            for (int64_t remIdx = kNumIntVecInHxW * kIntVLen;
-                 remIdx < kNonVecRemInHxW + kNumIntVecInHxW * kIntVLen;
-                 ++remIdx) {
+            for (const auto remIdx : c10::irange(kNumIntVecInHxW * kIntVLen, kNonVecRemInHxW + kNumIntVecInHxW * kIntVLen)) {
               auto qXVal = X_ptr[remIdx];
               float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
               float dqY = dqXVal * scale_ptr[remIdx] + bias_ptr[remIdx];
@@ -3444,7 +3443,7 @@ void quantized_groupnorm_nhwc_kernel(
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
-            for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+            for (const auto fvecIdx : c10::irange(dqXVec.size())) {
               auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3453,9 +3452,7 @@ void quantized_groupnorm_nhwc_kernel(
                 .store(Y_ptr + vecStartIdx);
           }
           // Remaining scalar
-          for (int64_t remIdx = kNumIntVecOnChannel * kIntVLen;
-               remIdx < kNonVecRemOnChannel + kNumIntVecOnChannel * kIntVLen;
-               ++remIdx) {
+          for (const auto remIdx : c10::irange(kNumIntVecOnChannel * kIntVLen, kNonVecRemOnChannel + kNumIntVecOnChannel * kIntVLen)) {
             auto qXVal = X_ptr[remIdx];
             float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
             float dqY = dqXVal * scale_ptr[remIdx] + bias_ptr[remIdx];

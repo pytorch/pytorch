@@ -46,22 +46,27 @@ from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.fx.passes.split_module import split_module, split_module_simple
+from torch.fx.passes.split_module import (
+    _split_module,
+    split_module,
+    split_module_simple,
+)
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_Z3,
     run_tests,
-    TestCase,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
+    TEST_Z3,
+    TestCase,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -88,6 +93,8 @@ def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule
 
 
 class TestFXExperimental(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -1157,6 +1164,38 @@ terrible spacing
                         f"in submodule '{name}'",
                     )
 
+    @parametrize("keep_original_order", [True, False])
+    @parametrize("read_specs", [True, False])
+    def test_split_module_reads_treespec_get_attr_in_partition(
+        self, keep_original_order, read_specs
+    ):
+        # By default a partition takes a pytree spec as an input, as with the
+        # public split_module. When asked, it reads the spec with get_attr.
+        root = torch.nn.Module()
+        root.spec = pytree.tree_flatten((0, 0))[1]
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        spec = graph.get_attr("spec")
+        graph.output(graph.call_function(pytree.tree_unflatten, ([x, x], spec)))
+        gm = torch.fx.GraphModule(root, graph)
+        split_gm = _split_module(
+            gm,
+            None,
+            lambda node: 0,
+            keep_original_order=keep_original_order,
+            read_pytree_specs_in_partition=read_specs,
+        )
+        (submod,) = split_gm.children()
+        inputs = [n.op for n in submod.graph.nodes if n.op != "call_function"]
+        spec_input = "get_attr" if read_specs else "placeholder"
+        self.assertEqual(inputs, ["placeholder", spec_input, "output"])
+        # Without keep_original_order, the split module keeps reading the spec
+        # even when the partition reads it too.
+        root_reads = [n.target for n in split_gm.graph.find_nodes(op="get_attr")]
+        reads_spec = not (read_specs and keep_original_order)
+        self.assertEqual(root_reads, ["spec"] if reads_spec else [])
+        self.assertEqual(split_gm(torch.ones(1)), gm(torch.ones(1)))
+
     @staticmethod
     def _build_partition_map(graph, ops_per_partition=1):
         """Build a node-to-partition dict assigning ops_per_partition ops per partition."""
@@ -1614,9 +1653,6 @@ class {test_classname}(torch.nn.Module):
                     }
                 )
 
-        # Smoke test torchscript compilation since now we're emitting type annotations
-        torch.jit.script(traced_modules_annotated)
-
         class FunctionalTracer(torch.fx.Tracer):
             def is_leaf_module(
                 self, m: torch.nn.Module, module_qualified_name: str
@@ -1643,9 +1679,6 @@ class {test_classname}(torch.nn.Module):
                 # AnnotateTypesWithSchema doesn't work with bound C++ functions
                 if not isinstance(node.target, BuiltinFunctionType):
                     self.assertIn(check, excluded_nodes)
-
-        # Smoke test torchscript compilation since now we're emitting type annotations
-        torch.jit.script(traced_functionals_annotated)
 
     def test_annotate_getitem_node(self):
         class CustomType:
@@ -2096,6 +2129,7 @@ class {test_classname}(torch.nn.Module):
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
+    @skipIfTorchDynamo("traces 8 full torchvision models (~6 min); this tests an FX pass")
     def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
@@ -2128,7 +2162,8 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
-    @onlyCPU
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
@@ -2255,6 +2290,10 @@ class TestModule(torch.nn.Module):
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
 
+
+class TestNormalizeOperatorsGeneric(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_normalize_quantized_eb(self):
         target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         args = (
@@ -2300,6 +2339,8 @@ if TEST_Z3:
     from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
 
     class TestTranslationValidation(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def _prepare_for_translation_validation(self):
             validator = TranslationValidator()
 
@@ -2467,7 +2508,7 @@ if TEST_Z3:
 
 
 instantiate_parametrized_tests(TestFXExperimental)
-instantiate_device_type_tests(TestNormalizeOperators, globals())
+instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

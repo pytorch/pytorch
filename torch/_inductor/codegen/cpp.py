@@ -647,7 +647,7 @@ def arith_promoted(op, a, b):
 
 
 class CppOverrides(OpOverrides):
-    """Map element-wise ops to C++"""
+    """Map element-wise ops to scalar C++ expressions (CppVecOverrides is the vectorized version)"""
 
     @staticmethod
     def add(a, b):
@@ -797,11 +797,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sqrt(x):
+        if config.cpp.sqrt_without_errno:
+            return f"sqrt_without_errno({x})"
         return f"std::sqrt({x})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def rsqrt(x):
+        if config.cpp.sqrt_without_errno:
+            return f"1 / sqrt_without_errno({x})"
         return f"1 / std::sqrt({x})"
 
     @staticmethod
@@ -3475,6 +3479,8 @@ class CppVecKernel(CppKernel):
                 vec_dtype = torch.float if is_bool else dtype
                 vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
+                if config.cpp.simd_horizontal_reduction:
+                    vec_reduce_all_func = f"simd_vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 result_vec = f"{acc_vec}"
                 if use_acc_helper:
                     if reduction_type != "sum":
@@ -5901,8 +5907,10 @@ class CppScheduling(BaseScheduling):
             cpp_kernel_proxy.codegen_nodes(nodes)
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
-        args_num = self._get_scheduled_num_args()
-        if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
+        if (
+            self._may_exceed_max_args()
+            and self._get_scheduled_num_args() > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM
+        ):
             self._set_flush_status(True)
 
     def is_cpp_template(self, node: BaseSchedulerNode) -> bool:
@@ -6009,6 +6017,19 @@ class CppScheduling(BaseScheduling):
 
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
+
+    def _may_exceed_max_args(self) -> bool:
+        # Counting the exact arguments formats every one of them, and this runs
+        # after each node, so check a cheap upper bound first: the buffers and
+        # size variables before removing duplicates and removed buffers.
+        args = self.kernel_group.args
+        upper_bound = (
+            len(args.inplace_buffers)
+            + len(args.input_buffers)
+            + len(args.output_buffers)
+            + len(args.sizevars)
+        )
+        return upper_bound > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM
 
     def ready_to_flush(self):
         return self._ready_to_flush

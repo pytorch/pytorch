@@ -6,6 +6,8 @@ Each FX node has metadata on it, and in particular, stores a faketensor represen
 
 Passes may assume that FakeTensor metadata is consistent when they begin. If a rewrite makes downstream metadata stale, the pass must update the affected metadata itself or use `FakeTensorUpdater` from `torch._inductor.fx_utils`. Create `FakeTensorUpdater(gm)` before rewriting the graph, then call its `incremental_update()` method afterwards, before returning. The updater detects changes relative to its snapshot at construction; creating it after the rewrite will not detect those changes. The outermost graph's input/output semantics must remain unchanged after the updater is created.
 
+Other `node.meta` entries, in particular `eager_input_vals` (used by lowering to enforce stride requirements), must also be preserved when a pass replaces or rebuilds a node.
+
 ## Operator arguments
 Passes cannot assume that an operator's arguments have been normalized into `Node.args`, because manually constructed nodes may place schema arguments in `Node.kwargs`. When inspecting a known operator, use `get_arg_value(node, index, kwarg_name)` to handle either representation:
 
@@ -57,6 +59,8 @@ Changes to intermediate aliasing must also preserve tensor values in the presenc
 
 - Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases.
 
+  Note: [#198735](https://github.com/pytorch/pytorch/pull/198735) will relax the "introduce" half of this rule for forward and inference graphs. AOTAutograd records which user inputs and outputs share a storage in eager (`ViewAndMutationMeta.aliased_input_output_pairs` and `aliased_output_pairs`). When lowering the output node, Inductor compares these with the buffers the user-visible outputs actually use, and copies any output that has a new input-output or output-output alias, keeping its original strides. Once it lands, introducing such an alias costs a copy but is not a correctness bug. Two constraints remain: removing an eager alias is not repaired, and the repair copy is made at the output, after input mutations, so passes must still preserve the values observed across mutations (see [Mutations](#mutations)). This section will be updated then.
+
 For example
 ```python
 a = b.clone()
@@ -96,19 +100,15 @@ identity everywhere keeps passes simple and consistent with each other.
 
 
 ## Tensor layouts
-The following invariants apply to intermediate tensors:
-
 - The exact storage offset of an intermediate tensor is not part of its semantic contract. Passes do not need to preserve it, and operators must not depend on its value.
-- The exact strides of an intermediate tensor are not part of its semantic contract. During lowering, Inductor determines the input strides required by each consumer and ensures that the consumer receives them, restriding or materializing the input as needed.
+- A pass does not need to preserve the strides a node produces; a rewrite may change them. Stride requirements are enforced at each use rather than at the definition: during lowering, Inductor determines the strides each consumer requires and restrides or materializes the input as needed. Uses with stride requirements include non-codegen'd kernels, such as custom and extern ops, and user-visible graph outputs: when `config.keep_output_stride` is enabled (the default), Inductor records each output's original strides before post-grad passes run and restrides the output to match during lowering. Changing strides is therefore a performance concern rather than a correctness one: when the strides a node produces do not match what a use requires, Inductor may insert a copy at that use.
 
-These invariants do not apply to user-visible graph inputs and outputs, whose externally visible metadata must be preserved.
-
-Saved activations are internal compiler values that appear as inputs to backward graphs, so they follow the intermediate-tensor layout rules. Layout changes must still preserve the values saved for backward, including across input mutations, as described in [Altering Aliasing](#altering-aliasing).
+Graph input layouts are set by the caller and cannot be changed by passes.
 
 ## Topological order of nodes
 FX passes must NOT assume that the current graph-list order is topological. Earlier passes may leave dependencies out of list order, and passes are not generally required to restore topological order after each rewrite.
 
-A pass that requires a topological traversal must either establish that ordering itself or be registered at a pipeline point whose preceding passes have been carefully verified to guarantee it. This registration-order dependency must be maintained when the pipeline changes.
+A pass that requires a topological traversal must either establish that ordering itself or be registered at a pipeline point whose preceding passes have been carefully verified to guarantee it. This registration-order dependency must be maintained when the pipeline changes. This implicit contract is fragile; we want to provide a better API for it, e.g. a way for a pass to declare that it requires (or preserves) topological order so the pipeline can enforce it.
 
 Rewrites must still keep the dataflow graph acyclic.
 
