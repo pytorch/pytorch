@@ -83,6 +83,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -587,8 +588,10 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value) or isinstance(
-            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        elif (
+            inspect.isbuiltin(value)
+            or (inspect.ismethoddescriptor(value) and not is_constant_source(source))
+            or isinstance(value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
@@ -667,7 +670,7 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
     def call_obj_hasattr(
@@ -1003,6 +1006,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
+                self,
                 self.value,
                 tx,
                 self.source,
