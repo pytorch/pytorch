@@ -166,8 +166,8 @@ class TestXpu(TestCase):
             device_capability["has_subgroup_matrix_multiply_accumulate"],
         )
         self.assertEqual(
-            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
-            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+            device_properties.has_subgroup_matrix_multiply_accumulate_tf32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tf32"],
         )
         self.assertEqual(
             device_properties.has_subgroup_2d_block_io,
