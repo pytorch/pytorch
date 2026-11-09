@@ -5,8 +5,7 @@ import io
 import sys
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar
-from typing_extensions import Self
+from typing import Any, Self, TypeVar
 
 import torch
 import torch.distributed.rpc as rpc
@@ -606,6 +605,10 @@ class RemoteModule(_RemoteModule):
     """
         A RemoteModule instance can only be created after RPC initialization.
 
+        .. deprecated:: 2.16
+            ``torch.distributed.rpc`` is deprecated and will be removed in a future version.
+            See :ref:`distributed-rpc-framework` for alternatives.
+
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
@@ -672,10 +675,6 @@ class RemoteModule(_RemoteModule):
         >>>
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
-
-        Furthermore, a more practical example that is combined with
-        `DistributedDataParallel <https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel>`__ (DDP)
-        can be found in this `tutorial <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__.
     """
 
     def __init__(
