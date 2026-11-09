@@ -41,6 +41,11 @@ functions. The isolated ONNX Script evaluator path remains for external torch_li
 implementations until they are migrated. Tests requiring newer operators also require
 an ONNX Runtime release supporting their opset.
 
+Set `TorchLibOpInfo.supported_dtypes` to preserve a migrated implementation's
+source-supported numerical coverage without depending on its old annotations.
+This metadata only filters tests; it does not participate in exporter dispatch.
+Keep source tolerances and sample-specific skips with the migrated mapping.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests

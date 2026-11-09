@@ -43,15 +43,17 @@ from typing import Any, Self, TYPE_CHECKING
 import numpy as np
 import ops_test_common
 
+import torch
 from torch.onnx._internal.exporter._torchlib.ops import core as core_ops, nn as nn_ops
-from torch.testing._internal import common_methods_invocations
-from torch.testing._internal.opinfo import definitions as opinfo_definitions
+from torch.testing._internal import common_dtype, common_methods_invocations
+from torch.testing._internal.opinfo import (
+    core as opinfo_core,
+    definitions as opinfo_definitions,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection
-
-    import torch
 
 
 # Create a copy of the op_db to modify
@@ -59,6 +61,40 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # Append extra op_db into the op database for testing
 OPS_DB.extend(opinfo_definitions.signal.op_db)
+
+
+def _sample_inputs_local_scalar_dense(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    for shape in ((), (1,), (3,), (1, 1), (1, 2), (2, 1), (1, 1, 1), (2, 2, 2)):
+        tensor = torch.testing.make_tensor(
+            shape,
+            low=0,
+            high=1,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **kwargs,
+        )
+        yield opinfo_core.SampleInput(tensor)
+
+
+OPS_DB.extend(
+    (
+        opinfo_core.BinaryUfuncInfo(
+            "ops.aten.floor_divide",
+            aten_name="floor_divide",
+            dtypes=common_dtype.all_types_and_half(),
+            rhs_make_tensor_kwargs=dict(exclude_zero=True),
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._local_scalar_dense",
+            aten_name="_local_scalar_dense",
+            dtypes=common_dtype.all_types_and(torch.bool),
+            sample_inputs_func=_sample_inputs_local_scalar_dense,
+            supports_out=False,
+        ),
+    )
+)
 
 
 @dataclasses.dataclass
@@ -81,6 +117,8 @@ class TorchLibOpInfo:
     compare_shape_only_for_output: tuple[int, ...] = ()
     # Whether the function is designed for complex inputs
     complex: bool = False
+    # Eligibility for numerical tests only; native dispatch does not inspect dtypes.
+    supported_dtypes: tuple[torch.dtype, ...] | None = None
     # The ONNX opset version in which the function was introduced.
     # Its specifies the minimum ONNX opset version required to use the function.
     # It ensures that the function is only used when the target ONNX opset version
@@ -469,6 +507,288 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     ),
 )
 
+
+# Source-supported dtypes are test metadata, not exporter dispatch constraints.
+_FLOAT_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+    torch.bfloat16,
+)
+_FLOAT_HIGH_PRECISION_DTYPES = (
+    torch.float32,
+    torch.float64,
+)
+_INT_DTYPES = (
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+_REAL_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+    torch.bfloat16,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+_REAL_UINT8_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+    torch.bfloat16,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+)
+_TENSOR_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+    torch.bfloat16,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+    torch.bool,
+)
+_COMPLEX_DTYPES = (
+    torch.complex32,
+    torch.complex64,
+    torch.complex128,
+)
+TESTED_TORCHLIB_OPS += (
+    TorchLibOpInfo(
+        "ops.aten._local_scalar_dense",
+        core_ops.aten__local_scalar_dense,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo("acos", core_ops.aten_acos, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("acosh", core_ops.aten_acosh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "add",
+        core_ops.aten_add,
+        tolerance={torch.float16: (1e-3, 1e-3)},
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "add", core_ops.aten_add_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo(
+        "addcdiv",
+        core_ops.aten_addcdiv,
+        tolerance={torch.float16: (3e-2, 1e-3)},
+        supported_dtypes=_FLOAT_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "addcmul",
+        core_ops.aten_addcmul,
+        tolerance={torch.float16: (4e-3, 3e-3)},
+        supported_dtypes=_REAL_DTYPES,
+    ),
+    TorchLibOpInfo("angle", core_ops.aten_angle, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "angle",
+        core_ops.aten_angle_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("asin", core_ops.aten_asin, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("asinh", core_ops.aten_asinh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("atan", core_ops.aten_atan, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("atan2", core_ops.aten_atan2, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("atanh", core_ops.aten_atanh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "bitwise_and", core_ops.aten_bitwise_and, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "bitwise_left_shift",
+        core_ops.aten_bitwise_left_shift,
+        supported_dtypes=_INT_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "bitwise_not", core_ops.aten_bitwise_not, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "bitwise_or", core_ops.aten_bitwise_or, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "bitwise_right_shift",
+        core_ops.aten_bitwise_right_shift,
+        supported_dtypes=_INT_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "bitwise_xor", core_ops.aten_bitwise_xor, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo("ceil", core_ops.aten_ceil, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "clamp_max", core_ops.aten_clamp_max_tensor, supported_dtypes=_REAL_DTYPES
+    ).skip(
+        reason="Size 0 inputs are not handled by design",
+        matcher=lambda sample: sample.input.numel() == 0,
+    ),
+    TorchLibOpInfo(
+        "clamp_min", core_ops.aten_clamp_min_tensor, supported_dtypes=_REAL_DTYPES
+    ).skip(
+        reason="Size 0 inputs are not handled by design",
+        matcher=lambda sample: sample.input.numel() == 0,
+    ),
+    TorchLibOpInfo("clone", core_ops.aten_clone, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "clone",
+        core_ops.aten_clone_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("conj", core_ops.aten_conj, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "conj",
+        core_ops.aten_conj_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("cos", core_ops.aten_cos, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("cosh", core_ops.aten_cosh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("deg2rad", core_ops.aten_deg2rad, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("div", core_ops.aten_div, supported_dtypes=_FLOAT_DTYPES).skip(
+        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
+        reason="this variation does not take the rounding_mode argument",
+    ),
+    TorchLibOpInfo("true_divide", core_ops.aten_div, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "true_divide",
+        core_ops.aten_div_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "div_mode", core_ops.aten_div_mode, supported_dtypes=_REAL_DTYPES
+    ).skip(
+        variant_name="no_rounding_mode",
+        reason="this variation requires the rounding_mode argument",
+    ),
+    TorchLibOpInfo("eq", core_ops.aten_eq, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("exp", core_ops.aten_exp, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("exp2", core_ops.aten_exp2, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("floor", core_ops.aten_floor, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "ops.aten.floor_divide",
+        core_ops.aten_floor_divide,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo("fmod", core_ops.aten_fmod, supported_dtypes=_REAL_UINT8_DTYPES),
+    TorchLibOpInfo("frac", core_ops.aten_frac, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("ge", core_ops.aten_ge, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("gt", core_ops.aten_gt, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("isclose", core_ops.aten_isclose, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo(
+        "isfinite",
+        core_ops.aten_isfinite,
+        supported_dtypes=_FLOAT_HIGH_PRECISION_DTYPES,
+    ),
+    TorchLibOpInfo("isinf", core_ops.aten_isinf, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("isnan", core_ops.aten_isnan, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("isneginf", core_ops.aten_isneginf, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("isposinf", core_ops.aten_isposinf, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("log", core_ops.aten_log, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("le", core_ops.aten_le, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "lerp",
+        core_ops.aten_lerp,
+        tolerance={torch.float16: (2e-3, 2e-1)},
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo("log10", core_ops.aten_log10, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("log1p", core_ops.aten_log1p, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("log2", core_ops.aten_log2, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "logaddexp",
+        core_ops.aten_logaddexp,
+        tolerance={torch.float16: (1, 1e-4)},
+        supported_dtypes=_FLOAT_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "logaddexp2",
+        core_ops.aten_logaddexp2,
+        tolerance={torch.float16: (2e-2, 6e-4)},
+        supported_dtypes=_FLOAT_DTYPES,
+    ),
+    TorchLibOpInfo("lt", core_ops.aten_lt, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("maximum", core_ops.aten_maximum, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("minimum", core_ops.aten_minimum, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("mul", core_ops.aten_mul, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "mul", core_ops.aten_mul_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo("ne", core_ops.aten_ne, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo("neg", core_ops.aten_neg, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo(
+        "neg", core_ops.aten_neg_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo("pow", core_ops.aten_pow, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo("rad2deg", core_ops.aten_rad2deg, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "reciprocal", core_ops.aten_reciprocal, supported_dtypes=_FLOAT_DTYPES
+    ),
+    TorchLibOpInfo(
+        "reciprocal",
+        core_ops.aten_reciprocal_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "remainder", core_ops.aten_remainder, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo("round", core_ops.aten_round, supported_dtypes=_FLOAT_DTYPES).skip(
+        matcher=lambda sample: sample.kwargs.get("decimals") is not None,
+        reason="this Aten overload only support one tensor as input and one int as args by design",
+    ),
+    TorchLibOpInfo(
+        "round_decimals", core_ops.aten_round_decimals, supported_dtypes=_FLOAT_DTYPES
+    ),
+    TorchLibOpInfo("rsqrt", core_ops.aten_rsqrt, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("sign", core_ops.aten_sign, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("sin", core_ops.aten_sin, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("sinh", core_ops.aten_sinh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("sqrt", core_ops.aten_sqrt, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo(
+        "sub",
+        core_ops.aten_sub,
+        tolerance={torch.float16: (2e-3, 1e-3)},
+        supported_dtypes=_REAL_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "sub", core_ops.aten_sub_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo("tan", core_ops.aten_tan, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("tanh", core_ops.aten_tanh, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("trunc", core_ops.aten_trunc, supported_dtypes=_FLOAT_DTYPES),
+    TorchLibOpInfo("clamp", core_ops.aten_clamp_tensor, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo(
+        "logical_and", core_ops.aten_logical_and, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "logical_not", core_ops.aten_logical_not, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "logical_or", core_ops.aten_logical_or, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "logical_xor", core_ops.aten_logical_xor, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "logit",
+        core_ops.aten_logit,
+        tolerance={torch.float16: (1e-1, 7e-4)},
+        supported_dtypes=_FLOAT_DTYPES,
+    ),
+)
 
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))

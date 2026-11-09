@@ -143,7 +143,13 @@ invocation. The active builder is
 scoped to the current translation; accessing it outside that scope raises an
 actionable error. `torch.onnx.ops.symbolic` is a separate FX-level API.
 
-Until built-ins are migrated, legacy translations still use their isolated
+Arithmetic and elementwise built-ins are being migrated to direct ONNX IR
+construction in PyTorch. Native implementations use explicit casts and represent
+complex tensors with a trailing dimension of size two for real and imaginary
+components. Real/complex and opset eligibility select an implementation; tensor
+dtypes do not select overloads.
+
+Until all built-ins are migrated, legacy translations still use their isolated
 ONNX Script evaluator path. When a native value crosses into that path, an
 `Identity` supplies the legacy Python-operator interface; normal optimization
 can remove this compatibility node.

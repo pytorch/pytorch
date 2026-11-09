@@ -145,6 +145,14 @@ def run_test_output_match(
     )
 
     torchlib_op_info = tested_op_mapping[op.name]
+    if (
+        torchlib_op_info.supported_dtypes is not None
+        and dtype not in torchlib_op_info.supported_dtypes
+    ):
+        test_suite.skipTest(
+            f"dtype '{dtype}' is outside the source-supported numerical coverage "
+            f"for '{op.name}': {torchlib_op_info.supported_dtypes}"
+        )
     # Obtain the input_wrangler that manipulates the OpInfo inputs
     # to match the aten operator signature
     # An example is nn.functional.upsample_nearest2d, which has a different signature

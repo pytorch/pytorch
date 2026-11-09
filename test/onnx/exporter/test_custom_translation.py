@@ -209,8 +209,8 @@ if any(n == 'onnxscript' or n.startswith('onnxscript.') or 'torch_lib' in n for 
         ) as legacy:
             program = self.export()
         types = [n.op_type for n in program.model.graph]
-        self.assertEqual(types, ["Constant", "Mul", "Add", "Identity", "Sin"])
-        self.assertEqual(legacy.call_count, 1)
+        self.assertEqual(types, ["Constant", "Mul", "Add", "Sin"])
+        self.assertEqual(legacy.call_count, 0)
         self.assertEqual(len(set(program.model.graph)), len(types))
         self.assertEqual(program.model.graph.outputs[0].shape, ir.Shape([2]))
         for node in program.model.graph:
