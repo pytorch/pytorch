@@ -3141,10 +3141,8 @@ class TestCutlassBackend(TestCase):
 
         # Check that all config counts are equal
         all_counts = list(config_counts.values())
-        # XPU has more configs for bf16 than f16.
-        expected_count = 2 if GPU_TYPE == "xpu" else 1
         self.assertTrue(
-            len(set(all_counts)) == expected_count,
+            len(set(all_counts)) == 1,
             lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
             f"Got counts: {config_counts}",
         )
