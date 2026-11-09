@@ -665,10 +665,12 @@ class CKGemmTemplate(CKTemplate):
                 else:
                     op.c_elementwise_op = "MultiplyMultiply"
                 op.c_shuffle_dtype = "F32"
-                op.ds_layouts = (
-                    torch_layout_to_ck_layout(scale_x.get_layout()),
-                    torch_layout_to_ck_layout(scale_w.get_layout()),
-                )
+                # Rowwise scales are contiguous [M, 1] and [1, N] and are
+                # passed with a zero leading dimension (see ds_strides below),
+                # so the layout alone selects the indexing: Col reads scale_x
+                # by row and Row reads scale_w by column. Strides cannot decide
+                # this: [M, 1] and [1, 1] tensors can both have strides (1, 1).
+                op.ds_layouts = ("Col", "Row")
                 op.ds_element_dtypes = (
                     self._TORCH_DTYPE_TO_CK[scale_x.get_layout().dtype],
                     self._TORCH_DTYPE_TO_CK[scale_w.get_layout().dtype],
