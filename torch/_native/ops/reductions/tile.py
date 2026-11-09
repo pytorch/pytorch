@@ -520,15 +520,16 @@ def fold_row_aligned(
     groups = (n - prefix) // Int32(vec)
     waves = (groups + Int32(threads_per_row - 1)) // Int32(threads_per_row)
     tail = prefix + groups * Int32(vec)
-    # B200 64 MiB: edges cost 16-bit sums at N = 255/257 1.4-1.5x vs N + 1 (27 vs 18-20
-    # us) yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
-    for i in cutlass.range_constexpr(vec - 1):
+    # B200 64 MiB: 16-bit sums at N = 255/257 ran 1.4-1.5x N = 256/258 (27 vs 18-20 us)
+    # yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
+    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long.
+    for i in cutlass.range_constexpr(vec - math.gcd(tm.N, vec)):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
         acc = reduce_fn(acc, acc_dt(rowv[prefix_index]), prefix_index, prefix_valid)
-        tail_index = tail + Int32(i)
-        tail_valid = (lane == Int32(0)) & (tail_index < n)
-        safe_tail = tail_index if tail_valid else Int32(0)
+        # Compare the remaining count: tail + i can pass 2^31 - 1 for N near it.
+        tail_valid = (lane == Int32(0)) & (Int32(i) < n - tail)
+        safe_tail = tail + Int32(i) if tail_valid else Int32(0)
         acc = reduce_fn(acc, acc_dt(rowv[safe_tail]), safe_tail, tail_valid)
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(waves, unroll=unroll):
@@ -830,7 +831,7 @@ class TileReduce:
             or not getattr(trait, "has_combine_equal", False)
         ):
             raise ValueError(
-                f"column groups need a scalar column fold of input rows with combine_equal, got {type(trait).__name__} {axis=} {combine=} {vec=}"
+                f"column groups need axis='col', vec=1, combine=False and a trait with combine_equal, got {type(trait).__name__} {col_group=} {axis=} {combine=} {vec=}"
             )
         itemsize = dtype.width // 8 if dtype is not None else 0
         if ragged_vector:
@@ -839,7 +840,9 @@ class TileReduce:
             if order != "linear":
                 raise ValueError("ragged vectors require the linear order")
             # fold_row_aligned also needs rows packed at stride N from a 16-byte aligned
-            # base, and nonempty rows, which only the driver (reduce_row_tile) can check.
+            # base, which only the driver (reduce_row_tile) can check.
+            if N < 1:
+                raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
             if vec is None or vec * itemsize != TRANSFER_ALIGNMENT:
                 raise ValueError(
                     f"ragged vectors require vec * itemsize == {TRANSFER_ALIGNMENT}, got {vec=} {itemsize=}"
@@ -1403,20 +1406,18 @@ class TileReduce:
                 b,
                 index,
                 const_expr(self.itree.combine_count),
-                b[2] if const_expr(self.itree.combine_weights) else None,
+                b[-1] if const_expr(self.itree.combine_weights) else None,
             )
         return self.trait.combine(a, b)
 
     @cute.jit
     def _stage_combine_weights(self, sw, base, lane):
         """Write the weights of the tile of partials from index `base` into sw."""
-        grp = const_expr(self.itree.combine_grp)
         count = const_expr(self.itree.combine_count)
-        for u in cutlass.range_constexpr(self.itree.combine_tile // (WARP * grp)):
-            for v in cutlass.range_constexpr(grp):
-                # Consecutive lanes write consecutive words, avoiding bank conflicts.
-                k = Int32(const_expr((u * grp + v) * WARP)) + lane
-                sw[k] = self.trait.uniform_weight(base + k, count)
+        for i in cutlass.range_constexpr(self.itree.combine_tile // WARP):
+            # Consecutive lanes write consecutive words, avoiding bank conflicts.
+            k = Int32(const_expr(i * WARP)) + lane
+            sw[k] = self.trait.uniform_weight(base + k, count)
 
     @cute.jit
     def _fold_itree_combine_async(self, mIns, row, lane, blk):
@@ -1450,7 +1451,7 @@ class TileReduce:
         if const_expr(weights):
             sbuf.append(
                 smem.allocate_tensor(
-                    fdtypes[2],
+                    fdtypes[ncopy],
                     cute.make_layout(tile_n),
                     byte_alignment=TRANSFER_ALIGNMENT,
                 )
@@ -1469,7 +1470,7 @@ class TileReduce:
         row0 = Int32(blk) * Int32(const_expr(rpb))
         live_lane = lane if lane < Int32(const_expr(rpb)) else Int32(0)
         run = live_lane * Int32(const_expr(pitch))
-        # combine_uniform ignores b[2], so without weights it reads a constant.
+        # combine_uniform ignores the count slot, so without weights it reads a constant.
         take = lambda j: tuple(  # noqa: E731
             fdtypes[f](sbuf[f][run + Int32(j)])
             if const_expr(f < ncopy)
@@ -1495,7 +1496,7 @@ class TileReduce:
                     for f in cutlass.range_constexpr(ncopy):
                         cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
         if const_expr(weights):
-            self._stage_combine_weights(sbuf[2], Int32(0), lane)
+            self._stage_combine_weights(sbuf[ncopy], Int32(0), lane)
         cute.arch.cp_async_commit_group()
         cute.arch.cp_async_wait_group(0)
         cute.arch.barrier()
@@ -1526,7 +1527,7 @@ class TileReduce:
                         for f in cutlass.range_constexpr(ncopy):
                             cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
             if const_expr(weights):
-                self._stage_combine_weights(sbuf[2], t * Int32(tile_n), lane)
+                self._stage_combine_weights(sbuf[ncopy], t * Int32(tile_n), lane)
             cute.arch.cp_async_commit_group()
             cute.arch.cp_async_wait_group(0)
             cute.arch.barrier()
