@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import importlib.metadata
 import os
 import pickle
 import re
@@ -365,6 +366,49 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("gloo", looked_up)
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+    def test_fake_backend_registration(self):
+        from torch.distributed._backends import fake
+        from torch.testing._internal.distributed import fake_pg
+
+        def ensure_registered_without_entrypoint():
+            with unittest.mock.patch(
+                "importlib.metadata.entry_points", return_value=[]
+            ):
+                dist.Backend._ensure_backend_registered("fake")
+
+        for name, register in {
+            "fallback": ensure_registered_without_entrypoint,
+            "testing_shim": lambda: importlib.reload(fake_pg),
+        }.items():
+            with self.subTest(name), unittest.mock.patch.dict(dist.Backend._plugins):
+                dist.Backend._plugins.pop("FAKE", None)
+                register()
+                creator = dist.Backend._plugins["FAKE"].creator_fn
+                self.assertIs(creator, fake._create_fake_pg)
+
+        # fbcode/sandcastle builds have no installed entry points.
+        if IS_FBCODE or IS_SANDCASTLE:
+            return
+        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+        self.assertEqual(
+            [ep.value for ep in eps if ep.name == "fake"],
+            ["torch.distributed._backends.fake:_register_fake_backend"],
+        )
+        # A fresh process registers "fake" without importing it up front.
+        script = (
+            "import sys, torch, torch.distributed as dist\n"
+            "print('torch.distributed._backends.fake' in sys.modules)\n"
+            "dist.init_process_group('fake', rank=0, world_size=2)\n"
+            "print('torch.testing._internal.distributed.fake_pg' in sys.modules)\n"
+            "print(type(dist.get_backend_impl(device=torch.device('cpu'))).__module__)\n"
+        )
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], text=True, timeout=120
+        )
+        self.assertEqual(
+            out.split(), ["False", "False", "torch.distributed._backends.fake"]
+        )
 
     @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
@@ -3362,6 +3406,12 @@ class ReduceOpTest(TestCase):
             premul_sum = c10d.ReduceOp.PREMUL_SUM(scale)
             self.assertIsInstance(premul_sum, c10d.ReduceOp)
             self.assertEqual(premul_sum.factor, scale)
+
+        # `op` is writable, so PREMUL_SUM can lack its factor supplement.
+        reduce_op = c10d.ReduceOp(c10d.ReduceOp.SUM)
+        reduce_op.op = c10d.ReduceOp.PREMUL_SUM
+        with self.assertRaisesRegex(RuntimeError, "has no factor"):
+            reduce_op.factor
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
