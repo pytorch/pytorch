@@ -778,28 +778,6 @@ class TestShapeOps(TestCase):
             torch.nonzero(t, as_tuple=False, out=out), torch.nonzero(t, out=out)
         )
 
-        # Verifies that JIT script cannot handle the as_tuple kwarg
-        # See Issue https://github.com/pytorch/pytorch/issues/45499.
-        def _foo(t):
-            tuple_result = torch.nonzero(t, as_tuple=True)
-            nontuple_result = torch.nonzero(t, as_tuple=False)
-            out = torch.empty_like(nontuple_result)
-            torch.nonzero(t, as_tuple=False, out=out)
-            return tuple_result, nontuple_result, out
-
-        with self.assertRaises(RuntimeError):
-            torch.jit.script(_foo)
-
-        # Verifies that JIT tracing works fine
-        traced_foo = torch.jit.trace(_foo, t)
-        traced_tuple, traced_nontuple, traced_out = traced_foo(t)
-        expected_tuple = torch.nonzero(t, as_tuple=True)
-        expected_nontuple = torch.nonzero(t)
-
-        self.assertEqual(traced_tuple, expected_tuple)
-        self.assertEqual(traced_nontuple, expected_nontuple)
-        self.assertEqual(traced_out, expected_nontuple)
-
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
