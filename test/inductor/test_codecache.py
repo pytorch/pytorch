@@ -5437,7 +5437,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
-    @skipIfWindowsXPU(msg="Static XPU launcher is not supported on Windows")
+    @skipIfWindowsXPU(msg="Static XPU launcher is not supported on Windows yet.")
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
