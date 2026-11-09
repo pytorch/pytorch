@@ -16,6 +16,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import traceback
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -65,6 +66,15 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.target_determination.exploration import (
+    check_disjoint,
+    exploration_info,
+    EXPLORATION_SHARE,
+    ExplorationSplit,
+    ExploredBatchRun,
+    plan_exploration,
+    rank_candidates,
+)
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
@@ -2703,13 +2713,68 @@ def main():
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
+    sha = os.environ.get("SHA1", "")
+    explore = options.enable_td and bool(sha) and EXPLORATION_SHARE > 0
+    exploration: ExplorationSplit | None = None
+    test_batch_explored: TestBatch | None = None
+    skipped = exclude
+    explored_names: set[str] = set()
+    artifact_lists = None
+    if explore:
+        try:
+            exploration = plan_exploration(
+                include,
+                rank_candidates(exclude, test_prioritizations.get_scored_tests()),
+                test_file_times_dict,
+                test_class_times_dict,
+                ":".join(
+                    [
+                        sha,
+                        os.environ.get("GITHUB_WORKFLOW", ""),
+                        BUILD_ENVIRONMENT,
+                        TEST_CONFIG,
+                    ]
+                ),
+            )
+            explored = exploration.tests() if exploration else []
+            check_disjoint(explored, include, exclude)
+            explored_names = {str(test) for test in explored}
+            skipped = [test for test in exclude if str(test) not in explored_names]
+            if explored:
+                test_batch_explored = TestBatch("explored", explored, False)
+            artifact_lists = (
+                [x.to_json() for x in include + explored],
+                [x.to_json() for x in skipped],
+            )
+            if exploration:
+                print_to_stderr(
+                    f"TD exploration: budget {exploration.budget_seconds:.0f}s, "
+                    f"frame {exploration.frame}, out of frame {exploration.out_of_frame}, "
+                    f"explored {[str(test) for test in explored]}"
+                )
+        except Exception:
+            exploration = test_batch_explored = artifact_lists = None
+            skipped = exclude
+            explored_names = set()
+            print_to_stderr(
+                f"TD exploration failed, running TD's top {percent_to_run}% only:\n"
+                f"{traceback.format_exc()}"
+            )
+
     test_batch = TestBatch("tests to run", include, False)
-    test_batch_exclude = TestBatch("excluded", exclude, True)
+    test_batch_exclude = TestBatch("excluded", skipped, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        if artifact_lists is None:
+            artifact_lists = (
+                [x.to_json() for x in include],
+                [x.to_json() for x in exclude],
+            )
+        gen_ci_artifact(*artifact_lists)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
+    if test_batch_explored is not None:
+        print_to_stderr(test_batch_explored)
     print_to_stderr(test_batch_exclude)
 
     if options.dry_run:
@@ -2724,16 +2789,28 @@ def main():
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
-    try:
-        # Actually run the tests
+    def run_batch(batch: TestBatch) -> None:
         start_time = time.time()
-        run_tests(
-            test_batch.sharded_tests, test_directory, options, test_batch.failures
-        )
+        run_tests(batch.sharded_tests, test_directory, options, batch.failures)
         elapsed_time = time.time() - start_time
         print_to_stderr(
-            f"Running test batch '{test_batch.name}' cost {round(elapsed_time, 2)} seconds"
+            f"Running test batch '{batch.name}' cost {round(elapsed_time, 2)} seconds"
         )
+
+    explored_failures = test_batch_explored.failures if test_batch_explored else []
+    explored_run = ExploredBatchRun(
+        test_batch_explored.sharded_tests if test_batch_explored else []
+    )
+    try:
+        # Actually run the tests
+        run_batch(test_batch)
+        if test_batch_explored is not None:
+            batch_explored = test_batch_explored
+            explored_run.run_after(
+                bool(test_batch.failures),
+                options.continue_through_error or RERUN_DISABLED_TESTS,
+                lambda: run_batch(batch_explored),
+            )
 
     finally:
         if options.coverage:
@@ -2748,23 +2825,45 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-        all_failures = test_batch.failures
+        all_failures = test_batch.failures + explored_failures
 
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
+                failure_info: dict[str, Any] = {
+                    "selected_tests": selected_tests,
+                    "failure": str(test),
+                }
+                if explore:
+                    failure_info["explored"] = str(test) in explored_names
                 print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
-                    {
-                        "selected_tests": selected_tests,
-                        "failure": str(test),
-                        **test_stats,
-                    },
+                    {**failure_info, **test_stats},
                 )
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
+            if exploration is not None and explored_run.pieces:
+                try:
+                    emit_metric(
+                        "td_exploration",
+                        exploration_info(
+                            exploration,
+                            explored_run.pieces,
+                            explored_run.outcomes(
+                                test for test, _ in explored_failures
+                            ),
+                            sha=sha,
+                            pr_number=get_pr_number(),
+                            num_tests=len(include) + len(exclude),
+                            top_tests=len(include),
+                        ),
+                    )
+                except Exception:
+                    print_to_stderr(
+                        f"Failed to emit td_exploration:\n{traceback.format_exc()}"
+                    )
 
     if len(all_failures):
         for _, err in all_failures:
