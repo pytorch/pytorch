@@ -1174,11 +1174,16 @@ class TestLibtorchAgnostic(TestCase):
             libtorch_agnostic.ops.test_tensor_device(t_device), t_device.device
         )
 
-        if torch.device(device).type == "cuda" and torch.cuda.device_count() > 1:
-            t_cuda_1 = torch.randn(2, 3, device="cuda:1")
-            self.assertEqual(
-                libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
-            )
+    @skipIfTorchVersionLessThan(2, 10)
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_tensor_device_multi_gpu(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t_cuda_1 = torch.randn(2, 3, device="cuda:1")
+        self.assertEqual(
+            libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
+        )
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
