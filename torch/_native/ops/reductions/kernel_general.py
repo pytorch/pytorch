@@ -373,7 +373,7 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
 # The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
 # the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). Rows
-# compile once per R:
+# compile once per R and mapping (see kernel_coltile.OrderedColConfig.min_blocks):
 # single-field rows replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at
 # R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at
 # R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed
@@ -385,6 +385,8 @@ _B200_CCS = ((10, 0),)
 # Trait types the B200 one-field and index rules were measured with. Index rules also
 # need 32-bit accumulators, so int32 indices.
 _B200_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
+# The wide strided one-field rule's traits (see select_general_config).
+_B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
 _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
 # trait types they measured, with rule names.
@@ -392,9 +394,12 @@ _SM107_DTYPES = (torch.float32, torch.bfloat16)
 _SM107_CCS = ((10, 7),)
 _SM107_SIZES = (16 << 20, 64 << 20, 256 << 20, 2 << 30)
 _SM107_LARGE_SIZES = _SM107_SIZES[2:]
-_SM107_ONE_FIELD = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
+_SM107_MIN_SIZE, _SM107_MAX_SIZE = _SM107_SIZES[0], _SM107_SIZES[-1]
+_SM107_ONE_FIELD = (SumOps, MeanOps, AMaxOps)
 _ORDERED_COL_DTYPES = _B200_DTYPES
-# kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
+# Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
+# policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
+# entries for other architectures are not routed.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -412,8 +417,8 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
-# per R, ragged last partitions included: 9.4 s on first call (B200, C = 64), against
-# 0.52 s for the indexed tree.
+# per R, ragged last partitions included: C = 128 split views compiled in about 9.5 s on
+# first call (B200), against 0.55 s for the indexed tree.
 _ORDERED_SPLIT_MIN_R = _K_TWO_KERNEL_THRESHOLD * _K_INNER_TREE_THRESHOLD + 1
 _ORDERED_SPLIT_MIN_OUTPUTS = 128
 _ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS = 1024
@@ -523,10 +528,12 @@ def select_general_config(
         and alignment >= tile.TRANSFER_ALIGNMENT
     )
     strided_row = strided and cc in _B200_CCS and dtype in _B200_DTYPES
-    # Against the default config on B200 (bf16/fp32, 8-8192 outputs; fp16 shares the rules
-    # unmeasured), the c256 inner tree ran 1.18-3.8x at every output count. The wider
-    # rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a two-stage
-    # split below sm_count * 4 outputs), and 1.03-2.9x from 2048.
+    # Against the default config on B200 (fp16/bf16/fp32, 8 to 256K outputs), the c256
+    # inner tree ran 1.03-6.2x at every output count. The wider rules ran 0.76-0.95x
+    # below 2048 outputs, which keep the default config (a two-stage split below
+    # sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper bound (fp32 sum at
+    # count 1024: 1.0x). Amax and amin skip the wide one-field rule: amax ran 0.88-0.94x
+    # at count 4096 and for fp32 at count 1024, against 1.7-2.6x under c256.
     wide = strided_row and count in (1024, 4095, 4096) and num_o >= 2048
     if (
         strided_row
@@ -542,7 +549,7 @@ def select_general_config(
         return _GeneralConfig(block=block, rule="b200_strided_index")
     if wide and welford_outs == nouts:
         return _GeneralConfig(block=64, rule="b200_strided_welford", uniform_tree=True)
-    if wide and trait_type in _B200_ONE_FIELD:
+    if wide and trait_type in _B200_STRIDED_ONE_FIELD:
         return _GeneralConfig(block=32, rule="b200_strided_one_field")
     sm107 = cc in _SM107_CCS and dtype in _SM107_DTYPES
     if not (sm107 and strided and count == 1024):
@@ -554,12 +561,12 @@ def select_general_config(
         return _GeneralConfig(block=64, rule="rubin_strided_sum")
     if welford_outs == nouts:
         return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_welford")
-    if size >= 64 << 20:
-        if trait_type in _SM107_ONE_FIELD:
+    if size > _SM107_MIN_SIZE:
+        if trait_type in _SM107_ONE_FIELD and nfields == 1:
             return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_inner")
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         argmax = trait_type is ArgMaxOps
-        if argmax and (dtype == torch.bfloat16 or size == 2 << 30):
+        if argmax and (dtype == torch.bfloat16 or size == _SM107_MAX_SIZE):
             return _GeneralConfig(
                 kernel_order="inner_tree", rule="rubin_strided_argmax"
             )
@@ -589,7 +596,8 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
 # N = 1023. Rows are odd, so Welford traits start at N = 1025; at BF16 N = 4095 var_mean
 # ran 1.18x and var 1.36x. Std, std_mean, all and any (bf16/fp32, N = 255-16383, 2 to
-# 4096 rows; fp16 unmeasured) ran 1.07-2.38x, and two- and three-row sums 1.28-1.91x.
+# 4096 rows) ran 1.07-2.38x, fp16 std, all and any 1.07-2.4x, and two- and three-row
+# sums 1.28-1.91x.
 # The kernel bakes N, so each new width compiles once (0.17 s on B200).
 _RAGGED_ROW_MIN_N = 255
 _RAGGED_ROW_LATE_MIN_N = 1023
