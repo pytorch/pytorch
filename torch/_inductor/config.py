@@ -718,7 +718,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
@@ -1753,11 +1753,12 @@ keep_static_cubin_raw: bool = (
     os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
-# Use _FastCudaLauncher (vectorcall C extension) instead of
-# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Use _FastCudaLauncher / _FastXpuLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedTritonKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
-# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
-# and cuCtxGetCurrent.
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple and, per pointer
+# argument, cuPointerGetAttribute and cuCtxGetCurrent on CUDA, or
+# zeMemGetAllocProperties and the context lookup it needs on XPU.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
@@ -2011,6 +2012,12 @@ class cpp:
 
     # set to torch.get_num_threads()
     threads = -1
+
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
 
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
