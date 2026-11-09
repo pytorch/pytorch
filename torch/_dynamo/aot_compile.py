@@ -658,8 +658,9 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # Order roots are deliberately excluded: they select dictionary manager
-    # types but do not certify all the values in a dictionary. Serialized
+    # Order roots alone add no names: they select dictionary manager types but
+    # do not certify every value. A root with its own kept GlobalSource guard
+    # is still included below. Serialized
     # global_scope also carries roots reached through aliases, shape_env_sources
     # and DUPLICATE_INPUT's source_b, which need not have their own value guard.
     # DUPLICATE_INPUT can even record a root before its optimizer-source early return.

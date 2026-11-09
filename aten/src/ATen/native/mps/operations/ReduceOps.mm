@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <bit>
 #include <numeric>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -663,7 +664,7 @@ static void reduction_dispatch_mps(Tensor input,
   };
   const auto threads =
       std::max(grid_threads(plan), plan.num_segments > 1 ? grid_threads(reduction_combine_plan(plan, op.is_arg)) : 0);
-  if (threads > std::numeric_limits<uint32_t>::max()) {
+  if (!std::in_range<uint32_t>(threads)) {
     const auto min_chunks = static_cast<int64_t>(at::ceil_div<uint64_t>(threads, std::numeric_limits<int32_t>::max()));
     reduction_dispatch_split_mps(input, output, op, partial_type, combine_prefix, profile_name, min_chunks);
     return;
