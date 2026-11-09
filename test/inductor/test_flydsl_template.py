@@ -1670,24 +1670,16 @@ class TestFlyDSLTemplate(TestCase):
             exhaustive = flydsl_heuristics.get_mxfp8_grouped_gemm_configs(
                 512, 2048, 2048, 8, num_cus
             )
-        self.assertEqual(len(exhaustive), 6 if num_cus == 32 else 18)
-        for num_xcd in {1, num_cus // 32}:
+        self.assertEqual(len(exhaustive), 6 if num_cus == 32 else 12)
+        schedules = {(1, 1)} if num_cus == 32 else {(1, 1), (num_cus // 32, 4)}
+        self.assertEqual({(c["NUM_XCD"], c["GROUP_M"]) for c in exhaustive}, schedules)
+        for xcd, group_m in schedules:
             self.assertIn(
-                {"BLOCK_R": 256, "BLOCK_C": 256, "NUM_XCD": num_xcd, "GROUP_M": 1},
+                {"BLOCK_R": 256, "BLOCK_C": 256, "NUM_XCD": xcd, "GROUP_M": group_m},
                 exhaustive,
             )
             self.assertIn(
-                {"BLOCK_R": 64, "BLOCK_C": 128, "NUM_XCD": num_xcd, "GROUP_M": 1},
-                exhaustive,
-            )
-        if num_cus > 32:
-            self.assertIn(
-                {
-                    "BLOCK_R": 256,
-                    "BLOCK_C": 256,
-                    "NUM_XCD": num_cus // 32,
-                    "GROUP_M": 4,
-                },
+                {"BLOCK_R": 64, "BLOCK_C": 128, "NUM_XCD": xcd, "GROUP_M": group_m},
                 exhaustive,
             )
 

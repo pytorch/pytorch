@@ -77,7 +77,7 @@ class TestFlyDSLGroupedScheduler(TestCase):
     @parametrize("k", (512, 640, 2048))
     @parametrize(
         "num_xcd,group_m,grid",
-        ((1, 1, 3), (8, 1, 8), (8, 4, 3), (8, 4, 8), (4, 4, 24), (8, 4, 256)),
+        ((1, 1, 3), (8, 4, 3), (8, 4, 8), (4, 4, 24), (8, 4, 256)),
     )
     def test_persistent_tiles(self, device, tile, k, num_xcd, group_m, grid):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (

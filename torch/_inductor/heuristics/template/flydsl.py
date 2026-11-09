@@ -512,7 +512,7 @@ class FlyDSLMXFP8GroupedGemmConfig:
     block, and its LDS ping-pong depth is fixed at 2. NUM_XCD=1 disables XCD
     gathering; larger values gather adjacent logical workers on
     each XCD. GROUP_M groups row tiles to reuse weights. Autotuning compares
-    the original traversal with XCD gathering, alone and with four-row groups.
+    the original traversal with XCD gathering combined with four-row groups.
     """
 
     BLOCK_R: int = 256
@@ -593,7 +593,7 @@ def get_exhaustive_mxfp8_grouped_gemm_configs(
         for block_r, block_c, (xcd, group_m) in product(
             _MXFP8_GROUPED_BLOCK_R,
             _MXFP8_GROUPED_BLOCK_C,
-            ((1, 1), (num_xcd, 1), (num_xcd, 4)) if num_xcd > 1 else ((1, 1),),
+            ((1, 1), (num_xcd, 4)) if num_xcd > 1 else ((1, 1),),
         )
     ]
 
