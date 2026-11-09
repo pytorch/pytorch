@@ -30,6 +30,8 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -52,6 +54,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -102,6 +105,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -174,7 +178,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (Py_ssize_t i = 0; i < num_classes; i++) {
+  for (const auto i : c10::irange(num_classes)) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
@@ -2630,6 +2634,7 @@ PyObject* initModule() {
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));
+  ASSERT_TRUE(FastXpuLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
@@ -2877,6 +2882,29 @@ Call this whenever a new thread is created in order to propagate values from
     fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
   });
 
+  py_module.def(
+      "_set_fake_sym_memo",
+      [](const at::Tensor& fake,
+         const std::string& name,
+         c10::SymInt memo,
+         uint64_t epoch) {
+        fake.unsafeGetTensorImpl()->set_fake_sym_memo(
+            name, std::move(memo), epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("memo"),
+      py::arg("epoch"));
+
+  py_module.def(
+      "_get_fake_sym_memo",
+      [](const at::Tensor& fake, const std::string& name, uint64_t epoch) {
+        return fake.unsafeGetTensorImpl()->fake_sym_memo(name, epoch);
+      },
+      py::arg("fake"),
+      py::arg("name"),
+      py::arg("epoch"));
+
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
@@ -2912,6 +2940,144 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
+  });
+
+  // A C++ FakeTensorMode, owned by its Python CppFakeTensorMode wrapper; see
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  py::class_<c10::FakeTensorMode, std::shared_ptr<c10::FakeTensorMode>>(
+      py_module, "_CppFakeTensorMode")
+      .def(
+          py::init([](const py::object& converter,
+                      const py::object& shape_env,
+                      const py::object& wrapper) {
+            TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
+            TORCH_CHECK(
+                !wrapper.is_none(),
+                "Expected the CppFakeTensorMode that owns this mode as wrapper");
+            std::shared_ptr<c10::SafePyObject> shape_env_obj;
+            if (!shape_env.is_none()) {
+              shape_env_obj = std::make_shared<c10::SafePyObject>(
+                  shape_env.inc_ref().ptr(), getPyInterpreter());
+            }
+            auto functorch_config =
+                py::module::import("torch._functorch.config");
+            auto mode = std::make_shared<c10::FakeTensorMode>(
+                std::move(shape_env_obj),
+                std::make_shared<c10::SafePyObject>(
+                    converter.inc_ref().ptr(), getPyInterpreter()),
+                functorch_config.attr("fake_tensor_allow_meta").cast<bool>(),
+                functorch_config
+                    .attr("fake_tensor_allow_unsafe_data_ptr_access")
+                    .cast<bool>());
+            PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
+            if (weakref == nullptr) {
+              throw py::error_already_set();
+            }
+            mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
+                weakref, getPyInterpreter());
+            return mode;
+          }),
+          py::arg("converter"),
+          py::arg("shape_env"),
+          py::arg("wrapper"))
+      .def_property(
+          "allow_meta",
+          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_; },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_meta_ = value;
+          })
+      .def_property(
+          "_allow_unsafe_data_ptr_access",
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_unsafe_data_ptr_access_;
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_unsafe_data_ptr_access_ = value;
+          });
+
+  // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
+  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor
+  // (a Parameter carries the _is_param marker instead), and callers record
+  // anything else on the result. It does not memoize; callers such as the
+  // converter do. It rejects the inputs Python's does, raising TypeError,
+  // ValueError or, for a meta device the mode disallows, RuntimeError, where
+  // Python's raises AssertionError. Unlike Python's, it also rejects every
+  // tensor subclass with __torch_dispatch__ (Python's accepts one whose
+  // dispatched detach returns a plain tensor) and functional and functorch
+  // wrappers, and it takes device as a torch.device, not a string. It also
+  // does not initialize a CUDA or XPU context for such a device, as Python's
+  // FakeTensor.__new__ does (init_gpu_context).
+  py_module.def(
+      "_from_meta_and_device",
+      [](const at::Tensor& meta,
+         c10::Device device,
+         const std::shared_ptr<c10::FakeTensorMode>& mode) {
+        // A functional or functorch wrapper would be copied as a wrapper whose
+        // inner tensor is not fake. Checked first, as reading a subclass's
+        // device can run its __torch_dispatch__.
+        constexpr auto wrapper_ks = c10::python_ks |
+            c10::DispatchKeySet(c10::DispatchKey::Functionalize) |
+            c10::functorch_transforms_ks |
+            c10::DispatchKeySet(c10::DispatchKey::BatchedNestedTensor);
+        TORCH_CHECK_TYPE(
+            !meta.key_set().has_any(wrapper_ks),
+            "_from_meta_and_device does not accept tensor subclasses with "
+            "__torch_dispatch__ or functional or functorch wrappers, got "
+            "dispatch keys ",
+            meta.key_set());
+        TORCH_CHECK_VALUE(
+            meta.is_meta(),
+            "_from_meta_and_device: tensor's device must be 'meta', got ",
+            meta.device().type());
+        auto* impl = meta.unsafeGetTensorImpl();
+        // A fake also reads as meta on the meta device or inside a kernel
+        TORCH_CHECK_VALUE(
+            !impl->is_fake(),
+            "_from_meta_and_device: expected a plain meta tensor that is not "
+            "fake; use an existing fake directly");
+        // Like Python's FakeTensor(mode, meta, device), which goes through
+        // _make_subclass: a new detached fake sharing meta's storage (or, for a
+        // sparse meta, its indices and values). meta keeps its own device and
+        // autograd state. As in Python, the shared storage is marked as a
+        // fake's; a sparse meta has no storage to mark, and the indices and
+        // values it shares stay non-fake.
+        c10::intrusive_ptr<c10::TensorImpl> out_impl;
+        {
+          // As in no_dispatch(). Otherwise an active dispatch mode would run
+          // the detach, and an active C++ mode or the Python dispatcher would
+          // see the placeholder indices and values that the sparse impls'
+          // copies allocate with at::empty. _make_subclass disables the Python
+          // dispatcher too.
+          torch::DisableTorchDispatch no_dispatch;
+          c10::impl::DisablePythonDispatcher no_python_dispatcher;
+          out_impl = impl->shallow_copy_and_detach(
+              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+        }
+        // Before marking the shared storage, as this can throw
+        out_impl->set_requires_grad(meta.requires_grad());
+        at::init_cpp_fake(out_impl.get(), device, mode);
+        return at::Tensor(std::move(out_impl));
+      },
+      py::arg("meta"),
+      py::arg("device"),
+      py::arg("mode").none(false));
+
+  // The Python wrapper of a C++ fake's mode, or None for any other tensor,
+  // including a Python FakeTensor (maybe_get_fake_mode handles those) and a
+  // tensor with the Fake key but no mode (see _set_fake_device). Unlike
+  // maybe_get_fake_mode, it does not look inside functional, functorch or
+  // traceable wrapper tensors. If the wrapper has been collected,
+  // getCppFakeTensorModePyObj rebuilds it (see Note [C++ FakeTensorMode Python
+  // wrapper lifetime] in torch/csrc/FakeTensorMode.cpp), propagating any error
+  // raised while doing so.
+  // TODO: the rebuild always fails until CppFakeTensorMode is added.
+  py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
+    if (!t.defined() || !t.is_fake()) {
+      return py::none();
+    }
+    return torch::fake_tensor::getCppFakeTensorModePyObj(
+        t.unsafeGetTensorImpl()->fake_tensor_mode());
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -3518,6 +3684,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
+
+  // See Note [C++ in_kernel_invocation].
+  torch::impl::py_context_manager<c10::impl::InKernelInvocationGuard>(
+      py_module, "_InKernelInvocation");
+
+  py_module.def("_in_kernel_invocation", []() {
+    return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
+  });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();

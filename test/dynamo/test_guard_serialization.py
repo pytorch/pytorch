@@ -65,7 +65,12 @@ from torch._dynamo.utils import (
 )
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -74,7 +79,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -1335,6 +1339,8 @@ torch._library.opaque_object.register_custom_class(CustomConstantType, typ="cons
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         DynamoCache.clear()
@@ -1560,6 +1566,8 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
 
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
@@ -2112,13 +2120,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+        from torch._C._distributed_c10d import Backend, ProcessGroup
+        from torch.distributed._backends.fake import FakeProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)
         self.assertNotIsInstance(pg, ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        objs = (
+            pg,
+            Backend(0, 1),
+            _PyBackend(),
+            ProcessGroup(0, 1),
+            torch.Stream(device="cpu"),
+        )
         for obj in (*objs, weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
@@ -2981,6 +2996,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_function_locals(self):
         def foo(x):
             return x + 1
@@ -3444,71 +3461,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    def test_tensor_match_current_device(self):
-        # The relative-device decision must survive a load on a rank whose current
-        # device differs from the saving one. The derivation ignores the saved
-        # tensor's index -- the one piece of the artifact that is rank-specific --
-        # and reads compile_on_one_rank off the saved graph state rather than the
-        # loading process's config, so the guard that is rebuilt is the one that
-        # was saved.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        with torch.cuda.device(0):
-            ref, _ = self._test_serialization(
-                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-            )
-
-        with mock.patch("torch.accelerator.current_device_index", return_value=1):
-            state = load_guards_state(self._cached_guards_state)
-            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
-
-        self.assertIn("device=current", "\n".join(loaded.code_parts))
-
-        with torch.cuda.device(0):
-            inputs = {"x": torch.randn(4, device="cuda:0")}
-            self._test_check_fn(ref, loaded, inputs, True)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_tensor_match_current_device_survives_config_change_on_load(self):
-        # Whether the index is pinned or relative belongs to the saved guard, not to
-        # the loading process. Rebuilding from the loader's own compile_on_one_rank
-        # would flip the guard either way: a relaxed one reloaded without CooR would
-        # be rebuilt pinned and reject the device it was saved to accept, and a
-        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
-        # was saved to reject.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        for saved_with_coor in (True, False):
-            with (
-                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
-                torch.cuda.device(0),
-            ):
-                torch._dynamo.reset()
-                self._test_serialization(
-                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-                )
-                saved_state = self._cached_guards_state
-                saved_code = self._cached_f_code
-
-            # Load under the opposite setting.
-            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
-                state = load_guards_state(saved_state)
-                loaded = load_guard_manager(state, saved_code, f.__globals__)
-
-            code = "\n".join(loaded.code_parts)
-            if saved_with_coor:
-                self.assertIn("device=current", code)
-            else:
-                self.assertNotIn("device=current", code)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
@@ -4993,7 +4945,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_fsdp_training_state(self):
         from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
         from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
@@ -5684,19 +5636,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
-    def test_unused_stream(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
-        def foo(inputs):
-            return inputs.x + 1
-
-        x = torch.randn(3, 2)
-        ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
-        )
-        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
-
     def test_unused_process_group(self):
         import torch.distributed as dist
 
@@ -5888,6 +5827,102 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+@torch._dynamo.config.patch({"strict_precompile": True})
+class TestGuardSerializationCUDA(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
+
+
+class TestGuardSerializationAccelerator(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch({"strict_precompile": True})
+    def test_unused_stream(self, device):
+        def foo(inputs):
+            return inputs.x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream(device=device))
+        )
+        self._test_check_fn(
+            ref, loaded, {"inputs": Inputs(x, torch.Stream(device=device))}, True
+        )
+
+
+instantiate_device_type_tests(
+    TestGuardSerializationAccelerator,
+    globals(),
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 
 class SimpleModule(torch.nn.Module):

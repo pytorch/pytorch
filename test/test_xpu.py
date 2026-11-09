@@ -166,8 +166,8 @@ class TestXpu(TestCase):
             device_capability["has_subgroup_matrix_multiply_accumulate"],
         )
         self.assertEqual(
-            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
-            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+            device_properties.has_subgroup_matrix_multiply_accumulate_tf32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tf32"],
         )
         self.assertEqual(
             device_properties.has_subgroup_2d_block_io,
@@ -621,6 +621,28 @@ print(torch.xpu.is_initialized())
         self.assertNotEqual(event.sycl_event, 0)
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.sycl_event, event.event_id)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_multi_events_elapsed_time(self):
+        s0 = torch.xpu.current_stream(0)
+        s1 = torch.xpu.current_stream(1)
+
+        with s0:
+            start_event = torch.xpu.Event(enable_timing=True)
+            start_event.record()
+            _ = torch.randn(1000, device="xpu")
+
+        with s1:
+            end_event = torch.xpu.Event(enable_timing=True)
+            s0.synchronize()
+            end_event.record()
+
+        start_event.synchronize()
+        end_event.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError, "Both events must be on the same device"
+        ):
+            start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -4063,6 +4085,37 @@ class TestMemPool(TestCase):
         # each thread should create a unique mempool, since
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
+
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.xpu.empty_cache()
+        pool1 = torch.xpu.MemPool()
+        pool2 = torch.xpu.MemPool()
+        pool3 = torch.xpu.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="xpu")
+            data.append(x)
+
+        with torch.xpu.use_mem_pool(pool1):
+            allocate_data()
+            with torch.xpu.use_mem_pool(pool2):
+                allocate_data()
+                with torch.xpu.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.xpu.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.xpu.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.xpu.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
 
     def test_mempool_empty_cache(self):
         torch.xpu.empty_cache()
