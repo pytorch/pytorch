@@ -16,6 +16,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.lazy import (
     ComputedLazyCache,
     LazyCache,
+    LazySymNodeFormatString,
     LazyVariableTracker,
 )
 from torch.testing._internal.common_utils import (
@@ -160,6 +161,58 @@ class CachedConstantSourceLocationTests(TestCase):
         self.assertIsNot(lazy.realize(), prototype)
         self.assertEqual(lazy.realize().source_location, location)
         self.assertIsNone(prototype.source_location)
+
+
+@instantiate_parametrized_tests
+class LazyCacheTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("raises", (False, True))
+    def test_init_does_not_access_dunder_class(self, raises):
+        calls = []
+
+        class Cache:
+            @property
+            def __class__(self):
+                calls.append("hook")
+                if raises:
+                    raise RuntimeError("class-hook")
+                return Cache
+
+        def fn(x, values):
+            return x + len(values)
+
+        obj = Cache()
+        values = [obj]
+        x = torch.ones(1)
+        expected = fn(x, values)
+        self.assertEqual(calls, [])
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, values), expected)
+        self.assertEqual(calls, [])
+        self.assertIs(values[0], obj)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_init_source(self):
+        value = object()
+        source = ConstantSource("value")
+        cache = LazyCache(value, source)
+        self.assertIs(cache.value, value)
+        self.assertIs(cache.source, source)
+        with self.assertRaisesRegex(AssertionError, "source is required"):
+            LazyCache(value, None)
+
+        class FormatStringSubclass(LazySymNodeFormatString):
+            pass
+
+        for cls in (LazySymNodeFormatString, FormatStringSubclass):
+            with self.subTest(cls=cls):
+                value = object.__new__(cls)
+                cache = LazyCache(value, None)
+                self.assertIs(cache.value, value)
+                self.assertIsNone(cache.source)
 
 
 class LazyConstantVariableTests(TestCase):
