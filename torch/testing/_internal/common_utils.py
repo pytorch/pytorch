@@ -27,6 +27,7 @@ import pathlib
 import platform
 import random
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -103,6 +104,7 @@ except ImportError:
     has_pytest = False
 
 SEED = 1234
+MI450_ARCH = ("gfx1250",)
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
@@ -130,8 +132,11 @@ class HardwareClassification(Enum):
     Test classes declare a ``hw_classification`` class attribute to indicate
     the kind of hardware their tests require.  When ``--hw-classification``
     is passed, only tests whose classification matches one of the requested
-    values are executed.  When the flag is not specified, all test discovery
-    and execution paths remain unchanged.
+    values are executed.  ``PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION``, a
+    comma-separated list, instead drops the listed classifications (they are
+    not reported as skipped) and keeps unclassified tests; with both set, both
+    apply.  With neither set, all test discovery and execution paths remain
+    unchanged.
 
     Currently there are three hardware classification categories:
 
@@ -209,45 +214,55 @@ def get_hw_classification(
 
 def filter_by_hw_classification(
     items: Iterable[Any],
-    requirement: set[HardwareClassification],
+    requirement: set[HardwareClassification] | None,
     get_class: Callable[[Any], type | None],
     *,
     on_match: Callable[[Any], None],
-) -> None:
-    """Filter items by hardware classification and print a summary.
+    exclude: frozenset[HardwareClassification] = frozenset(),
+) -> int:
+    """Filter items by hardware classification, print a summary, and return the
+    number of items dropped.
 
     For each item, `get_class` extracts the associated test class. Items whose
-    hardware classification is in `requirement` are passed to `on_match`, if
-    provided. Prints a summary of matched, mismatched, unclassified, and
-    classless items.
+    hardware classification is in `requirement` and not in `exclude` are passed
+    to `on_match`. A `requirement` of None accepts every classification,
+    including unclassified and classless items. The summary counts each dropped
+    item once, by the reason it was dropped, and is printed when a requirement
+    is set or something was dropped.
     """
-    total = 0
-    passed = 0
-    no_class = 0
-    unclassified = 0
+    total = passed = excluded = mismatched = unclassified = no_class = 0
     for item in items:
         total += 1
         cls = get_class(item)
-        if cls is None:
-            no_class += 1
-            continue
-        classification = get_hw_classification(cls)
-        if classification is None:
-            unclassified += 1
-        elif classification in requirement:
+        classification = None if cls is None else get_hw_classification(cls)
+        if classification in exclude:
+            excluded += 1
+        elif requirement is None or classification in requirement:
             passed += 1
             on_match(item)
+        elif cls is None:
+            no_class += 1
+        elif classification is None:
+            unclassified += 1
+        else:
+            mismatched += 1
 
-    mismatched = total - passed - unclassified - no_class
-    parts = [
-        f"HW classification mode active ({[e.name for e in requirement]}):",
-        f"total={total}, passed={passed},",
-        f"unclassified={unclassified},",
-    ]
-    if no_class > 0:
-        parts.append(f"no_class={no_class},")
-    parts.append(f"mismatched={mismatched}")
-    print(" ".join(parts))
+    dropped = total - passed
+    if requirement is not None or dropped:
+        header = "HW classification mode active"
+        if requirement is not None:
+            header += f" ({[e.name for e in requirement]})"
+        if exclude:
+            header += f" (exclude={sorted(e.name for e in exclude)})"
+        parts = [f"{header}:", f"total={total}, passed={passed},", f"unclassified={unclassified},"]
+        if no_class > 0:
+            parts.append(f"no_class={no_class},")
+        parts.append(f"mismatched={mismatched}")
+        if exclude:
+            parts[-1] += ","
+            parts.append(f"excluded={excluded}")
+        print(" ".join(parts))
+    return dropped
 
 
 def is_navi3_arch():
@@ -269,11 +284,11 @@ def freeze_rng_state(*args, **kwargs):
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
-    # are not implied. Maps from env var name -> value (int)
+    # are not implied. Maps from env var name -> the env var's string value.
     repro_env_vars: dict = {}
-    # Every include_in_repro env var's value as set, unparsed ("" if unset); an unset
-    # flag that's on anyway (by default or implication) is "1". Read by
-    # torchci/environment.py.
+    # The value as set, unparsed ("" if unset), of every include_in_repro flag and
+    # every include_in_report setting; an unset flag that's on anyway (by default
+    # or implication) is "1". Read by torchci/environment.py.
     env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
@@ -345,8 +360,11 @@ class TestEnvironment:
     #         variable. Default: None
     #     include_in_repro (bool): Indicates whether this setting should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure), and in env_var_values, which test
-    #         run reports record as their flags. Default: True
+    #         relevant to reproducing the test failure). The repro gets the env var's
+    #         string, not the parsed value. Default: True
+    #     include_in_report (bool | None): Indicates whether this setting should be
+    #         included in env_var_values, which test run reports record as their flags.
+    #         Default: None, meaning the same as include_in_repro
     #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
     #         the string itself.
     @staticmethod
@@ -356,13 +374,16 @@ class TestEnvironment:
         default=None,
         include_in_repro=True,
         parse_fn=lambda maybe_val_str: maybe_val_str,
+        *,
+        include_in_report=None,
     ):
-        value = default if env_var is None else os.getenv(env_var)
-        value = parse_fn(value)
-        if include_in_repro and (env_var is not None):
-            TestEnvironment.env_var_values[env_var] = os.getenv(env_var) or ""
-        if include_in_repro and (value != default):
-            TestEnvironment.repro_env_vars[env_var] = value
+        raw = None if env_var is None else os.getenv(env_var)
+        value = parse_fn(default if env_var is None else raw)
+        if include_in_repro if include_in_report is None else include_in_report:
+            if env_var is not None:
+                TestEnvironment.env_var_values[env_var] = raw or ""
+        if include_in_repro and (raw is not None) and (value != default):
+            TestEnvironment.repro_env_vars[env_var] = raw
 
         # export setting globally for convenience
         if name in globals():
@@ -376,7 +397,7 @@ class TestEnvironment:
     # Example: "PYTORCH_TEST_WITH_ASAN=1 PYTORCH_TEST_WITH_ROCM=1"
     @staticmethod
     def repro_env_var_prefix() -> str:
-        return " ".join([f"{env_var}={value}"
+        return " ".join([f"{env_var}={shlex.quote(str(value))}"
                          for env_var, value in TestEnvironment.repro_env_vars.items()])
 
 
@@ -466,6 +487,35 @@ OPINFO_RESTRICT_TO_DSL: str | None = TestEnvironment.def_setting(
     # be queried from the tracked sample input instead
     include_in_repro=True,
     parse_fn=lambda val: None if val is None else str(val),
+)
+
+
+_HW_CLASSIFICATION_EXCLUDE_ENV_VAR = "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"
+
+
+def _parse_hw_classification_exclude(val: str | None) -> frozenset[HardwareClassification]:
+    names = [name.strip().upper() for name in (val or "").split(",") if name.strip()]
+    if unknown := [name for name in names if name not in HardwareClassification.__members__]:
+        raise ValueError(
+            f"{_HW_CLASSIFICATION_EXCLUDE_ENV_VAR}: unknown hardware classification(s) {unknown}; "
+            f"expected a comma-separated list of {', '.join(HardwareClassification.__members__)}"
+        )
+    return frozenset(HardwareClassification[name] for name in names)
+
+
+# Comma-separated hw_classification names (e.g. GENERIC) whose test classes are
+# dropped: not loaded under unittest, deselected under pytest. Unclassified
+# classes still run (see filter_by_hw_classification). There is no flag form:
+# test.sh runs some test files directly rather than through run_test.py, and a
+# job-level environment variable reaches those too. It is left out of repro
+# commands, since a test that ran wasn't excluded, but reports record it.
+HW_CLASSIFICATION_EXCLUDE: frozenset[HardwareClassification] = TestEnvironment.def_setting(
+    "HW_CLASSIFICATION_EXCLUDE",
+    env_var=_HW_CLASSIFICATION_EXCLUDE_ENV_VAR,
+    default=frozenset(),
+    include_in_repro=False,
+    include_in_report=True,
+    parse_fn=_parse_hw_classification_exclude,
 )
 
 
@@ -1448,9 +1498,14 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
-    def __init__(self, hw_classification):
+    def __init__(self, hw_classification, *, exclude=frozenset()):
         super().__init__()
         self.hw_classification = hw_classification
+        self.exclude = exclude
+        # Tests dropped from whole-module loads. Tests requested by name aren't
+        # counted, so a run of only filtered-out named tests still looks like
+        # "nothing ran" to exit_code.
+        self.dropped_from_modules = 0
 
     @staticmethod
     def iter_test_cases_recursively(
@@ -1464,25 +1519,30 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         for element in suite_or_case:
             yield from _iter(element)
 
-    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
-        if self.hw_classification is None:
-            return tests
+    def _filter(self, tests: unittest.TestSuite) -> tuple[unittest.TestSuite, int]:
+        if self.hw_classification is None and not self.exclude:
+            return tests, 0
 
         filtered_suite = unittest.TestSuite()
         _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
-        filter_by_hw_classification(
+        dropped = filter_by_hw_classification(
             _iter(tests),
             self.hw_classification,
             get_class=lambda tc: tc.__class__,
             on_match=filtered_suite.addTest,
+            exclude=self.exclude,
         )
-        return filtered_suite
+        return filtered_suite, dropped
+
+    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+        return self._filter(tests)[0]
 
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
-        suite = super().loadTestsFromModule(
-            module, *args, pattern=pattern, **kwargs
+        suite, dropped = self._filter(
+            super().loadTestsFromModule(module, *args, pattern=pattern, **kwargs)
         )
-        return self.get_filtered_suite(suite)
+        self.dropped_from_modules += dropped
+        return suite
 
     def loadTestsFromName(self, name, module=None, *args, **kwargs):
         suite = super().loadTestsFromName(name, module, *args, **kwargs)
@@ -1495,6 +1555,19 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         if tests and isinstance(tests[0], unittest.loader._FailedTest):
             return suite
         return self.get_filtered_suite(suite)
+
+    def exit_code(self, result: unittest.TestResult) -> int:
+        """The process exit code for result: 1 on any failure (including a
+        setUpClass error before any test ran), else 5 if nothing ran and the
+        filter dropped nothing (a -k typo, or only named tests the filter
+        dropped) on Python 3.12+, like unittest.main(), else 0. So a run the
+        filter emptied succeeds, as on the pytest path; test.sh runs some files
+        directly, where Python 3.12+'s unittest.main() would exit 5."""
+        if not result.wasSuccessful():
+            return 1
+        if result.testsRun == 0 and not result.skipped and not self.dropped_from_modules and sys.version_info >= (3, 12):
+            return 5
+        return 0
 
 
 def run_tests(argv=None):
@@ -1530,9 +1603,16 @@ def run_tests(argv=None):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    testLoader = unittest.loader.defaultTestLoader
-    if HW_CLASSIFICATION is not None:
-        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
+    hw_loader = None
+    if HW_CLASSIFICATION is not None or HW_CLASSIFICATION_EXCLUDE:
+        hw_loader = HardwareClassificationTestLoader(HW_CLASSIFICATION, exclude=HW_CLASSIFICATION_EXCLUDE)
+    testLoader = unittest.loader.defaultTestLoader if hw_loader is None else hw_loader
+
+    def unittest_main(**kwargs):
+        if hw_loader is None:
+            unittest.main(testLoader=testLoader, **kwargs)
+        else:
+            sys.exit(hw_loader.exit_code(unittest.main(testLoader=hw_loader, exit=False, **kwargs).result))
 
     if SHOWLOCALS:
         argv = [
@@ -1667,16 +1747,17 @@ def run_tests(argv=None):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        unittest_main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose), testLoader=testLoader)
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv, testLoader=testLoader)
+        unittest_main(argv=argv)
+
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
@@ -1917,11 +1998,18 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
     "TEST_CONFIG",
     env_var="TEST_CONFIG",
 )
-# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+# Enables @periodic tests, which CI runs only in periodic-strict and in periodic
+# jobs that set this (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
     implied_by_fn=lambda: TEST_CONFIG == "periodic",
+)
+# Runs inductor's RUN_CPU test classes even when ONLY_FOR leaves out cpu (unless
+# EXCEPT_FOR excludes it); see inductor_utils.RUN_CPU
+TEST_INDUCTOR_RUN_CPU: bool = TestEnvironment.def_flag(
+    "TEST_INDUCTOR_RUN_CPU",
+    env_var="PYTORCH_TEST_INDUCTOR_RUN_CPU",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -3049,16 +3137,18 @@ def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run in CI.
+    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
+    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    Tests in files outside the default Python test sweep (e.g. distributed or
+    quantization) never run in CI unless such a job runs those files.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
-    while the periodic gate keeps a test marked both out of the slow shards;
-    it runs only in periodic-strict.
+    while the periodic gate keeps a test marked both out of the slow shards.
+    Such a test runs only in jobs that set both flags, like periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC

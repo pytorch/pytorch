@@ -5,8 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import TYPE_CHECKING
-from typing_extensions import assert_never
+from typing import assert_never, TYPE_CHECKING
 
 from torchgen.utils import NamespaceHelper, OrderedSet
 
@@ -120,6 +119,7 @@ class DispatchKey(Enum):
     PreDispatch = auto()
     PythonDispatcher = auto()
     Python = auto()
+    Fake = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     Conjugate = auto()
@@ -2863,6 +2863,24 @@ def gets_generated_out_inplace_wrapper(
         f.func.kind() is not SchemaKind.functional
         and not b.has_kernel(f)
         and b.has_kernel(g.functional)
+    )
+
+
+def gets_generated_inplace_meta_kernel(
+    f: NativeFunction | NativeFunctionsGroup, b: BackendIndex
+) -> bool:
+    if isinstance(f, NativeFunctionsGroup):
+        if f.inplace is None:
+            return False
+        f = f.inplace
+    return (
+        b.dispatch_key == DispatchKey.Meta
+        and f.func.kind() is SchemaKind.inplace
+        and not b.has_kernel(f)
+        # Defer to composites for meta implementation
+        and not f.has_composite_kernel
+        # Inplace list operations are not supported
+        and len(f.func.returns) == 1
     )
 
 

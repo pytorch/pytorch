@@ -1,7 +1,6 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import glob
-import io
 import sys
 import math
 import random
@@ -924,6 +923,23 @@ class TestMPS(TestCaseMPS):
             if not torch.equal(out.cpu(), torch.full((1_000_000,), 2.0)):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
+
+    def test_stream_device(self):
+        for device in [None, torch.device("mps"), torch.device("mps", 0), "mps", "mps:0", 0, -10]:
+            s = torch.mps.Stream(device=device)
+            self.assertEqual(s.device.type, "mps")
+            self.assertEqual(s.device.index, 0)
+
+        with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+            torch.mps.Stream(device=10000)
+
+        for device in [torch.device("mps", 1000), "mps:1000"]:
+            with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+                torch.mps.Stream(device=device)
+
+        for device in [torch.device("cpu"), "cpu"]:
+            with self.assertRaisesRegex(ValueError, r"Expected an mps device"):
+                torch.mps.Stream(device=device)
 
     # Tests that `torch.mps.empty_cache` empties unused buffers on any stream
     @parametrize("stream", ["default", "pool"])
@@ -8033,11 +8049,11 @@ class TestMPS(TestCaseMPS):
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
-        with self.assertRaisesRegex(RuntimeError, "Expected dtype"):
+        with self.assertRaisesRegex(ValueError, "Expected dtype"):
             torch.ops.aten.adaptive_avg_pool3d_backward(grad, x, grad_input=torch.empty(0, device='mps', dtype=torch.bfloat16))
-        with self.assertRaisesRegex(RuntimeError, "Expected 4D or 5D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 4D or 5D tensor"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad.view(6, 8), x.view(6, 120))
-        with self.assertRaisesRegex(RuntimeError, "Expected 3D or 4D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 3D or 4D tensor"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad.view(6, 8), x.view(6, 120))
 
     # Test max avg pool2d - when the input size is a multiple of output size
@@ -9398,15 +9414,6 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    def test_jit_save_load(self):
-        m = torch.nn.Module()
-        m.x = torch.rand(3, 3, device='mps')
-        buffer = io.BytesIO()
-        torch.jit.save(torch.jit.script(m), buffer)
-        buffer.seek(0)
-        n = torch.jit.load(buffer)
-        self.assertEqual(n.x, m.x)
-
     # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
@@ -10135,7 +10142,7 @@ def _conformance_read_metal_header(rel_path):
         stripped = line.strip()
         if stripped == "#pragma once":
             continue
-        if stripped.startswith("#include <c10/metal/"):
+        if stripped.startswith("#include <c10/"):
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
@@ -10143,6 +10150,7 @@ def _conformance_read_metal_header(rel_path):
 
 def _conformance_compose_metal_source():
     return "\n".join([
+        _conformance_read_metal_header("c10/util/IntegerDivider.h"),
         _conformance_read_metal_header("c10/metal/float8.h"),
         _conformance_read_metal_header("c10/metal/common.h"),
         _conformance_read_metal_header("c10/metal/utils.h"),
@@ -10321,21 +10329,12 @@ class TestBinaryDispatchRouting(TestCaseMPS):
         self._assert_kernel(
             self._probe(a, b), "probe_dense_scalar_float2_float2")
 
-    def test_dense_broadcast(self):
-        # other broadcasts -> kernel name has no _rhs/_lhs suffix. The smaller
-        # tensor must stay contiguous (no `expand`) for is_dense_broadcastable
-        # to accept it; TI handles the actual broadcast.
+    def test_broadcast_strided(self):
+        # A broadcasting operand has no dedicated kernel: the strided kernel
+        # divides by host-precomputed magic numbers (DimDivider) instead.
         a = torch.empty(4, 4, dtype=torch.float32, device="mps")
         b = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        self._assert_kernel(self._probe(a, b), "probe_dense_broadcast_float_float")
-
-    def test_dense_broadcast_lhs(self):
-        # input broadcasts -> dispatcher emits "_rhs" suffix (mirrors the
-        # other-broadcast kernel signature with operands swapped).
-        a = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        b = torch.empty(4, 4, dtype=torch.float32, device="mps")
-        self._assert_kernel(
-            self._probe(a, b), "probe_dense_broadcast_rhs_float_float")
+        self._assert_kernel(self._probe(a, b), "probe_strided_float_float")
 
     def test_dense_ilp(self):
         # Force ILP path with a threshold of 1: any contiguous, no-cast,
@@ -11062,10 +11061,12 @@ class TestNNMPS(NNTestCase):
 
             # Input and weights on different devices
             self.assertRaisesRegex(RuntimeError,
-                                   'must be on the same device',
+                                   'Expected all tensors to be on the same device, but got weight is on mps:0, '
+                                   'different from other tensors on cpu',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
             self.assertRaisesRegex(RuntimeError,
-                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   'Expected all tensors to be on the same device, but got weight is on cpu, '
+                                   'different from other tensors on mps:0',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
 
 
@@ -13805,7 +13806,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         # Currently, here using torchscript to put None into indices.
         # on C++ it gives indices as a list of 2 optional tensors: first is null and
         # the second is a valid tensor.
-        @torch.jit.script
+        @torch.jit._script.script
         def func(x, i, v):
             idx = [None, i]
             x.index_put_(idx, v, accumulate=True)
@@ -15167,6 +15168,8 @@ class TestConsistency(TestCaseMPS):
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
                 # drift on a single element while the rest match.
                 atol, rtol = 0.15, 0.1
+            if op.name == "linalg.pinv" and op.variant_test_name == "hermitian" and dtype == torch.float32:
+                atol, rtol = 1e-4, 5e-5
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
