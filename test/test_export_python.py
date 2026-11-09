@@ -194,6 +194,23 @@ class TestExportPython(_ExportPythonTestCase):
         with no_compilation():
             self.assertEqual(run(x, y), x @ y)
 
+    def test_the_eager_backend_writes_no_graph_code(self):
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        run = self._export("scaled", path, backend="eager")
+        self.assertEqual(run(x), x.mul(2).relu())
+        with open(path) as f:
+            self.assertNotIn(_CODE_BEGIN, f.read())
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(x), x.mul(2).relu())
+
+    def test_dynamic_serves_another_shape(self):
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path, dynamic=True)(torch.randn(8))
+        y = torch.randn(16)
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(y), (y * 2.0).relu())
+
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
         x = torch.randn(8)
