@@ -2302,6 +2302,9 @@ class f(torch.nn.Module):
             torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
 
 
+instantiate_parametrized_tests(TestPySymInt)
+
+
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
