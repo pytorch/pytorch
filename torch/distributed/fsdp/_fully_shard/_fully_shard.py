@@ -20,12 +20,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
-    DefaultAllGather,
-    ProcessGroupAllocAllGather,
-    SymmMemAllGather,
-)
+from ._fsdp_collectives import _default_reduce_scatter_input_fn
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -930,7 +925,10 @@ class FSDPModule:
         packs rank-major input and copies the output with its ``output_fn``,
         e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
         for the native copy; it works with any comm that produces rank-major
-        output. This is the only way to install a layout. A layout whose
+        output and is the only layout that works with
+        :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm`. This is the only
+        way to install a layout. A layout whose
         ``comm_type`` is set, e.g. one whose collective writes
         parameter-contiguous output, requires a comm of that type, which FSDP
         passes each call's layout metadata: install the comm first with
@@ -1144,16 +1142,14 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy. It is rejected under
-        a layout whose ``comm_type`` the resulting comm does not match.
+        determine their staging buffer allocation strategy. ProcessGroup
+        allocation only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
         state = self._get_fsdp_state()
-        comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
-        for fsdp_param_group in state._fsdp_param_groups:  # check all first
-            fsdp_param_group._check_comm_swap(comm_type)
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_allocate_memory_from_process_group(enable)
 
@@ -1181,16 +1177,15 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`, and is rejected like
-        :meth:`set_allocate_memory_from_process_group_for_comm` under a layout.
+        :meth:`set_custom_reduce_scatter`, and only works with the default
+        all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
                 ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:  # check all first
-            fsdp_param_group._check_comm_swap(SymmMemAllGather)
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
 

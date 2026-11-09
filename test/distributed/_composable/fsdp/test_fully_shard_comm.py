@@ -3332,7 +3332,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         self.assertIs(group._all_gather_layout, native)
         self.assertIs(group._all_gather_comm, comm)
         # A layout that requires a comm type needs that comm installed first and
-        # then rejects comms of other types, also from FSDP's comm setters
+        # then rejects comms of other types
         layout = _ParamContiguousLayout("custom")
         mismatch = "requires a _ParamContiguousAllGather comm, not DefaultAllGather"
         with self.assertRaisesRegex(ValueError, mismatch):
@@ -3343,9 +3343,10 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model.set_custom_all_gather(_ParamContiguousAllGather())  # same type
         with self.assertRaisesRegex(ValueError, mismatch):
             model.set_custom_all_gather(comm)
-        with self.assertRaisesRegex(ValueError, "not ProcessGroupAllocAllGather"):
+        # Symmetric memory and process-group allocation need the default layout
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
             model.set_allocate_memory_from_process_group_for_comm(True)
-        with self.assertRaisesRegex(ValueError, "not SymmMemAllGather"):
+        with self.assertRaisesRegex(ValueError, "cannot use SymmMemAllGather"):
             model.set_symm_mem_for_comm()
         self.assertIs(type(group._all_gather_comm), _ParamContiguousAllGather)
         # The comm keeps no per-call state, so it can serve another module too
@@ -3410,10 +3411,17 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         handle.wait()
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):
             model[0].set_all_gather_layout(native, recurse=False)
-        model[0].set_allocate_memory_from_process_group_for_comm(True)
-        self.assertIsNot(groups[0]._all_gather_comm, comm)
+        # Symmetric memory and process-group allocation need the default layout,
+        # even where a custom layout falls back to it on every call
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_allocate_memory_from_process_group_for_comm(True)
+        self.assertIs(groups[0]._all_gather_comm, comm)
         model[0].reshard()
         model[0].set_all_gather_layout(native, recurse=False)
+        self.assertIs(groups[0]._all_gather_layout, native)
+        model[0].set_allocate_memory_from_process_group_for_comm(True)
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_all_gather_layout(rank_major, recurse=False)
         self.assertIs(groups[0]._all_gather_layout, native)
 
         # FSDP adopts nothing from a rejected result, so another layout can follow

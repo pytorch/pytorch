@@ -25,6 +25,7 @@ from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
 )
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
@@ -418,6 +419,18 @@ class FSDPParamGroup:
             )
 
     def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
+        # Symmetric memory and process-group allocation assume FSDP's in-place
+        # rank-major all-gather, while a custom layout packs separate input
+        allocating = (SymmMemAllGather, ProcessGroupAllocAllGather)
+        default_layout = isinstance(layout, DefaultAllGatherLayout)
+        if not default_layout and issubclass(comm_type, allocating):
+            raise ValueError(
+                self._with_fqn(
+                    f"all-gather layout {type(layout).__name__} cannot use "
+                    f"{comm_type.__name__}: symmetric memory and process-group "
+                    "allocation only work with DefaultAllGatherLayout"
+                )
+            )
         if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
             raise ValueError(
                 self._with_fqn(
@@ -427,13 +440,8 @@ class FSDPParamGroup:
                 )
             )
 
-    def _check_comm_swap(self, comm_type: type) -> None:
-        # Comms keep no per-call state and own no outputs, so only the layout's
-        # comm type limits a swap
-        self._check_layout_comm(self._all_gather_layout, comm_type)
-
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
-        self._check_comm_swap(SymmMemAllGather)
+        self._check_layout_comm(self._all_gather_layout, SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -461,7 +469,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
-        self._check_comm_swap(comm_type)
+        self._check_layout_comm(self._all_gather_layout, comm_type)
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):

@@ -23,7 +23,8 @@ each call as ``output_metadata``, ``None`` for a call that falls back to
 rank-major output, so the comm keeps no per-call state and can serve any number
 of parameter groups. ``FSDPModule.set_custom_all_gather`` installs the comm, and
 ``FSDPModule.set_all_gather_layout``, the only way to install a layout, installs
-the layout; each rejects a mismatch with the other.
+the layout; each rejects a mismatch with the other. Symmetric memory and
+process-group allocation work only with ``DefaultAllGatherLayout``.
 
 ``AllGatherLayout`` and its metadata types are private authoring interfaces;
 out-of-tree backends must target a matching revision of them.
