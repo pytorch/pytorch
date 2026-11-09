@@ -3660,7 +3660,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         # y is recomputed and read by the next region's saved mm, so it gets a
         # piece of its own along with what it's computed from: the whole
         # var_mean, whose variance the rest of the first region (the sqrt)
-        # reads from it. With the second region's relu, that is three pieces.
+        # reads from it. The backward needs y later than the var_mean, so y's
+        # sub is a piece of its own too: with the second region's relu, four.
         def first(x):
             v, m = torch.var_mean(x, dim=-1, keepdim=True)
             return x - m, v.sqrt()
@@ -3679,7 +3680,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         x = torch.randn(32, 16, device=device, requires_grad=True)
         w = torch.randn(16, 16, device=device, requires_grad=True)
-        self._validate(fn, self._shared_recompute_backend(3), x, w)
+        self._validate(fn, self._shared_recompute_backend(4), x, w)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_multi_output(self, device):
@@ -4091,8 +4092,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 None,
             ),
         }
-        # (In unbacked_input, the mask of w is a piece of its own.)
-        pieces = {"split": 2, "unique": 2, "unbacked_input": 2}
+        # (In unbacked_input, the mask of w is a piece of its own, and the
+        # backward recomputes mask's comparison after a gradient op.)
+        pieces = {"split": 2, "unique": 2, "unbacked_input": 2, "mask": 2}
         budget = {"budget": {"activation_memory_budget": 0.0}}
         for name, (fn, dynamo_cfg, start) in cases.items():
             with (
@@ -4425,10 +4427,12 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_sac_pieces(self, device):
         # Saved values split the recompute into pieces, each shared separately.
-        # Saving both matmuls gives three: the norm before the first, the silu
-        # between them, and the mul + sigmoid after the second, which reads the
-        # first piece's output h. Saving only the second mm, which the recomputed
-        # first mm feeds, gives two.
+        # Saving both matmuls leaves the norm before the first, the silu between
+        # them, and the mul + sigmoid after the second, which reads h. The
+        # backward needs h right away but the norm only for the first matmul's
+        # gradients, so h = x.sin() is a piece of its own and the norm's piece
+        # runs after the second matmul's gradients: four pieces. Saving only the
+        # second mm, which the recomputed first mm feeds, gives two.
         def three(x, w1, w2):
             h = x.sin()
             n = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6)
@@ -4458,12 +4462,13 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             b = y @ v
             return (a * (b @ w) * b).sin()
 
+        three_order = ["recompute"] * 3 + ["mm"] * 2 + ["recompute"] + ["mm"] * 2
         cases = (
-            (three, save_mm_context_fn, 3, {}),
+            (three, save_mm_context_fn, 4, {"bw_order": three_order}),
             (two, save_second_mm, 2, {}),
             (reads_later, save_second_mm, 2, {"fw_mms": 2, "bw_mms": 5}),
         )
-        for gn, context_fn, pieces, mms in cases:
+        for gn, context_fn, pieces, checks in cases:
             with self.subTest(gn.__name__):
                 torch._dynamo.reset()
 
@@ -4477,8 +4482,313 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     torch.randn(8, 8, device=device, requires_grad=True)
                     for _ in range(nargs)
                 ]
-                backend = self._shared_recompute_backend(pieces, **mms)
+                backend = self._shared_recompute_backend(pieces, **checks)
                 self._validate(fn, backend, *args)
+
+    @parametrize("case", ["freed", "read_later", "expand"])
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_cast_stays_in_piece(self, device, case):
+        # The backward needs y's bf16 cast later than the rest of the layer, but
+        # a piece of its own would keep the fp32 y alive until then instead of
+        # the smaller cast, so the cast stays in the layer's piece (freed). Not
+        # if the backward reads y after the cast anyway (sin's gradient,
+        # read_later), or if the cast reads an expand of a vector, which is all
+        # the gap would hold (expand): then the cast frees nothing and is a
+        # piece of its own, in its run (in expand, so is w's cast).
+        def layer(x, g):
+            x32 = x.float()
+            y = x32 * torch.rsqrt(x32.pow(2).mean(-1, keepdim=True) + 1e-6) * g
+            s = y.sin().to(x.dtype) if case == "read_later" else None
+            out = x + torch.softmax(y, -1).to(x.dtype) * y.to(x.dtype)
+            return out if s is None else out + s
+
+        def expand(x, v, w):
+            e = v.sin().expand(8, 8)
+            bf16 = torch.bfloat16
+            return (e.to(bf16) @ w.to(bf16)).float().tanh() * e * x
+
+        def randn(*shape, dtype=torch.float32):
+            return torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+
+        if case == "expand":
+            gn, pieces, context_fn = expand, 4, save_mm_context_fn
+            args = [randn(8, 8), randn(8), randn(8, 8)]
+        else:
+            gn, pieces, context_fn = layer, 2 if case == "read_later" else 1, None
+            args = [randn(8, 8, dtype=torch.bfloat16), randn(8)]
+
+        def fn(*args):
+            ckpt = torch.utils.checkpoint.checkpoint
+            kwargs = {"context_fn": context_fn} if context_fn else {}
+            return ckpt(gn, *args, use_reentrant=False, **kwargs)
+
+        self._validate(fn, self._shared_recompute_backend(pieces), *args)
+
+    @parametrize(
+        "case",
+        [
+            "view",
+            "other_reader",
+            "other_split",
+            "draw",
+            "same_size",
+            "view_reader",
+            "ln_cast",
+            "copied_constant",
+            "other_split_prev",
+        ],
+    )
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_run_rules(self, device, case):
+        # Which pieces the runs make: a view is in its base's run, so a.t(),
+        # which the backward reads a run after a, isn't left alone in a piece
+        # with nothing to share (view). A bf16 cast of y run after y doesn't
+        # join y's run if it frees nothing: y.exp(), in the cast's run, still
+        # reads y (other_reader); y is in another split, read by the next
+        # region (other_split); or the cast is as big as y (same_size, a mul).
+        # Nor does the mm of a replayed dropout, which no run labels (draw).
+        # A cast of a whose view the backward still reads later doesn't free a
+        # (view_reader); a cast of native_layer_norm's getitem frees it
+        # (ln_cast). r + c, as big as c, frees nothing of the constant c copied
+        # into every piece (copied_constant); and mm(y, t), whose latest input
+        # t is in another split, doesn't move to t's run, where nothing of its
+        # own split could take it (other_split_prev).
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        bf16 = torch.bfloat16
+
+        def norm(x, g):
+            x32 = x.float()
+            return x32 * torch.rsqrt(x32.pow(2).mean(-1, keepdim=True) + 1e-6) * g
+
+        def view(x, w):
+            a = x.sin()
+            return (a.t() @ w) * a.sigmoid()
+
+        def other_reader(x, g):
+            y = norm(x, g)
+            return x + torch.softmax(y, -1).to(bf16) * (y.exp().to(bf16) + y.to(bf16))
+
+        def first(x, g):
+            y = norm(x, g)
+            return y, torch.softmax(y, -1).to(bf16) * (y.to(bf16) + 1)
+
+        def other_split(x, g, w):
+            y, out = checkpoint(first, x, g, use_reentrant=False, context_fn=save_mm)
+            z = checkpoint(
+                lambda y: (y @ w).tanh(), y, use_reentrant=False, context_fn=save_mm
+            )
+            return z.to(bf16) + out
+
+        def draw(x, d0, w2, w3):
+            a = x.sin()
+            n = torch.mm(a, F.dropout(d0, p=0.3, training=True))
+            return (n.tanh() @ w2).sum(-1, keepdim=True) + a.sigmoid() @ w3
+
+        def same_size(x, g):
+            y = norm(x, g)
+            return x + (torch.softmax(y, -1) * (y * 2)).to(bf16)
+
+        def view_reader(x, w1, w2, w3):
+            a = x.sin()
+            av = a.view(32, 8)
+            n = a.to(bf16)
+            return (
+                (av @ w2).sum() + (n.float().cos() @ w3).sum() + (av.cos() @ w1).sum()
+            )
+
+        def ln_cast(x, g):
+            x32 = x.float() * g
+            y = torch.ops.aten.native_layer_norm(x32, (8,), None, None, 1e-5)[0]
+            return x + torch.softmax(y, -1).to(bf16) * y.to(bf16)
+
+        def copied_constant(x, d):
+            r = d.sin()
+            c = torch.ones(8, 8, device=x.device) * 2
+            return torch.softmax((x + r) - c, -1) * (r + c)
+
+        def prev_first(x, g, dd, w2, w3, w5):
+            y = norm(x, g)
+            t = dd.cos()
+            out = torch.mm(y, t).tanh() @ w2 + t.exp() @ w5 + y.sigmoid() @ w3
+            return out, t
+
+        def other_split_prev(x, g, dd, w2, w3, w5, wz):
+            ctx = kwargs_of["draw"]
+            out, t = checkpoint(
+                prev_first, x, g, dd, w2, w3, w5, use_reentrant=False, **ctx
+            )
+            return out + checkpoint(lambda t: t @ wz, t, use_reentrant=False, **ctx)
+
+        save_mm = save_mm_context_fn
+        norms = ["add", "mean", "mul", "mul", "pow", "rsqrt"]
+        gn, shapes, ckpt, pieces = {
+            "view": (view, [(8, 8), (8, 8)], "mm", [["sigmoid", "sin"]]),
+            "other_reader": (
+                other_reader,
+                [(8, 8), (8,)],
+                "plain",
+                [
+                    ["_softmax", "_to_copy", "_to_copy", *norms],
+                    ["_to_copy", "_to_copy", "add", "exp"],
+                ],
+            ),
+            "other_split": (
+                other_split,
+                [(8, 8), (8,), (8, 8)],
+                None,
+                [
+                    ["_softmax", "_to_copy"],
+                    ["_to_copy", "add"],
+                    ["_to_copy", *norms],
+                    ["tanh"],
+                ],
+            ),
+            "draw": (
+                draw,
+                [(8, 64), (64, 2), (2, 4), (64, 4)],
+                "draw",
+                [["mm", "tanh"], ["sigmoid", "sin"]],
+            ),
+            "same_size": (
+                same_size,
+                [(8, 8), (8,)],
+                "plain",
+                [["_softmax", "_to_copy", *norms], ["mul"]],
+            ),
+            "view_reader": (
+                view_reader,
+                [(16, 16), (8, 8), (8, 8), (16, 16)],
+                "mm",
+                [["_to_copy", "_to_copy", "cos"], ["cos", "sin", "view"]],
+            ),
+            "ln_cast": (
+                ln_cast,
+                [(8, 8), (8,)],
+                "plain",
+                [
+                    [
+                        "_softmax",
+                        *["_to_copy"] * 3,
+                        *["getitem"] * 3,
+                        "mul",
+                        "native_layer_norm",
+                    ]
+                ],
+            ),
+            "copied_constant": (
+                copied_constant,
+                [(8, 8), (8, 1)],
+                "plain",
+                [
+                    ["_softmax", "add", "detach", "mul", "ones", "sin", "sub"],
+                    ["add", "detach", "mul", "ones"],
+                ],
+            ),
+            "other_split_prev": (
+                other_split_prev,
+                [(8, 8), (8,), (8, 1), (1, 4), (8, 4), (1, 4), (1, 4)],
+                None,
+                [[*norms, "sigmoid"], ["cos"], ["exp"], ["mm", "tanh"]],
+            ),
+        }[case]
+        if case in ("draw", "other_split_prev"):
+            from torch._functorch._aot_autograd.utils import supports_graphsafe_rng
+
+            if not supports_graphsafe_rng(torch.device(device)):
+                self.skipTest("no graphsafe RNG functionalization on this device")
+
+        def policy(ctx, op, *args, **kwargs):
+            # (draw saves only the matmuls of width 4.)
+            if op is torch.ops.aten.mm.default and args[1].shape[-1] == 4:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        kwargs_of = {
+            "mm": {"context_fn": save_mm},
+            "plain": {},
+            "draw": {
+                "context_fn": functools.partial(
+                    create_selective_checkpoint_contexts, policy
+                )
+            },
+        }
+        kwargs = kwargs_of.get(ckpt)
+
+        def fn(*args):
+            if kwargs is None:
+                return gn(*args)
+            return checkpoint(gn, *args, use_reentrant=False, **kwargs)
+
+        graphs = []
+
+        def check(gm, args):
+            graphs.append(
+                sorted(
+                    sorted(
+                        n.target.__name__.split(".")[0]
+                        for n in mod.graph.nodes
+                        if n.op == "call_function"
+                    )
+                    for name, mod in gm.named_children()
+                    if name.startswith("recompute_")
+                )
+            )
+            return gm
+
+        backend = aot_autograd(
+            fw_compiler=check,
+            bw_compiler=lambda gm, args: gm,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        bf16_cases = ("other_reader", "other_split", "same_size", "ln_cast")
+        dtype = bf16 if case in bf16_cases else None
+        no_grad = {"draw": (1,), "other_split_prev": (2, 6)}.get(case, ())
+        args = [
+            torch.randn(s, device=device, dtype=dtype if i == 0 else None)
+            for i, s in enumerate(shapes)
+        ]
+
+        def run(share):
+            torch._dynamo.reset()
+            graphs.clear()
+            inputs = [
+                a.clone().requires_grad_(i not in no_grad) for i, a in enumerate(args)
+            ]
+            torch.manual_seed(0)
+            with torch._functorch.config.patch(deterministic_recompute=share):
+                out = torch.compile(fn, backend=backend, fullgraph=True)(*inputs)
+                out.sum().backward()
+            return out, [a.grad for a in inputs]
+
+        # (Compiled dropout doesn't match eager's draws on every device.)
+        expected = run(False)
+        with self.assertLogs(deterministic_recompute.log, level="DEBUG") as logs:
+            deterministic_recompute.log.debug("start")
+            self.assertEqual(run(True), expected)
+        self.assertEqual(graphs, [pieces])
+        self.assertNotIn("only views", "\n".join(logs.output))
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_later_run_reads_earlier(self, device):
+        # The backward needs the mm and tanh before the cos, mul and sigmoid,
+        # which read the mm: two runs, so two pieces. The cos's piece starts
+        # first in the forward but goes after the mm's, which it reads rather
+        # than recomputes: as many matmuls as with the flag off.
+        def gn(x, y, w1, w2):
+            a = x.cos()
+            b = y @ w1
+            c = (a * b).sigmoid()
+            return b.tanh() @ w2 + c
+
+        def fn(*args):
+            return torch.utils.checkpoint.checkpoint(gn, *args, use_reentrant=False)
+
+        args = [
+            torch.randn(16, 16, device=device, requires_grad=True) for _ in range(4)
+        ]
+        backend = self._shared_recompute_backend(2, fw_mms=2, bw_mms=5)
+        self._validate(fn, backend, *args)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_multi_output_op(self, device):
@@ -4487,7 +4797,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         # mean and rstd, and SDPA's logsumexp etc., which only the backward
         # reads. A multi-output view op (split, unbind, and unsafe_chunk's
         # unsafe_split, whose schema doesn't say it's a view) stays inline
-        # instead.
+        # instead. (var_mean's add + rsqrt are a piece of their own: the
+        # backward recomputes them after a gradient op.)
         def var_mean(x, y):
             h = torch.matmul(x, y)
             v, m = torch.var_mean(h, dim=-1, keepdim=True)
@@ -4516,14 +4827,14 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         save_mm = {"context_fn": save_mm_context_fn}
         cases = (
-            (var_mean, save_mm, [(8, 8)] * 2),
-            (layer_norm, save_mm, [(8, 8)] * 2),
-            (sdpa, {}, [(2, 4, 16, 8)] * 3),
-            (split, {}, [(8, 8)] * 2),
-            (unbind, {}, [(8, 8)] * 2),
-            (unsafe_chunk, {}, [(8, 8)] * 2),
+            (var_mean, save_mm, [(8, 8)] * 2, 2),
+            (layer_norm, save_mm, [(8, 8)] * 2, 1),
+            (sdpa, {}, [(2, 4, 16, 8)] * 3, 1),
+            (split, {}, [(8, 8)] * 2, 1),
+            (unbind, {}, [(8, 8)] * 2, 1),
+            (unsafe_chunk, {}, [(8, 8)] * 2, 1),
         )
-        for gn, kwargs, shapes in cases:
+        for gn, kwargs, shapes, pieces in cases:
             with self.subTest(gn.__name__):
                 torch._dynamo.reset()
 
@@ -4535,7 +4846,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 args = [
                     torch.randn(s, device=device, requires_grad=True) for s in shapes
                 ]
-                self._validate(fn, self._shared_recompute_backend(1), *args)
+                self._validate(fn, self._shared_recompute_backend(pieces), *args)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_piece_absorbs_another(self, device):
@@ -4647,39 +4958,23 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_moves_readers(self, device):
-        # Forward: the piece recomputing p1 and p1 * i2 reads the saved i2,
-        # which the forward computes after the saved c that reads p1, so c moves
-        # below the shared call.
-        def forward_case(x, w, y, w2):
+        # The piece recomputing p1 and p1 * i2 reads the saved i2, which the
+        # forward computes after the saved c that reads p1, so c moves below the
+        # shared call. (The backward runs each piece where the partitioner put
+        # its recompute, so its readers come after it already.)
+        def gn(x, w, y, w2):
             p1 = x.sin()
             c = p1 @ w
             i2 = y @ w2
             return c + (p1 * i2).cos()
 
-        # Backward: the second piece (b1, b1 * a, b1.exp(), after the saved mm)
-        # reads the first piece's a. The backward uses b1.exp() for its gradient
-        # before it recomputes a, so that gradient moves below the second
-        # piece's call.
-        def backward_case(x, w):
-            a = x.sin()
-            b1 = (a @ w).cos()
-            return (b1 * a).sin() + b1.exp()
+        def fn(*args):
+            return torch.utils.checkpoint.checkpoint(
+                gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
+            )
 
-        cases = ((forward_case, 4, 1), (backward_case, 2, 2))
-        for gn, nargs, shared in cases:
-            with self.subTest(gn=gn.__name__):
-                torch._dynamo.reset()
-
-                def fn(*args, gn=gn):
-                    return torch.utils.checkpoint.checkpoint(
-                        gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
-                    )
-
-                args = [
-                    torch.randn(8, 8, device=device, requires_grad=True)
-                    for _ in range(nargs)
-                ]
-                self._validate(fn, self._shared_recompute_backend(shared), *args)
+        args = [torch.randn(8, 8, device=device, requires_grad=True) for _ in range(4)]
+        self._validate(fn, self._shared_recompute_backend(1), *args)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_convex_pieces(self, device):
@@ -4917,11 +5212,10 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_pieces_read_each_other(self, device):
-        # The saved mms split the region into two pieces that read each other
-        # both ways (through the mms: f and b feed d, c feeds the product with
-        # b), so from each a path leaves it and comes back through the other:
-        # both are left as partitioned, in either order.
-        from torch._functorch._aot_autograd import deterministic_recompute
+        # The saved mms split the region into two convex pieces that read each
+        # other both ways (through the mms: f and b feed d, c feeds the product
+        # with b). The backward recomputes them in four runs, though, and the
+        # four pieces those make don't: each is shared.
 
         def gn(x, y, w, w2):
             f = x.sin()
@@ -4938,9 +5232,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             )
 
         args = [torch.randn(8, 8, device=device, requires_grad=True) for _ in range(4)]
-        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
-            self._validate(fn, self._shared_recompute_backend(0), *args)
-        self.assertIn("depends on its own recompute", logs.output[0])
+        self._validate(fn, self._shared_recompute_backend(4), *args)
 
     @requires_gpu_and_triton
     @torch._functorch.config.patch(deterministic_recompute=True)
