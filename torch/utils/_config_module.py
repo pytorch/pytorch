@@ -562,11 +562,11 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Avoid a redundant instance-__dict__ write: hide defaults to False on
-                # the class and is only ever set True by __delattr__ (the mock.patch
-                # workaround), so only clear it when it is actually set.
-                if config.hide:
-                    config.hide = False
+            # Avoid a redundant instance-__dict__ write: hide defaults to False on
+            # the class and is only ever set True by __delattr__ (the mock.patch
+            # workaround), so only clear it when it is actually set.
+            if config.hide:
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -622,6 +622,9 @@ class ConfigModule(ModuleType):
         if alias is None:
             return None
         module_name, constant_name = alias.rsplit(".", 1)
+        # Nested configs of this module, e.g. "<module>.cutlass.foo", are flat keys.
+        if module_name.startswith(f"{self.__name__}."):
+            return self, alias.removeprefix(f"{self.__name__}.")
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
@@ -1564,12 +1567,21 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     return default
 
 
-def inherit_fields_from(parent_cls):
-    def wrapper(child_cls):
+def deprecated_alias_fields_from(parent_cls: type) -> Callable[[type], type]:
+    """Adds the public fields of a nested config class that the decorated class
+    does not define as deprecated aliases, so reads and writes go to the parent."""
+
+    def wrapper(child_cls: type) -> type:
+        type_hints = inspect.get_annotations(parent_cls)
         for k, v in parent_cls.__dict__.items():
-            # copy fields that are not private and not overridden
             if not k.startswith("_") and k not in child_cls.__dict__:
-                setattr(child_cls, k, v)
+                alias = Config(
+                    alias=f"{parent_cls.__module__}.{parent_cls.__qualname__}.{k}",
+                    value_type=type_hints.get(k, type(v)),
+                    deprecated=True,
+                    deprecation_message=f"use {parent_cls.__qualname__}.{k} instead",
+                )
+                setattr(child_cls, k, alias)
         return child_cls
 
     return wrapper
