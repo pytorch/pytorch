@@ -169,11 +169,16 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25}, "FP32"),
             ({"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144}, "FP32"),
             ({"split": (1024, 8192, 8191, 512, 512)}, "FP32"),
+            ({"rows_per_block": 64}, "rows_per_block <= 32"),
         ],
+        name_fn=lambda updates, msg: "_".join(
+            f"{k}_{v}" for k, v in updates.items()
+        ).translate(str.maketrans(",", "x", " ()")),
     )
     def test_uniform_count_tile_rejects(self, updates, msg):
-        """Reject weights without counts, plans that stage no complete combine tile, and
-        counts outside complete FP32 Welford partials."""
+        """Reject weights without counts, plans that stage no complete combine tile,
+        counts outside complete FP32 Welford partials, and staged blocks of more rows
+        than a warp has lanes."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, tile, traits as T
@@ -389,7 +394,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         baseline = [torch.empty(rows, device=device) for _ in range(2)]
         actual = [torch.empty_like(t) for t in baseline]
 
-        def launch(selected, outs):
+        def launch(selected, fields, outs):
             block = kg.ReduceBlock(
                 trait,
                 count=partials,
@@ -402,12 +407,15 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
                 itree=selected,
             )
             key = ("test_uniform_count",) + block.cache_sig
-            kg._launch(block, key, parts, outs)
+            kg._launch(block, key, fields, outs)
             return block.cache_sig
 
         candidate = plan._replace(combine_count=count, combine_weights=weights)
+        # The candidate derives counts, so a poisoned count field must not reach it.
+        poisoned = parts[:2] + [torch.full_like(parts[2], float("nan"))]
         # Distinct kernels, so the bits below compare two compiled folds.
-        self.assertNotEqual(launch(plan, baseline), launch(candidate, actual))
+        sigs = launch(plan, parts, baseline), launch(candidate, poisoned, actual)
+        self.assertNotEqual(*sigs)
         for got, expected in zip(actual, baseline):
             self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 

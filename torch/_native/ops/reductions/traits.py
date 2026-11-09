@@ -165,6 +165,9 @@ class WelfordOps:
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
     has_combine_equal = True
+    # Staged inner-tree combines (tile.uniform_combine_ok) rely on combine_uniform,
+    # uniform_weight, an FP32 accumulator and the count as the last field: they skip
+    # staging it and may stage the weight in its slot.
     has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
@@ -225,10 +228,11 @@ class WelfordOps:
         mb, m2b, _ = b
         na, nb = self.acc(index) * self.acc(count), self.acc(count)
         nn = na + nb
-        nb_over_n = nb / nn if const_expr(weight is None) else weight
+        if const_expr(weight is None):
+            weight = self.uniform_weight(index, count)
         delta = mb - ma
-        mean = ma + delta * nb_over_n
-        m2 = m2a + m2b + delta * delta * na * nb_over_n
+        mean = ma + delta * weight
+        m2 = m2a + m2b + delta * delta * na * weight
         return (mean, m2, nn)
 
     @cute.jit
