@@ -1,8 +1,6 @@
 #include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
-#include <ATen/SparseCsrTensorImpl.h>
-#include <ATen/SparseTensorImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -44,11 +42,6 @@
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors);
-//  - outputs a sparse input holds (such as _values'), which Python returns as
-//    the same fake on each call;
-//  - sparse inputs while sparse invariant checks are enabled, which read index
-//    data meta tensors lack. Python turns the process-wide setting off around
-//    the op, which races with other threads;
 //  - sparse inputs to ops without a sparse Meta kernel, for which there is no
 //    Meta backend fallback;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
@@ -102,6 +95,34 @@ void for_each_tensor(
       cause.empty() ? "" : ": ",
       cause);
 }
+
+// Uninstalls this thread's C++ FakeTensorMode, if any, for its lifetime
+class UnsetFakeTensorModeGuard {
+ public:
+  UnsetFakeTensorModeGuard()
+      : mode_(c10::impl::FakeTensorModeTLS::get_state()),
+        fake_included_(
+            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake)) {
+    if (mode_ != nullptr) {
+      c10::impl::FakeTensorModeTLS::reset_state();
+    }
+  }
+  ~UnsetFakeTensorModeGuard() {
+    if (mode_ != nullptr) {
+      c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
+      c10::impl::tls_set_dispatch_key_included(
+          c10::DispatchKey::Fake, fake_included_);
+    }
+  }
+  UnsetFakeTensorModeGuard(const UnsetFakeTensorModeGuard&) = delete;
+  UnsetFakeTensorModeGuard& operator=(const UnsetFakeTensorModeGuard&) = delete;
+  UnsetFakeTensorModeGuard(UnsetFakeTensorModeGuard&&) = delete;
+  UnsetFakeTensorModeGuard& operator=(UnsetFakeTensorModeGuard&&) = delete;
+
+ private:
+  std::shared_ptr<c10::FakeTensorMode> mode_;
+  bool fake_included_;
+};
 
 // Whether ivalue is or holds a symbolic number
 bool is_symbolic(const c10::IValue& ivalue) {
@@ -206,6 +227,10 @@ void fakeFallback(
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
+  // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
+  // __torch_dispatch__ runs, so the code the op runs (a Python Meta kernel
+  // calling active_fake_mode(), say) sees no fake mode; so here
+  UnsetFakeTensorModeGuard unset_mode;
 
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
@@ -237,9 +262,8 @@ void fakeFallback(
   // an output (by in-place and out= ops) from a new tensor
   std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
-  // The sparse Meta keys of the sparse inputs, and the tensors they hold
+  // The sparse Meta keys of the sparse inputs
   c10::DispatchKeySet meta_keyset;
-  std::unordered_set<const c10::TensorImpl*> sparse_members;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
@@ -295,19 +319,8 @@ void fakeFallback(
         }
         if (impl->is_sparse()) {
           meta_keyset = meta_keyset.add(c10::DispatchKey::SparseMeta);
-          const auto* sparse = static_cast<const at::SparseTensorImpl*>(impl);
-          for (const auto& member : {sparse->indices(), sparse->values()}) {
-            sparse_members.insert(member.unsafeGetTensorImpl());
-          }
         } else if (impl->is_sparse_compressed()) {
           meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
-          const auto* sparse = static_cast<const at::SparseCsrTensorImpl*>(impl);
-          for (const auto* member :
-               {&sparse->compressed_indices(),
-                &sparse->plain_indices(),
-                &sparse->values()}) {
-            sparse_members.insert(member->unsafeGetTensorImpl());
-          }
         }
       });
   if (!device.has_value()) {
@@ -322,8 +335,6 @@ void fakeFallback(
       unsupported(op, "ops Python decomposes");
     }
     meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
-  } else if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
-    unsupported(op, "sparse inputs with sparse invariant checks enabled");
   } else if (!op.hasComputedKernelForDispatchKey(
                  meta_keyset.highestPriorityTypeId())) {
     // Otherwise the dispatcher raises its missing kernel error
@@ -346,12 +357,22 @@ void fakeFallback(
   c10::impl::ExcludeDispatchKeyGuard exclude_fake(c10::DispatchKey::Fake);
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
-  try {
-    op.redispatchBoxed(meta_keyset, stack);
-  } catch (const c10::NotImplementedError& e) {
-    // Python runs these through maybe_run_unsafe_fallback
-    unsupported(
-        op, "ops without a working Meta kernel", e.what_without_backtrace());
+  {
+    // As in Python, sparse invariant checks, which read index data meta tensors
+    // lack, are off for a sparse Meta kernel; here on this thread only, where
+    // Python turns the process-wide setting off
+    std::optional<at::ThreadLocalSparseTensorInvariantChecks> checks_off;
+    if (!meta_keyset.has(c10::DispatchKey::Meta) &&
+        at::globalContext().checkSparseTensorInvariants().value_or(false)) {
+      checks_off.emplace(false);
+    }
+    try {
+      op.redispatchBoxed(meta_keyset, stack);
+    } catch (const c10::NotImplementedError& e) {
+      // Python runs these through maybe_run_unsafe_fallback
+      unsupported(
+          op, "ops without a working Meta kernel", e.what_without_backtrace());
+    }
   }
 
   // The fakes that replaced outputs, so that a tensor returned twice gets the
@@ -374,17 +395,13 @@ void fakeFallback(
       TORCH_INTERNAL_ASSERT(impl->fake_device() == device);
       return std::nullopt;
     }
-    // Python memoizes the fake it makes of a meta output, so the values _values
-    // returns from a sparse tensor are the same fake on each call, which this
-    // does not do yet
-    if (sparse_members.contains(impl)) {
-      unsupported(op, "outputs held by a sparse input");
-    }
     std::optional<at::Tensor> out;
     if (c10::raw::intrusive_ptr::use_count(impl) > 1) {
-      // A tensor held elsewhere: a Python Meta kernel's output, which its
-      // Python object refers to, is new on each call; it is not changed, and a
-      // shallow copy becomes the fake
+      // A tensor held elsewhere, such as a Python Meta kernel's output, which
+      // its Python object refers to, or a tensor a sparse input holds (as
+      // _values returns), is not changed: a shallow copy becomes the fake, a
+      // new one on each call, as Python wraps each meta output in a new
+      // FakeTensor
       out = at::Tensor(impl->shallow_copy_and_detach(
           impl->version_counter(), impl->allow_tensor_metadata_change()));
       replaced.emplace(impl, *out);

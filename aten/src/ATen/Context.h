@@ -592,6 +592,28 @@ class TORCH_API Context {
 
 TORCH_API Context& globalContext();
 
+// Gives this thread its own sparse invariant check setting while alive, which
+// checkSparseTensorInvariants() reports and setCheckSparseTensorInvariants()
+// changes, leaving the process-wide setting alone. The C++ fake fallback runs
+// sparse Meta kernels with checks off this way, as the checks read index data
+// meta tensors lack.
+class TORCH_API ThreadLocalSparseTensorInvariantChecks {
+ public:
+  explicit ThreadLocalSparseTensorInvariantChecks(std::optional<bool> enabled);
+  ~ThreadLocalSparseTensorInvariantChecks();
+  ThreadLocalSparseTensorInvariantChecks(
+      const ThreadLocalSparseTensorInvariantChecks&) = delete;
+  ThreadLocalSparseTensorInvariantChecks& operator=(
+      const ThreadLocalSparseTensorInvariantChecks&) = delete;
+  ThreadLocalSparseTensorInvariantChecks(
+      ThreadLocalSparseTensorInvariantChecks&&) = delete;
+  ThreadLocalSparseTensorInvariantChecks& operator=(
+      ThreadLocalSparseTensorInvariantChecks&&) = delete;
+
+ private:
+  std::optional<std::optional<bool>> prev_;
+};
+
 inline void init() {
   globalContext();
 }
