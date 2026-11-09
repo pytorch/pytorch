@@ -363,6 +363,7 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # tree. reduce_ordered_col declines replays past tile.MAX_UNROLL leaves, so the route
 # stops at R = 8192.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -378,7 +379,8 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     """Whether the ordered column kernel beats the indexed tree at this view's shape and
     output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
-    # reduce_ordered_col also declines views narrower than a warp.
+    # Narrow tiles are unmeasured on views narrower than a warp; reduce_ordered_col
+    # declines them too.
     if C < WARP:
         return False
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
