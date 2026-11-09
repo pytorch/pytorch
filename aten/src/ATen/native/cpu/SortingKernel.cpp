@@ -90,7 +90,7 @@ struct KeyValueCompDesc {
 };
 
 #ifdef USE_FBGEMM
-bool can_use_radix_sort(const TensorBase& values, const bool descending) {
+bool can_use_radix_sort(const TensorBase& values, const TensorBase& indices, const bool descending) {
   // radix_sort can be used only for 1D data
   if (values.dim() != 1) return false;
   // radix_sort sorts in ascending order
@@ -103,7 +103,8 @@ bool can_use_radix_sort(const TensorBase& values, const bool descending) {
   // TODO(DamianSzwichtenberg): radix_sort is a stable sorting algorithm,
   // should we check here, whether stable is set to true?
 
-  return true;
+  // parallel_sort1d_kernel reads and writes values and indices as dense buffers
+  return values.is_contiguous() && indices.is_contiguous();
 }
 
 void parallel_sort1d_kernel(
@@ -180,9 +181,7 @@ void sort_kernel(
     return;
   }
 #ifdef USE_FBGEMM
-  // parallel_sort1d_kernel reads and writes values and indices as dense buffers.
-  if (can_use_radix_sort(values, descending) && values.is_contiguous() &&
-      indices.is_contiguous()) {
+  if (can_use_radix_sort(values, indices, descending)) {
     parallel_sort1d_kernel(values, indices);
     return;
   }

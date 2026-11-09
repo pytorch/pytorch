@@ -6395,17 +6395,20 @@ class TestLinalg(TestCase):
     @onlyCUDA
     def test_addmm_out_row_size_one_stride(self, device):
         # A (1, N) out is contiguous for any stride(0); here stride(0) == 1 < N
-        a, b, bias = (torch.randn(*s, device=device) for s in ((1, 8), (8, 16), (16,)))
+        a = torch.randn(1, 8, device=device)
+        b = torch.randn(8, 16, device=device)
+        bias = torch.randn(16, device=device)
         out = torch.zeros(16, 1, device=device).t()
-        self.assertEqual(torch.addmm(bias, a, b, out=out), torch.addmm(bias, a, b))
+        torch.addmm(bias, a, b, out=out)
+        self.assertEqual(out, torch.addmm(bias, a, b))
 
     @onlyCUDA
     @dtypes(torch.float32, torch.bfloat16)
     def test_bmm_out_size_one_dim_stride_zero(self, device, dtype):
         a = torch.randn(3, 5, 7, device=device, dtype=dtype)
         b = torch.randn(3, 7, 1, device=device, dtype=dtype)
-        out = torch.empty(15, device=device, dtype=dtype).as_strided((3, 5, 1), (5, 1, 0))
-        # cuBLASLt normalizes leading dims itself; the fix is in the cuBLAS helper
+        out = torch.empty_strided((3, 5, 1), (5, 1, 0), device=device, dtype=dtype)
+        # Exercise the cuBLAS leading-dimension checks, not the cuBLASLt path
         with blas_library_context("cublas"):
             self.assertEqual(torch.bmm(a, b, out=out), torch.bmm(a, b))
 
