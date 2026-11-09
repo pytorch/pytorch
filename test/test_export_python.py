@@ -215,6 +215,23 @@ class TestExportPython(_ExportPythonTestCase):
         with no_compilation():
             self.assertEqual(run(x, y), x @ y)
 
+    def test_the_eager_backend_writes_no_graph_code(self):
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        run = self._export("scaled", path, backend="eager")
+        self.assertEqual(run(x), x.mul(2).relu())
+        with open(path) as f:
+            self.assertNotIn(_CODE_BEGIN, f.read())
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(x), x.mul(2).relu())
+
+    def test_dynamic_serves_another_shape(self):
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path, dynamic=True)(torch.randn(8))
+        y = torch.randn(16)
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(y), (y * 2.0).relu())
+
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
         x = torch.randn(8)
@@ -330,6 +347,17 @@ class TestExportPython(_ExportPythonTestCase):
         with torch.no_grad():
             self._export("grad_aware", path)(x)
             self.assertEqual(self._export("grad_aware", path, check=True)(x), x * 2)
+
+    def test_check_allows_compiled_rounding_but_not_small_edits(self):
+        from torch.compiler._export_python import _assert_matches_eager
+
+        # A compiled GEMM's reordering noise on large values passes.
+        want = torch.randn(64, 64) * 20
+        _assert_matches_eager(want + 1e-4 * torch.randn(64, 64), want)
+        # Doubling a tensor of small values is still caught.
+        x = torch.randn(64)
+        with self.assertRaises(AssertionError):
+            _assert_matches_eager(x * 2e-4, x * 1e-4)
 
     def test_check_defaults_to_the_environment_variable(self):
         path = os.path.join(self.dir, "shifted.py")
