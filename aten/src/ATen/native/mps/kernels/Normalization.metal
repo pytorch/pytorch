@@ -245,12 +245,6 @@ struct LayerNormOp {
       bool) const {
     return {rstd, sum_grad / size, sum_prod / size};
   }
-  METAL_FUNC NormBackwardCoeffs<T> coeffs(
-      thread const NormBackwardRow<T>& row) const {
-    const auto sums = threadgroup_sum2(
-        row.tg_a, row.tg_b, row.sum_grad, row.sum_prod, row.tid, row.lsize);
-    return finish(sums[0], sums[1], row.size, row.index, row.tid == 0);
-  }
   static acc_t column_term(
       opmath dy,
       opmath x,
@@ -258,15 +252,6 @@ struct LayerNormOp {
       device const T* rstds,
       uint row) {
     return acc_t(dy * (x - opmath(means[row])) * opmath(rstds[row]), dy);
-  }
-  template <typename A>
-  static void store(acc_t acc, device A* dgamma, device A* dbeta, uint col) {
-    if (dgamma != nullptr) {
-      dgamma[col] = static_cast<A>(acc.x);
-    }
-    if (dbeta != nullptr) {
-      dbeta[col] = static_cast<A>(acc.y);
-    }
   }
 };
 

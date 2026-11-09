@@ -7,7 +7,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/BatchNorm.h>
-#include <ATen/native/mps/operations/NormBackward.h>
+#include <ATen/native/mps/operations/NormBackwardHeuristics.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -499,11 +499,14 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   const auto gamma = weight.defined() ? std::make_optional(weight.to(dtype).contiguous()) : std::nullopt;
   const auto rows = c10::safe_conv<uint32_t>(M, "layer_norm rows");
   const auto row_size = c10::safe_conv<uint32_t>(N, "layer_norm normalized size");
-  const auto dx_plan = grad_input.defined() ? std::make_optional<NormBackwardRows>(M, N, X->options()) : std::nullopt;
+  const auto dx_cfg = select_norm_row_config(M, N, occupancy_threadgroups());
+  const auto dx_part = grad_input.defined() && dx_cfg.chunks > 1
+      ? std::make_optional(at::empty({M, dx_cfg.chunks, 2}, X->options().dtype(kFloat)))
+      : std::nullopt;
   const auto has_affine_grads = grad_weight.defined() || grad_bias.defined();
   const auto dgamma = grad_weight.defined() ? std::make_optional(grad_weight) : std::nullopt;
   const auto dbeta = grad_bias.defined() ? std::make_optional(grad_bias) : std::nullopt;
-  const NormBackwardColumns tiles(M, N);
+  const auto tiles = select_norm_column_config(M, N, occupancy_threadgroups());
   const auto splits = tiles.splits;
   const auto& affine = grad_weight.defined() ? grad_weight : grad_bias;
   // With a single split the tile kernel writes dgamma/dbeta itself, if it is instantiated for their dtype
@@ -517,8 +520,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto enc = stream->commandEncoder();
-      if (dx_plan) {
-        dx_plan->encode(enc, lib, "layer_norm_backward", *dOut, *X, mean_c, rstd_c, grad_input, gamma);
+      if (grad_input.defined()) {
+        const std::array<uint32_t, 4> dims{dx_cfg.rows, dx_cfg.row_size, dx_cfg.lanes, dx_cfg.chunk_size};
+        mtl_setArgs(enc, *dOut, *X, mean_c, rstd_c, grad_input, dx_part, dims, gamma);
+        for (const auto pass : dx_cfg.passes()) {
+          [enc setComputePipelineState:lib.getPipelineStateForFunc(
+                                           fmt::format("layer_norm_backward_{}_{}", pass, type_str))];
+          [enc dispatchThreadgroups:MTLSizeMake(dx_cfg.chunks, dx_cfg.row_groups, 1)
+              threadsPerThreadgroup:MTLSizeMake(dx_cfg.threads, 1, 1)];
+        }
       }
       if (has_affine_grads) {
         auto pso = lib.getPipelineStateForFunc(fmt::format(
@@ -533,7 +543,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
                     direct ? dgamma : std::nullopt,
                     direct ? dbeta : std::nullopt,
                     std::array<uint32_t, 2>{rows, row_size});
-        tiles.dispatch(enc);
+        [enc dispatchThreadgroups:MTLSizeMake(tiles.col_groups, splits, 1)
+            threadsPerThreadgroup:MTLSizeMake(tiles.tx, tiles.ty, 1)];
         if (!direct) {
           pso = lib.getPipelineStateForFunc(
               fmt::format("layer_norm_backward_affine_combine_{}", scalarToMetalTypeString(affine)));

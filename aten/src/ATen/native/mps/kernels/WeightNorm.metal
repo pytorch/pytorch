@@ -28,12 +28,6 @@ struct WeightNormOp {
     }
     return {g * rnorm, 0, dot * rnorm * rnorm};
   }
-  METAL_FUNC NormBackwardCoeffs<T> coeffs(
-      thread const NormBackwardRow<T>& row) const {
-    const opmath dot =
-        threadgroup_sum(row.tg_b, row.sum_prod, row.tid, row.lsize);
-    return finish(0, dot, row.size, row.index, row.tid == 0);
-  }
   static opmath column_term(
       opmath dy,
       opmath x,
@@ -41,10 +35,6 @@ struct WeightNormOp {
       device const T*,
       uint) {
     return dy * x;
-  }
-  template <typename A>
-  static void store(acc_t dot, device A* out, device A*, uint col) {
-    out[col] = static_cast<A>(dot);
   }
 };
 
