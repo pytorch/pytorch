@@ -7,8 +7,8 @@ from unittest import skip
 
 import torch
 import torch.utils._pytree as pytree
-from torch.distributed._local_tensor import LocalTensorMode
 from torch import Tensor
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
