@@ -3051,8 +3051,17 @@ struct NNModuleHookFlagsValidation {
   bool valid{false};
 
   bool check(PyObject* flags) {
-    const auto current_version = get_dict_version_unchecked(flags);
     const auto current_size = PyDict_GET_SIZE(flags);
+#if IS_PYTHON_3_12_PLUS
+    // Inspecting a singleton is cheaper than watching and checking its version.
+    if (current_size <= 1) {
+      PyObject *key = nullptr, *value = nullptr;
+      Py_ssize_t pos = 0;
+      return current_size == 0 ||
+          (PyDict_Next(flags, &pos, &key, &value) && PyLong_CheckExact(key));
+    }
+#endif
+    const auto current_version = get_dict_version_unchecked(flags);
     if (current_version != 0 && dictionary == flags &&
         version == current_version && size == current_size) {
       return valid;
@@ -3083,8 +3092,31 @@ struct NNModuleHookMembership {
 
   bool check() const {
     if (PyDict_GET_SIZE(hooks.ptr()) !=
-            static_cast<Py_ssize_t>(expected.size()) ||
-        !flags_validation->check(flags.ptr())) {
+        static_cast<Py_ssize_t>(expected.size())) {
+      return false;
+    }
+#if IS_PYTHON_3_12_PLUS
+    // A single hook and flag need only an exact-integer comparison, not
+    // hashing.
+    if (expected.size() == 1 && PyDict_GET_SIZE(flags.ptr()) == 1) {
+      PyObject *hook_key = nullptr, *flag_key = nullptr, *value = nullptr;
+      Py_ssize_t hook_pos = 0, flag_pos = 0;
+      PyDict_Next(hooks.ptr(), &hook_pos, &hook_key, &value);
+      PyDict_Next(flags.ptr(), &flag_pos, &flag_key, &value);
+      if (!PyLong_CheckExact(hook_key) || !PyLong_CheckExact(flag_key)) {
+        return false;
+      }
+      const int contains = hook_key == flag_key
+          ? 1
+          : PyObject_RichCompareBool(hook_key, flag_key, Py_EQ);
+      if (contains < 0) {
+        PyErr_Clear();
+        return false;
+      }
+      return static_cast<bool>(contains) == expected[0];
+    }
+#endif
+    if (!flags_validation->check(flags.ptr())) {
       return false;
     }
     PyObject *key = nullptr, *value = nullptr;

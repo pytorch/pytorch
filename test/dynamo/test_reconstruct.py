@@ -136,14 +136,13 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def fn(x, value):
             comptime.force_static(value)
-            return x + 1, (value, None)
+            return x + 1, (value, None), id(value)
 
         x = torch.ones(1)
         with self.register_bytecode_hook(hook):
-            self.assertEqual(
-                torch.compile(fn, backend="eager", fullgraph=True)(x, value),
-                fn(x, value),
-            )
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x, value)
+        self.assertEqual(result, fn(x, value))
+        self.assertIs(result[1][0], value)
         self.assertIn((value, None), constants)
 
     @parametrize("kind", ["class", "enum"])
@@ -191,6 +190,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         for value in values:
             result = compiled(x, value)
+            self.assertEqual(result[0], x + 1)
             self.assertIs(result[1][0][0], value)
             self.assertIs(next(iter(result[2])), value)
             self.assertIs(result[3].start, value)
