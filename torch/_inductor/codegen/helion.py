@@ -919,8 +919,14 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             line = f"{arg.name}[{subscript}]{cast_suffix}"
         else:
             # hl.load zero-fills masked lanes; masked() then selects `other`.
+            # A 0-d tensor takes an empty index list. F.pad(x * s, (0, 1))[:, 3]
+            # reads s under the constant mask 3 < 4, and its subscript in1[()]
+            # as an index list would fail:
+            #   tmp6 = hl.load(in1, [()], extra_mask=tmp4)
+            #   InvalidIndexingType: Expected tile/int/None/tensor/etc in tensor[...], got ().
             mask = self.align(mask, shape)
-            line = f"hl.load({arg.name}, [{subscript}], extra_mask={mask}){cast_suffix}"
+            index = "" if coordinates == ["()"] else subscript
+            line = f"hl.load({arg.name}, [{index}], extra_mask={mask}){cast_suffix}"
         value = self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
         # A row vector continues as tmp3 = tmp2.reshape([tile_y, 1]). Left as
         # (tile_y,), a @ b + c for c of shape [40, 1] fails Inductor's shape
