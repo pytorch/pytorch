@@ -1052,12 +1052,15 @@ class CompileContext:
     def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
-    def __init__(self, compile_id: CompileId | None) -> None:
+    def __init__(
+        self, compile_id: CompileId | None, *, is_aot_capture: bool = False
+    ) -> None:
         if compile_id is not None and not isinstance(compile_id, CompileId):
             raise AssertionError(
                 f"compile_id must be None or CompileId, got {type(compile_id)}"
             )
         self.compile_id: CompileId | None = compile_id
+        self.is_aot_capture = is_aot_capture
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
