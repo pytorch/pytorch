@@ -98,6 +98,53 @@ class PipelineStageBackendWarningTest(TestCase):
 instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
+class PipelineStageBackwardReshardTest(TestCase):
+    @parametrize("reshard_after_backward", [False, True])
+    def test_resharding_does_not_enable_microbatch_gradient_reduction(
+        self, reshard_after_backward
+    ):
+        with single_rank_process_group():
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, torch.device("cpu"))
+            self.assertFalse(stage._reshard_after_backward)
+            stage.set_reshard_after_backward(reshard_after_backward)
+            stage.submod = mock.MagicMock(spec=stage_module.FSDPModule)
+            expected_grads = (torch.ones(1),)
+            kwargs = {
+                "stage_output": (),
+                "output_grads": (),
+                "input_values": (),
+            }
+            with mock.patch.object(
+                stage_module, "stage_backward", return_value=expected_grads
+            ):
+                actual_grads, groups = stage.backward_maybe_with_nosync("full", kwargs)
+                self.assertEqual(actual_grads, expected_grads)
+                self.assertIsNone(groups)
+            stage.submod.set_reshard_after_backward.assert_called_once_with(
+                reshard_after_backward
+            )
+            stage.submod.set_requires_gradient_sync.assert_called_once_with(False)
+            stage.submod.finalize_backward.assert_not_called()
+            stage.start_gradient_reduction()
+            stage.submod.set_requires_gradient_sync.assert_called_with(True)
+            stage.submod.set_reshard_after_backward.assert_called_with(True)
+            stage.submod.finalize_backward.assert_called_once_with(async_op=True)
+
+    @parametrize("backward_type", ["input", "weight"])
+    def test_rejects_resharding_between_split_backwards(self, backward_type):
+        with single_rank_process_group():
+            stage = PipelineStage(torch.nn.Identity(), 0, 1, torch.device("cpu"))
+            stage.set_reshard_after_backward(True)
+            stage.submod = mock.MagicMock(spec=stage_module.FSDPModule)
+            with self.assertRaisesRegex(ValueError, "requires full backward"):
+                stage.backward_maybe_with_nosync(backward_type, {})
+            stage.submod.set_reshard_after_backward.assert_not_called()
+            stage.submod.set_requires_gradient_sync.assert_not_called()
+
+
+instantiate_parametrized_tests(PipelineStageBackwardReshardTest)
+
+
 class PipelineStageMetadataInferenceTest(TestCase):
     def test_metadata_p2p_uses_directed_edge_groups(self):
         with single_rank_process_group():

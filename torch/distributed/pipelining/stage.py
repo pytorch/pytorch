@@ -183,6 +183,7 @@ class _PipelineStageBase(ABC):
             )
 
         self.submod = submodule
+        self._reshard_after_backward = False
         self.stage_index = stage_index
         self.num_stages = num_stages
         self.device = device
@@ -1064,6 +1065,18 @@ class _PipelineStageBase(ABC):
                 if p.grad is not None:
                     p.grad.div_(grad_scale_factor)
 
+    def set_reshard_after_backward(self, reshard_after_backward: bool) -> None:
+        """Set FSDP parameter residency between pipeline microbatch backwards.
+
+        Defaults to ``False`` to reuse unsharded parameters. ``True`` releases
+        each FSDP unit's parameters after backward while still accumulating
+        unreduced gradients until the schedule's gradient-reduction action.
+        This trades memory for additional parameter all-gathers and applies
+        only to full backward, not split input/weight backward schedules.
+        It has no effect on stages that are not wrapped with FSDP.
+        """
+        self._reshard_after_backward = reshard_after_backward
+
     def backward_maybe_with_nosync(
         self,
         backward_type,
@@ -1128,7 +1141,11 @@ class _PipelineStageBase(ABC):
 
         # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
-            self.submod.set_reshard_after_backward(False)
+            if self._reshard_after_backward and backward_type != "full":
+                raise ValueError(
+                    "Pipeline FSDP backward resharding requires full backward"
+                )
+            self.submod.set_reshard_after_backward(self._reshard_after_backward)
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
 
