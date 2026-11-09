@@ -7155,7 +7155,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5661")
     def test_split_with_sizes_copy_out(self, device):
         shape = (30, 40, 50)
         x = torch.rand(*shape, device=device)
