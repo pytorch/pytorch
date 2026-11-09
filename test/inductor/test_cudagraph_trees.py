@@ -10,6 +10,7 @@ import re
 import sys
 import unittest
 import warnings
+import weakref
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from unittest import mock
@@ -56,6 +57,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._triton import (
+    has_triton_cuda_tma_device,
+    has_triton_tensor_descriptor_host_tma,
+)
 
 
 if IS_WINDOWS and IS_CI:
@@ -1304,6 +1309,105 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out = f_compiled(x_cloned)
                 self.assertEqual(eager_out, compiled_out)
 
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cat_across_partitions(self):
+            # cat inputs are written in place into the cat buffer. When they are
+            # computed in different partitions, the cat buffer must be allocated
+            # once and passed across partitions.
+            @torch.library.custom_op(
+                "mylib::unsafe_clone",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def unsafe_clone(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @unsafe_clone.register_fake
+            def _(x: torch.Tensor) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            # The middle partition writes c but holds neither the first writer
+            # nor the ConcatKernel node.
+            def f(x, y):
+                a = (x.sin() * 2).sum(0, keepdim=True)
+                b = unsafe_clone(y * a)
+                c = (b.cos() * 3).sum(0, keepdim=True)
+                d = unsafe_clone(y * c)
+                e = (d.sin() * 4).sum(0, keepdim=True)
+                return torch.cat([a, c, e])
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+            x = torch.randn(64, 128, device="cuda")
+            y = torch.randn(64, 128, device="cuda")
+
+            _, code = run_and_get_code(f_compiled, x, y)
+            self.assertGreaterEqual(get_num_partitions(code), 3)
+            FileCheck().check_count("empty_strided_cuda((3, 128)", 1, exactly=True).run(
+                code[0]
+            )
+            # Each partition writes its slice in place into the single cat
+            # buffer, which later partitions take as an input.
+            cat_buf = re.search(r"(\w+) = empty_strided_cuda\(\(3, 128\)", code[0])[1]
+            for i, partition in enumerate(code[0].split("def partition_")[1:4]):
+                self.assertIn(f"reinterpret_tensor({cat_buf}, ", partition)
+                if i > 0:
+                    args = re.search(r"(.*) = args\n", partition)[1]
+                    self.assertIn(cat_buf, args.replace(" ", "").split(","))
+
+            for _ in range(3):
+                self.assertEqual(f_compiled(x, y), f(x, y), atol=1e-2, rtol=1e-2)
+
+        @unittest.skipIf(
+            not (
+                has_triton_cuda_tma_device() and has_triton_tensor_descriptor_host_tma()
+            ),
+            "requires host-side TMA support",
+        )
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_tma_tensor_from_other_partition(self):
+            # TMA descriptors alias their tensor via NonOwningLayout but only read
+            # it, so the tensor must stay owned by its producer or graph input.
+            from torch.testing._internal.triton_utils import (
+                add_kernel_with_tma_1d_new_api,
+                create_tensor_descriptor_shim,
+            )
+
+            @torch.library.custom_op(
+                "mylib::unsafe_clone_tma",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def unsafe_clone(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @unsafe_clone.register_fake
+            def _(x: torch.Tensor) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            def tma_add(a, b):
+                out = torch.zeros_like(a)
+                descs = [create_tensor_descriptor_shim(t, [256]) for t in (a, b, out)]
+                add_kernel_with_tma_1d_new_api[(a.numel() // 256,)](
+                    *descs, BLOCK_SIZE=256
+                )
+                return out
+
+            def f(x, y):
+                a = x.sin()
+                c = unsafe_clone(a).cos()
+                return tma_add(a, c), tma_add(y, c)
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            x = torch.randn(1024, device="cuda")
+            y = torch.randn(1024, device="cuda")
+
+            _, code = run_and_get_code(f_compiled, x, y)
+            self.assertGreaterEqual(get_num_partitions(code), 2)
+            for _ in range(3):
+                self.assertEqual(f_compiled(x, y), f(x, y))
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -2270,9 +2374,9 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.num_checkpoints(), 0)
 
             out = foo(inp())
-            out_id = id(out)
+            out_ref = weakref.ref(out)
             del out
-            self.assertEqual(id(foo(inp())), out_id)
+            self.assertIs(foo(inp()), out_ref())
 
             @torch.compile(mode="reduce-overhead")
             def foo2(x):
@@ -2299,7 +2403,7 @@ if HAS_CUDA_AND_TRITON:
             new_out = foo(inp())
             curr_node = self.curr_node()
             self.assertFalse(curr_node.unaliased_in_all_paths[0])
-            self.assertFalse(out_id == id(new_out))
+            self.assertIsNot(new_out, out_ref())
 
         def test_aliased_static_parameter(self):
             inp = torch.rand([20, 20], device="cuda")
@@ -6931,36 +7035,36 @@ if HAS_CUDA_AND_TRITON:
                 y2 = x2 + 1
                 return y1, y2
 
-            with config.patch(
-                "triton.autotune_at_compile_time", autotune_at_compile_time
-            ):
+            log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+            cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+            with config.patch(cfg), ctx():
                 compiled_foo = torch.compile(foo)
                 x = torch.randn((20, 20), device="cuda")
                 eager_out = foo(x)
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                if autotune_at_compile_time:
-                    # auto-tuning block should only appear once. We generate auto-tuning code
-                    # for all the kernels no matter if they are defined in the main graph or
-                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
-                    FileCheck().check_count(
-                        "Compile-time auto-tuning block", 1, exactly=True
-                    ).run(code[0])
-                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
-                    # and then in the main code block
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 2, exactly=True
-                    ).run(code[0])
-                    # cpu kernel definition should only appence once, not in the auto-tuning block
-                    FileCheck().check_count(
-                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                    ).run(code[0])
-                else:
-                    # triton_poi_fused_add_ should appear once, because of kernel reuse
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 1, exactly=True
-                    ).run(code[0])
+            # Each kernel is defined once: partition 2 reuses partition 1's triton
+            # kernel, and the module has no compile-time autotune block.
+            module = code[0]
+            self.assertNotIn("Compile-time auto-tuning block", module)
+            self.assertEqual(module.count("def triton_poi_fused_add_"), 1)
+            self.assertEqual(module.count("cpp_fused__to_copy_add_1 = "), 1)
+            # The kernels of the root and of both partitions are tuned in one block,
+            # which runs once.
+            prefix = "Auto-tuning code written to "
+            paths = [
+                line.removeprefix(prefix)
+                for line in log_stream.getvalue().splitlines()
+                if line.startswith(prefix)
+            ]
+            self.assertEqual(len(paths), 1 if autotune_at_compile_time else 0, paths)
+            for path in paths:
+                with open(path) as f:
+                    src = f.read()
+                # The block reuses the kernel too, and tunes no CPU kernel.
+                self.assertEqual(src.count("def triton_poi_fused_add_"), 1)
+                self.assertNotIn("cpp_fused__to_copy_add_1", src)
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
@@ -6994,9 +7098,8 @@ if HAS_CUDA_AND_TRITON:
             eager_out = foo(x, y)
             compiled_out, code = run_and_get_code(compiled_foo, x, y)
             self.assertEqual(eager_out, compiled_out)
-            FileCheck().check_count(
-                "async_compile.triton('add_kernel',", 1, exactly=True
-            ).run(code[0])
+            defs = re.findall(r"^def add_kernel\w*\(", code[0], re.MULTILINE)
+            self.assertEqual(len(defs), 1, code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):

@@ -79,7 +79,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_no_gpu,
     skip_if_odd_worldsize,
     skip_if_rocm_multiprocess,
-    skip_if_rocm_ver_atleast_multiprocess,
     skip_if_small_worldsize,
     TEST_SKIPS,
     verify_ddp_error_logged,
@@ -2672,6 +2671,9 @@ class DistributedTest:
                     group_id,
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
+                )
+                self.assertEqual(
+                    tensor, _build_tensor(src + 1, expected_value, dtype=dtype)
                 )
                 # Gloo and NCCL are the only backends that reach here; every other
                 # backend skips the enclosing tests.
@@ -8946,7 +8948,6 @@ class DistributedTest:
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs and we want to
             # report first timed out rank.
@@ -8955,7 +8956,6 @@ class DistributedTest:
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
             # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
             os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"

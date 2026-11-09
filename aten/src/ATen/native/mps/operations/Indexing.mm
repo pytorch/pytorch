@@ -4,6 +4,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Indexing.h>
+#include <utility>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
@@ -339,7 +340,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // The block-scan running count is bounded by numel, so it fits uint32 (and can
   // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
   // genuinely >2^32-element tensors need the 64-bit scan.
-  const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
+  const bool count_fits_u32 = std::in_range<uint32_t>(numel);
   auto pso_step2 =
       lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
@@ -863,14 +864,17 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
-  // Atomic prod/mean are non-associative for floating-point; alert unless we're
-  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
-  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
-  // actually produce non-deterministic output on MPS.
-  const auto dtype = self.scalar_type();
-  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
-      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
-    at::globalContext().alertNotDeterministic("index_reduce_mps");
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
+      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
+  if (serial && (self.scalar_type() != kFloat || index.scalar_type() != kLong)) {
+    result.copy_(self.to(kFloat).index_reduce(dim, index.to(kLong), source.to(kFloat), reduce, include_self));
+    return;
   }
 
   if (!result.is_same(self)) {
@@ -903,12 +907,18 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   MPSStream* stream = getCurrentMPSStream();
 
   auto num_threads = source.numel();
+  if (num_threads > 0 && serial) {
+    num_threads /= source.size(dim);
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format("index_reduce_{}_{}_{}{}",
+                                                                         reduce,
+                                                                         mps::scalarToMetalTypeString(result),
+                                                                         mps::scalarToMetalTypeString(index),
+                                                                         serial ? "_serial" : ""));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
@@ -941,13 +951,15 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
-  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(self.numel()),
               "masked_fill not supported for tensors of more than 2**32 elements");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
   const bool is_dense_broadcast = is_dense_broadcastable(mask, self);
   const auto flavor = is_dense ? "dense" : is_dense_broadcast ? "broadcast" : "strided";
+  TORCH_CHECK(is_dense || is_dense_broadcast || offsetsFitIn<int32_t>(self, *b_mask),
+              "masked_fill: non-contiguous tensors whose offsets exceed 2**31 are not supported on MPS");
   auto fillPSO = lib.getPipelineStateForFunc(
       fmt::format("masked_fill_scalar_{}_{}", flavor, getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -993,12 +1005,13 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
               " and ",
               source.scalar_type());
 
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_scatter_ only supports boolean masks, but got mask with dtype ",
+              mask.scalar_type());
+
   if (self.numel() == 0) {
     return self;
   }
-
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_scatter: expected BoolTensor or ByteTensor for mask");
 
   bool was_scalar = self.dim() == 0;
 
@@ -1110,6 +1123,13 @@ static void index_fill_mps_kernel(TensorIterator& iter,
   // is where the mask's O(numel) sequential scan beats scatter's growing write-
   // conflict overhead.
   const bool use_mask = (indices_numel * 16 >= dim_size);
+  // The strided kernels index in int32 and the dense mask kernel in uint32; dense scatter uses int64
+  TORCH_CHECK(!is_dense ? offsetsFitIn<int32_t>(self) : !use_mask || std::in_range<uint32_t>(self.numel()),
+              "index_fill: MPS does not support a tensor of size ",
+              self.sizes(),
+              " and strides ",
+              self.strides(),
+              " (too large for 32-bit indexing)");
 
   auto stream = getCurrentMPSStream();
   if (use_mask) {

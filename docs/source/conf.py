@@ -266,6 +266,8 @@ autosummary_filename_map = {
     "torch.cpu.Stream": "torch.cpu.Stream_class",
     "torch.cuda.stream": "torch.cuda.stream_function",
     "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.mps.stream": "torch.mps.stream_function",
+    "torch.mps.Stream": "torch.mps.Stream_class",
     "torch.xpu.stream": "torch.xpu.stream_function",
     "torch.xpu.Stream": "torch.xpu.Stream_class",
 }
@@ -411,16 +413,6 @@ coverage_ignore_functions = [
     "get_default_qconfig_dict",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_jit
-    "convert_dynamic_jit",
-    "convert_jit",
-    "fuse_conv_bn_jit",
-    "prepare_dynamic_jit",
-    "prepare_jit",
-    "quantize_dynamic_jit",
-    "quantize_jit",
-    "script_qconfig",
-    "script_qconfig_dict",
     # torch.ao.quantization.quantize_pt2e
     "convert_pt2e",
     "prepare_pt2e",
@@ -2154,7 +2146,8 @@ language = "en"
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+# Stale autosummary stubs from before torchrun moved to generated/.
+exclude_patterns = ["distributed/elastic/generated"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"

@@ -238,7 +238,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
 // this doesn't have caching because we're not implementing it
-// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+// no in_kernel_invocation flag; that state is thread-local in C++
+// (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
@@ -247,6 +248,9 @@ struct C10_API FakeTensorMode {
   // Note [C++ FakeTensorMode Python wrapper lifetime] in
   // torch/csrc/FakeTensorMode.cpp.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+
+  // The fields below are plain, like a Python FakeTensorMode's attributes, and
+  // must not be changed while another thread is using the mode.
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
@@ -257,13 +261,20 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
+  bool allow_unsafe_data_ptr_access_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -304,6 +315,16 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // The SymInt memos of a C++ fake (nonzero_memo, unique_memo,
+  // unique_consecutive_memo), by name; see TensorImpl::set_fake_sym_memo. The
+  // copy constructor does not copy them, so a shallow copy (e.g. set_data)
+  // drops them.
+  struct FakeSymMemo {
+    c10::SymInt value;
+    std::optional<uint32_t> version;
+    uint64_t epoch = 0;
+  };
+  std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
   // See TensorImpl::symbolic_wrapped_number.
   c10::SymNode symbolic_wrapped_number_ = nullptr;
 
@@ -1562,6 +1583,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->real_tensor_;
   }
 
+  // Records memo as this fake's SymInt memo `name`, set in fake mode epoch
+  // `epoch`. Like fake_sym_memo, safe to call concurrently.
+  void set_fake_sym_memo(
+      const std::string& name,
+      c10::SymInt memo,
+      uint64_t epoch);
+
+  // The memo named `name`, or nullopt if there is none or it is stale: the
+  // tensor was mutated since, or it was set in an epoch other than `epoch`.
+  // A stale memo is dropped.
+  std::optional<c10::SymInt> fake_sym_memo(
+      const std::string& name,
+      uint64_t epoch);
+
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
   ExtraMeta* maybe_get_extra_meta() const {
@@ -2691,7 +2726,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else
