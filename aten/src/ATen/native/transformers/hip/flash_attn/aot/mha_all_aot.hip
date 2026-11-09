@@ -167,6 +167,34 @@ prepare_philox_arguments(float p_dropout, int64_t counter_offset) {
 
 }
 
+// The mem-efficient API's window_size is a number of keys ending at the causal
+// diagonal: key j is visible to query i iff i + d - window_size < j <= i + d,
+// where d = 0 (top-left) or seqlen_k - seqlen_q (bottom-right). AOTriton windows
+// are inclusive: (window_size - 1, 0) around that diagonal. The bottom-right
+// shift reuses calculate_swa; varlen callers must additionally set
+// with_bottom_right_diagonal on VarlenBits.
+std::tuple<int, int>
+mem_eff_window_aot(int64_t window_size,
+                   bool bottom_right,
+                   int64_t max_seqlen_q,
+                   int64_t max_seqlen_k,
+                   bool is_varlen) {
+  TORCH_CHECK(window_size > 0 && window_size <= std::numeric_limits<int>::max(),
+              "window_size must be positive and fit in int32");
+  const int window_left = static_cast<int>(window_size - 1);
+  if (!bottom_right) {
+    return std::make_tuple(window_left, 0);
+  }
+  auto [needs_swa, left, right] = calculate_swa(window_left,
+                                                0,
+                                                static_cast<int>(max_seqlen_q),
+                                                static_cast<int>(max_seqlen_k),
+                                                false,
+                                                is_varlen);
+  (void)needs_swa;
+  return std::make_tuple(left, right);
+}
+
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")

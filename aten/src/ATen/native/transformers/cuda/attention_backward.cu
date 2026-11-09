@@ -590,6 +590,8 @@ _efficient_attention_backward(
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_CHECK(!window_size.has_value(),
+                "CK mem_eff_backward does not support window_size");
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
@@ -634,8 +636,6 @@ _efficient_attention_backward(
 #ifndef DISABLE_AOTRITON
     TORCH_CHECK(!num_splits_key.has_value(),
               "ROCM does not support num_split_keys in _efficient_attention_forward");
-    TORCH_CHECK(!window_size.has_value(),
-              "ROCM does not support window_size in _efficient_attention_forward");
     auto ret = aotriton::v2::flash::check_gpu(stream);
     if (hipSuccess != ret) {
       TORCH_CHECK(false,
@@ -719,6 +719,22 @@ _efficient_attention_backward(
       params.window_left = WindowValue::BottomRightAligned;
       params.window_right = WindowValue::BottomRightAligned;
     }
+    const bool use_window = window_size.has_value() && *window_size > 0;
+    if (use_window) {
+#if AOTRITON_V3_API
+      TORCH_CHECK(is_causal, "window_size requires a causal custom_mask_type");
+      const bool bottom_right =
+          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type;
+      std::tie(params.window_left, params.window_right) =
+          pytorch_flash::mem_eff_window_aot(*window_size,
+                                            bottom_right,
+                                            max_seqlen_q,
+                                            max_seqlen_k,
+                                            cu_seqlens_q.has_value());
+#else
+      TORCH_CHECK(false, "window_size requires AOTriton >= 0.10");
+#endif
+    }
     using sdp::aotriton_adapter::mklazy_empty_like;
     using sdp::aotriton_adapter::mklazy_fp32zeros;
     using sdp::aotriton_adapter::LazyTensorContext;
@@ -731,6 +747,16 @@ _efficient_attention_backward(
       params.varlen_bits = mk_varlen_bits_packed();
       params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q.value(), "seqinfo_q0");
       params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k.value(), "seqinfo_k0");
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+      if (use_window &&
+          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
+      }
+#else
+      TORCH_CHECK(!use_window ||
+                  static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) != custom_mask_type,
+                  "bottom-right window_size on varlen requires AOTriton >= 0.15");
+#endif
     }
 #else
     if (cu_seqlens_q.has_value()) {

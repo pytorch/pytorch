@@ -29,6 +29,16 @@
 
 namespace pytorch_flash {
 
+// Translate the mem-efficient API's window_size to AOTriton (window_left,
+// window_right). Requires AOTriton >= 0.10 (V3 API).
+TORCH_API
+std::tuple<int, int>
+mem_eff_window_aot(int64_t window_size,
+                   bool bottom_right,
+                   int64_t max_seqlen_q,
+                   int64_t max_seqlen_k,
+                   bool is_varlen);
+
 // AOTriton Implementation
 TORCH_API
 std::tuple<

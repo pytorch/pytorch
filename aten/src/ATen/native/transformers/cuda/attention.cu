@@ -1742,6 +1742,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     at::ROCmFABackend::Ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_CHECK(!window_size.has_value(),
+                "CK mem_eff_forward does not support window_size");
     std::optional<Tensor> out(res);
     std::optional<Tensor> seqused_k = std::nullopt;
     std::optional<Tensor> alibi_slopes = std::nullopt;
@@ -1878,11 +1880,37 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (bias.has_value()) {
       params.B = mk_input_aotensor(bias.value(), "bias");
     }
+    const bool use_window = window_size.has_value() && *window_size > 0;
+    if (use_window) {
+#if AOTRITON_V3_API
+      TORCH_CHECK(is_causal, "window_size requires a causal custom_mask_type");
+      const bool bottom_right =
+          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type;
+      std::tie(params.window_left, params.window_right) =
+          pytorch_flash::mem_eff_window_aot(*window_size,
+                                            bottom_right,
+                                            max_seqlen_q,
+                                            max_seqlen_k,
+                                            seqstart_q.has_value());
+#else
+      TORCH_CHECK(false, "window_size requires AOTriton >= 0.10");
+#endif
+    }
 #if AOTRITON_VARLEN_BITS_API
     if (seqstart_q.has_value()) {
       params.varlen_bits = mk_varlen_bits_packed();
       params.seqinfo_q0 = mk_input_aotensor<1>(seqstart_q.value(), "seqinfo_q0");
       params.seqinfo_k0 = mk_input_aotensor<1>(seqstart_k.value(), "seqinfo_k0");
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+      if (use_window &&
+          static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
+      }
+#else
+      TORCH_CHECK(!use_window ||
+                  static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) != custom_mask_type,
+                  "bottom-right window_size on varlen requires AOTriton >= 0.15");
+#endif
     }
 #else
     if (seqstart_q.has_value()) {

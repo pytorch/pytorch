@@ -4172,7 +4172,6 @@ class TestSDPAAccelerator(NNTestCase):
         )
 
     @tf32_off()
-    @skipIfRocm(msg="ROCm mem-efficient attention does not support window_size")
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
