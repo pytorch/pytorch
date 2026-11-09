@@ -43,3 +43,7 @@ replace a fully overwriting functional chain with writes into a fresh base,
 then `reinplace_inplaceable_ops` may introduce further mutation. These passes
 must run in that order *just before Inductor lowering*, as otherwise this breaks
 our invariant.
+
+Additionally, we do have a few passes that *do* introduce mutation, such as
+`reinplace_inplaceable_ops` and `fold_foreach_input_mutation_ops`. These passes
+must run *just before Inductor lowering*, as otherwise this breaks our invariant.
