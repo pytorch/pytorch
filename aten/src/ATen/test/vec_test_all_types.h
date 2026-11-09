@@ -1388,9 +1388,11 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 #endif /* defined(TEST_AGAINST_DEFAULT) */
 }
 
-
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+        return std::fma(a, b, c);
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
@@ -1399,6 +1401,9 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+        return std::fma(a, b, -c);
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
