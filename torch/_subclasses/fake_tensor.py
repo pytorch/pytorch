@@ -379,6 +379,9 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
+# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which like
+# SymNumberMemoDescriptor drops it once the tensor is mutated or fake_mode's
+# epoch changes, except that a backed SymFloat is kept across epochs.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
@@ -680,6 +683,31 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+@typing.final
+class CppFakeTensorMode(torch._C._CppFakeTensorMode):
+    # The Python object of a C++ FakeTensorMode, which the Python parts of fake
+    # dispatch run against. The mode's state lives on the C++ mode, so an object
+    # rebuilt by _from_cpp_mode is equivalent. See
+    # Note [C++ FakeTensorMode Python object lifetime] in
+    # torch/csrc/FakeTensorMode.cpp.
+    __slots__ = ()
+
+    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
+        import torch._functorch.config
+
+        copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
+        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self._attach_python_object()
+
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
+        # Rebuilds a collected CppFakeTensorMode around the same C++ mode, which
+        # getCppFakeTensorModePyObj passes in a capsule
+        self = cls.__new__(cls)
+        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
+        return self
 
 
 @functools.cache

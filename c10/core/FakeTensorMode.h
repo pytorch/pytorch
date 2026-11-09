@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -23,11 +24,13 @@ struct TensorImpl;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
-  // not the wrapper itself. See
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
+  // Owns a Python weakref to this mode's Python object (a CppFakeTensorMode,
+  // which subclasses the mode's binding), not the object itself. See
+  // Note [C++ FakeTensorMode Python object lifetime] in
+  // torch/csrc/FakeTensorMode.cpp. Accessed only under fake_mode_pyobj_mutex_,
+  // by _CppFakeTensorMode._attach_python_object and getCppFakeTensorModePyObj.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  std::mutex fake_mode_pyobj_mutex_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
