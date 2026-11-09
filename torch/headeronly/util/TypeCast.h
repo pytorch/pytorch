@@ -87,10 +87,11 @@ inline constexpr bool rounds_through_float = [] {
       L::digits + 2 <= F::digits && L::max_exponent <= F::max_exponent &&
       L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
 }();
-// This includes Half on aarch64 CPUs, where it is constructed from the native
-// float16_t, which converts from double with a single rounding (fcvt h, d).
-// But GCC 13 to 15 vectorize that conversion for SVE as two roundings (fcvt
-// z.s, z.d then fcvt z.h, z.s).
+// This deliberately includes Half on aarch64 CPUs, where it is constructed from
+// the native float16_t, which converts from double with a single rounding (fcvt
+// h, d): GCC 13 to 15 vectorize that conversion for SVE as two roundings (fcvt
+// z.s, z.d then fcvt z.h, z.s), so Half goes through round_to_odd_float there
+// too.
 } // namespace detail
 
 template <typename dest_t, typename src_t>
