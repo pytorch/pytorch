@@ -399,40 +399,6 @@ class FSDPParamGroup:
         self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
 
-    def _check_all_gather_replaceable(self) -> None:
-        # Only the layout that created a group's outputs can refill them, and a
-        # pending first all-gather adopts its layout's outputs when it completes
-        if self._all_gather_result is not None or self.is_unsharded:
-            raise RuntimeError(
-                self._with_fqn(
-                    "cannot replace the all-gather layout while an all-gather is "
-                    "pending or parameters are unsharded; reshard, or call "
-                    "reset_iter_state() after a failed unshard"
-                )
-            )
-        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
-            raise RuntimeError(
-                self._with_fqn(
-                    "cannot replace the all-gather layout after parameters adopted "
-                    "outputs from the installed custom layout"
-                )
-            )
-
-    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
-        # Installed comms expect the default copy-in into the output they allocate,
-        # while a custom layout packs its own input and carries its own comm
-        custom_layout = not isinstance(layout, DefaultAllGatherLayout)
-        if custom_layout and comm_type is not DefaultAllGather:
-            raise ValueError(
-                self._with_fqn(
-                    f"all-gather layout {type(layout).__name__} cannot use "
-                    f"{comm_type.__name__}: comms from set_custom_all_gather(), "
-                    "set_symm_mem_for_comm() and "
-                    "set_allocate_memory_from_process_group_for_comm() only work "
-                    "with DefaultAllGatherLayout; a custom layout carries its own comm"
-                )
-            )
-
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
         self._check_layout_comm(self._all_gather_layout, SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
@@ -1436,6 +1402,40 @@ class FSDPParamGroup:
                 f"{self._reduce_scatter_comm.__class__.__name__}. Keep "
                 "max_input_buffers=1 with symmetric memory, or use the default "
                 "reduce-scatter comm."
+            )
+
+    def _check_all_gather_replaceable(self) -> None:
+        # Only the layout that created a group's outputs can refill them, and a
+        # pending first all-gather adopts its layout's outputs when it completes
+        if self._all_gather_result is not None or self.is_unsharded:
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout while an all-gather is "
+                    "pending or parameters are unsharded; reshard, or call "
+                    "reset_iter_state() after a failed unshard"
+                )
+            )
+        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout after parameters adopted "
+                    "outputs from the installed custom layout"
+                )
+            )
+
+    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
+        # Installed comms expect the default copy-in into the output they allocate,
+        # while a custom layout packs its own input and carries its own comm
+        custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+        if custom_layout and comm_type is not DefaultAllGather:
+            raise ValueError(
+                self._with_fqn(
+                    f"all-gather layout {type(layout).__name__} cannot use "
+                    f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+                    "set_symm_mem_for_comm() and "
+                    "set_allocate_memory_from_process_group_for_comm() only work "
+                    "with DefaultAllGatherLayout; a custom layout carries its own comm"
+                )
             )
 
 
