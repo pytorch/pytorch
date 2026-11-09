@@ -188,6 +188,8 @@ else:
 
 
 if sys.platform == "win32":
+    if "OMP_WAIT_POLICY" not in os.environ and "KMP_BLOCKTIME" not in os.environ:
+        os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
 
     def _load_dll_libraries() -> None:
         import importlib.util

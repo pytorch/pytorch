@@ -1,6 +1,9 @@
 # Owner(s): ["module: unknown"]
 
 import collections
+import os
+import subprocess
+import sys
 import unittest
 
 import torch
@@ -67,6 +70,39 @@ class TestOpenMP_ParallelFor(TestCase):
         ncores = min(5, psutil.cpu_count(logical=False))
         torch.set_num_threads(ncores)
         self.func_rss(300)
+
+
+@unittest.skipIf(sys.platform != "win32", "OMP_WAIT_POLICY default is Windows-only")
+class TestOpenMPWaitPolicyDefault(TestCase):
+    """`import torch` should default OMP_WAIT_POLICY to passive on Windows so
+    idle OpenMP workers sleep instead of busy-spinning (gh-177906), while never
+    overriding a preference the user set themselves."""
+
+    _PROBE = "import os, torch; print('OMPWP=' + os.environ.get('OMP_WAIT_POLICY', ''))"
+
+    def _omp_wait_policy_after_import(self, env_overrides):
+        env = os.environ.copy()
+        env.pop("OMP_WAIT_POLICY", None)
+        env.pop("KMP_BLOCKTIME", None)
+        env.update(env_overrides)
+        out = subprocess.check_output(
+            [sys.executable, "-c", self._PROBE], env=env, text=True
+        )
+        marker = next(ln for ln in out.splitlines() if ln.startswith("OMPWP="))
+        return marker[len("OMPWP=") :]
+
+    def test_default_is_passive(self):
+        self.assertEqual(self._omp_wait_policy_after_import({}), "PASSIVE")
+
+    def test_user_wait_policy_is_respected(self):
+        self.assertEqual(
+            self._omp_wait_policy_after_import({"OMP_WAIT_POLICY": "active"}), "active"
+        )
+
+    def test_user_blocktime_disables_default(self):
+        # A user who tunes KMP_BLOCKTIME has opted into managing the wait
+        # behavior, so we must not also force a wait policy on top of it.
+        self.assertEqual(self._omp_wait_policy_after_import({"KMP_BLOCKTIME": "1"}), "")
 
 
 if __name__ == "__main__":
