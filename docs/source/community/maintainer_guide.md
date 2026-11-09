@@ -105,7 +105,9 @@ When a PR is in your `ready for review` queue, you can expect that:
 - Every comment from a maintainer has been addressed, either by a code change that fixes the specific problem or by a
   reply explaining why no change is needed.
 
-PRs labeled `no automated review` skip these checks and move directly to `ready for review`.
+PRs labeled `no automated review` skip these checks and move directly to `ready for review`. Adding the label
+withdraws the automated review's change requests, so anyone who can label the PR can clear them; your review is
+then the only check.
 
 Do your review as usual. Once you accept the PR, the author is able to merge it.
 If the PR requires significant changes, use "Request changes".
