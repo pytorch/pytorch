@@ -96,6 +96,14 @@ APPROVAL_NOTES = {
 NOTES = {"review": REVIEW_NOTES, "approval": APPROVAL_NOTES}
 
 
+def narrows(text: str) -> bool:
+    """Whether an approval interdiff limits the review to the changes since."""
+    return any(
+        text.startswith(APPROVAL_NOTES[key].split("{sha}")[0])
+        for key in ("header", "base_only")
+    )
+
+
 REPO = Path(".")
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
@@ -194,6 +202,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--max-bytes", required=True, type=int)
+    ap.add_argument(
+        "--output",
+        type=Path,
+        help="with --since approval: a GitHub step-output file that gets "
+        "approved_sha=<--previous> when the file limits the review to the "
+        "changes since",
+    )
     args = ap.parse_args(argv)
     global REPO
     REPO = args.repo
@@ -207,6 +222,9 @@ def main(argv: list[str] | None = None) -> int:
     if len(text.encode()) > args.max_bytes:
         text = notes["too_large"]
     args.out.write_text(text)
+    if args.output and args.since == "approval" and narrows(text):
+        with args.output.open("a") as f:
+            f.write(f"approved_sha={args.previous}\n")
     return 0
 
 

@@ -11,7 +11,8 @@ back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
 notice that the PR is over the size limit instead of a verdict.
 `--withdraw-opted-out` takes no row either: it runs when the opt-out label is
 added. `--approved-commit FILE` writes the commit of the binding approval
-(`binding_approval`) to FILE, for `prepare` to build the interdiff since it.
+(`binding_approval`) to FILE, for the review job to build the interdiff
+since it.
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES (but see the approval
@@ -29,10 +30,10 @@ Invariants:
 - A `changes_requested` verdict is a COMMENT instead when a human approval
   of the reviewed commit meets merge_rules.yaml's approval requirement for the
   PR's files (`binding_approval`), and is then cleared like a clean verdict.
-  After an approval of an earlier commit that the review was told about
-  (APPROVED_SHA), the verdict stands: the review was asked to block only on
-  the changes since that commit. Anything that check cannot read leaves the
-  verdict blocking.
+  After an approval of an earlier commit that the review was told to block
+  only on the changes since (APPROVED_SHA), the verdict stands. Anything that
+  check cannot read leaves the verdict blocking, and a clean verdict told of
+  an approval that no longer binds withdraws no earlier request.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissals are a run retracting its own review because the
@@ -1263,8 +1264,9 @@ def binding_approval(gh: GitHub, pr: int, head: str) -> Approval | None:
     greenlight's test, are not human approvers.
 
     The commit is `head` when any binding approval was given on it, otherwise
-    that of the most recently submitted one. Any failure yields None, so the
-    review blocks on every finding.
+    that of the most recently submitted one; the approvers are those whose
+    approval is of that commit. Any failure yields None, so the review blocks
+    on every finding.
     """
     try:
         latest: dict[str, dict] = {}
@@ -1307,7 +1309,10 @@ def binding_approval(gh: GitHub, pr: int, head: str) -> Approval | None:
             commit = str(newest.get("commit_id") or "")
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError(f"approval on an unreadable commit: {commit!r}")
-        return Approval(tuple(sorted(binding)), commit)
+        on_commit = (
+            login for login in binding if latest[login].get("commit_id") == commit
+        )
+        return Approval(tuple(sorted(on_commit)), commit)
     except Exception as exc:  # noqa: BLE001 - falls back to the blocking review
         warn(f"could not check for a merge-rules approval: {exc!r}")
         return None
@@ -1427,8 +1432,8 @@ def run(
     limits: tuple[int, int] | None = None,
     approved_sha: str = "",
 ) -> int:
-    """`approved_sha` is the approved commit the review was told about, from
-    `--approved-commit` in `prepare`; empty if none."""
+    """`approved_sha` is the approved commit the review was told to block only
+    on the changes since; empty if none."""
     if row.get("status") == "skipped_too_large":
         return decline(gh, pr, sha, author, opt_out, limits)
     review = load_review(row)
@@ -1455,12 +1460,17 @@ def run(
         # An approval of an earlier commit this review was not told about (it
         # arrived after `prepare`): the verdict blocks on every finding.
         approval = None
+    if verdict != "changes_requested":
+        # Only a change request is posted differently for an approval.
+        approval, standing = None, approval
+    else:
+        standing = approval
     on_head = approval is not None and approval.commit == sha
     # A PR approved at this commit is cleared like a clean verdict, and a clean
     # verdict is not when the approval it was told of no longer binds: the
     # earlier change requests stand until a review that knows.
     clean = on_head or (
-        verdict == "ready_for_human_review" and not (leaned and approval is None)
+        verdict == "ready_for_human_review" and not (leaned and standing is None)
     )
     reason = (
         f"Withdrawn: {sha[:12]} is approved under merge_rules.yaml, so its "
@@ -1640,7 +1650,8 @@ def main() -> int:
     mode.add_argument(
         "--approved-commit",
         metavar="FILE",
-        help="write the commit of the binding approval at REVIEWED_SHA to FILE",
+        help="write the commit of the binding approval of REVIEWED_SHA or an "
+        "earlier commit to FILE",
     )
     mode.add_argument(
         "--withdraw-opted-out",

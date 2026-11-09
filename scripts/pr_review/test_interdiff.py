@@ -189,11 +189,12 @@ class TestInterdiff(unittest.TestCase):
     def test_since_approval_names_the_approval_in_every_note(self):
         v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
         self.checkout(v2)
-        files, out = Path("files.z"), Path("out.txt")
+        files, out, step = Path("files.z"), Path("out.txt"), Path("step_output")
         files.write_bytes(b"a.txt\0")
         notes = interdiff.APPROVAL_NOTES
 
         def write(previous, max_bytes="100000"):
+            step.write_text("")
             interdiff.main(
                 [
                     "--since",
@@ -210,6 +211,8 @@ class TestInterdiff(unittest.TestCase):
                     str(out),
                     "--max-bytes",
                     max_bytes,
+                    "--output",
+                    str(step),
                 ]
             )
             return out.read_text()
@@ -217,9 +220,20 @@ class TestInterdiff(unittest.TestCase):
         text = write(self.v1)
         self.assertTrue(text.startswith(notes["header"].format(sha=self.v1)), text)
         self.assertIn("+2-pr", text)
+        # Only a file that limits the review to the changes since exports the
+        # approved commit for the publisher.
+        self.assertEqual(step.read_text(), f"approved_sha={self.v1}\n")
         self.assertEqual(write(""), notes["none"])
+        self.assertEqual(step.read_text(), "")
         self.assertEqual(write(v2), notes["same"])
+        self.assertEqual(step.read_text(), "")
         self.assertEqual(write(self.v1, "10"), notes["too_large"])
+        self.assertEqual(step.read_text(), "")
+        narrowing = {"header", "base_only"}
+        for key, note in notes.items():
+            self.assertEqual(
+                interdiff.narrows(note.format(sha=self.v1)), key in narrowing, key
+            )
         self.assertEqual(set(notes), set(interdiff.REVIEW_NOTES))
         for key, note in notes.items():
             self.assertNotIn("automated review", note, key)

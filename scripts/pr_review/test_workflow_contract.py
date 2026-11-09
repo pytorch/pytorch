@@ -7047,9 +7047,17 @@ class TestTheApprovalInterdiffReachesTheReview(unittest.TestCase):
                 env_values(step, name.upper()),
                 [f"${{{{ needs.prepare.outputs.{name} }}}}"],
             )
+        # The publisher hears of the approval only when the review job's
+        # interdiff limited the review to the changes since it.
+        review_outputs = mapping_items(indented_block(self.review, "outputs:"))
+        self.assertEqual(
+            norm_expr(review_outputs["approved_sha"]),
+            "${{ steps.approval_diff.outputs.approved_sha }}",
+        )
+        self.assertIn("id: approval_diff\n", step)
         self.assertEqual(
             env_values(self.publish, "APPROVED_SHA"),
-            ["${{ needs.prepare.outputs.approved_sha }}"],
+            ["${{ needs.review.outputs.approved_sha }}"],
         )
 
     def _build_step(self) -> str:
@@ -7092,7 +7100,7 @@ class TestTheApprovalInterdiffReachesTheReview(unittest.TestCase):
                 f"python3 trusted/scripts/pr_review/interdiff.py --repo pr --since approval "
                 f"--previous {self.APPROVED} --previous-base {self.APPROVED_BASE} "
                 f"--base {self.MERGE_BASE} --files /tmp/pr-files.z "
-                f"--out {self.PATH} --max-bytes 1000",
+                f"--out {self.PATH} --max-bytes 1000 --output {Path(td) / 'step_output'}",
             ],
         )
 

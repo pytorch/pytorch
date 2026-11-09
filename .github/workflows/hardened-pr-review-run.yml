@@ -646,6 +646,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      # The approved commit, set before the model runs and only when the review
+      # is told to block only on the changes since it.
+      approved_sha: ${{ steps.approval_diff.outputs.approved_sha }}
     steps:
       - name: Harden runner
         # MUST be the first step, before anything can open a socket.
@@ -879,6 +883,7 @@ jobs:
       # that commit is gone, the file holds a note and the review blocks as
       # usual.
       - name: Build the interdiff since the maintainer's approval
+        id: approval_diff
         if: steps.diff.outputs.too_large == 'false'
         env:
           APPROVED_SHA: ${{ needs.prepare.outputs.approved_sha }}
@@ -900,7 +905,8 @@ jobs:
             --base "$MERGE_BASE_SHA" \
             --files /tmp/pr-files.z \
             --out /tmp/pr-approval-interdiff.txt \
-            --max-bytes "${MAX_DIFF_BYTES}"
+            --max-bytes "${MAX_DIFF_BYTES}" \
+            --output "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials via OIDC
         id: aws
@@ -1440,8 +1446,9 @@ jobs:
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
           OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
-          # The approved commit the review was told about, if any.
-          APPROVED_SHA: ${{ needs.prepare.outputs.approved_sha }}
+          # The approved commit the review was told to block only on the
+          # changes since, if any.
+          APPROVED_SHA: ${{ needs.review.outputs.approved_sha }}
         run: python3 scripts/pr_review/post_review.py --row-file terminal.json
 
       - name: Put back the previous review if this run did not replace it

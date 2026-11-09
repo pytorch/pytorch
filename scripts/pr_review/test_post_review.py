@@ -2334,7 +2334,7 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
             )
             self.assertEqual(
                 post_review.binding_approval(gh, 1, SHA),
-                post_review.Approval(("alice", "root"), "c" * 40),
+                post_review.Approval(("alice",), "c" * 40),
             )
 
     def test_an_approval_of_the_head_under_a_later_rule_wins(self):
@@ -2349,7 +2349,7 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
             )
             self.assertEqual(
                 post_review.binding_approval(gh, 1, SHA),
-                post_review.Approval(("alice", "bob"), SHA),
+                post_review.Approval(("bob",), SHA),
             )
 
     def test_a_clean_verdict_told_of_a_lost_approval_clears_nothing(self):
@@ -2368,6 +2368,16 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
         gh = Rules(reviews=[old, approval(6, "alice", commit=OLD)], comments=[])
         clean = row(verdict="ready_for_human_review", findings=[])
         run(gh, clean, 1, SHA, "no automated review", AUTHOR, None, OLD)
+        self.assertEqual(dismissed(gh), ["5"])
+
+    def test_a_clean_verdict_on_an_approved_head_is_not_called_blocking(self):
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = Rules(reviews=[old, approval(6, "alice")], comments=[])
+        clean = row(verdict="ready_for_human_review", findings=[])
+        run(gh, clean, 1, SHA, "no automated review", AUTHOR, None, OLD)
+        (body,) = gh.posted()
+        self.assertNotIn("blocking findings", body["body"])
+        self.assertNotIn("approval from", body["body"])
         self.assertEqual(dismissed(gh), ["5"])
 
     def test_an_approval_on_an_unreadable_commit_binds_nothing(self):
