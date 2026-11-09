@@ -84,12 +84,14 @@ from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
+    SM90OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyOn,
     PYTORCH_CUDA_MEMCHECK,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
@@ -20304,18 +20306,13 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         or not hasattr(__import__("triton"), "set_allocator"),
         "requires triton with set_allocator support",
     )
+    @skipCUDAIf(not SM90OrLater, "requires Hopper+ (SM >= 9.0) for TMA")
     def test_triton_set_allocator_no_graph_break(self, device):
         """set_allocator inside torch.compile does not graph break and
         replays correctly at runtime (including cache hits)."""
         import triton
         import triton.language as tl
         from triton.runtime._allocation import NullAllocator
-
-        if device == "cuda" and torch.cuda.get_device_capability() < (
-            9,
-            0,
-        ):
-            self.skipTest("requires Hopper+ (SM >= 9.0) for TMA")
 
         @triton.jit
         def tma_copy_kernel(
@@ -20867,9 +20864,21 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
 instantiate_parametrized_tests(MiscTestsPyTree)
 
+_MISC_DEVICE_TEST_BASES = (MiscTestsDevice,)
+
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
+
+
+def get_misc_device_test_classes():
+    return [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and cls not in _MISC_DEVICE_TEST_BASES
+        and issubclass(cls, _MISC_DEVICE_TEST_BASES)
+    ]
 
 
 class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
