@@ -25,6 +25,24 @@ inline void check_size_nonnegative(ArrayRef<c10::SymInt> size) {
   }
 }
 
+// Sub-byte quantized dtypes (QUInt4x2, QUInt2x4) pack multiple logical
+// elements per storage byte. Itemsize is still 1, so the standard
+// element*itemsize formula over-counts; divide by this packing factor.
+inline int64_t subByteElementPerByte(const c10::ScalarType data_type) {
+  switch (data_type) {
+    case c10::ScalarType::QUInt4x2:
+      return 2;
+    case c10::ScalarType::QUInt2x4:
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
+  return subByteElementPerByte(c10::typeMetaToScalarType(data_type));
+}
+
 TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize,
