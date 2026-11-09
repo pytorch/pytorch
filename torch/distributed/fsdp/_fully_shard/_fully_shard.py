@@ -950,6 +950,8 @@ class FSDPModule:
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
+        # Check every group before installing on any, so that a failed check leaves
+        # all groups on their old layout instead of a mix of old and new
         groups = []
         for module in modules:
             if not isinstance(module, FSDPModule):
