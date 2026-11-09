@@ -24,7 +24,7 @@ from .inner_tree_plan import _MAX_WARPS
 from .kernel_general import (
     _B200_CCS,
     _B200_DTYPES,
-    _B200_ONE_FIELD,
+    _B200_RAGGED_COL_ONE_FIELD,
     _combine_itree_partials,
     _flat,
     _INT32_LIMIT,
@@ -33,6 +33,8 @@ from .kernel_general import (
     _SM107_CCS,
     _SM107_DTYPES,
     _SM107_LARGE_SIZES,
+    _SM107_MAX_SIZE,
+    _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
     ReduceBlock,
 )
@@ -171,13 +173,13 @@ def select_ordered_col_config(
 
     Entries are keyed by trait type; SM107's apply to its _SM107_DTYPES views only.
     Split plans (partials > 1) without an entry take a fallback on _ORDERED_COL_CCS that
-    applies to any outputs and inherits full_tiles (ragged splits still run clamped).
-    Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
-    if the mapping has out_dtypes, only to those outputs; SM107 mappings have
-    _sm107_outputs. full_tiles means a split plan or an exact looped plan; with rows,
-    B200 single-field views whose mapping has full tiles then take measured tile widths,
-    and C 128-257 a band of widths. Views that fill fewer than the mapping's min_blocks
-    useful 32-column blocks get None.
+    applies to any outputs and inherits full_tiles. Mappings apply to unbatched
+    _ORDERED_COL_DTYPES views with 32-bit accumulators and, if the mapping has
+    out_dtypes, only to those outputs; SM107 mappings have _sm107_outputs. full_tiles
+    requests full tiles; ragged splits are clamped regardless. With rows, B200
+    single-field views whose mapping has full tiles (cfg.full_tiles) take measured tile
+    widths, and C 128-257 a band of widths. Views that fill fewer than the mapping's
+    min_blocks useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
     sm107 = cc in _SM107_CCS and dtype in _SM107_DTYPES
@@ -329,7 +331,7 @@ def select_col_config(
         welford = welford_outs == nouts == 1
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
-        one_field = trait_type in _B200_ONE_FIELD
+        one_field = trait_type in _B200_RAGGED_COL_ONE_FIELD
         if columns == 4095 and anchor == 16 << 20 and (one_field or welford):
             return cfg._replace(
                 rule="b200_ragged_c4095_ordered",
@@ -424,14 +426,14 @@ def select_col_config(
     bf16 = dtype == torch.bfloat16
     inner = False
     if columns == 256:
-        inner = (size == 16 << 20 and bf16 and welford) or (
+        inner = (size == _SM107_MIN_SIZE and bf16 and welford) or (
             size == 64 << 20 and trait_type not in _SM107_MEAN_AMAX
         )
     elif columns == 1024:
         if size in _SM107_LARGE_SIZES:
-            inner = nfields > 1 or (not bf16 and size == 2 << 30)
+            inner = nfields > 1 or (not bf16 and size == _SM107_MAX_SIZE)
     elif columns == 4096:
-        if size == 16 << 20:
+        if size == _SM107_MIN_SIZE:
             inner = not bf16 or not welford
         elif size == 64 << 20:
             inner = trait_type in (SumOps, MeanOps) if bf16 else not welford
@@ -444,7 +446,7 @@ def select_col_config(
     if size not in _SM107_LARGE_SIZES:
         return cfg
     # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
-    large = size == 2 << 30
+    large = size == _SM107_MAX_SIZE
     # Inner-tree rule names end in _ordered.
     sfx = "_ordered" if cfg.kernel_order == "inner_tree" else ""
     rule = f"rubin_c{columns}{sfx}"
@@ -1123,6 +1125,8 @@ def _reduce_col_tile(
         vec=vec,
         out_dtypes=out_dtypes[:nouts],
     )
+    if cfg.kernel_order not in ("linear", "inner_tree"):
+        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
