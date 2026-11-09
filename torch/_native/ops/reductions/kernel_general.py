@@ -386,14 +386,14 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # Input dtypes of the B200 launch policies, which the ordered route shares.
 _B200_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _B200_CCS = ((10, 0),)
-# Trait types the B200 one-field and index rules were measured with. Index rules also
-# need 32-bit accumulators, so int32 indices.
-_B200_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
+# The one-field traits of the B200 ragged-column rule (kernel_coltile.select_col_config).
+_B200_RAGGED_COL_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
 # The wide strided one-field rule's traits (see select_general_config).
 _B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
+# The B200 index rules' traits; they also need 32-bit accumulators (int32 indices).
 _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
-# trait types they measured, with rule names.
+# trait types they measured.
 _SM107_DTYPES = (torch.float32, torch.bfloat16)
 _SM107_CCS = ((10, 7),)
 _SM107_SIZES = (16 << 20, 64 << 20, 256 << 20, 2 << 30)
@@ -1073,6 +1073,8 @@ def _reduce(
         acc_bits=max(dt.width for dt in trait.fdtypes),
         alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
     )
+    if config.kernel_order not in ("linear", "inner_tree"):
+        raise ValueError(f"unknown kernel order {config.kernel_order!r}")
     if config.kernel_order == "inner_tree":
         ordered = _try_indexed_itree(
             trait, trait_key, x, red_pairs, kept_pairs, num_o, count, out_dtypes, nouts
