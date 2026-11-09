@@ -354,6 +354,8 @@ class TestSumCuteDSLOverride(TestCase):
 
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
+        """Rows the inner-tree condition cannot collapse leave this family and still
+        match ATen; out= calls write only the output's elements."""
         values = torch.arange(36, device="cuda", dtype=torch.float32)
         base = values.reshape(18, 2, 1, 1)
         x = base[::3]
@@ -368,6 +370,22 @@ class TestSumCuteDSLOverride(TestCase):
         getattr(torch, op)(x, 3, out=out)
         self.assertEqual(out, x[..., 0])
         self.assertEqual(storage[12:], torch.full_like(storage[12:], -1.0))
+
+    def test_declined_calls_reach_the_reduction_overrides(self):
+        """sum.dim_IntList calls this family declines fall through to the CuTeDSL
+        reduction overrides, which record one replay entry, rather than to ATen."""
+        from torch._native.ops.reductions import kernel_general as kg, overrides as ov
+
+        if torch.cuda.get_device_capability()[0] not in ov._ARCH_MAJORS:
+            self.skipTest("the reduction overrides serve SM90 and SM100-family only")
+        x = self._make_order_sensitive_input(128, 8192, torch.float32)
+        self.assertFalse(cutedsl_impl._cond(x, [0, 1]))
+        kg._REPLAYS.clear()
+        got = torch.sum(x, (0, 1))
+        self.assertEqual(len(kg._REPLAYS), 1)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.sum(x, (0, 1))
+        self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
 
     @parametrize("op", ("sum", "prod"))
     @parametrize("keepdim", (False, True))

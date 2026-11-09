@@ -847,7 +847,9 @@ class TestOrderedColRoute(TestCase):
             for dtype in (f32, bf16, torch.float16):
                 for out in (f32, dtype):
                     self.assertEqual(select(dtype=dtype, out_dtypes=(out,)), cfg)
-            self.assertEqual(select(T.WelfordOps, bf16), cfg)
+            self.assertEqual(select(T.WelfordOps, bf16, welford_outs=1), cfg)
+            # WelfordOps entries serve var and std, not mean-returning traits.
+            self.assertIsNone(select(T.WelfordOps, bf16, welford_outs=0))
             # Entries with out_dtypes apply only to those outputs.
             self.assertEqual(select(T.AMaxOps, bf16, out_dtypes=(bf16,)), measured)
             self.assertIsNone(select(T.AMaxOps, bf16))
@@ -954,7 +956,7 @@ class TestOrderedColDevice(TestCase):
 
     def test_split_plans_can_be_declined(self, device):
         """Decline split plans when no config is given or selected."""
-        # The column policy never selects batched views.
+        # No entry is selected for this key (test_policy_contract covers the batch rule).
         x = torch.randn(2, 32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
@@ -1293,17 +1295,20 @@ class TestOrderedColDevice(TestCase):
         with mock.patch.object(ct, "_INT32_LIMIT", 2 * 64 + 32):
             self.assertIsNone(ct.reduce_ordered_col(trait, "decline_int32", x, f32, 1))
 
-    def test_split_policy_matches_the_indexed_tree(self, device):
-        """Keep B200's split tile widths and input-dtype outputs bitwise exact."""
+    @parametrize("rows", [32768, 32769])
+    def test_split_policy_matches_the_indexed_tree(self, device, rows):
+        """Keep B200's split tile widths and input-dtype outputs bitwise exact, with an
+        exact and a ragged last partition."""
         if torch.cuda.get_device_capability(device) != (10, 0):
             self.skipTest("the split policy is measured on B200 only")
-        x = torch.randn(32768, 257, device=device, dtype=torch.float16)
-        key, trait, outputs = "split_policy", T.SumOps(), [torch.float16]
+        x = torch.randn(rows, 257, device=device, dtype=torch.float16)
+        key, trait, outputs = f"split_policy_{rows}", T.SumOps(), [torch.float16]
         got, _ = self._reduce(device, trait, key, x, 0, outputs, route=True)
         ops = [_ordered_fields(k) for k in ct._CACHE if k[:2] == ("ordered_col1", key)]
-        rows, columns = x.shape
+        columns = x.shape[1]
         plan = ct.trait_itree_plan(trait, rows, columns, 2, stage=False, device=device)
         self.assertEqual(plan.shape, "split")
+        self.assertEqual(plan.split[1] != plan.split[2], rows == 32769)
         cfg = ct.select_ordered_col_config(
             (10, 0),
             x.dtype,
@@ -1462,7 +1467,7 @@ class TestOrderedColDevice(TestCase):
 
     def test_selected_mapping_launches(self, device):
         """Launch the selected mapping; split views without an entry need a cc in
-        _ORDERED_COL_CCS, which takes the clamp-free fallback."""
+        _ORDERED_COL_CCS, whose fallback inherits full_tiles."""
         from torch import _native as native
 
         rows, cols = 32768, 64

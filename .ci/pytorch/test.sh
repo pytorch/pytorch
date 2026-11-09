@@ -625,6 +625,10 @@ test_python_smoke_b200() {
   # with the sum, mean, amax, amin and prod overrides active where their conditions
   # accept a call; declined calls stay on ATen.
   time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Their OpInfo checks too. Unlike linear_cross_entropy, these overrides replace core
+  # ops that have no DSL OpInfo variants (OPINFO_RESTRICT_TO_DSL=cutedsl would collect
+  # none), so select the standard OpInfos by name.
+  time python test/run_test.py --include test_ops -k "_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Dynamically discover the DSL override tests so new ones are picked up. This

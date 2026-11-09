@@ -657,8 +657,7 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "ragged_width" in k]
         self.assertEqual(len(mine), 2, f"expected one plan per width, got {mine}")
 
-    def test_ragged_vector_rejects_inner_tree(self):
-        # test_ragged_vector_tile_rejects covers TMA.
+    def test_ragged_vector_rejects_inner_tree_and_tma(self):
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(64, 32, device="cuda")
         with self.assertRaisesRegex(ValueError, "require the linear order"):
@@ -669,6 +668,12 @@ class TestKernelRowTile(TestCase):
                 [torch.float32],
                 order="inner_tree",
                 ragged_vector=True,
+            )
+        # A 16388-byte row stride would otherwise fail TMA's own stride check.
+        x, f32 = torch.randn(64, 4097, device="cuda"), [torch.float32]
+        with self.assertRaisesRegex(ValueError, "cannot use TMA"):
+            rt.reduce_row_tile(
+                trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
             )
 
     @parametrize(
@@ -693,13 +698,22 @@ class TestKernelRowTile(TestCase):
                 trait, cutlass.Float16, axis, 4095, ragged_vector=True, **kwargs
             )
 
+    def test_ragged_vector_tile_rejects_empty_rows(self):
+        trait, f16 = T.SumOps(acc=cutlass.Float32), cutlass.Float16
+        with self.assertRaisesRegex(ValueError, "nonempty rows"):
+            rt.tile.TileReduce(trait, f16, "row", 0, vec=8, ragged_vector=True)
+
     def test_ragged_vector_rejects_misaligned_rows(self):
         """Refuse empty rows and rows not starting at r * N from an aligned base."""
         trait = T.SumOps(acc=cutlass.Float32)
         base = torch.randn(34, 4100, device="cuda")
-        cases = (base.flatten()[1:4098].view(1, 4097), base[:, :4097], base[:, :0])
-        for x in cases:
-            with self.assertRaisesRegex(ValueError, "contiguous 16-byte aligned"):
+        cases = (
+            (base.flatten()[1:4098].view(1, 4097), "16-byte aligned base"),
+            (base[:, :4097], "contiguous rows"),
+            (base[:, :0], "nonempty rows"),
+        )
+        for x, msg in cases:
+            with self.assertRaisesRegex(ValueError, msg):
                 rt.reduce_row_tile(
                     trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
                 )

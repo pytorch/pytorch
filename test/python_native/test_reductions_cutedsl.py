@@ -81,6 +81,16 @@ class TestCuTeDSLReductionWiring(TestCase):
         fn = getattr(torch, op)
         self.assertEqual(self._run(lambda: fn(x, dim=-1))[1], 1)
 
+    def test_per_overload_opt_out(self, device):
+        """Disable every override by the overload names the overrides document."""
+        x = torch.randn(128, 512, device=device)
+        ops = ("sum", "mean", "prod", "amax", "amin")
+        calls = [functools.partial(getattr(torch, op), x, dim=-1) for op in ops]
+        names = ("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin")
+        with torch.backends.python_native.operations_disabled(*names):
+            self.assertEqual([self._run(call)[1] for call in calls], [0] * len(calls))
+        self.assertEqual([self._run(call)[1] for call in calls], [1] * len(calls))
+
     def test_unsupported_dtype_falls_back(self, device):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""
         xi = torch.randint(0, 9, (64, 64), device=device)
@@ -278,7 +288,8 @@ class TestCuTeDSLReductionWiring(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         want = kg.reduce_dim(trait, "ref", x, [1], torch.float32, order="inner_tree")
         self.assertEqual(got, want, atol=0, rtol=0)
-        unordered, fires = self._run(lambda: torch.sum(x, dim=-1))
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}):
+            unordered, fires = self._run(lambda: torch.sum(x, dim=-1))
         self.assertEqual(fires, 1)
         self.assertFalse(torch.equal(unordered, got))
 

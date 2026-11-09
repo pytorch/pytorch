@@ -1,9 +1,11 @@
 """CUDA aten reduction overrides backed by the CuteDSL kernels.
 
 Conditions check capability and fall through to ATen for unsupported calls.
-Supported layouts use a fast path or the general TensorIterator decode. No out=
-overload or full prod is registered, so those stay on ATen, whose results can differ
-bitwise from the served overloads'.
+Supported layouts use a fast path or the general TensorIterator decode. Full prod and
+the Python out= overloads (sum.IntList_out, mean.out, amax.out, amin.out,
+prod.int_out) are not registered, so they stay on ATen, whose results can differ
+bitwise from the served overloads'. aten::sum.out and at::sum_out route through
+sum.default to sum.dim_IntList and are served.
 
 Of the launch policies, these one-field operations reach only the one-field rules;
 index and Welford rules serve direct kernel calls.
