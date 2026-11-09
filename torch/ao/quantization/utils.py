@@ -666,8 +666,8 @@ def determine_qparams(
             [0], device=min_val.device.type
         )
 
-    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
-    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+    min_val_neg = torch.min(min_val, min_val.new_zeros(()))
+    max_val_pos = torch.max(max_val, max_val.new_zeros(()))
 
     device = min_val_neg.device
     scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)

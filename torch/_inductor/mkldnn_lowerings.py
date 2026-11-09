@@ -841,10 +841,8 @@ def register_onednn_fusion_ops():
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
                     )
-                    and torch.equal(
-                        torch.zeros_like(V.graph.constants[w_zp.get_name()]),
-                        V.graph.constants[w_zp.get_name()],
-                    )
+                    and torch.count_nonzero(V.graph.constants[w_zp.get_name()]).item()
+                    == 0
                 ) and use_cpp_gemm_template(layout, x, packed_weight):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
 
@@ -1190,10 +1188,8 @@ def register_onednn_fusion_ops():
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
                     )
-                    and torch.equal(
-                        torch.zeros_like(V.graph.constants[w_zp.get_name()]),
-                        V.graph.constants[w_zp.get_name()],
-                    )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
+                    and torch.count_nonzero(V.graph.constants[w_zp.get_name()]).item()
+                    == 0  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
                     and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()]

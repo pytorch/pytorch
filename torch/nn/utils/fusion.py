@@ -83,7 +83,7 @@ def fuse_conv_bn_weights(
     conv_weight_dtype = conv_w.dtype
     conv_bias_dtype = conv_b.dtype if conv_b is not None else conv_weight_dtype
     if conv_b is None:
-        conv_b = torch.zeros_like(bn_rm)
+        conv_b = bn_rm.new_zeros(())
     if bn_w is None:
         bn_w = torch.ones_like(bn_rm)
     if bn_b is None:
@@ -185,7 +185,7 @@ def fuse_linear_bn_weights(
     linear_weight_dtype = linear_w.dtype
     linear_bias_dtype = linear_b.dtype if linear_b is not None else linear_weight_dtype
     if linear_b is None:
-        linear_b = torch.zeros_like(bn_rm)
+        linear_b = bn_rm.new_zeros(())
     bn_scale = bn_w * torch.rsqrt(bn_rv + bn_eps)
 
     fused_w = linear_w * bn_scale.unsqueeze(-1).to(dtype=linear_weight_dtype)

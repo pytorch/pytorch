@@ -104,7 +104,7 @@ class GeneralizedPareto(Distribution):
         loc = self.loc
         scale = self.scale
         concentration = self.concentration
-        eq_zero = torch.isclose(concentration, torch.zeros_like(concentration))
+        eq_zero = torch.isclose(concentration, concentration.new_zeros(()))
         safe_conc = torch.where(eq_zero, 1, concentration)
         logu = torch.log1p(-value)
         where_nonzero = loc + scale / safe_conc * torch.expm1(-safe_conc * logu)

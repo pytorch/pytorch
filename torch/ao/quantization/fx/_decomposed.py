@@ -855,8 +855,8 @@ def _choose_qparams_per_token_asymmetric_impl(
     qmin, qmax = -128, 127
     min_val = torch.amin(input, dim=-1, keepdim=True)
     max_val = torch.amax(input, dim=-1, keepdim=True)
-    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
-    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+    min_val_neg = torch.min(min_val, min_val.new_zeros(()))
+    max_val_pos = torch.max(max_val, max_val.new_zeros(()))
     eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
 
     # scale
