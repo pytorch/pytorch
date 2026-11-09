@@ -19,7 +19,10 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.inductor_utils import RUN_CPU
+from torch.testing._internal.inductor_utils import (
+    CPU_TESTS_REQUESTED,
+    RequiresCPUInductor,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -41,9 +44,10 @@ except unittest.SkipTest:
 
 
 @unittest.skipIf(
-    IS_MACOS or not RUN_CPU, "requires a supported CPU cpp_wrapper test configuration"
+    IS_MACOS or not CPU_TESTS_REQUESTED,
+    "requires a supported CPU cpp_wrapper test configuration",
 )
-class CppWrapperAssertTests(InductorTestCase):
+class CppWrapperAssertTests(RequiresCPUInductor, InductorTestCase):
     def test_inplace_view_alignment_uses_result_classification(self):
         class FakeInplaceViewExternKernel:
             @staticmethod

@@ -27,11 +27,12 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
+    CPU_TESTS_REQUESTED,
     GPU_TYPE,
     IS_BIG_GPU,
     requires_gpu,
     requires_triton,
-    RUN_CPU,
+    RequiresCPUInductor,
     RUN_GPU,
 )
 
@@ -272,9 +273,9 @@ class TestSubprocess(TestCase):
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
-if RUN_CPU:
+if CPU_TESTS_REQUESTED:
 
-    class CpuTests(TestSubprocess):
+    class CpuTests(RequiresCPUInductor, TestSubprocess):
         common = check_model
         device = "cpu"
 
@@ -296,5 +297,5 @@ if RUN_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU:
+    if CPU_TESTS_REQUESTED or RUN_GPU:
         run_tests(needs="filelock")

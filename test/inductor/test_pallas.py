@@ -2662,9 +2662,11 @@ class PallasLoweringTests(TestCase):
         self.assertNotIsInstance(graph.graph_outputs[0].data, FallbackKernel)
 
 
-if test_torchinductor.RUN_CPU and has_cpu_pallas():
+if test_torchinductor.CPU_TESTS_REQUESTED and has_cpu_pallas():
 
-    class PallasTestsCPU(PallasTestsMixin, TestCase):
+    class PallasTestsCPU(
+        test_torchinductor.RequiresCPUInductor, PallasTestsMixin, TestCase
+    ):
         DEVICE = "cpu"
 
     make_pallas(test_torchinductor.SweepInputsCpuTest)
