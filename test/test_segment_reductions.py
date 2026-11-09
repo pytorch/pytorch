@@ -575,6 +575,21 @@ class TestSegmentReductions(TestCase):
         lengths = torch.ones(4, 1, dtype=torch.long, device=device)
         out = torch._segment_reduce(data, "sum", lengths=lengths, axis=1)
         self.assertEqual(out, data.clone(memory_format=torch.contiguous_format))
+        # Lengths (3, 1) whose size-1 dim has stride 2; stepping by it reads 2, 2, 9
+        data = torch.randn(3, 2, 5, device=device)
+        lengths = torch.tensor([2, 2, 2, 9, 9], device=device).as_strided((3, 1), (1, 2))
+        out = torch._segment_reduce(data, "sum", lengths=lengths, axis=1)
+        self.assertEqual(out, data.sum(1, keepdim=True))
+        # Backward with a grad whose size-1 dim has stride 12, inside a larger buffer
+        data = torch.randn(4, 1, 3, device=device, requires_grad=True)
+        lengths = torch.ones(4, 1, dtype=torch.long, device=device)
+        grad = torch.randn(48, device=device)[:12].view(1, 4, 3).transpose(0, 1)
+        for reduce in ("sum", "max"):
+            out = torch._segment_reduce(data, reduce, lengths=lengths, axis=1)
+            (actual,) = torch.autograd.grad(out, data, grad, retain_graph=True)
+            dense_grad = grad.clone(memory_format=torch.contiguous_format)
+            (expected,) = torch.autograd.grad(out, data, dense_grad)
+            self.assertEqual(actual, expected)
 
 
 
