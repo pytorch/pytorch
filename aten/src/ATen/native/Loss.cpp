@@ -197,7 +197,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
-  auto zeros = at::zeros({}, cos.options());
+  auto zeros = cos.new_zeros({});
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
   auto output_pos = at::where(target == 1, pos, zeros);
@@ -207,7 +207,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
-  auto zeros = at::zeros({}, self.options());
+  auto zeros = self.new_zeroes({});
   auto margin_diff = (margin - self);
   // For Composite Compliance,
   // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
