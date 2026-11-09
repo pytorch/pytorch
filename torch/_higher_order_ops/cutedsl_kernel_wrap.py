@@ -59,43 +59,60 @@ def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
     return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
 
 
+def normalize_mutates_args(fn: Callable[..., Any], mutates_args: object) -> MutatesArgs:
+    """The write set of host function ``fn``: "unknown", or the parameter names, read
+    once (a generator works) into a tuple without repeats, of parameters the kernel
+    can write: not the stream, nor a Constexpr or cutlass Numeric one. Raises a
+    TypeError for anything but "unknown" or an iterable of str (exactly str: not the
+    numpy strings of an array of names), and a ValueError for a name the kernel
+    cannot write, naming ``fn``; an empty write set does not parse the signature."""
+    if isinstance(mutates_args, str) and mutates_args == "unknown":
+        return "unknown"
+    name = cutedsl_kernel_name(fn)
+    error = TypeError(
+        f'CuTeDSL kernel {name}: mutates_args must be "unknown" or an iterable of '
+        "parameter names, each exactly a str (not a numpy string or another str "
+        f"subclass), got {mutates_args!r}"
+    )
+    if isinstance(mutates_args, str):
+        raise error
+    try:
+        # Materialize once: a generator would be empty on a second pass.
+        names = tuple(mutates_args)  # type: ignore[call-overload]
+    except TypeError:
+        raise error from None
+    if not all(type(n) is str for n in names):
+        raise error
+    names = tuple(dict.fromkeys(names))
+    if not names:
+        return names
+    info = get_host_fn_info(fn)
+    scalars = {info.stream_param, *info.constexpr_params, *info.numeric_params}
+    writable = tuple(p for p in info.params if p not in scalars)
+    for n in names:
+        if n not in writable:
+            raise ValueError(
+                f"CuTeDSL kernel {name}: mutates_args names {n!r}, but the parameters "
+                "it can write (all but the stream, Constexpr and cutlass Numeric "
+                f"ones) are {writable}"
+            )
+    return names
+
+
 @dataclasses.dataclass(frozen=True)
 class CuteDSLKernel:
     """Side-table entry for a CuTeDSL host function: plays the part a JITFunction
     plays for Triton. The write set is part of the record, so one host function
     wrapped with two different lists gets two entries. ``mutates_args`` may be any
-    iterable of parameter names (stored as a tuple without repeats), or "unknown"."""
+    iterable of parameter names (stored as a tuple without repeats), or "unknown",
+    as normalize_mutates_args validates it."""
 
     fn: Callable[..., Any]
     mutates_args: MutatesArgs
 
     def __post_init__(self) -> None:
-        if self.mutates_args == "unknown":
-            return
-        error = TypeError(
-            f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or an '
-            f"iterable of parameter names, got {self.mutates_args!r}"
-        )
-        if isinstance(self.mutates_args, str):
-            raise error
-        try:
-            names = tuple(dict.fromkeys(self.mutates_args))
-        except TypeError:
-            raise error from None
-        if not all(isinstance(name, str) for name in names):
-            raise error
-        object.__setattr__(self, "mutates_args", names)
-        if not names:
-            return
-        info = get_host_fn_info(self.fn)
-        writable = tuple(p for p in info.params if p != info.stream_param)
-        for name in names:
-            if name not in writable:
-                raise ValueError(
-                    f"CuTeDSL kernel {self.name}: mutates_args names {name!r}, but "
-                    f"its parameters other than the stream {info.stream_param!r} "
-                    f"are {writable}"
-                )
+        mutates_args = normalize_mutates_args(self.fn, self.mutates_args)
+        object.__setattr__(self, "mutates_args", mutates_args)
 
     @property
     def name(self) -> str:
@@ -108,6 +125,12 @@ def _is_cutlass_type(cls: type) -> bool:
     return module == "cutlass" or module.startswith("cutlass.")
 
 
+# What to pass instead of a DSL runtime object (see is_dsl_runtime_object).
+_DSL_RUNTIME_OBJECT_FIX = (
+    "pass torch.Tensor and Python values; PT2 converts tensors and supplies the stream"
+)
+
+
 class _CuteDSLConstantRules(ConstantRules):
     def is_dsl_value(self, value: object) -> bool:
         return _is_cutlass_type(type(value))
@@ -116,6 +139,9 @@ class _CuteDSLConstantRules(ConstantRules):
         # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value.
         inner = getattr(value, "value", None) if self.is_dsl_value(value) else None
         return inner if isinstance(inner, (bool, int, float)) else None
+
+    def refusal(self, cls: type) -> str | None:
+        return _DSL_RUNTIME_OBJECT_FIX if is_dsl_runtime_object(cls) else None
 
 
 CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
@@ -277,6 +303,17 @@ def python_scalar(value: Any, annotation: type | None = None) -> Any:
         if isinstance(value, Numeric):
             return value.value
     return value
+
+
+def is_dsl_runtime_object(cls: type) -> bool:
+    """Objects PT2 has to make itself: cute tensors and pointers (it converts torch
+    tensors) and CUDA streams (it passes the current stream). Other DSL values, such
+    as cutlass dtype classes, enums and Numeric values, are ordinary constants."""
+    module = getattr(cls, "__module__", "") or ""
+    name = getattr(cls, "__name__", "")
+    return module.startswith("cutlass.cute.runtime") or (
+        module.startswith("cuda.") and name in ("CUstream", "CUdeviceptr")
+    )
 
 
 _host_fn_infos: "weakref.WeakKeyDictionary[Callable[..., Any], CuteDSLHostFnInfo]" = (

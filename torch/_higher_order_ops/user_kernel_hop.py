@@ -16,8 +16,8 @@ import enum
 import sys
 import threading
 import types
-from collections.abc import Callable, Iterable, Mapping
-from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, Literal, NamedTuple, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
@@ -121,6 +121,12 @@ class ConstantRules:
         or None for any other value."""
         return None
 
+    def refusal(self, cls: type) -> str | None:
+        """What to pass instead of a value of type ``cls``, one of the DSL's objects
+        that PT2 makes for each launch itself (a DSL tensor or stream, say), which a
+        constant cannot be or hold; None for any other type."""
+        return None
+
 
 def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | None:
     """The attributes constant_key keys an object by, and _snapshot copies: the
@@ -128,9 +134,9 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     (attributes set ad hoc or in __post_init__), or the __dict__ of a plain object
     (one with no __slots__ attributes that is not callable or a module, of a class
     that does not hash by value), such as a mutable config object. None for any other
-    value, the DSL's own values included, and for an object, a dataclass instance
-    too, whose class has a built-in base keeping state outside __dict__ (see
-    _has_builtin_state).
+    value, the DSL's own values and tensors (of a subclass that does not hash too)
+    included, and for an object, a dataclass instance too, whose class has a built-in
+    base keeping state outside __dict__ (see _has_builtin_state).
 
     Limitation: an object with state in __slots__ attributes that are not dataclass
     fields or in a built-in base (see _has_builtin_state), or a callable object other
@@ -143,7 +149,12 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     it): a side-table entry holds it for the life of the process (see KernelSideTable),
     and so does the eager compile cache (see torch/_native/cutedsl/user_kernel.py)."""
     cls = type(value)
-    if rules.is_dsl_value(value) or _has_slot_state(value) or _has_builtin_state(cls):
+    if (
+        rules.is_dsl_value(value)
+        or isinstance(value, Tensor)
+        or _has_slot_state(value)
+        or _has_builtin_state(cls)
+    ):
         return None
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         state = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
@@ -163,16 +174,83 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     return None
 
 
+class ConstantContents(NamedTuple):
+    """One level of a constant kernel argument that constant_key keys by content."""
+
+    # The attribute names an object is keyed by; none for a tuple, list or dict.
+    names: tuple[str, ...]
+    # (format, key, item) for each value directly inside, in walk order, where
+    # format.format(key) names the step to the item, such as "[0]".
+    steps: list[tuple[str, object, object]]
+    # A copy of the container with new items in their places (a tuple with the same
+    # items is returned as is).
+    rebuild: Callable[[list[object]], object]
+
+
+def constant_contents(value: object, rules: ConstantRules) -> ConstantContents | None:
+    """The values directly inside a constant kernel argument that constant_key keys,
+    and _snapshot copies, by content, for any walk of a constant to agree with the
+    side table: the items of a tuple or list, the keys and then the values of a dict
+    (of a subclass too), the attributes _object_state reads of any other object.
+    None for a value that is not such a container."""
+    names: tuple[str, ...] = ()
+    steps: list[tuple[str, object, object]]
+    if isinstance(value, (tuple, list)):
+        steps = [("[{!r}]", i, item) for i, item in enumerate(value)]
+    elif isinstance(value, dict):
+        steps = [(".keys()[{!r}]", i, key) for i, key in enumerate(value)]
+        steps += [("[{!r}]", key, item) for key, item in value.items()]
+    else:
+        state = _object_state(value, rules)
+        if state is None:
+            return None
+        names = tuple(state)
+        steps = [(".{}", name, item) for name, item in state.items()]
+
+    def rebuild(items: list[object]) -> object:
+        if isinstance(value, list):
+            new_list = _copy_of(value)
+            new_list[:] = items
+            return new_list
+        if isinstance(value, tuple):
+            if all(a is b for a, b in zip(items, value)):
+                return value
+            # A namedtuple is rebuilt with _make, any other tuple from the items.
+            return getattr(type(value), "_make", type(value))(items)
+        if isinstance(value, dict):
+            half = len(items) // 2
+            new_dict = _copy_of(value)
+            new_dict.clear()
+            # Each item assigned, as pickle rebuilds a dict subclass: a Counter's
+            # update() counts the pairs, and dict.update() would bypass the order an
+            # OrderedDict keeps.
+            for key, item in zip(items[:half], items[half:]):
+                new_dict[key] = item
+            return new_dict
+        cls = type(value)
+        # Made as copy.copy makes a plain object, not by copy.copy: a class's
+        # __copy__ or __reduce__ can return the object itself or a shared one (a
+        # RootLogger's returns the process's root logger), which the assignments
+        # below would overwrite.
+        new = object.__new__(cls) if cls.__new__ is object.__new__ else _copy_of(value)
+        for name, item in zip(names, items):
+            object.__setattr__(new, name, item)
+        return new
+
+    return ConstantContents(names, steps, rebuild)
+
+
 def constant_key(value: object, rules: ConstantRules) -> object:
     """A hashable key for a constant kernel argument, equal for two values only when
-    they are interchangeable: lists, tuples, dicts and objects (see _object_state)
-    by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
-    same), numpy floats and complex values by type and the hex() of each float
-    component (see _float_component_keys), a DSL scalar by its type and Python value
-    (see ConstantRules), other values by their own equality. Any other unhashable
-    value, a tensor, and a defaultdict with a default_factory (which the key would
-    leave out), as the value or anywhere inside it, are refused with a TypeError,
-    and a value that contains itself with a ValueError."""
+    they are interchangeable: containers (see constant_contents) by type and
+    content, floats by hex() (-0.0 is not 0.0, and every NaN is the same), numpy
+    floats and complex values by type and the hex() of each float component (see
+    _float_component_keys), a DSL scalar by its type and Python value (see
+    ConstantRules), other values by their own equality. Any other unhashable value,
+    a defaultdict with a default_factory (which the key would leave out), and a
+    tensor or a value the DSL refuses (ConstantRules.refusal), as the value or in a
+    container, are refused with a TypeError, and a value that contains itself with a
+    ValueError."""
     return _ContentWalk(rules).key(value)
 
 
@@ -184,10 +262,10 @@ def _snapshot(value: object, rules: ConstantRules) -> object:
 
 
 def _copy_of(value: _T) -> _T:
-    """copy.copy(value) for _snapshot, refused with a TypeError if it is ``value``
-    itself (a class's __copy__ or __reduce__ can return the object itself): the
-    snapshot would be the caller's object, which _snapshot would write into and the
-    caller could still change."""
+    """copy.copy(value) for _snapshot and map_constant, refused with a TypeError if
+    it is ``value`` itself (a class's __copy__ or __reduce__ can return the object
+    itself): the copy would be the caller's object, which they would write into and
+    the caller could still change."""
     new = copy.copy(value)
     if new is value:
         raise TypeError(
@@ -197,10 +275,23 @@ def _copy_of(value: _T) -> _T:
     return new
 
 
+def map_constant(
+    value: object, rules: ConstantRules, fn: Callable[[object], object]
+) -> object:
+    """``value`` with ``fn`` applied to each value in it that is not a container (see
+    constant_contents), or to ``value`` itself if it is not one. A container is
+    copied only if ``fn`` changed something in it, and refused if that copy would be
+    the container itself (see _copy_of). A tensor or a value the DSL refuses, as the
+    value or in a container, and a value that contains itself are refused, as
+    constant_key refuses them."""
+    return _ContentWalk(rules).map(value, fn)
+
+
 class _ContentWalk:
-    """One walk of a constant kernel argument's contents, by constant_key or
-    _snapshot. A cycle would be followed forever, so entering a container that the
-    walk is already inside raises a ValueError naming the cycle."""
+    """One walk of a constant kernel argument's contents (see constant_contents), by
+    constant_key, _snapshot or map_constant. A cycle would be followed forever, so
+    entering a container that the walk is already inside raises a ValueError naming
+    the cycle."""
 
     def __init__(self, rules: ConstantRules) -> None:
         self.rules = rules
@@ -211,36 +302,43 @@ class _ContentWalk:
     def visit(
         self,
         container: object,
-        pairs: Iterable[tuple[object, object]],
-        step: str,
+        steps: list[tuple[str, object, object]],
         fn: Callable[[object], object],
     ) -> list[object]:
-        """``fn`` of the item of each (key, item) pair of ``container``, called with
-        the container on the path; ``step`` formats the key."""
+        """``fn`` of the item of each (format, key, item) step of ``container`` (see
+        ConstantContents), called with the container on the path."""
         if id(container) in self.path:
             start = list(self.path).index(id(container))
-            steps = list(self.path.values())[start:]
+            cycle = list(self.path.values())[start:]
             raise ValueError(
                 f"a constant kernel argument of type {type(container).__name__} "
-                f"refers to itself through {''.join(f.format(k) for f, k in steps)}"
+                f"refers to itself through {''.join(f.format(k) for f, k in cycle)}"
             )
         results = []
-        for key, item in pairs:
+        for step, key, item in steps:
             self.path[id(container)] = (step, key)
             results.append(fn(item))
         self.path.pop(id(container), None)
         return results
 
-    def key(self, value: object) -> object:
+    def refuse(self, value: object) -> None:
+        """Refuse ``value``, met at the walk's path, if it is a tensor or a value the
+        DSL refuses (ConstantRules.refusal)."""
         if isinstance(value, Tensor):
             # Keyed by identity, a tensor would stay alive with its key, and it would
             # reach the DSL without from_dlpack.
-            where = "".join(f.format(k) for f, k in self.path.values())
-            raise TypeError(
-                "a constant kernel argument holds a tensor"
-                + (f" at {where}" if where else "")
-                + ": pass each tensor as its own argument"
-            )
+            held, fix = "a tensor", "pass each tensor as its own argument"
+        else:
+            fix = self.rules.refusal(type(value))
+            if fix is None:
+                return
+            held = f"a {type(value).__name__}"
+        where = "".join(f.format(k) for f, k in self.path.values())
+        what = f"holds {held} at {where}" if where else f"is {held}"
+        raise TypeError(f"a constant kernel argument {what}: {fix}")
+
+    def key(self, value: object) -> object:
+        self.refuse(value)
         if isinstance(value, collections.defaultdict) and (
             value.default_factory is not None
         ):
@@ -248,13 +346,6 @@ class _ContentWalk:
                 f"a constant kernel argument of type {type(value).__name__} has a "
                 "default_factory, which its key would leave out: pass a dict"
             )
-        if isinstance(value, (tuple, list)):
-            items = self.visit(value, enumerate(value), "[{!r}]", self.key)
-            return (type(value), tuple(items))
-        if isinstance(value, dict):
-            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.key)
-            items = self.visit(value, value.items(), "[{!r}]", self.key)
-            return (type(value), tuple(keys), tuple(items))
         scalar = self.rules.scalar_value(value)
         if scalar is not None:
             return (type(value), self.key(scalar))
@@ -263,10 +354,10 @@ class _ContentWalk:
             return (type(value), float_keys)
         if isinstance(value, float):
             return (type(value), value.hex())
-        state = _object_state(value, self.rules)
-        if state is not None:
-            items = self.visit(value, state.items(), ".{}", self.key)
-            return (type(value), tuple(state), tuple(items))
+        contents = constant_contents(value, self.rules)
+        if contents is not None:
+            items = self.visit(value, contents.steps, self.key)
+            return (type(value), contents.names, tuple(items))
         try:
             hash(value)
         except TypeError:
@@ -291,40 +382,20 @@ class _ContentWalk:
             # A DSL scalar is keyed by its value, which its owner can still change;
             # an enum member's cannot (copy.copy returns the member itself).
             return value if isinstance(value, enum.Enum) else _copy_of(value)
-        if isinstance(value, (tuple, list)):
-            items = self.visit(value, enumerate(value), "[{!r}]", self.snapshot)
-            if isinstance(value, list):
-                new_list = _copy_of(value)
-                new_list[:] = items
-                return new_list
-            if all(a is b for a, b in zip(items, value)):
-                return value
-            # A namedtuple is rebuilt with _make, any other tuple from the items.
-            return getattr(type(value), "_make", type(value))(items)
-        if isinstance(value, dict):
-            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.snapshot)
-            items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
-            new_dict = _copy_of(value)
-            new_dict.clear()
-            # Each item assigned, as pickle rebuilds a dict subclass: a Counter's
-            # update() counts the pairs, and dict.update() would bypass the order an
-            # OrderedDict keeps.
-            for key, item in zip(keys, items):
-                new_dict[key] = item
-            return new_dict
-        state = _object_state(value, self.rules)
-        if state is None:
+        contents = constant_contents(value, self.rules)
+        if contents is None:
             return value
-        items = self.visit(value, state.items(), ".{}", self.snapshot)
-        cls = type(value)
-        # Made as copy.copy makes a plain object, not by copy.copy: a class's
-        # __copy__ or __reduce__ can return the object itself or a shared one (a
-        # RootLogger's returns the process's root logger), which the assignments
-        # below would overwrite.
-        new = object.__new__(cls) if cls.__new__ is object.__new__ else _copy_of(value)
-        for name, item in zip(state, items):
-            object.__setattr__(new, name, item)
-        return new
+        return contents.rebuild(self.visit(value, contents.steps, self.snapshot))
+
+    def map(self, value: object, fn: Callable[[object], object]) -> object:
+        self.refuse(value)
+        contents = constant_contents(value, self.rules)
+        if contents is None:
+            return fn(value)
+        items = self.visit(value, contents.steps, lambda item: self.map(item, fn))
+        if all(new is old for new, (_, _, old) in zip(items, contents.steps)):
+            return value
+        return contents.rebuild(items)
 
 
 # We cannot put user kernels into the FX graph as the graph nodes

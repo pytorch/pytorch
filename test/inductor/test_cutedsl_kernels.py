@@ -22,6 +22,7 @@ import numpy as np
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
+    CUTEDSL_CONSTANT_RULES,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_functional,
     cutedsl_kernel_wrapper_mutation,
@@ -560,6 +561,65 @@ class CuteDSLHOPTests(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             launch_cutedsl_kernel(mul_cfg_kernel, args)
 
+    def test_map_constant_walks_what_the_side_table_keys(self):
+        # map_constant walks the containers constant_key keys by content and copies
+        # only those whose contents fn changed. It refuses what constant_key refuses
+        # as or in a constant, with the same errors, saying where: a tensor (also of a
+        # subclass that does not hash), a DSL runtime object and a cycle. Both walks
+        # refuse a tensor before they ask constant_contents whether it is a
+        # container; test/test_hop_infra.py asks it directly.
+        from torch._higher_order_ops.user_kernel_hop import constant_key, map_constant
+
+        class UnhashableTensor(torch.Tensor):
+            __hash__ = None
+
+        rules = CUTEDSL_CONSTANT_RULES
+        value = (MulCfg([1.0, "a"]), {"k": 2.0})
+        leaves = []
+
+        def collect(leaf):
+            leaves.append(leaf)
+            return leaf
+
+        self.assertIs(map_constant(value, rules, collect), value)
+        self.assertEqual(leaves, [1.0, "a", "k", 2.0])
+
+        def double(leaf):
+            return 2 * leaf if isinstance(leaf, float) else leaf
+
+        doubled = map_constant(value, rules, double)
+        self.assertEqual((doubled[0].alpha, doubled[1]), ([2.0, "a"], {"k": 4.0}))
+        self.assertEqual(value[0].alpha[0], 1.0)
+
+        tensor_fix = "pass each tensor as its own argument"
+        dsl_fix = (
+            "pass torch.Tensor and Python values; PT2 converts tensors and supplies "
+            "the stream"
+        )
+        walks = {
+            "map_constant": functools.partial(map_constant, fn=collect),
+            "constant_key": constant_key,
+        }
+        for held, name, fix in (
+            (_rand(4).as_subclass(UnhashableTensor), "tensor", tensor_fix),
+            (from_dlpack(_rand(4), assumed_align=16), "_Tensor", dsl_fix),
+            (_stream(), "CUstream", dsl_fix),
+        ):
+            for value, what in (
+                ((MulCfg([1.0, held]),), rf"holds a {name} at \[0\]\.alpha\[1\]"),
+                (held, f"is a {name}"),
+            ):
+                msg = f"^a constant kernel argument {what}: {re.escape(fix)}$"
+                for walk_name, walk in walks.items():
+                    with self.subTest(held=name, walk=walk_name, top=value is held):
+                        with self.assertRaisesRegex(TypeError, msg):
+                            walk(value, rules)
+        items = [1.0]
+        items.append(items)
+        msg = r"^a constant kernel argument of type list refers to itself through "
+        with self.assertRaisesRegex(ValueError, msg + r"\[1\]$"):
+            map_constant(items, rules, collect)
+
     def test_constants_holding_tensors_are_refused(self):
         # The eager launch refuses a constant that holds a tensor, as constant_key
         # does (test/test_hop_infra.py), naming the kernel and the parameter.
@@ -1073,20 +1133,43 @@ class CuteDSLHOPTests(TestCase):
         )
 
     def test_side_table_record_checks_mutates_args(self):
-        # A name that is not a parameter (a typo) or is the stream would never be
-        # cloned and written back, so a write would be lost: the record refuses it
-        # with a ValueError, and a write set that is not "unknown" or an iterable of
-        # names with a TypeError. An empty write set does not parse the signature.
+        # The record refuses a name that is not a parameter (a typo, whose argument
+        # would never be cloned and written back, so a write would be lost) or names
+        # one the kernel cannot write (the stream, a Constexpr or a cutlass Numeric
+        # parameter) with a ValueError, and anything but "unknown" or an iterable of
+        # str with a TypeError (normalize_mutates_args): None, a bare string, a
+        # non-str name, an array of names (numpy strings), and an object equal to
+        # everything, compared with "unknown" only if it is a str.
+        # An empty write set does not parse the signature.
         msg = (
-            r"^CuTeDSL kernel add_kernel: mutates_args names '{}', but its parameters "
-            r"other than the stream 'stream' are \('mX', 'mY', 'mOut', 'n'\)$"
+            r"^CuTeDSL kernel {}: mutates_args names '{}', but the parameters it can "
+            r"write \(all but the stream, Constexpr and cutlass Numeric ones\) are "
+            r"\({}\)$"
         )
-        for names, bad in ((("mout",), "mout"), (["mOut", "stream"], "stream")):
-            with self.assertRaisesRegex(ValueError, msg.format(bad)):
-                CuteDSLKernel(add_kernel, names)
-        msg = 'mutates_args must be "unknown" or an iterable of parameter names, got '
-        for bad in ("mOut", 5, ["mOut", 1]):
-            with self.assertRaisesRegex(TypeError, re.escape(f"{msg}{bad!r}") + "$"):
+        add_params = "'mX', 'mY', 'mOut'"
+        for fn, names, bad, params in (
+            (add_kernel, ("mout",), "mout", add_params),
+            (add_kernel, ["mOut", "stream"], "stream", add_params),
+            (add_kernel, ["n"], "n", add_params),
+            (mul_const_kernel, ["mOut", "alpha"], "alpha", "'mX', 'mOut'"),
+        ):
+            error = msg.format(fn.__name__, bad, params)
+            with self.assertRaisesRegex(ValueError, error):
+                CuteDSLKernel(fn, names)
+
+        class EqualToAll:
+            def __eq__(self, other):
+                return True
+
+        iterable = (
+            'CuTeDSL kernel add_kernel: mutates_args must be "unknown" or an iterable '
+            "of parameter names, each exactly a str (not a numpy string or another str "
+            "subclass), got "
+        )
+        names = np.array(["mX", "mOut"])
+        for bad in ("mOut", None, 5, [1], ["mOut", 1], names, EqualToAll()):
+            error = "^" + re.escape(f"{iterable}{bad!r}") + "$"
+            with self.assertRaisesRegex(TypeError, error):
                 CuteDSLKernel(add_kernel, bad)
         self.assertEqual(CuteDSLKernel(no_stream_kernel, ()).mutates_args, ())
 
