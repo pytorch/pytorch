@@ -194,10 +194,12 @@ __device__ __forceinline__ void red_sub_relaxed_sys_u32(
 }
 #else
 __device__ __forceinline__ void multimem_red_add1_release_u32(uint32_t* addr) {
-  asm("multimem.red.release.sys.global.add.u32 [%0], 1;"
-      :
-      : "l"(addr)
-      : "memory");
+  // Order the multicast arrival before polling through its unicast alias.
+  asm volatile("multimem.red.release.sys.global.add.u32 [%0], 1;\n"
+               "fence.proxy.alias;"
+               :
+               : "l"(addr)
+               : "memory");
 }
 
 __device__ __forceinline__ uint32_t ld_acquire_sys_u32(uint32_t* addr) {
