@@ -7144,7 +7144,6 @@ class TestTorchDeviceType(TestCase):
         msg = (
             "expected scalar type .* but found"  # CUDA
             "|batch1 and batch2 to have the same dtype"  # XPU
-            "|same dtype"  # MPS baddbmm
             "|Expected arguments of same type"  # MPS bmm/matmul
         )
 
