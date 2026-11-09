@@ -113,6 +113,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
     Member,
@@ -164,7 +165,7 @@ def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
     Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's hash_impl and tp_richcompare_impl MRO walks.
+    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -390,6 +391,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
 
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
+
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -413,7 +430,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return GuardBuilder.CLASS_MATCH
         return None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if self.source:
             try:
                 install_guard(self.source.make_guard(GuardBuilder.CLASS_MATCH))
@@ -1466,7 +1483,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         # it resolves through cls.__mro__ first and can land on
                         # a different object (object.__repr__ rather than the
                         # metaclass __repr__). There is no expression for the
-                        # bound method itself, and hash_impl and
+                        # bound method itself, and tp_hash_impl and
                         # reconstruct_pycode both read the method VT's source,
                         # so leave it unset rather than give them cls.name.
                         fn_source = self.source and AttrSource(
@@ -4304,19 +4321,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
-            # off TypeSource is not tag-safe.
-            if var_source is not None and can_guard_class_function_code(tx, type_attr):
-                im_func = variables.UserFunctionVariable.create_with_source(
-                    type_attr, var_source
-                )
+            fn_source = var_source or (
+                self.source and AttrSource(TypeSource(self.source), name)
+            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
             else:
-                im_func = VariableBuilder.create_internal_user_function(
-                    type_attr,
-                    source=var_source
-                    or (self.source and AttrSource(TypeSource(self.source), name)),
-                )
-            return variables.UserMethodVariable(im_func, self, source=source)
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -4518,12 +4551,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def is_hashable(self) -> bool:
-        # Mirrors the __hash__ is None check in hash_impl's MRO walk.
+        # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.
         # Returns "Is this hashable in CPython?", not "can Dynamo trace the hash?".
-        # Unknown C hashes are hashable but graph-break in hash_impl.
+        # Unknown C hashes are hashable but graph-break in tp_hash_impl.
         return type(self.value).__hash__ is not None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Mirrors CPython's slot_tp_hash which looks up __hash__ via the MRO:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9521-L9565
         # __hash__ = None → PyObject_HashNotImplemented:
@@ -4531,7 +4564,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self.inherits_base_slot("__hash__"):
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         obj_type = type(self.value)
 
@@ -4575,7 +4608,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="Non-constant __hash__ return",
-                        context=f"hash_impl {self}",
+                        context=f"tp_hash_impl {self}",
                         explanation=f"__hash__ returned a non-constant "
                         f"{type(result).__name__}.",
                         hints=[
@@ -4600,7 +4633,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 break
             unimplemented(
                 gb_type="Untraceable C tp_hash",
-                context=f"hash_impl {self}",
+                context=f"tp_hash_impl {self}",
                 explanation=f"{cls.__name__} defines a C __hash__ that "
                 f"Dynamo cannot trace into.",
                 hints=[
@@ -4613,7 +4646,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self._base_methods is not None:
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
         # hash(self.value) calls the real tp_hash — handles both
         # object.__hash__ (identity) and builtin-inherited C hashes
         # (e.g. IntEnum inheriting int.__hash__).
@@ -4627,7 +4660,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
         """
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         obj_type = type(self.value)
 
@@ -4699,7 +4731,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_methods is not None:
             return super().tp_richcompare_impl(tx, other, op)
 
-        return object_richcompare(self, tx, other, op)
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def call_tree_map_branch(
         self,
@@ -4943,19 +4975,19 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # The fast path below replicates CPython's *generated* frozen dataclass
         # __hash__ (hash(tuple(field_values))).  A frozen dataclass may instead
         # define a custom __hash__ (e.g. the PyTreeSpec polyfill); dataclasses
         # synthesizes the generated one via exec (co_filename "<string>"), so a
         # __hash__ from a real source file is custom -- defer to the general
-        # MRO-walking hash_impl, which traces it.
+        # MRO-walking tp_hash_impl, which traces it.
         type_hash = type(self.value).__hash__
         if (
             isinstance(type_hash, types.FunctionType)
             and type_hash.__code__.co_filename != "<string>"
         ):
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         # CPython's frozen dataclass __hash__ is generated by _hash_add:
         # https://github.com/python/cpython/blob/e76aa128fe/Lib/dataclasses.py#L886-L892
@@ -5399,6 +5431,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:

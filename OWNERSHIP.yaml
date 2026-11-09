@@ -165,13 +165,14 @@ ownership:
       - /test/test_spectral_ops.py
   - name: floatx_linear_algebra
     labels: ["module: linear algebra", "module: floatx (formerly float8)"]
-    owners: [drisspg, slayton58]
+    owners: [drisspg, slayton58, vkuzo]
     section: core_aten_linalg
     paths:
       - /aten/src/ATen/native/ScaledBlas.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.h
       - /test/test_scaled_matmul_cuda.py: [drisspg, slayton58]
+      - /test/test_quantize_tensor.py: [vkuzo, slayton58]
   - name: sparse
     labels: ["module: sparse"]
     owners: [amjames, nikitaved, pearu]
@@ -203,6 +204,8 @@ ownership:
       - /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
       - /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
       - /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+      - /test/expect/TestSparseXPU.test_print_coalesced_xpu_float64.expect
+      - /test/expect/TestSparseXPU.test_print_uncoalesced_xpu_float64.expect
       - /test/test_sparse.py: [amjames, pearu, nikitaved]
       - /test/test_sparse_csr.py: [amjames, pearu, nikitaved]
       - /test/test_sparse_semi_structured.py
@@ -750,12 +753,12 @@ ownership:
       - /torch/nn/parallel/: [weifengpy]
   - name: dtensor
     labels: ["module: dtensor"]
-    owners: [weifengpy]
+    owners: [weifengpy, pianpwk, anshul-si]
     section: distributed
     paths:
-      - /torch/distributed/tensor/placement_types.py: [weifengpy]
-      - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
-      - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
+      - /torch/distributed/tensor/placement_types.py: [weifengpy, pianpwk, anshul-si]
+      - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy, pianpwk, anshul-si]
+      - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy, pianpwk, anshul-si]
   - name: build_rocm
     labels: ["module: rocm", "module: build"]
     owners: [jeffdaily, jithunnair-amd]
@@ -1620,6 +1623,7 @@ ownership:
     section: infra_test
     paths:
       - /test/benchmark_utils/
+      - /test/hw_classification_testdata/
       - /test/junit_xml_testdata/
       - /test/scripts/
       - /test/spincli/
@@ -1659,8 +1663,6 @@ ownership:
       - /.github/pi/
       - /.github/workflows/claude-autorevert-advisor.yml
       - /.github/workflows/claude-code.yml
-      - /.github/workflows/claude-distributed-triage-cron.yml
-      - /.github/workflows/distributed-triage-pi.yml
       - /.github/workflows/issue-triage-pi.yml
       - /.github/workflows/issue-triage.yml
       - /.github/workflows/pi-agent-tests.yml

@@ -193,6 +193,29 @@ class TestPoolingNN(NNTestCase):
             ),
         )
 
+    def test_adaptive_avg_pooling_backward_fails_meta(self):
+        # Meta must reject the same shapes as eager so fake tensors and compile match
+        backward2d = torch.ops.aten._adaptive_avg_pool2d_backward
+        backward3d = torch.ops.aten._adaptive_avg_pool3d_backward
+        cl = torch.channels_last
+        ndim_msg = "Expected dimensions"
+        dim_msg = "must have the same size at dim"
+        cases = [
+            (backward2d, (1, 2, 7), (1, 2, 3, 3), None, ndim_msg),
+            (backward2d, (1, 3, 7, 7), (1, 2, 3, 3), None, dim_msg),
+            (backward2d, (1, 2, 7, 7), (1, 3, 3, 3), cl, dim_msg),
+            (backward3d, (1, 2, 7, 7), (1, 2, 3, 3, 3), None, ndim_msg),
+            (backward3d, (1, 3, 7, 7, 7), (1, 2, 3, 3, 3), None, dim_msg),
+        ]
+        for op, grad_shape, input_shape, memory_format, msg in cases:
+            grad_output = torch.empty(grad_shape, device="meta")
+            input = torch.empty(input_shape, device="meta")
+            if memory_format is not None:
+                grad_output = grad_output.to(memory_format=memory_format)
+                input = input.to(memory_format=memory_format)
+            with self.assertRaisesRegex(ValueError, msg):
+                op(grad_output, input)
+
     @parametrize_test("dtype", [torch.bfloat16, torch.float16])
     @parametrize_test(
         "mod",
@@ -817,12 +840,31 @@ class TestPoolingNNDevice(NNTestCase):
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        # channels_last takes the channel count from input and strides
+        # grad_output with it, so it runs off grad_output rather than grad_input
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        grad_output = grad_output.to(memory_format=torch.channels_last)
+        input = torch.randn(1, 3, 3, 3, device=device)
+        input = input.to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
 
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 3, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
 
     def test_adaptive_max_pooling_backward_fails(self, device):
@@ -1356,6 +1398,15 @@ torch.{device_type}.synchronize()
 
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
+
+    def test_adaptive_avg_pool2d_size_one_channel_stride(self, device):
+        # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
+        x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
+        self.assertTrue(x.is_contiguous())
+        expected = F.adaptive_avg_pool2d(
+            x.clone(memory_format=torch.contiguous_format), (2, 3)
+        )
+        self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
 
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
