@@ -6144,9 +6144,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "CppFakeTensorMode is not supported here yet"
         with self.assertRaisesRegex(NotImplementedError, msg):
             require_python_fake_mode(detect_fake_mode([fake]))
-        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        self.assertIs(require_python_fake_mode(py_mode), py_mode)
-        self.assertIsNone(require_python_fake_mode(None))
 
         # Python modes are found as before, including under a user mode, and
         # not inside unset_fake_temporarily()
@@ -6155,6 +6152,18 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertIs(active_fake_mode(), python_mode)
             with unset_fake_temporarily():
                 self.assertIsNone(active_fake_mode())
+
+    def test_require_python_fake_mode(self):
+        from torch._guards import require_python_fake_mode
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        # Callers that need a Python FakeTensorMode reject a C++ one
+        msg = "CppFakeTensorMode is not supported here yet"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            require_python_fake_mode(CppFakeTensorMode())
+        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        self.assertIs(require_python_fake_mode(py_mode), py_mode)
+        self.assertIsNone(require_python_fake_mode(None))
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
