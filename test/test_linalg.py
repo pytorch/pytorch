@@ -9651,6 +9651,19 @@ class TestLinalgCudaOnly(TestCase):
             # clean up intermediate files
             self._set_tunableop_defaults()
 
+    @dtypes(torch.float)
+    def test_rerun_rewrites_results_file_tunableop(self, device, dtype):
+        import os
+        # Each run deletes its results file on exit, so a rerun of the same test
+        # in the same process must write a new one.
+        for _ in range(2):
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = make_tensor((17, 17), device=device, dtype=dtype)
+                torch.mm(A, A)
+                self.assertTrue(os.path.exists(torch.cuda.tunable.get_filename()))
+
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
