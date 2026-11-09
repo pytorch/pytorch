@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -196,12 +197,6 @@ timer_counter = itertools.count()
 
 
 # Abstraction on top of counters.
-class ReInplaceTrigger(enum.Enum):
-    AUTO_FUNC_V1 = 1
-    AUTO_FUNC_V2 = 2
-    TRITON_OPS = 3
-
-
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -6311,7 +6306,8 @@ def is_pybind11_enum_member(value: object) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslatorBase, f: Callable[..., Any]
+    tx: InstructionTranslatorBase,
+    f: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
@@ -6320,11 +6316,11 @@ def _make_inlined(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
         from torch._dynamo.trace_rules import _force_inline
-        from torch._dynamo.variables.functions import UserFunctionVariable
+        from torch._dynamo.variables.builder import SourcelessBuilder
 
         with _force_inline():
             return tx.inline_user_function_return(
-                UserFunctionVariable(f),
+                SourcelessBuilder.create_internal_user_function(f),
                 list(args),
                 dict(kwargs),
             )

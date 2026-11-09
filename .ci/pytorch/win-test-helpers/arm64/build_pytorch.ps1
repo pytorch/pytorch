@@ -26,6 +26,7 @@ $env:CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
 $env:libuv_ROOT = Join-Path $env:DEPENDENCIES_DIR "libuv\install"
 $env:INSTALL_TEST = "0"
 $env:MSSdk = "1"
+$env:USE_MKLDNN = "0"
 
 if ($env:PYTORCH_BUILD_VERSION) {
     $env:PYTORCH_BUILD_VERSION = $env:PYTORCH_BUILD_VERSION
