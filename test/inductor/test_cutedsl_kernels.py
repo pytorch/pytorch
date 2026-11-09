@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import runpy
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -485,6 +486,57 @@ if HAS_CUTEDSL:
         _select_k(mX, mOut, n, cutlass.Boolean(flag)).launch(
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
+
+    # Host functions that differ only in a captured list: out = x * c[0] + c[1].
+    def make_affine_kernel(c):
+        @cute.kernel
+        def _affine_k(gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32):
+            tidx, _, _ = cute.arch.thread_idx()
+            bidx, _, _ = cute.arch.block_idx()
+            i = bidx * 128 + tidx
+            if i < n:
+                gOut[i] = gX[i] * c[0] + c[1]
+
+        @cute.jit
+        def affine_kernel(
+            mX: cute.Tensor, mOut: cute.Tensor, n: cutlass.Int32, stream: cuda.CUstream
+        ):
+            _affine_k(mX, mOut, n).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+        return affine_kernel
+
+    # Reads one element, so mX can be a huge expanded tensor: out[0] = x[0].
+    @cute.kernel
+    def _copy_first_k(gX: cute.Tensor, gOut: cute.Tensor):
+        gOut[0] = gX[0]
+
+    # Exported with _abi_specs under the prefix cutedsl_fixture, it gives
+    # _EXPORTED_HEADER: a tensor with dynamic sizes and a dynamic stride, a static
+    # one, a scalar of each cutlass Numeric type export_to_c supports, a Constexpr
+    # and the stream.
+    @cute.jit
+    def abi_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        i8: cutlass.Int8,
+        i16: cutlass.Int16,
+        i32: cutlass.Int32,
+        i64: cutlass.Int64,
+        u8: cutlass.Uint8,
+        u16: cutlass.Uint16,
+        u32: cutlass.Uint32,
+        u64: cutlass.Uint64,
+        flag: cutlass.Boolean,
+        f32: cutlass.Float32,
+        tf32: cutlass.TFloat32,
+        f64: cutlass.Float64,
+        f16: cutlass.Float16,
+        alpha: cutlass.Constexpr,
+        stream: cuda.CUstream,
+    ):
+        _copy_first_k(mX, mOut).launch(grid=[1, 1, 1], block=[1, 1, 1], stream=stream)
 
 
 DEVICE = "cuda"
@@ -8064,8 +8116,186 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
-# The header export_to_c (nvidia-cutlass-dsl 4.8.0) writes for a host function with
-# the parameters of _abi_specs, exported under the prefix cutedsl_fixture.
+@requires_cuda_and_triton
+@requires_cutedsl
+class CuteDSLAOTITests(TestCase):
+    """The ahead-of-time compile of user CuTeDSL kernels for the C++ wrapper
+    (export_to_c), which needs a GPU and cutlass."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_aoti_cross_arch_export_in_fresh_process(self):
+        # An export for another architecture than the GPU's works as the first
+        # CuTeDSL compile of a process (see warm_up_exporter).
+        other = "sm_80" if torch.cuda.get_device_capability() >= (9, 0) else "sm_90a"
+        with tempfile.TemporaryDirectory() as d:
+            script = os.path.join(d, "export.py")
+            with open(script, "w") as f:
+                f.write(_EXPORT_SCRIPT)
+            proc = subprocess.run(
+                [sys.executable, script, other, d],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(os.path.exists(os.path.join(d, "p.o")))
+
+    def test_cutedsl_kernel_prefix_same_for_equal_constants(self):
+        # Equal constants give the same prefix in every process: objects are compared
+        # by content, sets in any order, and object addresses are ignored.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            ConstantParamSpec,
+            cutedsl_kernel_prefix,
+        )
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Slots:
+            __slots__ = ()
+
+        def prefix(cfg):
+            spec = ConstantParamSpec("cfg", cfg)
+            return cutedsl_kernel_prefix(cfg_scale_kernel, [spec], "sm_90a")
+
+        for a, b in [
+            (Cfg(3.0), Cfg(3.0)),
+            (frozenset([0, 8]), frozenset([8, 0])),
+            (Slots(), Slots()),
+        ]:
+            self.assertEqual(prefix(a), prefix(b))
+        self.assertNotEqual(prefix(Cfg(3.0)), prefix(Cfg(5.0)))
+
+    def test_cutedsl_kernel_prefix_same_after_first_compile(self):
+        # The DSL's first compile of a function replaces its code with one that
+        # starts at the def line, after the decorators. The prefix, and so the
+        # export's files, must not depend on whether the kernel ran before.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            cutedsl_kernel_prefix,
+        )
+
+        kernel = make_affine_kernel([2.0, 1.0])
+        before = cutedsl_kernel_prefix(kernel, [], "sm_90a")
+        x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
+        out = torch.empty_like(x)
+        wrap_cutedsl(kernel, mutates_args=["mOut"])(x, out, x.numel())
+        self.assertEqual(out, 2 * x + 1)
+        self.assertEqual(cutedsl_kernel_prefix(kernel, [], "sm_90a"), before)
+
+    def test_cutedsl_kernel_prefix_refuses_cyclic_constants(self):
+        # constant_key keys a frozenset by its hash without walking it, so a cycle
+        # through one passes the side table; the prefix's walk refuses it instead of
+        # recursing until a RecursionError.
+        from torch._higher_order_ops.user_kernel_hop import constant_key
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            ConstantParamSpec,
+            cutedsl_kernel_prefix,
+        )
+
+        class Cfg:
+            pass
+
+        cfg = Cfg()
+        cfg.items = frozenset([cfg])
+        constant_key(cfg, CUTEDSL_CONSTANT_RULES)
+        spec = ConstantParamSpec("cfg", cfg)
+        msg = (
+            "^CuTeDSL kernel cfg_scale_kernel: parameter 'cfg': a constant kernel "
+            "argument of type Cfg refers to itself$"
+        )
+        with self.assertRaisesRegex(ValueError, msg):
+            cutedsl_kernel_prefix(cfg_scale_kernel, [spec], "sm_90a")
+
+    def _export_abi_kernel(self, d):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            export_cutedsl_kernel,
+        )
+
+        specs = _abi_specs(lambda name: getattr(cutlass, name))
+        return export_cutedsl_kernel(
+            abi_kernel, specs, out_dir=d, prefix="cutedsl_fixture", arch="sm_90a"
+        )
+
+    def test_header_fixture_is_current(self):
+        # A supported DSL writes _EXPORTED_HEADER (the other tests use it). If an
+        # upgrade breaks this, capture the new header here and fix what the other
+        # tests catch.
+        from torch._native.cutedsl_utils import _CUTEDSL_REQUIRED_VERSIONS
+        from torch._vendor.packaging.version import Version
+
+        if Version(cutlass.__version__) not in _CUTEDSL_REQUIRED_VERSIONS:
+            # 4.4.2, fbcode's, leaves the two ret variables uninitialized.
+            self.skipTest(
+                f"nvidia-cutlass-dsl {cutlass.__version__} is not a supported version "
+                "(_CUTEDSL_REQUIRED_VERSIONS); _EXPORTED_HEADER is what 4.8.0 writes"
+            )
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self._export_abi_kernel(d).header_text, _EXPORTED_HEADER)
+
+    def test_exported_object_keeps_the_current_device(self):
+        # The steps of Module_Load pass the device to the CUDA calls they make,
+        # without setting the current one (see emit_cpp_declarations): the object
+        # calls no set-device shim, and the runtime archive's shims call no driver
+        # context function.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            cutedsl_runtime_archive,
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            with open(self._export_abi_kernel(d).object_path, "rb") as f:
+                self.assertNotIn(b"SetDevice", f.read())
+        with open(cutedsl_runtime_archive(), "rb") as f:
+            self.assertNotIn(b"cuCtx", f.read())
+
+
+# Run by test_aoti_cross_arch_export_in_fresh_process as a script: exports a kernel
+# for the architecture argv[1] into argv[2], the first CuTeDSL compile of its process.
+_EXPORT_SCRIPT = """
+import sys
+
+import cuda.bindings.driver as cuda
+import cutlass
+import cutlass.cute as cute
+import torch
+from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+    export_cutedsl_kernel,
+    ScalarParamSpec,
+    StreamParamSpec,
+    TensorParamSpec,
+)
+
+
+@cute.kernel
+def scale_k(gX: cute.Tensor, n: cutlass.Int32):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    i = bidx * 128 + tidx
+    if i < n:
+        gX[i] = gX[i] * 2.0
+
+
+@cute.jit
+def scale_kernel(mX: cute.Tensor, n: cutlass.Int32, stream: cuda.CUstream):
+    scale_k(mX, n).launch(
+        grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+    )
+
+
+specs = [
+    TensorParamSpec("mX", torch.float32, (None,), (1,), 16),
+    ScalarParamSpec("n", cutlass.Int32, 1),
+    StreamParamSpec("stream"),
+]
+export_cutedsl_kernel(
+    scale_kernel, specs, out_dir=sys.argv[2], prefix="p", arch=sys.argv[1]
+)
+"""
+
+
+# The header export_to_c (nvidia-cutlass-dsl 4.8.0) writes for abi_kernel exported
+# with _abi_specs under the prefix cutedsl_fixture.
 _EXPORTED_HEADER = r"""
 #pragma once
 
@@ -8161,7 +8391,7 @@ def _numeric(name):
 
 
 def _abi_specs(numeric=_numeric):
-    """The specs of the host function _EXPORTED_HEADER was exported for."""
+    """The specs abi_kernel is exported with to produce _EXPORTED_HEADER."""
     from torch._inductor.codegen.cutedsl.user_kernel_aot import (
         ConstantParamSpec,
         ScalarParamSpec,
@@ -8194,9 +8424,10 @@ def _abi_specs(numeric=_numeric):
 
 
 class CuteDSLExportTests(TestCase):
-    """The C++ side of an export_to_c export (parse the header, emit the
-    declarations, the launch and the launcher), on a header export_to_c wrote and
-    code the C++ compiler builds: no GPU or cutlass needed."""
+    """The C++ side of an export_to_c export (parse and validate the header, check
+    the object's symbols, emit the declarations and the launch, link flags), on a
+    header export_to_c wrote and code the C++ compiler builds: no GPU or cutlass
+    needed."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -8234,7 +8465,10 @@ class CuteDSLExportTests(TestCase):
         return out
 
     def test_parse_exported_header(self):
-        from torch._inductor.codegen.cutedsl.user_kernel_aot import ExportedTensorStruct
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            ExportedTensorStruct,
+            validate_exported_abi,
+        )
 
         abi = self._exported().abi
         p = "cutedsl_fixture"
@@ -8277,6 +8511,7 @@ class CuteDSLExportTests(TestCase):
                 ("cudaStream_t", "stream"),
             ),
         )
+        validate_exported_abi(abi, _abi_specs())
 
     def test_parse_exported_header_errors(self):
         from torch._inductor.codegen.cutedsl.user_kernel_aot import CuteDSLExportError
@@ -8320,6 +8555,69 @@ class CuteDSLExportTests(TestCase):
             with self.subTest(msg), self.assertRaisesRegex(CuteDSLExportError, msg):
                 self._exported(header)
 
+    def test_validate_exported_abi_errors(self):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            CuteDSLExportError,
+            ScalarParamSpec,
+            StreamParamSpec,
+            TensorParamSpec,
+            validate_exported_abi,
+        )
+
+        abi = self._exported().abi
+        specs = _abi_specs()
+
+        def replaced(spec, name=None):
+            return [spec if s.name == (name or spec.name) else s for s in specs]
+
+        int32 = _numeric("Int32")
+        mx_sizes = dataclasses.replace(specs[0], sizes=(4, None))
+        for case_abi, case_specs, msg in [
+            (
+                dataclasses.replace(abi, wrapper_return_ctype="void"),
+                specs,
+                "returns void, expected the int32_t launch status",
+            ),
+            (
+                abi,
+                replaced(ScalarParamSpec("m", int32, 1), "i32"),
+                r"parameters \[.*\] != ",
+            ),
+            (
+                abi,
+                replaced(ScalarParamSpec("mOut", int32, 1)),
+                r"unexpected tensor structs \['cutedsl_fixture_Tensor_mOut_t'\]",
+            ),
+            (
+                abi,
+                replaced(TensorParamSpec("i32", torch.int32, (4,), (1,), 4)),
+                "no tensor struct for i32",
+            ),
+            (
+                abi,
+                replaced(mx_sizes),
+                r"tensor mX has .* = \('cutedsl_fixture_Tensor_mX_t\*', 'int32_t', "
+                r"2, 'int64_t', 1\), expected .*'int32_t', 1, 'int64_t', 1\)",
+            ),
+            (
+                abi,
+                replaced(ScalarParamSpec("i8", _numeric("Int16"), 1)),
+                "scalar i8 is int8_t, expected int16_t",
+            ),
+            (
+                abi,
+                replaced(ScalarParamSpec("i8", _numeric("BFloat16"), 1)),
+                "BFloat16.* is not supported by CuTeDSL export_to_c",
+            ),
+            (
+                abi,
+                replaced(StreamParamSpec("flag")),
+                "stream flag is uint8_t, expected cudaStream_t",
+            ),
+        ]:
+            with self.subTest(msg), self.assertRaisesRegex(CuteDSLExportError, msg):
+                validate_exported_abi(case_abi, case_specs)
+
     def test_scalar_ctype_needs_a_cutlass_class(self):
         # A class from a module named like cutlass, but not cutlass or one of its
         # submodules, is no cutlass Numeric, whatever its name.
@@ -8338,6 +8636,88 @@ class CuteDSLExportTests(TestCase):
                 self.assertRaisesRegex(CuteDSLExportError, "is not supported"),
             ):
                 scalar_ctype(int32)
+
+    def test_unexportable_parameter_names(self):
+        # The header names the C parameters after the host function's, next to the
+        # names it declares itself: those and C++ keywords are refused before
+        # compiling. A constant is not a C parameter.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            ConstantParamSpec,
+            export_cutedsl_kernel,
+            ScalarParamSpec,
+            StreamParamSpec,
+            TensorParamSpec,
+        )
+
+        def host(args, ret, module, new, x, s):
+            pass
+
+        specs = [
+            TensorParamSpec("args", torch.float32, (4,), (1,), 4),
+            ScalarParamSpec("ret", _numeric("Int32"), 1),
+            ConstantParamSpec("module", 1),
+            ScalarParamSpec("new", _numeric("Float32"), 1.0),
+            TensorParamSpec("x", torch.float32, (4,), (1,), 4),
+            StreamParamSpec("s"),
+        ]
+        msg = r"host: rename parameters \['args', 'ret', 'new'\]: export_to_c"
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(ValueError, msg):
+                export_cutedsl_kernel(host, specs, out_dir=d, prefix="p", arch="sm_90a")
+            self.assertEqual(os.listdir(d), [])
+
+    def test_object_symbols(self):
+        # Only global and weak symbols the object defines count: an object passes if
+        # they all carry the prefix.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            _check_object_symbols,
+            _elf_global_symbols,
+            CuteDSLExportError,
+        )
+
+        source = """
+            extern "C" {
+            int _cudaLaunchKernelEx(void);
+            static int local_helper(void) { return 1; }
+            int cutedsl_fixture_launch(void) {
+              return local_helper() + _cudaLaunchKernelEx();
+            }
+            int _mlir_cutedsl_fixture_cuda_init(void) { return 0; }
+            __attribute__((weak)) int cutedsl_fixture_version = 1;
+            }
+        """
+        stray = """
+            extern "C" {
+            int helper(void) { return 0; }
+            __attribute__((weak)) int weak_helper = 1;
+            }
+        """
+        with tempfile.TemporaryDirectory() as d:
+            ok = self._compile(d, "ok.o", source, "-c")
+            bad = self._compile(d, "bad.o", source + stray, "-c")
+            self.assertEqual(
+                sorted(_elf_global_symbols(ok)),
+                [
+                    "_mlir_cutedsl_fixture_cuda_init",
+                    "cutedsl_fixture_launch",
+                    "cutedsl_fixture_version",
+                ],
+            )
+            _check_object_symbols(ok, "cutedsl_fixture")
+            with self.assertRaisesRegex(
+                CuteDSLExportError, "outside cutedsl_fixture_"
+            ) as cm:
+                _check_object_symbols(bad, "cutedsl_fixture")
+            self.assertIn("'helper'", str(cm.exception))
+            self.assertIn("'weak_helper'", str(cm.exception))
+            self.assertNotIn("cutedsl_fixture_launch", str(cm.exception))
+            with self.assertRaisesRegex(CuteDSLExportError, "outside other_"):
+                _check_object_symbols(ok, "other")
+            archive = os.path.join(d, "lib.a")
+            with open(archive, "wb") as f:
+                f.write(b"!<arch>\n")
+            with self.assertRaisesRegex(CuteDSLExportError, "not an ELF64"):
+                _elf_global_symbols(archive)
 
     def test_launcher(self):
         # The C++ launcher: the module, then parameters named by position (never
@@ -8681,11 +9061,155 @@ launch! clear [CuTeDSL kernel cutedsl_fixture: launch failed: cudaErrorX: failed
             with self.subTest(msg), self.assertRaisesRegex(error, msg):
                 launch(**kwargs)
 
+    @contextlib.contextmanager
+    def _dsl_layout(self, package, archives, cuda="13.0"):
+        """Lays out a cutlass package and runtime archives (paths relative to a
+        temporary root), with that cutlass imported and torch's CUDA version
+        ``cuda`` while in the context; yields the root."""
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        with tempfile.TemporaryDirectory() as root:
+            for f in (f"{package}/__init__.py", *archives):
+                os.makedirs(os.path.dirname(os.path.join(root, f)), exist_ok=True)
+                open(os.path.join(root, f), "w").close()
+            cutlass_module = types.ModuleType("cutlass")
+            cutlass_module.__file__ = os.path.join(root, package, "__init__.py")
+            user_kernel_aot.cutedsl_runtime_archive.cache_clear()
+            try:
+                with (
+                    mock.patch.dict(sys.modules, {"cutlass": cutlass_module}),
+                    mock.patch.object(torch.version, "cuda", cuda),
+                ):
+                    yield root
+            finally:
+                user_kernel_aot.cutedsl_runtime_archive.cache_clear()
+
+    def test_runtime_archive_layouts(self):
+        # The runtime archive in each layout of the DSL's wheels and fbcode pars, as
+        # (cutlass package, archives) under one root: the last archive is the one
+        # for torch's CUDA version.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        a = "libcuda_dialect_runtime_static.a"
+        a13 = "libcuda_dialect_cu13_runtime_static.a"
+        layouts = {
+            "wheel, 4.4.2": (
+                "nvidia_cutlass_dsl/python_packages/cutlass",
+                [f"nvidia_cutlass_dsl/lib/{a}"],
+            ),
+            "wheels, 4.6.1+": (
+                "nvidia_cutlass_dsl/dsl_packages/cutlass",
+                [f"nvidia_cutlass_dsl/cu{v}/lib/{a}" for v in (14, 12, 13)],
+            ),
+            "fbcode, 4.4.2": ("cutlass", [f"lib/{a}", f"nvidia_cutlass_dsl/lib/{a13}"]),
+            "fbcode, 4.6.1+": ("cutlass", [f"nvidia_cutlass_dsl/cu13/lib/{a}"]),
+        }
+        for layout, (package, archives) in layouts.items():
+            with self.subTest(layout), self._dsl_layout(package, archives) as root:
+                self.assertEqual(
+                    user_kernel_aot.cutedsl_runtime_archive(),
+                    os.path.join(root, archives[-1]),
+                )
+
+    def test_runtime_archive_for_another_cuda_version(self):
+        # From nvidia-cutlass-dsl 4.6.1 only the cu12 archive is a hard dependency;
+        # another CUDA version's comes with an extra. Without one for torch's CUDA
+        # version, the highest CUDA version's is linked, with a warning that says
+        # what to install (for CUDA 12, which has no extra, nvidia-cutlass-dsl
+        # again); with none at all, the error says it.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        package = "nvidia_cutlass_dsl/dsl_packages/cutlass"
+        cases = {
+            "13.0": ((11, 12), "install 'nvidia-cutlass-dsl[cu13]'"),
+            "12.8": ((11, 13), "reinstall nvidia-cutlass-dsl"),
+        }
+        for cuda_version, (versions, install) in cases.items():
+            archives = [
+                f"nvidia_cutlass_dsl/cu{v}/lib/libcuda_dialect_runtime_static.a"
+                for v in versions
+            ]
+            with self.subTest(cuda=cuda_version):
+                with (
+                    self._dsl_layout(package, archives, cuda_version) as root,
+                    self.assertLogs(user_kernel_aot.log, logging.WARNING) as logs,
+                ):
+                    archive = user_kernel_aot.cutedsl_runtime_archive()
+                self.assertEqual(archive, os.path.join(root, archives[1]))
+                (warning,) = logs.records
+                self.assertRegex(
+                    warning.getMessage(),
+                    "^nvidia-cutlass-dsl has no CuTeDSL runtime archive for CUDA "
+                    f"{cuda_version.split('.')[0]}; linking {re.escape(archive)} "
+                    f"instead .*: {re.escape(install)} to link the matching one$",
+                )
+                missing = f"not found .*: {re.escape(install)}$"
+                with self._dsl_layout(package, [], cuda_version):
+                    with self.assertRaisesRegex(FileNotFoundError, missing):
+                        user_kernel_aot.cutedsl_runtime_archive()
+
+    def test_link_inputs_and_flags(self):
+        # The runtime archive follows the objects (each once); the version script,
+        # named by its content, keeps each prefix's symbols local.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        archive = "/dsl lib/libcuda_dialect_runtime_static.a"
+        exported = [
+            dataclasses.replace(self._exported(), object_path=path)
+            for path in ("/a/k1.o", "/b c/k2.o", "/a/k1.o")
+        ]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                user_kernel_aot, "cutedsl_runtime_archive", return_value=archive
+            ),
+        ):
+            # Each argument is a shell fragment: CppBuilder joins them into one
+            # command line and splits it.
+            inputs = user_kernel_aot.cutedsl_link_inputs(exported)
+            self.assertEqual(
+                shlex.split(" ".join(inputs)), ["/a/k1.o", "/b c/k2.o", archive]
+            )
+            self.assertEqual(user_kernel_aot.cutedsl_link_inputs([]), [])
+            d = os.path.join(tmp, "cache dir")
+            flags = user_kernel_aot.cutedsl_link_flags(d, ["k_b", "k_a", "k_b"])
+            self.assertEqual(
+                flags[0], "-Wl,--exclude-libs,libcuda_dialect_runtime_static.a"
+            )
+            *opts, script = shlex.split(flags[1])
+            self.assertEqual(opts, ["-Xlinker", "--version-script", "-Xlinker"])
+            self.assertEqual(os.path.dirname(script), d)
+            with open(script) as f:
+                self.assertExpectedInline(
+                    f.read(),
+                    """\
+/* CuTeDSL user kernels: export_to_c symbols stay local to this library. */
+{
+  local:
+    k_a_*;
+    _mlir_k_a_*;
+    k_b_*;
+    _mlir_k_b_*;
+};
+""",
+                )
+            self.assertEqual(
+                user_kernel_aot.cutedsl_link_flags(d, ["k_a", "k_b"]), flags
+            )
+            self.assertNotEqual(user_kernel_aot.cutedsl_link_flags(d, ["k_a"]), flags)
+            self.assertEqual(len(os.listdir(d)), 2)
+            self.assertEqual(user_kernel_aot.cutedsl_link_flags(d, []), [])
+            with self.assertRaisesRegex(
+                ValueError, "prefix 'k-a' is not a C identifier"
+            ):
+                user_kernel_aot.cutedsl_link_flags(d, ["k-a"])
+
 
 instantiate_parametrized_tests(CuteDSLHOPTests)
 instantiate_parametrized_tests(CuteDSLWrapTests)
 instantiate_parametrized_tests(CuteDSLDynamoTests)
 instantiate_parametrized_tests(CuteDSLInductorTests)
+instantiate_parametrized_tests(CuteDSLAOTITests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
