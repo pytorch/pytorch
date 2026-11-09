@@ -453,6 +453,39 @@ class TestSingleRankSaveLoad(TestCase):
                 torch.equal(state_dict[fqn].view(torch.uint8), t.view(torch.uint8))
             )
 
+    @with_temp_dir
+    def test_gpt_oss_mxfp4_loading(self) -> None:
+        """GPT-OSS MXFP4 _blocks load in full, not just the first G values per row."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        # GPT-OSS _blocks [experts, rows, groups, 16] and _scales [experts, rows,
+        # groups] hold the same bytes as compressed-tensors MXFP4.
+        experts, rows, cols = 2, 3, 128
+        packed, scale, expected = random_compressed_tensors_mxfp4(experts * rows, cols)
+        fqn = "model.layers.0.mlp.experts.down_proj"
+        save_hf_checkpoint(
+            self.temp_dir,
+            {
+                "model.safetensors": {
+                    f"{fqn}_blocks": packed.reshape(experts, rows, cols // 32, 16),
+                    f"{fqn}_scales": scale.reshape(experts, rows, cols // 32),
+                }
+            },
+        )
+
+        state_dict = {f"{fqn}_blocks": torch.zeros(experts, rows, cols)}
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=self.temp_dir),
+        )
+        torch.testing.assert_close(
+            state_dict[f"{fqn}_blocks"], expected.reshape(experts, rows, cols)
+        )
+
 
 class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):
     @with_comms

@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
+    periodic,
     run_tests,
     serialTest,
     skipIfCppFakeTensor,
@@ -8761,8 +8762,8 @@ BACKWARD_SKIPS_AND_XFAILS = [
     ),
     # mean(): need to examine backwards formula
     XFailRule(
-        error_type=RuntimeError,
-        error_msg="SymIntArrayRef expected to contain only concrete integers",
+        error_type=AttributeError,
+        error_msg="'NestedIntNode' object has no attribute 'sym_max'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -9005,7 +9006,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
-        error_msg="'NestedIntNode' object has no attribute 'sym_float'",
+        error_msg="'NestedIntNode' object has no attribute 'sym_max'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -9058,6 +9059,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this

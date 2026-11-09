@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -50,13 +50,14 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
+from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
+    GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -3750,6 +3751,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             if mixed_dtype:
                 bn.float()
                 ref_bn.float()
+
+            # channels_last and contiguous kernels reduce grads in different orders
+            if precision is None and bn.weight.dtype == torch.float:
+                precision = 1e-4
 
             out = bn(input)
             out.backward(grad)
@@ -8469,6 +8474,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, -1, 0], g[:, :, -pb - 1 :, : pl + 1].sum((-2, -1)))
             self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
 
+    @serialTest()
     @largeTensorTest("6GB")
     def test_ReplicationPad3d_large(self, device):
         shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
@@ -9519,6 +9525,61 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
+    @onlyCUDA
+    @dtypes(torch.double, torch.float, torch.half, torch.bfloat16)
+    # Below double, the device computes source coordinates in float and the
+    # reference in double. The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
+    # times the step between neighbouring inputs, so inputs stay in [-1, 1].
+    @toleranceOverride({torch.double: tol(atol=1e-7, rtol=1e-7),
+                        torch.float: tol(atol=1e-4, rtol=1e-5),
+                        torch.half: tol(atol=1e-2, rtol=1e-2),
+                        torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
+    @parametrize_test("align_corners", [False, True])
+    @parametrize_test("layout", [
+        "contiguous", "noncontig_input", "noncontig_output", "misaligned_output", "channels_last_c3",
+    ])
+    @parametrize_test("isize, osize, scale", [
+        subtest(((8, 8), (16, 16), None), name="up_2x"),
+        subtest(((7, 5), (13, 11), None), name="up_odd_width"),
+        subtest(((16, 16), (8, 8), None), name="down_2x"),
+        subtest(((9, 10), (9, 32), None), name="aniso"),
+        subtest(((10, 12), None, 1.7), name="scale_factor"),
+        subtest(((256, 320), (512, 640), None), name="large_plane"),
+    ])
+    def test_upsamplingBilinear2d_nchw_kernel_paths(self, device, dtype, align_corners, layout, isize, osize, scale):
+        # On ROCm, the NCHW forward loops over planes per output pixel when the
+        # output plane is large enough to fill the device (large_plane).
+        # Otherwise it writes 4 outputs per thread when the output is
+        # contiguous, vector-aligned, width % 4 == 0, and the op upsamples, and
+        # one output per thread in every other case. CUDA always loops over
+        # planes. The NaN prefill catches outputs no kernel writes.
+        n, c = 2, 3
+        ih, iw = isize
+        if layout == "noncontig_input":
+            x = make_tensor((n, c, ih, 2 * iw), device=device, dtype=dtype, low=-1, high=1)[..., ::2]
+        else:
+            x = make_tensor((n, c, ih, iw), device=device, dtype=dtype, low=-1, high=1)
+        if layout == "channels_last_c3":
+            x = x.contiguous(memory_format=torch.channels_last)
+        if scale is None:
+            oh, ow = osize
+        else:
+            oh, ow = int(ih * scale), int(iw * scale)
+
+        if layout == "noncontig_output":
+            out = torch.empty(n, c, ow, oh, device=device, dtype=dtype).transpose(2, 3)
+        elif layout == "misaligned_output":
+            out = torch.empty(n * c * oh * ow + 1, device=device, dtype=dtype)[1:].view(n, c, oh, ow)
+        elif layout == "channels_last_c3":
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype).contiguous(memory_format=torch.channels_last)
+        else:
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype)
+        out.fill_(float("nan"))
+
+        torch._C._nn.upsample_bilinear2d(x, [oh, ow], align_corners, scale, scale, out=out)
+        expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
+        self.assertEqual(out.cpu(), expected.to(dtype))
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
@@ -9763,6 +9824,38 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
+        self._test_upsamplingBiMode2d(
+            device, antialias, align_corners, mode, memory_format
+        )
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("num_channels", [2, 3])
+    def test_upsamplingBiMode2d_deterministic(
+        self, device, align_corners, memory_format, num_channels
+    ):
+        self._test_upsamplingBiMode2d(
+            device,
+            False,
+            align_corners,
+            "bilinear",
+            memory_format,
+            deterministic=True,
+            num_channels=num_channels,
+        )
+
+    def _test_upsamplingBiMode2d(
+        self,
+        device,
+        antialias,
+        align_corners,
+        mode,
+        memory_format,
+        deterministic=False,
+        num_channels=3,
+    ):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
@@ -9775,40 +9868,90 @@ class TestNNDeviceType(NNTestCase):
                 raise SkipTest("Lanczos mode does not support align_corners=True")
 
         kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
+        needs_compiled_autograd_workaround = (
+            TEST_WITH_TORCHDYNAMO
+            and torch.device(device).type == "cuda"
+            and mode == "bilinear"
+            and not antialias
+            and not TEST_WITH_ROCM
+        )
         # test float scale factor up & downsampling
         for scale_factor in [0.5, 1.5, 2]:
             in_t = torch.ones(
-                2, 3, 8, 8, device=device,
+                2, num_channels, 8, 8, device=device,
                 dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            expected_out = torch.ones(2, 3, out_size, out_size, device=device, dtype=torch.double)
+            expected_out = torch.ones(
+                2, num_channels, out_size, out_size, device=device, dtype=torch.double
+            )
             self.assertEqual(expected_out, out_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-            out_t.backward(torch.randn_like(out_t))
+            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+            if deterministic:
+                with DeterministicGuard(True):
+                    out_t.backward(grad_out)
+            else:
+                out_t.backward(grad_out)
             self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-            if torch.device(device).type == 'cuda':
-                # Bilinear backward is nondeterministic because of atomicAdd usage
-                nondet_tol = 1e-5
-            else:
-                nondet_tol = 0.0
+            if deterministic:
+                input_ref = in_t.detach().cpu().requires_grad_()
+                output_ref = F.interpolate(input_ref, scale_factor=scale_factor, **kwargs)
+                output_ref.backward(grad_out.cpu())
+                self.assertEqual(in_t.grad.cpu(), input_ref.grad, atol=1e-10, rtol=1e-10)
 
+            input_device = "cpu" if deterministic else device
             input = torch.randn(
-                2, 3, 8, 8, device=device,
+                2, num_channels, 8, 8, device=input_device,
                 dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
-            gradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+            # Compiled autograd cannot currently fake the SymInt lists for this CUDA backward.
+            gradcheck_context = (
+                torch._dynamo.compiled_autograd._disable()
+                if needs_compiled_autograd_workaround
+                else contextlib.nullcontext()
             )
-            gradgradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+            nondet_tol = (
+                1e-5
+                if torch.device(input_device).type == "cuda"
+                else 0.0
             )
+            with gradcheck_context:
+                gradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+                )
+                gradgradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+                )
+
+            if deterministic and not TEST_WITH_ROCM:
+                input_cuda = torch.randn(
+                    2, num_channels, 8, 8, device=device, dtype=torch.double
+                ).contiguous(memory_format=memory_format).requires_grad_()
+                compiled_autograd_context = (
+                    torch._dynamo.compiled_autograd._disable()
+                    if TEST_WITH_TORCHDYNAMO
+                    else contextlib.nullcontext()
+                )
+                with compiled_autograd_context, DeterministicGuard(True):
+                    gradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        [input_cuda],
+                        check_forward_ad=check_forward_ad,
+                        nondet_tol=0.0,
+                    )
+                    gradgradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        [input_cuda],
+                        check_fwd_over_rev=check_forward_ad,
+                        nondet_tol=0.0,
+                    )
 
             # Assert that cpu and cuda give same results
             if torch.device(device).type == 'cuda':
@@ -9829,10 +9972,23 @@ class TestNNDeviceType(NNTestCase):
                     g_cuda = torch.randn_like(out_cuda)
                     g_cpu = g_cuda.cpu()
 
-                    out_cuda.backward(g_cuda)
-                    out_cpu.backward(g_cpu)
+                    consistency_backward_context = (
+                        torch._dynamo.compiled_autograd._disable()
+                        if needs_compiled_autograd_workaround
+                        else contextlib.nullcontext()
+                    )
+                    with consistency_backward_context:
+                        if deterministic:
+                            with DeterministicGuard(True):
+                                out_cuda.backward(g_cuda)
+                        else:
+                            out_cuda.backward(g_cuda)
+                        out_cpu.backward(g_cpu)
 
-                    self.assertEqual(a_cuda.grad, a_cpu.grad)
+                    if deterministic:
+                        self.assertEqual(a_cuda.grad, a_cpu.grad, atol=1e-10, rtol=1e-10)
+                    else:
+                        self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("num_channels", [3, 5])
@@ -10535,6 +10691,7 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
 
+    @serialTest()
     @dtypes(torch.half)
     @largeTensorTest("20GB")
     def test_log_softmax_64bit_indexing(self, device, dtype):
@@ -10669,6 +10826,7 @@ class TestNNDeviceType(NNTestCase):
             torch.accelerator.synchronize()
         issue_24823_2()
 
+    @serialTest()
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
@@ -10717,6 +10875,7 @@ class TestNNDeviceType(NNTestCase):
             small_image.grad.zero_()
             large_view.grad.zero_()
 
+    @serialTest()
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
                      # Upper bound MPS memory usage based on actual measurement
@@ -10747,9 +10906,8 @@ class TestNNDeviceType(NNTestCase):
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
                 ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
-            # Neither MPS nor XPU has a 5-D bicubic sampler. XPU does not run this class
-            # (allow_xpu=False); its kernel lives in torch-xpu-ops.
-            if mode == 'bicubic' and torch.device(device).type in ('mps', 'xpu'):
+            # MPS has no 5-D bicubic sampler.
+            if mode == 'bicubic' and torch.device(device).type == 'mps':
                 continue
             a = F.grid_sample(
                 small_image, coords, mode=mode,
@@ -11510,7 +11668,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
 
     @parametrize_test("dual_inputs", ["grid", "input_and_grid"])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
     def test_grid_sample_3d_bicubic_forward_ad(self, device, dtype, dual_inputs):
@@ -11627,7 +11785,7 @@ class TestNNDeviceType(NNTestCase):
         grad_3d = torch.autograd.grad(out_3d.sum(), grid_3d)[0]
         self.assertEqual(grad_3d.squeeze(1)[..., :2], grad_2d)
 
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_grid_sample_3d_bicubic_double_backward_low_precision(self, device, dtype):
@@ -11650,7 +11808,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
 
     @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     def test_grid_sample_3d_bicubic_last_voxel_of_a_wide_axis(self, device, size):
         # Neither extent is exact in float32, and the second is not exact in double.
@@ -11780,11 +11938,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     # Merge into OpInfo?
-    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
-                          https://github.com/pytorch/pytorch/issues/34870""")
-    # TODO: Find out if this failure is just because we can't run MPS with
-    # double or if there's a real problem with the backward pass
-    @expectedFailureMPS  # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -11827,13 +11980,24 @@ class TestNNDeviceType(NNTestCase):
                     for i in idxes:
                         target_lengths[i] = 0
 
-            def ctc_after_softmax(x):
+            def ctc_after_softmax(x, tile_factors=tile_factors, targets=targets):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
                           .view(input_length, batch_size, num_labels))
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x])
+            if torch.device(device).type == 'mps':
+                # MPS has no float64, and finite-difference gradcheck in float32 is
+                # too noisy (it fails on CPU float32 too). Compare the analytical
+                # gradient against the CPU float64 one on the same inputs instead.
+                grad_device, = torch.autograd.grad(ctc_after_softmax(x), x)
+                x_ref = x.detach().cpu().double().requires_grad_()
+                loss_ref = ctc_after_softmax(x_ref, tile_factors.cpu().double(), targets.cpu())
+                grad_ref, = torch.autograd.grad(loss_ref, x_ref)
+                self.assertEqual(grad_device.cpu().double(), grad_ref, atol=1e-4, rtol=0)
+            else:
+                # CUDA backward accumulates with atomicAdd, so repeated runs differ in the last bits (gh-34870)
+                gradcheck(ctc_after_softmax, [x], nondet_tol=GRADCHECK_NONDET_TOL)
 
     def test_ctc_loss_error(self, device):
         log_probs = torch.rand(0, 0, 4, device=device)
@@ -15608,7 +15772,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(x.grad, torch.full_like(x, -0.5 * scale))
         self.assertEqual(y.grad, torch.full_like(y, 0.5 * scale))
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_lengthchecks(self, device):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
@@ -15618,9 +15781,12 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @skipMPS
     @onlyAccelerator
-    def test_CTCLoss_long_targets(self, device):
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @toleranceOverride({torch.double: tol(atol=1e-4, rtol=0), torch.float: tol(atol=1e-2, rtol=1e-6)})
+    def test_CTCLoss_long_targets(self, device, dtype):
+        # 2 * target_length + 1 > 1024 exercises the cross-block recursion in the MPS kernel (gh-203356)
         input_length = 4000
         vocab_size = 3
         batch_size = 4
@@ -15637,13 +15803,12 @@ class TestNNDeviceType(NNTestCase):
         grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
-            res_device = torch.nn.functional.ctc_loss(log_probs.to(device), targets.to(device), input_lengths, target_lengths,
+            res_device = torch.nn.functional.ctc_loss(log_probs.to(dtype).to(device), targets.to(device), input_lengths, target_lengths,
                                                       reduction='sum', zero_infinity=True)
-            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device))
-        self.assertEqual(res_cpu, res_device, atol=1e-4, rtol=0)
-        self.assertEqual(grad_cpu, grad_device, atol=1e-4, rtol=0)
+            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device, dtype))
+        self.assertEqual(res_cpu, res_device, exact_dtype=False)
+        self.assertEqual(grad_cpu, grad_device)
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
@@ -15660,7 +15825,6 @@ class TestNNDeviceType(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    @skipMPS
     def test_CTCLoss_zero_lengths(self, device):
         N = 3
         S = 2
@@ -15681,7 +15845,6 @@ class TestNNDeviceType(NNTestCase):
         res.sum().backward()
         self.assertTrue((inp.grad == 0).all().item())
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_zero_infinity(self, device):
         target_lengths = [60, 25, 20]
@@ -16707,12 +16870,13 @@ class TestNNCPU(NNTestCase):
             outf.sum().backward()
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+    def test_LSTM_differentiable_backward_using_oneDNN(self, device):
         batch = 10
         seq_len = 12
         input = 3
-        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        # Two layers exercise the inter-layer gradient path; under Dynamo the
+        # double-backward graph grows superlinearly with depth.
+        Net = nn.LSTM(input, 3, 2, batch_first=True)
         import copy
         Net_clone = copy.deepcopy(Net)
         x = torch.rand(batch, seq_len, input)
@@ -16736,10 +16900,10 @@ class TestNNCPU(NNTestCase):
                                        create_graph=True)[0]
         loss2 = der_out2.sum()
         loss2.backward(retain_graph=True)
-        if not torch.allclose(der_out1, der_out2):
-            raise AssertionError("der_out1 and der_out2 should be close")
-        if not torch.allclose(x1.grad, x2.grad):
-            raise AssertionError("x1.grad and x2.grad should be close")
+        # oneDNN and the native kernels differ by ~1e-7 relative in float32;
+        # some elements are near zero, so allclose's atol=1e-8 is too tight.
+        self.assertEqual(der_out1, der_out2, atol=1e-6, rtol=1e-5)
+        self.assertEqual(x1.grad, x2.grad, atol=1e-6, rtol=1e-5)
 
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):
@@ -17400,60 +17564,103 @@ class TestNNCUDA(NNTestCase):
         grad_true, = torch.autograd.grad(loss_true, log_probs)
         self.assertTrue(torch.isfinite(grad_true).all())
 
-    def test_ctc_loss_cudnn(self, device):
-        batch_size = 16
-        input_length = 30
-        num_labels = 101
-        target_length = 15
-        targets = torch.randint(1, num_labels, (batch_size * target_length,),
-                                device=device, dtype=torch.long)
-        log_probs = torch.log_softmax(
-            torch.randn(input_length, batch_size, num_labels, device=device, dtype=torch.float), 2)
-        log_probs.requires_grad_()
+    @staticmethod
+    def _ctc_log_probs(device, input_length, batch_size, num_labels, permuted):
+        # permuted is log_softmax(1).permute(2, 0, 1) of a model's [N, C, T]
+        # output (#202338): a (T, N, C) tensor that is not contiguous.
+        if permuted:
+            logits = torch.randn(batch_size, num_labels, input_length, device=device, dtype=torch.float) * 3
+            log_probs = logits.log_softmax(1).permute(2, 0, 1)
+        else:
+            log_probs = torch.randn(input_length, batch_size, num_labels, device=device,
+                                    dtype=torch.float).log_softmax(2)
+        return log_probs.detach().requires_grad_()
 
-        input_lengths = batch_size * [input_length]
-        target_lengths = batch_size * [target_length]
-        grad_out = torch.randn(batch_size, device=device, dtype=torch.float)
-        with torch.backends.cudnn.flags(enabled=False):
-            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-        loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
-                                                  input_lengths, target_lengths, reduction='none')
-        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
-        grad_fn_str = str(loss_cudnn.grad_fn)
-        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
-        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+    @staticmethod
+    def _ctc_backend_node(loss):
+        # With zero_infinity the loss is wrapped in a where(), so walk the
+        # graph to the CTC node and return its class name.
+        stack = [loss.grad_fn]
+        while stack:
+            node = stack.pop()
+            if node is None:
+                continue
+            if "CtcLoss" in type(node).__name__:
+                return type(node).__name__
+            stack.extend(next_fn for next_fn, _ in node.next_functions)
+        return None
+
+    def test_ctc_loss_cudnn(self, device):
+        # (T, N, C, permuted). MIOpen describes log_probs with packed strides,
+        # so the permuted layout is only run with cuDNN.
+        cases = [(30, 16, 101, False)]
+        if not torch.version.hip:
+            cases.append((64, 8, 30, True))
+        for input_length, batch_size, num_labels, permuted in cases:
+            with self.subTest(T=input_length, N=batch_size, C=num_labels, permuted=permuted):
+                target_length = 15
+                targets = torch.randint(1, num_labels, (batch_size * target_length,),
+                                        device=device, dtype=torch.long)
+                log_probs = self._ctc_log_probs(device, input_length, batch_size, num_labels, permuted)
+                self.assertEqual(log_probs.is_contiguous(), not permuted)
+
+                input_lengths = batch_size * [input_length]
+                target_lengths = batch_size * [target_length]
+                grad_out = torch.randn(batch_size, device=device, dtype=torch.float)
+                with torch.backends.cudnn.flags(enabled=False):
+                    loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                                               reduction='none')
+                    grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+                loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
+                                                          input_lengths, target_lengths, reduction='none')
+                # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+                backend = self._ctc_backend_node(loss_cudnn)
+                self.assertTrue(backend is not None and ("Miopen" in backend or "Cudnn" in backend),
+                                f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {backend}")
+                grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+                self.assertEqual(loss_cudnn, loss_native, atol=1e-3, rtol=1e-4)
+                self.assertEqual(grad_cudnn, grad_native, atol=1e-3, rtol=0)
 
     def test_ctc_loss_cudnn_tensor_cuda(self, device):
-        batch_size = 16
-        input_length = 30
-        num_labels = 101
-        target_length = 15
-        targets = torch.randint(1, num_labels, (batch_size * target_length,),
-                                device='cuda', dtype=torch.long)
-        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
-        log_probs.requires_grad_()
-
-        input_lengths = batch_size * [input_length]
-        input_lengths = torch.linspace(start=15, end=input_length, steps=batch_size, dtype=torch.long, device='cuda')
-        target_lengths = torch.tensor(batch_size * [target_length], dtype=torch.long, device='cuda')
-        grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
-        with torch.backends.cudnn.flags(enabled=False):
-            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-        loss_cudnn = torch.nn.functional.ctc_loss(log_probs,
-                                                  targets.to('cuda', torch.int32),
-                                                  input_lengths.to('cuda', torch.int32),
-                                                  target_lengths.to('cuda', torch.int32),
-                                                  reduction='none')
-        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
-        grad_fn_str = str(loss_cudnn.grad_fn)
-        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
-        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+        # (T, N, C, permuted). MIOpen describes log_probs with packed strides,
+        # so the permuted layout is only run with cuDNN.
+        cases = [(30, 16, 101, False)]
+        if not torch.version.hip:
+            cases.append((64, 8, 30, True))
+        for (input_length, batch_size, num_labels, permuted), zero_infinity in product(cases, (False, True)):
+            with self.subTest(T=input_length, N=batch_size, C=num_labels, permuted=permuted,
+                              zero_infinity=zero_infinity):
+                log_probs = self._ctc_log_probs(device, input_length, batch_size, num_labels, permuted)
+                self.assertEqual(log_probs.is_contiguous(), not permuted)
+                if permuted:
+                    # the lengths of #202338: input lengths vary across the batch
+                    input_lengths = torch.randint(input_length // 2, input_length + 1, (batch_size,), device=device)
+                    target_lengths = torch.randint(1, input_length // 4, (batch_size,), device=device)
+                else:
+                    input_lengths = torch.linspace(start=15, end=input_length, steps=batch_size, dtype=torch.long,
+                                                   device=device)
+                    # A target needs input_length >= target_length + repeats
+                    # to be alignable; keep every sample feasible, since cuDNN
+                    # and the native kernel differ on infeasible ones.
+                    target_lengths = torch.full((batch_size,), 7, dtype=torch.long, device=device)
+                targets = torch.randint(1, num_labels, (int(target_lengths.sum()),), device=device, dtype=torch.long)
+                grad_out = torch.randn(batch_size, device=device, dtype=torch.float)
+                with torch.backends.cudnn.flags(enabled=False):
+                    loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                                               reduction='none', zero_infinity=zero_infinity)
+                    grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+                loss_cudnn = torch.nn.functional.ctc_loss(log_probs,
+                                                          targets.to(torch.int32),
+                                                          input_lengths.to(torch.int32),
+                                                          target_lengths.to(torch.int32),
+                                                          reduction='none', zero_infinity=zero_infinity)
+                # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+                backend = self._ctc_backend_node(loss_cudnn)
+                self.assertTrue(backend is not None and ("Miopen" in backend or "Cudnn" in backend),
+                                f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {backend}")
+                grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+                self.assertEqual(loss_cudnn, loss_native, atol=1e-3, rtol=1e-4)
+                self.assertEqual(grad_cudnn, grad_native, atol=1e-3, rtol=0)
 
     def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self, device):
         # batch size
@@ -18234,6 +18441,10 @@ instantiate_device_type_tests(TestNNCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
+
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

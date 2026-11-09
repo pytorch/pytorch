@@ -37,8 +37,11 @@ PYTORCH_ROOT = _HERE.parents[2]
 PIP_PACKAGES: list[str] = [
     "cmake",
     "pyyaml",
-    "mkl-include",
-    "mkl-static",
+    # Keep in sync with .ci/docker/common/install_mkl.sh, .ci/docker/requirements-ci.txt
+    # and .ci/pytorch/win-test-helpers/build_pytorch.bat (2026.2 has the LAPACK
+    # DLASD2 fix, #202596).
+    "mkl-include==2026.2.0",
+    "mkl-static==2026.2.0",
     "boto3",
     "requests",
     "ninja",
@@ -48,6 +51,11 @@ PIP_PACKAGES: list[str] = [
     "spin==0.17",
 ]
 
+
+# XPU wheels pin the oneAPI 2026.1 runtime, whose SYCL needs the UR loader of
+# intel-openmp < 2026.2.0 (#201218). CPU and CUDA wheels ship the OpenMP runtime
+# that mkl-static resolves to.
+XPU_PIP_PACKAGES: list[str] = ["intel-openmp<2026.2.0"]
 
 LIBUV_URL = "https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2"
 
@@ -93,7 +101,8 @@ def main() -> None:
     # -- pass them anyway so a pin without a cp315 wheel stays guarded.
     build_flags = preinstall_cp315_build_deps()
     install_numpy(*build_flags)
-    pip_install("-q", *build_flags, *PIP_PACKAGES)
+    xpu_packages = XPU_PIP_PACKAGES if os.environ.get("GPU_ARCH_TYPE") == "xpu" else []
+    pip_install("-q", *build_flags, *PIP_PACKAGES, *xpu_packages)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run(
