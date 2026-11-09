@@ -166,6 +166,16 @@ class CuteDSLKernelLauncher:
     functions it uses by device and argument signature, so a launch keys only its own
     arguments. Both users bind snapshots as constants (see
     ir.UserDefinedCuteDSLKernel.split_args), so their key cannot go stale.
+
+    Known limitation: run() wraps every tensor with from_dlpack at every launch, and
+    a compile is specialized to the exact shape and stride of each tensor (cute
+    tensors from from_dlpack have static layouts), so a graph compiled with dynamic
+    shapes compiles the host function again for each new size, inside its call().
+    Compiling once for dynamic layouts is not a drop-in change: host code may read a
+    layout as static values (the grid it launches, a branch on an extent). The
+    follow-up, after measuring, is to compile host functions that accept dynamic
+    layouts against fake operands through tvm-ffi and pass the torch tensors
+    directly, as torch/_native/cutedsl/launch.py does for the native ops.
     """
 
     def __init__(

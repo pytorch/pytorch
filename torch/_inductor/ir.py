@@ -9188,7 +9188,7 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
         signature order) and the constants the generated code binds once, split by
         CuteDSLHostFnInfo.split_args as the eager launch splits a call, with an IR
         node counting as a tensor. A runtime scalar is a value the generated code can
-        print (see python_scalar; codegen refuses a symbolic one). A parameter the call
+        print (see python_scalar; a symbolic one stays as it is). A parameter the call
         left out takes a copy of its default, as the side table copies passed
         constants; unlike those, defaults are not guarded by Dynamo: changing one
         later does not recompile. If a default cannot be copied (such as one that
