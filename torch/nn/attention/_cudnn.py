@@ -4,14 +4,12 @@ cuDNN SDPA served by the cuDNN frontend Python API.
 The kernels live in the out-of-tree ``nvidia-cudnn-frontend`` package. This
 module swaps the cuDNN SDPA ops (``_scaled_dot_product_cudnn_attention`` and the
 varlen ops) over to it, behind a single switch:
-:func:`torch.backends.cuda.enable_cudnn_sdp_python`.
+:func:`torch.nn.attention.enable_cudnn_sdp_python`.
 
 The package's ``install_sdpa_overrides()`` installs the overrides and returns a
 handle whose ``remove()`` takes them out again. This module holds that handle,
 so whether it is set is the one record of whether the switch is on.
 """
-
-# mypy: allow-untyped-defs
 
 from __future__ import annotations
 
@@ -24,10 +22,11 @@ from torch._vendor.packaging.version import InvalidVersion, Version
 
 _CUDNN_MODULE_PATH = "cudnn.torch"
 _INSTALL_FN = "install_sdpa_overrides"
-# The first nvidia-cudnn-frontend release whose varlen overrides honor the
-# backend varlen_attn selected. install_sdpa_overrides() dates from 1.32.0, so
-# its presence alone does not tell the two apart.
-_MIN_FRONTEND_VERSION = "1.32.2"
+# The first nvidia-cudnn-frontend release that both honors the backend
+# varlen_attn selected and looks for this switch in torch.nn.attention. Older
+# releases register "CUDNN" in the flash attention registry on import, a second
+# switch, so they must be rejected before cudnn.torch is imported.
+_MIN_FRONTEND_VERSION = "1.33"
 
 
 class _OverridesHandle(Protocol):
@@ -51,13 +50,11 @@ def is_enabled() -> bool:
 
 
 def _check_frontend_version(module_path: str) -> None:
+    # Imports only the parent package, never the provider.
     package = importlib.import_module(module_path.partition(".")[0])
     found = getattr(package, "__version__", None)
     try:
-        ok = (
-            isinstance(found, str)
-            and Version(found).release >= Version(_MIN_FRONTEND_VERSION).release
-        )
+        ok = isinstance(found, str) and Version(found) >= Version(_MIN_FRONTEND_VERSION)
     except InvalidVersion:
         ok = False
     if not ok:
@@ -71,8 +68,8 @@ def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
     global _ACTIVE_HANDLE
     if _ACTIVE_HANDLE is not None:
         return
-    provider = importlib.import_module(module_path)
     _check_frontend_version(module_path)
+    provider = importlib.import_module(module_path)
     handle = getattr(provider, _INSTALL_FN)()
     if not callable(getattr(handle, "remove", None)):
         raise TypeError(
@@ -84,6 +81,8 @@ def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
 
 def disable() -> None:
     global _ACTIVE_HANDLE
-    handle, _ACTIVE_HANDLE = _ACTIVE_HANDLE, None
-    if handle is not None:
-        handle.remove()
+    if _ACTIVE_HANDLE is not None:
+        # Forget the handle only once its overrides are gone, so a failed
+        # remove() leaves the switch on and retryable.
+        _ACTIVE_HANDLE.remove()
+        _ACTIVE_HANDLE = None
