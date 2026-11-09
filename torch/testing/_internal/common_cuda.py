@@ -420,12 +420,13 @@ def hipsparselt_supported_archs():
 def evaluate_platform_supports_hipsparselt():
     return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
 
-def evaluate_platform_supports_cublaslt_fp8_grouped_gemm():
+def evaluate_platform_supports_cublaslt_grouped_gemm(min_cuda_version=(13, 3)):
     return (
         TEST_CUDA
         and SM90OrLater
         and not SM120OrLater
-        and _get_torch_cuda_version() >= (13, 4)
+        and not TEST_WITH_ROCM
+        and _get_torch_cuda_version() >= min_cuda_version
     )
 
 def evaluate_platform_supports_fp8_sparse():
@@ -445,7 +446,11 @@ PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
-PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_fp8_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
+PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM: bool = LazyVal(
+    lambda: bool(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and IS_SM90)
+)
 
 if TEST_NUMBA:
     try:
