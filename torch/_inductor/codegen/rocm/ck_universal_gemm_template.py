@@ -422,7 +422,9 @@ class CKGemmTemplate(CKTemplate):
         # CK compiles K1 >= 32 instances to an empty kernel body on anything but
         # gfx950 (GridwiseGemm::IsValidCompilationParameter), yet IsSupportedArgument
         # still accepts them, so they would launch without writing the output.
-        if max(op.a_k1, op.b_k1) >= 32 and rocm_gfx_arch() != "gfx950":
+        # Check every arch being compiled for, not just the current device.
+        archs = {a.split(":")[0] for a in config.rocm.arch} or {rocm_gfx_arch()}
+        if max(op.a_k1, op.b_k1) >= 32 and archs != {"gfx950"}:
             return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
