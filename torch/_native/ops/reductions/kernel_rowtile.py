@@ -20,6 +20,7 @@ from .kernel_general import (
     _SM107_CCS,
     _SM107_DTYPES,
     _SM107_LARGE_SIZES,
+    _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
     _SM107_SIZES,
 )
@@ -356,23 +357,24 @@ def select_row_order(
     welford = welford_outs == nouts
     # Only argmax with int32 indices (32-bit accumulators) was measured.
     argmax = trait_type is ArgMaxOps
-    simple = trait_type in _SM107_ONE_FIELD
+    simple = trait_type in _SM107_ONE_FIELD and nfields == 1
     if not (simple or argmax or welford):
         return "linear"
+    large = size in _SM107_LARGE_SIZES
     if N == 1024:
         inner = welford or (dtype == torch.bfloat16 and argmax)
     elif N == 256:
         if dtype == torch.bfloat16:
-            inner = size == 16 << 20 and not argmax
+            inner = size == _SM107_MIN_SIZE and not argmax
         else:
-            inner = size >= 256 << 20 or (
-                not argmax and (trait_type is not MeanOps or size >= 64 << 20)
+            inner = large or (
+                not argmax and (trait_type is not MeanOps or size > _SM107_MIN_SIZE)
             )
     else:
         inner = (
             welford
             or argmax
-            or (dtype == torch.float32 and (trait_type is MeanOps or size >= 256 << 20))
+            or (dtype == torch.float32 and (trait_type is MeanOps or large))
         )
     if inner:
         return "inner_tree"
@@ -670,6 +672,8 @@ def itree_combine_plan(
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
     block. A given `trait` supplies nfields (default 1) and may enable uniform counts.
+    `arch` replaces the device's policy, threading a workload-specific profile such as
+    SM107's full-reduction one (select_full_itree_arch); tests pass modified ones.
     """
     if trait is not None:
         if nfields is not None and nfields != trait.nfields:
@@ -683,6 +687,8 @@ def itree_combine_plan(
     if arch.combine_async and arch.combine_rpb > WARP:
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
+    if arch.combine_weights and not arch.uniform_count:
+        raise ValueError("combine_weights requires uniform_count")
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -1068,11 +1074,14 @@ def reduce_row_tile(
     # Row edges come from the logical row offset, so rows must start at r * N from a
     # 16-byte aligned base. Edge loads are unconditional, so rows must be nonempty.
     full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
-    if ragged_vector and (
-        N < 1 or not x.is_contiguous() or full_align != tile.TRANSFER_ALIGNMENT
-    ):
+    if ragged_vector and N < 1:
+        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
+    if ragged_vector and not x.is_contiguous():
+        raise ValueError(f"ragged vectors require contiguous rows, got {x.stride()=}")
+    if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
         raise ValueError(
-            "ragged vectors require a nonempty, contiguous 16-byte aligned input"
+            f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
+            f"got {full_align}-byte alignment"
         )
     isz = x.element_size()
     cfg = row_config(N, isz * 8)
@@ -1128,8 +1137,10 @@ def reduce_row_tile(
     # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    nchunks = Int32(N // op.vec)
-    nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
+    # fold_row_aligned derives its own groups and waves.
+    nvec = N // op.vec
+    nchunks = None if ragged_vector else Int32(nvec)
+    nwaves = None if ragged_vector else Int32(math.ceil(nvec / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
     # outside TMA and ragged vectors. Both bake N; other runtime folds share a vector
     # class.

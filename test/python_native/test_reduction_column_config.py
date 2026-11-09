@@ -111,7 +111,7 @@ class TestColumnConfig(TestCase):
                 1024,
                 "argmaxi32",
                 2,
-                "rubin_c1024",
+                "rubin_c1024_ordered",
                 (4096, 8, "column", 0, "inner_tree"),
             ),
             (
@@ -165,7 +165,7 @@ class TestColumnConfig(TestCase):
                 4096,
                 "var0",
                 3,
-                "rubin_var_c4096",
+                "rubin_var_c4096_ordered",
                 (2048, 8, "column", 0, "inner_tree"),
             ),
             (
@@ -177,14 +177,14 @@ class TestColumnConfig(TestCase):
                 "rubin_var_c4096",
                 (256, 8, "column", 0, "linear"),
             ),
-            # rubin_var_c4096 runs the ordered kernel for bf16 or 2 GiB views.
+            # Welford anchors take the ordered kernel for bf16 or 2 GiB views.
             (
                 torch.bfloat16,
                 256,
                 4096,
                 "var0",
                 3,
-                "rubin_var_c4096",
+                "rubin_var_c4096_ordered",
                 (256, 8, "column", 0, "inner_tree"),
             ),
             (
@@ -193,7 +193,7 @@ class TestColumnConfig(TestCase):
                 4096,
                 "var0",
                 3,
-                "rubin_var_c4096",
+                "rubin_var_c4096_ordered",
                 (1024, 8, "column", 0, "inner_tree"),
             ),
             (
@@ -202,7 +202,7 @@ class TestColumnConfig(TestCase):
                 4096,
                 "argmaxi32",
                 2,
-                "rubin_argmax_c4096_tree",
+                "rubin_argmax_c4096_ordered",
                 (2048, 4, "partition", 8, "inner_tree"),
             ),
             (
@@ -423,6 +423,26 @@ class TestColumnConfig(TestCase):
         )
         selected = ct.OrderedColConfig(0, full_tiles=True, out_dtypes=(torch.bfloat16,))
         self.assertEqual(cfg, selected if nouts == 1 else None)
+
+    @parametrize("welford_outs", [1, 0])
+    def test_sm107_ordered_welford_entry_needs_one_output(self, welford_outs):
+        """The SM107 WelfordOps entry serves var and std, not return_mean traits."""
+        cfg = ct.select_ordered_col_config(
+            (10, 7),
+            torch.float32,
+            1024,
+            1,
+            8,
+            trait_type=T.WelfordOps,
+            nfields=3,
+            nouts=1,
+            welford_outs=welford_outs,
+            acc_bits=32,
+            out_dtypes=(torch.float32,),
+            rows=65536,
+            full_tiles=True,
+        )
+        self.assertEqual(cfg is not None, welford_outs == 1)
 
     @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
     @parametrize("cc", [(10, 3), (10, 7)])

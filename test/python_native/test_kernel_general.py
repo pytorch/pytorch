@@ -14,6 +14,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -35,7 +36,6 @@ import cutlass.cute as cute
 from cutlass import Int32, Int64
 
 from torch._native.cutedsl import hw_caps as _hw, launch as _L
-from torch._native.cutedsl.dtypes import cute2torch
 from torch._native.cutedsl.plan_cache import LRUCache
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
@@ -499,20 +499,22 @@ class TestKernelGeneral(TestCase):
             ("argmin", torch.float32),
         ],
     )
+    @largeTensorTest("1GB", device="cuda")
     def test_reduce_all_wide_blocks_and_waves(self, op, dtype):
-        """Grid-stride full index reductions in B200's 512-thread, eight-wave launch."""
-        L = (1 << 22) + 3
-        x = torch.randn(L, device="cuda", dtype=dtype)
+        """Grid-stride 256 MiB full index reductions in B200's 512-thread, eight-wave
+        launch through _reduce_all; test_reduction_config pins the selector."""
+        if _hw.caps(torch.device("cuda")).cc not in kg._B200_CCS:
+            self.skipTest("B200 launch policy")
+        x = torch.randn((256 << 20) // dtype.itemsize, device="cuda", dtype=dtype)
+        L = x.numel()
         trait = {"argmax": T.ArgMaxOps, "argmin": T.ArgMinOps}[op](acc=cutlass.Float32)
-        out_dtypes = [torch.int32]
+        key = f"all_wide_{op}"
+        # Index traits skip xcta, so this reaches the grid-striding stages.
+        got = kg._reduce_all(trait, key, x, [torch.int32], 1, order="unordered")
         cfg = kg._AllConfig(block=512, grid_mult=8)
         G = kg._grid_size(L, cfg.block, _hw.caps(x.device).sm_count, cfg.grid_mult)
         chunk = -(-L // G)
         self.assertGreater(chunk, cfg.block, "threads no longer stride their chunks")
-        parts = [x.new_empty(G, dtype=cute2torch[f]) for f in trait.fdtypes]
-        outs = [torch.empty(1, device="cuda", dtype=d) for d in out_dtypes]
-        # A copy of _reduce_all's two grid-striding stages at the launch select_all_config
-        # picks for B200 index anchors; test_reduction_config pins the selector.
         s1 = kg.ReduceBlock(
             trait,
             count=chunk,
@@ -526,25 +528,15 @@ class TestKernelGeneral(TestCase):
             final=False,
             block=cfg.block,
         )
-        key = f"all_wide_{op}"
-        kg._launch(s1, ("all1", key, dtype) + s1.cache_sig, [kg._flat(x)], parts)
-        s2 = kg.ReduceBlock(
-            trait,
-            count=G,
-            num_o=1,
-            red_pairs=[(G, 1)],
-            kept_pairs=[],
-            from_partials=True,
-            project_n=L,
-            nouts=len(outs),
-            block=cfg.block,
-        )
-        s2_key = ("all2", key, tuple(out_dtypes), tuple(p.dtype for p in parts))
-        kg._launch(s2, s2_key + s2.cache_sig, parts, outs)
+        stage1 = {k for k in kg._COMPILE_CACHE if k[1:4] == ("all1", key, dtype)}
+        self.assertEqual(stage1, {(x.get_device(), "all1", key, dtype) + s1.cache_sig})
+        # cache_sig pins the block; the plan's geometry pins the (G, chunk) grid.
+        plans = {k[1] for k in kg._PLAN if k[0][1:4] == ("all1", key, dtype)}
+        self.assertEqual(plans, {s1.geom_sig})
         with torch.backends.python_native.cutedsl.disabled():
             want = (x.argmax(),) if op == "argmax" else (x.argmin(),)
-        for got, ref in zip(outs, want, strict=True):
-            self.assertEqual(got, ref.to(got.dtype).view(1))
+        for g, ref in zip(got, want, strict=True):
+            self.assertEqual(g, ref.to(g.dtype))
 
     @parametrize(
         "op,dtype,count",
@@ -746,7 +738,7 @@ class TestKernelGeneral(TestCase):
             "all_strided": ((1 << 21,), None, split),
         }
         cc = torch.cuda.get_device_capability()
-        if case == "ragged_row" and cc != (10, 0):
+        if case == "ragged_row" and cc not in kg._B200_CCS:
             self.skipTest("the ragged-row route is measured on B200 only")
         if case == "batched_column" and cc not in kg._BATCHED_COL_CCS:
             self.skipTest("the batched column route is measured on H100 and B200 only")
@@ -797,6 +789,9 @@ class TestKernelGeneral(TestCase):
         plans = [k for k in kg._PLAN if k[0][2] == key]
         self.assertEqual(sorted(k[0][1] for k in plans), ["all1", "all2"])
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_replay_multi_field_traits(self):
         """Replay a two-field index reduction of a contiguous input."""
         self._assert_replays(
@@ -885,6 +880,11 @@ class TestReplayRecords(TestCase):
         record = _L.LaunchRecord(x)
         record.add(None, 0, x, (buf,))
         self.assertIsNotNone(record.finish([buf[:4]]))
+        # A launch may read an earlier launch's output.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, x, (buf,))
+        record.add(None, 0, [buf], ())
+        self.assertIsNotNone(record.finish([buf]))
         # A torch-op result returned without a launch writing it.
         self.assertIsNone(record.finish([buf.clone()]))
         cases = {

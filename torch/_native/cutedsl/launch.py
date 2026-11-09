@@ -124,7 +124,7 @@ class LaunchRecord:
     x's dtype, device, sizes, strides, storage offset, storage size and pointer alignment.
 
     Callers must ensure that no torch op writes data to a buffer a launch has seen
-    (metadata changes such as resize_ are fine) and that launch outputs are write-only
+    (resizes that do not grow the storage are fine) and that launch outputs are write-only
     scratch: a replay allocates them uninitialized and repeats only the launches.
     finish() returns None unless every operand views `x` or a buffer whose storage first
     appeared in a launch's output position, before any input position, and every output
