@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
@@ -706,12 +707,26 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// True if t is dense with its dims in the same memory order as ref_strides;
+// size-1 dims can sit anywhere.
+static bool has_dense_order(const Tensor& t, IntArrayRef ref_strides) {
+  if (!t.is_non_overlapping_and_dense()) {
+    return false;
+  }
+  const auto want = at::infer_dense_strides(t.sizes(), ref_strides);
+  for (int64_t d = 0; d < t.dim(); ++d) {
+    if (t.size(d) != 1 && t.stride(d) != want[d]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // The fast path copies the i-th memory-order chunk of self (the elements for
 // one index of the dims before dim) to the i-th chunk of each output, one flat
 // byte range per split, ignoring layout inside the range. That is exact when
-// every tensor is dense, the dims from dim on fill one block per chunk, and
-// self and each output order both the chunks and the elements inside them
-// alike. Strides of size-1 dims and empty outputs never matter.
+// every tensor is dense with the same dim order and the dims from dim on form
+// self's innermost block, dim outermost. Empty outputs never matter.
 static bool has_dense_matching_slices(
     const Tensor& self,
     TensorList out,
@@ -722,55 +737,28 @@ static bool has_dense_matching_slices(
   if (self.numel() == 0) {
     return true;
   }
-  if (!self.is_non_overlapping_and_dense()) {
+  if (!has_dense_order(self, self.strides())) {
     return false;
   }
-  // A single non-empty split laid out exactly like self is a plain copy
-  const auto non_empty = std::count_if(
-      out.begin(), out.end(), [](const Tensor& t) { return t.numel() != 0; });
-  if (non_empty == 1) {
-    const auto& t = *std::find_if(
-        out.begin(), out.end(), [](const Tensor& t) { return t.numel() != 0; });
-    bool same_layout = t.is_non_overlapping_and_dense();
-    for (int64_t d = 0; d < self.dim() && same_layout; ++d) {
-      same_layout = self.size(d) == 1 || t.stride(d) == self.stride(d);
-    }
-    if (same_layout) {
-      return true;
-    }
-  }
-  const int64_t inner = c10::multiply_integers(self.sizes().slice(dim + 1));
-  int64_t inner_extent = 1;
-  for (int64_t d = dim + 1; d < self.dim(); ++d) {
-    inner_extent += (self.size(d) - 1) * self.stride(d);
-  }
-  if (inner_extent != inner ||
-      (self.size(dim) != 1 && self.stride(dim) != inner)) {
-    return false;
-  }
-  // Density then makes every leading stride a multiple of the chunk size
-  const int64_t self_chunk = self.size(dim) * inner;
+  int64_t non_empty = 0;
   for (const auto& t : out) {
     if (t.numel() == 0) {
       continue;
     }
-    if (!t.is_non_overlapping_and_dense() ||
-        (t.size(dim) != 1 && t.stride(dim) != inner)) {
+    if (!has_dense_order(t, self.strides())) {
       return false;
     }
-    const int64_t out_chunk = t.size(dim) * inner;
-    for (int64_t d = 0; d < self.dim(); ++d) {
-      if (d == dim || self.size(d) == 1) {
-        continue;
-      }
-      // Leading dims are compared in units of each tensor's own chunk
-      const bool same_order = d < dim
-          ? (t.stride(d) % out_chunk == 0 &&
-             t.stride(d) / out_chunk == self.stride(d) / self_chunk)
-          : t.stride(d) == self.stride(d);
-      if (!same_order) {
-        return false;
-      }
+    ++non_empty;
+  }
+  // One split covering all of self is a flat copy
+  if (non_empty == 1) {
+    return true;
+  }
+  // Several non-empty splits imply size(dim) > 1, so stride(dim) is meaningful
+  for (int64_t d = 0; d < self.dim(); ++d) {
+    if (d != dim && self.size(d) != 1 &&
+        (d < dim) != (self.stride(d) > self.stride(dim))) {
+      return false;
     }
   }
   return true;
