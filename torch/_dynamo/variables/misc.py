@@ -74,7 +74,9 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
+    GetSet,
     getset_build,
+    load_pending_mutation,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -180,6 +182,9 @@ class SuperVariable(VariableTracker):
         type_to_use_source: Source | None = (
             TypeSource(self.objvar.source) if self.objvar.source else None
         )
+        if isinstance(self.objvar, variables.TensorWithTFOverrideVariable):
+            # as_subclass() can retain the input's source while changing its type.
+            type_to_use_source = self.objvar.class_type_var(tx).source
         if issubclass(type_to_use, type):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
@@ -756,7 +761,7 @@ class AutogradFunctionVariable(VariableTracker):
             return NO_SUCH_SUBOBJ
         return self.fn_cls
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if self.represents_instance:
             if inspect.getattr_static(self.fn_cls, "__hash__") is not object.__hash__:
                 self._unsupported_method("__hash__")
@@ -767,7 +772,7 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(hash_source.make_guard(GuardBuilder.BUILTIN_MATCH))
             except NotImplementedError:
                 self._unsupported_method("__hash__")
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
         if self.fn_cls_source is not None:
             try:
                 install_guard(self.fn_cls_source.make_guard(GuardBuilder.CLASS_MATCH))
@@ -1245,6 +1250,28 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.dirty_tensors = dirty_tensors
         self.output_grad_dtypes = output_grad_dtypes
 
+    # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
+    # instance-dict entry, so user writes go there too and reads see them;
+    # without a pending entry the read falls through to tp_getattro_impl.
+    def _get_needs_input_grad(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        return load_pending_mutation(tx, self, "needs_input_grad")
+
+    def _set_needs_input_grad(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> VariableTracker:
+        # setNeedsInputGrad stores NULL for del, which the getter reads as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        se = tx.output.side_effects
+        se.store_instance_dict_attr(self, "needs_input_grad", value)
+        return ConstantVariable.create(None)
+
+    tp_getset = {
+        "needs_input_grad": GetSet(_get_needs_input_grad, _set_needs_input_grad)
+    }
+
     @staticmethod
     def create(
         tx: "InstructionTranslatorBase",
@@ -1517,7 +1544,7 @@ class GetAttrVariable(VariableTracker):  # noqa: RVT001
         except AttributeError:
             raise NotImplementedError(f"{self} is not a constant") from None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # GetAttrVariable can wrap various types (bound methods, descriptors,
         # etc.) with different C tp_hash.  Resolve to the actual value and hash.
         try:
@@ -1527,7 +1554,7 @@ class GetAttrVariable(VariableTracker):  # noqa: RVT001
 
             unimplemented(
                 gb_type="Non-constant GetAttrVariable hash",
-                context=f"hash_impl {self}",
+                context=f"tp_hash_impl {self}",
                 explanation=f"Cannot hash {self} because Dynamo doesn't know how to represent "
                 "the type of the getattr() result, which is not a constant.",
                 hints=[*graph_break_hints.SUPPORTABLE],
@@ -1627,7 +1654,7 @@ class CallMethodVariable(VariableTracker):  # noqa: RVT001
     def as_python_constant(self) -> Any:
         return getattr(self.obj.as_python_constant(), self.method_name)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             return hash(self.as_python_constant()), False
         except AsPythonConstantNotImplementedError:
@@ -1796,7 +1823,7 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
     def get_real_python_backed_value(self) -> Any:
@@ -2158,22 +2185,6 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(create_call_function_ex(True, False))
 
 
-class ObjectVariable(VariableTracker):
-    # PyBaseObject_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
-    _cpython_type = object
-
-    # placeholder for unknown / opaque values
-    def __init__(self, value: object, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.value = value
-
-    def get_real_python_backed_value(self) -> object:
-        return self.value
-
-    def python_type(self) -> type[object]:
-        return object
-
-
 if sys.version_info >= (3, 15):
 
     class SentinelVariable(VariableTracker):
@@ -2393,7 +2404,7 @@ class ConstantLikeVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
     def tp_richcompare_impl(
@@ -2958,7 +2969,7 @@ class WeakRefVariable(VariableTracker):
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython weakref_hash: hash(referent)
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/weakrefobject.c#L186
         from .object_protocol import generic_hash_impl
