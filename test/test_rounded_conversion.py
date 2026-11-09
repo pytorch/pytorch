@@ -161,6 +161,9 @@ def _boundary_inputs(src, dst):
         )
         mags = mags.sort().values
         top = torch.tensor([torch.finfo(dst).max, 2.0**128], dtype=torch.float64)
+        # Midpoints between the random values and the next float32 values.
+        next_mags = torch.nextafter(mags.float(), torch.tensor(math.inf)).double()
+        mags = torch.cat([mags, next_mags]).sort().values
     else:
         mags = _finite_magnitudes(dst)
         no_mantissa = dst is torch.float8_e8m0fnu
