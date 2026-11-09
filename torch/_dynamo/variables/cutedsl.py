@@ -313,7 +313,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         )
 
     def wrap_raw(self, variable: "CuteDSLKernelVariable") -> "CuteDSLKernelVariable":
-        return CuteDSLKernelVariable(
+        return CuteDSLKernelVariable(  # noqa: RVT001
             variable.kernel,
             RAW_CALL_MUTATES_ARGS,
             None,
@@ -853,7 +853,7 @@ class CuteDSLKernelVariable(VariableTracker):
     def with_mutates_args(self, mutates_args: object) -> "CuteDSLKernelVariable":
         """The variable wrap_cutedsl(self.kernel, mutates_args=...) returns;
         mutates_args is validated as in eager (None is refused)."""
-        return CuteDSLKernelVariable(
+        return CuteDSLKernelVariable(  # noqa: RVT001
             self.kernel,
             mutates_args,
             None,
@@ -967,6 +967,7 @@ class CuteDSLFromDlpackVariable(VariableTracker):
                     f"from_dlpack(): {key}= is not supported; PT2 makes the cute "
                     "tensor itself, accepting only assumed_align"
                 )
+        # noqa: RVT001
         return CuteDSLTensorVariable(tensor, align, _layout(tensor), _storage(tensor))
 
 
@@ -1078,7 +1079,7 @@ class CuteDSLCurrentStreamFunctionVariable(VariableTracker):
             dynamo_cutedsl_hopifier_singleton.raise_user_error(
                 TypeError("cutlass.torch.current_stream() takes no arguments")
             )
-        return CuteDSLCurrentStreamVariable(*_current_stream(tx))
+        return CuteDSLCurrentStreamVariable(*_current_stream(tx))  # noqa: RVT001
 
 
 class CuteDSLCurrentStreamVariable(_CuteDSLValueVariable):
