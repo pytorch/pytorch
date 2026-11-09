@@ -322,6 +322,24 @@ class GraphBuilder:
                     ):
                         attribute_dtype = dtype
                         break
+        elif op_type in (
+            "RandomNormalLike",
+            "RandomUniformLike",
+            "Bernoulli",
+            "Multinomial",
+        ):
+            attribute_dtype = ir.DataType(
+                attributes.get(
+                    "dtype",
+                    inputs[0].dtype
+                    if isinstance(inputs[0], ir.Value)
+                    else ir.DataType.FLOAT,
+                )
+            )
+        elif op_type in ("BlackmanWindow", "HammingWindow", "HannWindow"):
+            attribute_dtype = ir.DataType(
+                attributes.get("output_datatype", ir.DataType.FLOAT)
+            )
         for index in range(num_outputs):
             param = signature.outputs[min(index, len(signature.outputs) - 1)]
             constraint = param.type_constraint

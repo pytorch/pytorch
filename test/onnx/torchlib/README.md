@@ -56,6 +56,20 @@ both enabled and disabled. Those tests prohibit legacy graph construction.
 Use ONNX's reference evaluator when the installed runtime does not support a
 tested opset; do not skip a migrated translation merely because its opset is newer.
 
+Factories, random sampling, windows, matrix products, and Tensor[] operations
+also use native IR. `factories.py`, `linalg.py`, and `sequences.py` preserve source
+implementations and comments without ONNX Script evaluation. Dynamic split sizes
+produce typed ONNX sequences, explicitly unpacked at FX multioutput boundaries.
+Sequence maps use native IR subgraphs and `If` nodes. Factory sizes may be an
+INT64 tensor or a list of static/symbolic dimensions. Device, generator, and
+layout limitations remain those of the source translations; empty allocation
+is represented by zeros. Random tests compare shapes, dtypes, and valid ranges,
+not identical random streams. Window tolerances retain ONNX's Hamming coefficient
+difference. `test_native_factory_sequence_ops.py` covers dynamic sizes, empty
+and scalar outputs, repeats, complex stacking, and optimizer-off/on FX exports.
+The OpInfo harness uses the reference evaluator for boolean `SplitToSequence`,
+which is missing from older ONNX Runtime kernel tables.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests

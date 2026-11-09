@@ -541,6 +541,23 @@ def graph_executor(
         )
         with context:
             symbolic_outputs = function(*onnxscript_args, **onnxscript_kwargs)
+            if (
+                native
+                and len(outputs) == 1
+                and isinstance(outputs[0], Sequence)
+                and isinstance(symbolic_outputs, Sequence)
+            ):
+                symbolic_outputs = builder.call(
+                    "SequenceConstruct",
+                    *symbolic_outputs,
+                    _output_types=[
+                        ir.SequenceType(
+                            ir.TensorType(
+                                _TORCH_DTYPE_TO_ONNX_TYPE[outputs[0][0].dtype]
+                            )
+                        )
+                    ],
+                )[0]
         if not isinstance(symbolic_outputs, Sequence):
             symbolic_outputs = (symbolic_outputs,)
 
@@ -582,6 +599,15 @@ def graph_executor(
         except (onnx.checker.ValidationError, onnx.shape_inference.InferenceError) as e:
             raise AssertionError(f"ONNX model is invalid. Model:\n{onnx_model}") from e
         model_proto = onnx.shape_inference.infer_shapes(model_proto, data_prop=True)
+        if native and any(
+            node.op_type == "SplitToSequence"
+            and node.inputs[0].dtype == ir.DataType.BOOL
+            for node in graph
+        ):
+            # ORT 1.20 lacks boolean sequence splitting; retain numerical coverage.
+            from onnx.reference import ReferenceEvaluator
+
+            return ReferenceEvaluator(model_proto).run(None, ort_inputs), model_proto
         try:
             if (
                 os.environ.get("CATCH_ORT_SEGFAULT") == "1"

@@ -624,8 +624,25 @@ def _handle_call_function_node_with_lowering(
                     f"{node.target!r}. Check its IR inputs, explicit tensor casts "
                     "and ONNX schema arguments."
                 ) from e
-            values = list(outputs) if isinstance(outputs, Sequence) else [outputs]
             expected = node.meta["val"]
+            if (
+                isinstance(outputs, ir.Value)
+                and isinstance(outputs.type, ir.SequenceType)
+                and isinstance(expected, Sequence)
+            ):
+                # FX exposes a fixed tuple of tensors even when dynamic sizes
+                # require an ONNX sequence. Unpack explicitly, without tracing.
+                with builder.activate():
+                    outputs = tuple(
+                        builder.call(
+                            "SequenceAt",
+                            outputs,
+                            index,
+                            _output_types=[outputs.type.elem_type],
+                        )[0]
+                        for index in range(len(expected))
+                    )
+            values = list(outputs) if isinstance(outputs, Sequence) else [outputs]
             expected_count = len(expected) if isinstance(expected, Sequence) else 1
             if len(values) != expected_count or not all(
                 isinstance(value, ir.Value) for value in values

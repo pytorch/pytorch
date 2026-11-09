@@ -53,9 +53,11 @@ def constant(
     return current_builder().constant(array, dtype=ir.DataType(dtype))
 
 
-def merge_dims(dims: Sequence[int | ir.Value]) -> ir.Value:
+def merge_dims(dims: Sequence[int | ir.Value] | ir.Value) -> ir.Value:
     """Concatenate dimensions into a single value."""
     builder = current_builder()
+    if isinstance(dims, ir.Value):
+        return builder.call("Cast", dims, to=ir.DataType.INT64)[0]
     if not dims:
         return builder.constant([], dtype=ir.DataType.INT64)
 
