@@ -293,6 +293,15 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
 
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; return [] even in strict mode
+        with patch.dict(
+            os.environ,
+            {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
+            clear=True,
+        ):
+            self.assertEqual(torch.xpu._parse_visible_devices(), [])
+            self.assertEqual(torch.xpu._parse_visible_devices(strict=True), [])
+
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
             with self.assertRaisesRegex(ImportError, "pyzes is required"):

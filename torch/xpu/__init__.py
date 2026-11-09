@@ -97,11 +97,18 @@ def _parse_visible_devices(strict=False) -> list[int]:
     for ``int8_t`` device indices).  Returns an empty list for unsupported
     COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
 
+    Also returns an empty list (regardless of ``strict``) when
+    ``ONEAPI_DEVICE_SELECTOR`` is set, since Level Zero Sysman does not honor
+    it and the visible devices cannot be derived from ``ZE_AFFINITY_MASK``
+    alone; callers must defer to the SYCL runtime.
+
     Args:
         strict (bool): If ``True``, raises ``ValueError`` on unsupported mask
             formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
             (default), returns an empty list instead.
     """
+    if os.getenv("ONEAPI_DEVICE_SELECTOR") is not None:
+        return []
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
         # DeviceIndex is stored as int8_t, so valid indices are 0–127
@@ -278,13 +285,7 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
 
 
 def _device_count_zes() -> int:
-    r"""Return the number of visible XPU devices, or -1 on failure.
-
-    Also returns -1 when ``ONEAPI_DEVICE_SELECTOR`` is set, since Level Zero
-    Sysman does not honor it and the caller must defer to the SYCL runtime.
-    """
-    if os.getenv("ONEAPI_DEVICE_SELECTOR") is not None:
-        return -1
+    r"""Return the number of visible XPU devices, or -1 on failure."""
     visible_devices = _parse_visible_devices()
     if not visible_devices:
         return -1
