@@ -2062,10 +2062,8 @@ static bool can_use_expanded_index_path(
     return false;
   }
 
-  // allow only different size on dim 0 for src and index
-  // https://github.com/pytorch/pytorch/issues/99595
-  // The kernels also step self's rows by index's row size, so self must match
-  // index there too (scatter allows index to be smaller than self).
+  // The kernels step src and self rows by index's row size, so only dim 0 may
+  // differ (https://github.com/pytorch/pytorch/issues/99595).
   for (const auto dim : c10::irange(1, index.dim())) {
     if (src.size(dim) != index.size(dim) || self.size(dim) != index.size(dim)) {
       return false;
