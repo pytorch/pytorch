@@ -17,9 +17,9 @@ import types
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
-from torch._guards import Source
+from torch._guards import CompileContext, Source
 
-from .. import graph_break_hints, variables
+from .. import config, graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
 from ..exc import (
     raise_attribute_error,
@@ -601,13 +601,32 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
+    def has_fresh_container_receiver(self) -> bool:
+        return (
+            self.value is None
+            and self.obj.source is None
+            and (
+                (
+                    self.obj.mutation_type is not None
+                    and self.obj.mutation_type.scope > 0
+                )
+                or isinstance(self.obj, variables.RangeVariable)
+            )
+            and not (
+                isinstance(self.obj, variables.TupleVariable)
+                and self.obj.python_type() is tuple
+                and not self.obj.items
+            )
+        )
+
     def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
-        # It hashes m_self by identity, so only a guarded runtime method has a
-        # real hash; a method bound during tracing gets a compile-time-only one.
         if self.value is not None:
             return hash(self.value), False
-        return id(self), True
+        obj = self.obj.realize()
+        if self.has_fresh_container_receiver():
+            # Internal bucket; equality still distinguishes C functions.
+            return id(obj), True
+        return self.tp_hash_impl(tx)
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
@@ -637,7 +656,17 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                         *graph_break_hints.DIFFICULT,
                     ],
                 )
-        return hash(_bind_builtin_method(self.descriptor, receiver)), True
+        # Ordinary compilation can pin a constant receiver. Saved graphs cannot
+        # retain its address-based hash when identity guards are filtered out.
+        context = CompileContext.try_get()
+        is_aot_capture = context is not None and context.is_aot_capture
+        is_fake = (
+            type(obj) is not ConstantVariable
+            or is_aot_capture
+            or config.caching_precompile
+            or tx.export
+        )
+        return hash(_bind_builtin_method(self.descriptor, receiver)), is_fake
 
     def tp_richcompare_impl(self, tx, other, op):
         # meth_richcompare: equal iff both are builtin methods with the same

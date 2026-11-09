@@ -753,12 +753,12 @@ ownership:
       - /torch/nn/parallel/: [weifengpy]
   - name: dtensor
     labels: ["module: dtensor"]
-    owners: [weifengpy]
+    owners: [weifengpy, pianpwk, anshul-si]
     section: distributed
     paths:
-      - /torch/distributed/tensor/placement_types.py: [weifengpy]
-      - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
-      - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
+      - /torch/distributed/tensor/placement_types.py: [weifengpy, pianpwk, anshul-si]
+      - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy, pianpwk, anshul-si]
+      - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy, pianpwk, anshul-si]
   - name: build_rocm
     labels: ["module: rocm", "module: build"]
     owners: [jeffdaily, jithunnair-amd]
