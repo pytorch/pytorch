@@ -131,7 +131,7 @@ void _check_cublaslt_grouped_inputs(
     const Tensor& mat_b) {
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
   TORCH_CHECK_VALUE(
-      major >= 9 && major <= 11, "cuBLASLt grouped GEMM requires SM9.x/SM10.x/SM11.x; got SM", major, ".x");
+      at::cuda::blas::cublaslt_grouped_gemm_arch_supported(), "cuBLASLt grouped GEMM requires SM9.x/SM10.x/SM11.x; got SM", major, ".x");
   TORCH_CHECK_VALUE(
       scaled_blas::is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
       "cuBLASLt grouped GEMM inputs must both be float8_e4m3fn/e5m2 with at least one float8_e4m3fn input; got ",
@@ -188,10 +188,7 @@ bool should_use_cublaslt_grouped_gemm(
     const Tensor& mat_b,
     const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
-  const auto dprops = at::cuda::getCurrentDeviceProperties();
-  const bool valid_sm =
-      dprops->major >= 9 && dprops->major <= 11;
-  if (!valid_sm) {
+  if (!at::cuda::blas::cublaslt_grouped_gemm_arch_supported()) {
     return false;
   }
 
@@ -202,7 +199,7 @@ bool should_use_cublaslt_grouped_gemm(
   const int64_t batchCount = (a_is_2d || b_is_2d)
       ? (offs.has_value() ? offs->size(0) : 0)
       : mat_a.size(0);
-  if (batchCount < 1 || batchCount > 1024) {
+  if (batchCount < 1 || batchCount > kMaxCublasGroupedBatchCount) {
     return false;
   }
 
@@ -582,6 +579,31 @@ void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int
 }
 
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+void run_cublaslt_grouped_gemm(
+    const cublasGroupedArgs& args,
+    ScalarType a_dtype,
+    ScalarType b_dtype,
+    ScalarType out_dtype,
+    const std::optional<at::cuda::blas::GroupedGemmScaleOptions>& scales = std::nullopt) {
+  at::cuda::blas::grouped_gemm(
+      args.transa, args.transb,
+      args.mArray, args.m,
+      args.nArray, args.n,
+      args.kArray, args.k,
+      args.alphaPtrArray, args.alphaScalar,
+      a_dtype,
+      args.APtrArray, args.ldaArray,
+      b_dtype,
+      args.BPtrArray, args.ldbArray,
+      args.betaPtrArray, args.betaScalar, out_dtype,
+      args.DPtrArray, args.lddArray,
+      args.DPtrArray, args.lddArray,
+      args.batchCount, args.use_int64,
+      scales);
+}
+#endif
+
 } // namespace
 
 static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
@@ -598,7 +620,7 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool b_is_2d = mat_b.dim() == 2;
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
-  TORCH_CHECK(batchCount64 > 0 && batchCount64 <= 1024,
+  TORCH_CHECK(batchCount64 > 0 && batchCount64 <= kMaxCublasGroupedBatchCount,
       "batchCount must be in [1, 1024], got ", batchCount64);
   const int batchCount = static_cast<int>(batchCount64);
 
@@ -608,19 +630,7 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool needs_int64 = cublaslt_grouped_mm_use_int64(mat_a, mat_b, out);
 
   cublasGroupedArgs args(mat_a, mat_b, offs, out, batchCount, needs_int64);
-  at::cuda::blas::grouped_gemm(args.transa, args.transb,
-                               args.mArray, args.m,
-                               args.nArray, args.n,
-                               args.kArray, args.k,
-                               args.alphaPtrArray, args.alphaScalar,
-                               mat_a.scalar_type(),
-                               args.APtrArray, args.ldaArray,
-                               mat_b.scalar_type(),
-                               args.BPtrArray, args.ldbArray,
-                               args.betaPtrArray, args.betaScalar, out.scalar_type(),
-                               args.DPtrArray, args.lddArray,
-                               args.DPtrArray, args.lddArray,
-                               args.batchCount, args.use_int64);
+  run_cublaslt_grouped_gemm(args, mat_a.scalar_type(), mat_b.scalar_type(), out.scalar_type());
   return out;
 #else
   TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
@@ -646,14 +656,8 @@ static void scaled_grouped_mm_cublaslt(
   const bool empty_out = out.numel() == 0;
   const int64_t min_batch_count = empty_out ? 0 : 1;
   TORCH_CHECK_VALUE(
-      batchCount >= min_batch_count && batchCount <= 1024,
+      batchCount >= min_batch_count && batchCount <= kMaxCublasGroupedBatchCount,
       "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", 1024], got ", batchCount);
-  const auto scaling_a = recipe_a[0];
-  const auto scaling_b = recipe_b[0];
-  // NO_SWIZZLE is a placeholder for omitted metadata, not a claim that scales
-  // are unswizzled. Their storage layout is determined by gemm_impl.
-  const auto swizzle_a_value = swizzle_a.empty() ? SwizzleType::NO_SWIZZLE : swizzle_a[0];
-  const auto swizzle_b_value = swizzle_b.empty() ? SwizzleType::NO_SWIZZLE : swizzle_b[0];
   const auto [layout_a, layout_b] = get_cublaslt_grouped_scale_layouts(gemm_impl, scale_a[0], scale_b[0]);
   check_cublaslt_grouped_scale_storage(scale_a[0], batchCount, "scale_a");
   check_cublaslt_grouped_scale_storage(scale_b[0], batchCount, "scale_b");
@@ -678,29 +682,9 @@ static void scaled_grouped_mm_cublaslt(
   scales.A_scale_ptr = args.scale_mata_ptr;
   scales.B_scale_ptr = args.scale_matb_ptr;
   scales.use_fast_accum = use_fast_accum;
-  scales.A_scaling_type = scaling_a;
-  scales.B_scaling_type = scaling_b;
-  scales.A_swizzle_type = swizzle_a_value;
-  scales.B_swizzle_type = swizzle_b_value;
-  scales.A_scale_dtype = scale_a[0].scalar_type();
-  scales.B_scale_dtype = scale_b[0].scalar_type();
-  scales.A_per_batch = layout_a == CublasGroupedScaleLayout::PerBatchScalar;
-  scales.B_per_batch = layout_b == CublasGroupedScaleLayout::PerBatchScalar;
-  at::cuda::blas::grouped_gemm(
-      args.transa, args.transb,
-      args.mArray, args.m,
-      args.nArray, args.n,
-      args.kArray, args.k,
-      args.alphaPtrArray, args.alphaScalar,
-      mat_a.scalar_type(),
-      args.APtrArray, args.ldaArray,
-      mat_b.scalar_type(),
-      args.BPtrArray, args.ldbArray,
-      args.betaPtrArray, args.betaScalar, out.scalar_type(),
-      args.DPtrArray, args.lddArray,
-      args.DPtrArray, args.lddArray,
-      args.batchCount, args.use_int64,
-      scales);
+  scales.A_layout = layout_a;
+  scales.B_layout = layout_b;
+  run_cublaslt_grouped_gemm(args, mat_a.scalar_type(), mat_b.scalar_type(), out.scalar_type(), scales);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "cuBLASLt scaled grouped GEMM requires CUDA >= 13.4 and a non-ROCm build");
@@ -824,9 +808,9 @@ std::array<ScaleKernelDispatchEntry, 5> scale_grouped_kernel_dispatch = {{
 } // anonymous namespace
 
 // V2: Grouped scaled matrix multiply. Shape inference + output allocation and
-// recipe-independent input validation run in TORCH_META_FUNC(_scaled_grouped_mm_v2);
-// this impl handles strides/dtype validation that needs device context, the
-// per-recipe scale-shape checks, and kernel dispatch.
+// input and recipe-specific output dtype validation run in the structured meta;
+// this impl handles device capability, strides, per-recipe scale storage,
+// and kernel dispatch.
 TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           const Tensor& mat_a, const Tensor& mat_b,
           const at::ITensorListRef& scale_a_list,
