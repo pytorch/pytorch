@@ -131,6 +131,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
+    subtest,
     TestCase,
 )
 
@@ -6180,6 +6181,50 @@ class TestKLDevice(DistributionsTestCase):
             0,
         )
         self.assertEqual(kl_divergence(Uniform(0, 1), Beta(1, 1)), 0)
+
+    @set_default_dtype(torch.double)
+    @parametrize(
+        "dist_cls,q_logit",
+        (
+            subtest(
+                (Categorical, [0.0, 1.0, -0.5, -inf]),
+                name="categorical_both_masked",
+            ),
+            subtest(
+                (Categorical, [0.0, 1.0, -0.5, 2.0]),
+                name="categorical_p_only_masked",
+            ),
+            subtest(
+                (OneHotCategorical, [0.0, 1.0, -0.5, -inf]),
+                name="onehot_both_masked",
+            ),
+            subtest(
+                (OneHotCategorical, [0.0, 1.0, -0.5, 2.0]),
+                name="onehot_p_only_masked",
+            ),
+        ),
+    )
+    def test_kl_categorical_masked_logits_gradient(self, device, dist_cls, q_logit):
+        p_logits = torch.tensor(
+            [0.5, -1.0, 2.0, -inf], device=device, requires_grad=True
+        )
+        p = dist_cls(logits=p_logits)
+        q = dist_cls(logits=torch.tensor(q_logit, device=device))
+        kl = kl_divergence(p, q)
+        (actual_grad,) = grad(kl, p_logits)
+
+        mask = p.probs.detach() != 0
+        expected_kl = (
+            p.probs.detach()[mask] * (p.logits.detach()[mask] - q.logits.detach()[mask])
+        ).sum()
+        expected_grad = torch.zeros_like(p_logits)
+        expected_grad[mask] = p.probs.detach()[mask] * (
+            p.logits.detach()[mask] - q.logits.detach()[mask] - expected_kl
+        )
+
+        self.assertEqual(kl, expected_kl)
+        self.assertEqual(actual_grad, expected_grad)
+        self.assertFalse(actual_grad.isnan().any())
 
     def test_kl_shape(self):
         for Dist, params in _get_examples():
