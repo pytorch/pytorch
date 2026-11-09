@@ -54,12 +54,20 @@ class MooncakeTransport(Transport):
     """One-sided tensor transport backed by Mooncake's Transfer Engine.
 
     Uses Mooncake's P2P metadata exchange: ``bind`` returns the endpoint's
-    ``host:rpc_port`` and ``connect`` records the peer endpoint without an
-    external metadata server. Peers are addressed by endpoint and their
-    registered segments are reached directly, so remote descriptors carry no
-    opaque metadata blob. Mooncake is an optional dependency, imported only when
-    selected. Transfers require registered views; raw tensors are rejected rather
-    than allocated or registered implicitly.
+    ``host:rpc_port`` and ``connect`` records a peer endpoint without an
+    external metadata server. An endpoint may connect to several peers;
+    reconnecting with the same ``bind()`` bytes is a no-op. Peers are addressed
+    by endpoint and their registered segments are reached directly, so remote
+    descriptors carry no opaque metadata blob. Mooncake is an optional
+    dependency, imported only when selected. Transfers require registered views;
+    raw tensors are rejected rather than allocated or registered implicitly.
+
+    There is no per-peer disconnect; ``close`` releases all peers. A failed
+    transfer fails only its Work. A timed-out transfer also pins its local
+    memory, which is never unregistered and rejects further transfers, because
+    Mooncake may still be accessing it. Descriptors are not tied to the peer that
+    sent them, so an endpoint serving several peers must authorize each request,
+    for example by checking ``remote_buffer.endpoint``.
 
     Mooncake has no completion callback or fd yet, so transfers are submitted
     with ``batch_transfer_async`` and a single poller thread per transport checks
@@ -100,7 +108,7 @@ class MooncakeTransport(Transport):
         self._protocol = protocol
         self._timeout = timeout
         self._default_timeout = timeout
-        self._peer: str | None = None
+        self._peers: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
@@ -115,9 +123,6 @@ class MooncakeTransport(Transport):
         # independent of Work completion
         self._closed = False
         self._closing = False
-        # A failed transfer may still be running inside Mooncake; reject new
-        # transfers until the caller replaces the transport.
-        self._failed = False
 
     @staticmethod
     def supported() -> bool:
@@ -158,14 +163,19 @@ class MooncakeTransport(Transport):
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        if self._peer is not None:
-            raise RuntimeError("transport is already connected")
+        try:
+            endpoint = peer_url.decode()
+        except UnicodeDecodeError:
+            endpoint = ""
+        host, _, port = endpoint.rpartition(":")
+        if not host or not port.isdigit():
+            raise ValueError("peer_url is not a Mooncake bind() endpoint")
         # Mooncake handshakes lazily on the first transfer, hence record the endpoint
-        self._peer = peer_url.decode()
+        self._peers.add(endpoint)
         return 0
 
     def connected(self) -> bool:
-        return self._peer is not None and not self._closed and not self._closing
+        return bool(self._peers) and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -260,12 +270,17 @@ class MooncakeTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, MooncakeRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a Mooncake transport")
-        if self._peer != remote_buffer.endpoint:
-            raise ValueError("remote buffer does not belong to the connected peer")
+        if remote_buffer.endpoint not in self._peers:
+            raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
         registration.ensure_active()
+        if registration.pinned:
+            raise RuntimeError(
+                "memory is pinned after a timed-out transfer; Mooncake may still "
+                "be accessing it"
+            )
         if registration.tensor.data_ptr() != registration.address or (
             registration.tensor.numel() * registration.tensor.element_size()
             != registration.length
@@ -284,11 +299,6 @@ class MooncakeTransport(Transport):
         timeout: float,
     ) -> _MooncakeWork:
         engine = self._ensure_open()
-        if self._failed:
-            raise RuntimeError(
-                "transport is unusable after a failed transfer; close it and "
-                "create a new one"
-            )
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
         local_buffer = cast(MooncakeMemoryView, local_buffer)
         remote_buffer = cast(MooncakeRemoteBuffer, remote_buffer)
@@ -340,6 +350,11 @@ class MooncakeTransport(Transport):
                 batches = list(self._batches.items())
             settled = []
             for batch_id, (future, registration) in batches:
+                # Every non-zero status is final: Mooncake frees the batch, so it
+                # must not be polled again. 1 and -1 mean every slice of the one
+                # request has completed or failed. -2 (TIMEOUT, with
+                # MC_SLICE_TIMEOUT) or an unknown status may leave slices in
+                # flight, so the local memory stays pinned.
                 status = engine.transfer_check_status(batch_id)
                 if status != 0:
                     settled.append((batch_id, future, registration, status))
@@ -350,15 +365,14 @@ class MooncakeTransport(Transport):
                 if status == 1:
                     future.set_result(None)
                     continue
-                registration.pinned = True
-                self._failed = True
-                future.set_exception(
-                    RuntimeError(
-                        f"Mooncake transfer failed: {status}; the transfer may "
-                        "still be running, so its local memory stays pinned and "
-                        "must not be reused"
+                message = "Mooncake transfer failed"
+                if status != -1:
+                    registration.pinned = True
+                    message += (
+                        f" with status {status}; it may still be running, so its "
+                        "local memory stays pinned"
                     )
-                )
+                future.set_exception(RuntimeError(message))
             delay = 0.0 if settled else min(max(delay * 2, 1e-6), 1e-3)
 
     def _prune(self, key: int) -> None:
@@ -553,7 +567,7 @@ class MooncakeTransport(Transport):
             registration.active = False
             del self._registrations[key]
         self._pending.clear()
-        self._peer = None
+        self._peers.clear()
         # Mooncake has no explicit shutdown
         self._engine = None
         self._closed = True
