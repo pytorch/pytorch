@@ -332,6 +332,7 @@ jobs:
       - name: GPU job diagnostics on failure
         shell: bash
         if: failure()
+        timeout-minutes: 5
         run: |
           amd-smi monitor -ptumv || true
           amd-smi process || true

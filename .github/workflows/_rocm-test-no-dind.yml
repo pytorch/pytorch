@@ -157,7 +157,7 @@ jobs:
           amd-smi monitor -ptumv || true
           amd-smi process || true
           ls -l /dev/kfd /dev/dri || true
-          grep -H . /sys/fs/cgroup/memory.{current,max} 2>/dev/null || true
+          grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
 
       - name: Get workflow job id
         id: get-job-id
@@ -318,11 +318,12 @@ jobs:
       - name: GPU job diagnostics on failure
         shell: bash
         if: failure()
+        timeout-minutes: 5
         run: |
           source /etc/rocm_env.sh || true
           amd-smi monitor -ptumv || true
           amd-smi process || true
-          grep -H . /sys/fs/cgroup/memory.{current,max} 2>/dev/null || true
+          grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
           ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
       - name: Stop monitoring script
