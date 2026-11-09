@@ -143,6 +143,10 @@ class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
             "w": torch.randn(B, N, K, **opts),
             "offs": torch.arange(1, B + 1, device=device, dtype=torch.int32) * M,
         }
+        # The gradient test runs backward hundreds of times. Drop each .grad once it lands so
+        # a backward never holds new and accumulated gradients at once (OOM on 40 GB GPUs).
+        for t in (self.inputs["x"], self.inputs["w"]):
+            t.register_post_accumulate_grad_hook(lambda t: setattr(t, "grad", None))
         self.checked = False
         self.set_module_name("grouped_mm")
 
