@@ -40,9 +40,8 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
   const bool fits = (2 * staging_bytes) <= tg_limit;
   const bool unsupported_dtype = (dtype != kFloat && dtype != kComplexFloat);
-  const bool too_small = (batch * n * n < 12288);
 
-  if (unsupported_dtype || !fits || too_small) {
+  if (unsupported_dtype || !fits) {
     if (!fits) {
       TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
                       2 * staging_bytes,

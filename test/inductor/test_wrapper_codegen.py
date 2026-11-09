@@ -10,13 +10,17 @@ import sympy
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import ir
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import (
+    EnterDeviceContextManagerLine,
+    PythonWrapperCodegen,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer
+from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer, make_codegen_buffer
 from torch._inductor.virtualized import V
 from torch.fx.experimental._size_hinting import ConsistentHintState
 from torch.fx.experimental.symbolic_shapes import CallMethodKey, ShapeEnv
@@ -78,6 +82,51 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
         wrapper.prefix = IndentedBuffer()
         return wrapper
+
+    @parametrize("device", ["mtia", "mtia:0", "mtia:3"])
+    def test_cpp_codegen_mtia_device_cache(self, device: str) -> None:
+        fx_graph = torch.fx.Graph()
+        fx_graph.output(())
+        graph = GraphLowering(
+            torch.fx.GraphModule(torch.nn.Module(), fx_graph), cpp_wrapper=True
+        )
+        mtia_device = torch.device(device)
+        with V.set_graph_handler(graph):
+            wrapper = CppWrapperCpu()
+            self.assertEqual(
+                wrapper.codegen_device(mtia_device),
+                f"cached_torch_device_type_mtia, {mtia_device.index or 0}",
+            )
+            self.assertEqual(list(wrapper.used_cached_devices), ["mtia"])
+            wrapper.finalize_prefix()
+
+        self.assertIn("CACHE_TORCH_DEVICE(mtia);", wrapper.prefix.getvalue())
+
+    @parametrize("wrapper_mode", ["jit", "aoti", "dual"])
+    def test_cpp_codegen_mtia_device_guards(self, wrapper_mode: str) -> None:
+        graph = SimpleNamespace(
+            cpp_wrapper=True,
+            aot_mode=wrapper_mode != "jit",
+            is_dual_wrapper_mode=wrapper_mode == "dual",
+            device_ops=get_device_op_overrides("mtia"),
+        )
+        with V.set_graph_handler(graph):
+            code = make_codegen_buffer()
+            EnterDeviceContextManagerLine(3, None).codegen(code)
+            EnterDeviceContextManagerLine(3, 3).codegen(code)
+
+        if wrapper_mode != "aoti":
+            jit_code = code.getvalue()
+            self.assertIn("MTIAInductorDeviceGuard device_guard(3);", jit_code)
+            self.assertIn("device_guard.set_index(3);", jit_code)
+            self.assertNotIn("MTIAInductorStreamGuard", jit_code)
+        if wrapper_mode != "jit":
+            aot_code = (code.aot if wrapper_mode == "dual" else code).getvalue()
+            self.assertIn(
+                "MTIAInductorStreamGuard stream_guard(stream, this->device_idx_);",
+                aot_code,
+            )
+            self.assertNotIn("device_guard.set_index", aot_code)
 
     def _codegen_output_symbol(self, outputs, keypath):
         wrapper = self._new_cpp_wrapper()
