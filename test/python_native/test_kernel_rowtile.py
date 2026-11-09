@@ -651,7 +651,8 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "ragged_width" in k]
         self.assertEqual(len(mine), 2, f"expected one plan per width, got {mine}")
 
-    def test_ragged_vector_rejects_inner_tree_and_tma(self):
+    def test_ragged_vector_rejects_inner_tree(self):
+        # test_ragged_vector_tile_rejects covers TMA.
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(64, 32, device="cuda")
         with self.assertRaisesRegex(ValueError, "require the linear order"):
@@ -661,15 +662,6 @@ class TestKernelRowTile(TestCase):
                 x,
                 [torch.float32],
                 order="inner_tree",
-                ragged_vector=True,
-            )
-        with self.assertRaisesRegex(ValueError, "cannot use TMA"):
-            rt.reduce_row_tile(
-                trait,
-                "ragged_tma",
-                x,
-                [torch.float32],
-                use_tma=True,
                 ragged_vector=True,
             )
 

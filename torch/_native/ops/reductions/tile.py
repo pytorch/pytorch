@@ -415,9 +415,10 @@ def fold_row_aligned(
 ):
     """Fold a ragged row with aligned wide interior loads and scalar edges.
 
-    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it), a 16-byte
-    aligned base, so the logical prefix below matches the pointer's alignment, and
-    nonempty rows, since edge loads are unconditional (reduce_row_tile checks both).
+    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it), rows packed at
+    stride N from a 16-byte aligned base, so the logical prefix below matches the
+    pointer's alignment, and nonempty rows, since edge loads are unconditional
+    (reduce_row_tile checks both).
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -434,6 +435,8 @@ def fold_row_aligned(
     groups = (n - prefix) // Int32(vec)
     waves = (groups + Int32(threads_per_row - 1)) // Int32(threads_per_row)
     tail = prefix + groups * Int32(vec)
+    # B200 64 MiB: edges cost 16-bit sums at N = 255/257 1.4-1.5x vs N + 1 (27 vs 18-20
+    # us) yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
     for i in cutlass.range_constexpr(vec - 1):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
@@ -658,8 +661,8 @@ class TileReduce:
                 raise ValueError(f"ragged vectors require the row axis, got {axis!r}")
             if order != "linear":
                 raise ValueError("ragged vectors require the linear order")
-            # fold_row_aligned also needs a 16-byte aligned base and nonempty rows,
-            # which only the driver (reduce_row_tile) can check.
+            # fold_row_aligned also needs rows packed at stride N from a 16-byte aligned
+            # base, and nonempty rows, which only the driver (reduce_row_tile) can check.
             if vec is None or vec * itemsize != TRANSFER_ALIGNMENT:
                 raise ValueError(
                     f"ragged vectors require vec * itemsize == {TRANSFER_ALIGNMENT}, got {vec=} {itemsize=}"
