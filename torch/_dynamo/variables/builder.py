@@ -136,6 +136,7 @@ from ..source import (
     AttrSource,
     CallMethodItemSource,
     ChainedSource,
+    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
     CurrentStreamSource,
@@ -1094,6 +1095,15 @@ class VariableBuilder:
             )
 
     def _call_impl(self, value: object) -> VariableTracker:
+        if is_lru_cache_wrapped_function(value) and is_constant_source(self.source):
+            # Guard mutable wrapper attributes and every alias path, including
+            # cached __dict__ views, before reusing or constructing a tracker.
+            self.source = self.source.clone(
+                lambda s: GlobalSource(s.source_name)
+                if isinstance(s, ConstantSource)
+                else s
+            )
+            self.name = self.source.name
         self.tx.output.current_tracer.traced_sources.add(self.source)
         if (result := self._reuse_tracked_variable(value)) is not None:
             return result
@@ -1150,16 +1160,7 @@ class VariableBuilder:
 
         result = self.tx.output.side_effects[value]
         if self.source != result.source:
-            if (
-                isinstance(result, WrapperUserFunctionVariable)
-                and result.source is not None
-                and (
-                    is_constant_source(self.source) or is_constant_source(result.source)
-                )
-            ):
-                dup_guard = None
-            else:
-                dup_guard = make_dupe_guard(self.source, result.source)
+            dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
@@ -1183,11 +1184,10 @@ class VariableBuilder:
                 # the tracker still requires both sources to resolve to the same
                 # object (a wrapper, base module, or mapping behind a mappingproxy), so
                 # pin each source to its compile-time object.
-                for source in (self.source, result.source):
-                    # Constants are captured by the graph; only runtime aliases
-                    # need guards to keep pointing at the captured object.
-                    if not is_constant_source(source):
-                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                install_guard(
+                    self.source.make_guard(GuardBuilder.ID_MATCH),
+                    result.source.make_guard(GuardBuilder.ID_MATCH),
+                )
 
         if (
             isinstance(value, torch.nn.Module)

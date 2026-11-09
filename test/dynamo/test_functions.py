@@ -6118,7 +6118,10 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("constant_first", [False, True])
     @parametrize("use_global", [False, True])
-    def test_lru_cache_wrapper_constant_alias(self, constant_first, use_global):
+    @parametrize("use_dict", [False, True])
+    def test_lru_cache_wrapper_constant_alias(
+        self, constant_first, use_global, use_dict
+    ):
         @functools.lru_cache
         def cached_fn():
             return 1
@@ -6139,10 +6142,14 @@ class GraphModule(torch.nn.Module):
                 wrapper = mixed_scope_lru_wrapper
             if constant_first:
                 constant = get_wrapper()
-                return x + constant.tag + wrapper.tag, constant is wrapper
-            result = x + wrapper.tag
+                tag = constant.__dict__["tag"] if use_dict else constant.tag
+                other_tag = wrapper.__dict__["tag"] if use_dict else wrapper.tag
+                return x + tag + other_tag, constant is wrapper
+            tag = wrapper.__dict__["tag"] if use_dict else wrapper.tag
+            result = x + tag
             constant = get_wrapper()
-            return result + constant.tag, wrapper is constant
+            other_tag = constant.__dict__["tag"] if use_dict else constant.tag
+            return result + other_tag, wrapper is constant
 
         backend = CompileCounterWithBackend("eager")
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
@@ -6150,10 +6157,167 @@ class GraphModule(torch.nn.Module):
         with patch.dict(globals(), mixed_scope_lru_wrapper=cached_fn):
             self.assertEqual(opt_fn(x, cached_fn), (torch.tensor(12), True))
             self.assertEqual(backend.frame_count, 1)
-            globals()["mixed_scope_lru_wrapper"] = other_fn
-            self.assertEqual(fn(x, other_fn), (torch.tensor(12), False))
-            self.assertEqual(opt_fn(x, other_fn), (torch.tensor(12), False))
+
+            cached_fn.tag = 5
+            self.assertEqual(fn(x, cached_fn), (torch.tensor(20), True))
+            self.assertEqual(opt_fn(x, cached_fn), (torch.tensor(20), True))
             self.assertEqual(backend.frame_count, 2)
+
+            other_fn.tag = 5
+            if use_global:
+                globals()["mixed_scope_lru_wrapper"] = other_fn
+            self.assertEqual(fn(x, other_fn), (torch.tensor(20), False))
+            self.assertEqual(opt_fn(x, other_fn), (torch.tensor(20), False))
+            self.assertEqual(backend.frame_count, 3)
+
+    @parametrize("chained", [False, True])
+    def test_lru_cache_wrapper_constant_only(self, chained):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        @functools.lru_cache
+        def other_fn():
+            return 1
+
+        cached_fn.tag = 1
+        other_fn.tag = 7
+        holder = types.SimpleNamespace(wrapper=cached_fn)
+        calls = []
+
+        @torch._dynamo.assume_constant_result
+        def get_value():
+            calls.append(1)
+            return holder if chained else cached_fn
+
+        def fn(x):
+            value = get_value()
+            wrapper = value.wrapper if chained else value
+            return x + wrapper.tag
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(len(calls), 1)
+        cached_fn.tag = 5
+        self.assertEqual(opt_fn(x), torch.tensor(15))
+        self.assertEqual(opt_fn(x), torch.tensor(15))
+        self.assertEqual((backend.frame_count, len(calls)), (2, 2))
+        if chained:
+            holder.wrapper = other_fn
+            self.assertEqual(opt_fn(x), torch.tensor(17))
+            self.assertEqual((backend.frame_count, len(calls)), (3, 3))
+
+    @parametrize("reverse", [False, True])
+    @parametrize("mutate_attribute", [False, True])
+    def test_lru_cache_wrapper_two_constant_aliases(self, reverse, mutate_attribute):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        @functools.lru_cache
+        def other_fn():
+            return 1
+
+        cached_fn.tag = 1
+        other_fn.tag = 1
+        first = types.SimpleNamespace(wrapper=cached_fn)
+        second = types.SimpleNamespace(wrapper=cached_fn)
+
+        @torch._dynamo.assume_constant_result
+        def get_first():
+            return first
+
+        @torch._dynamo.assume_constant_result
+        def get_second():
+            return second
+
+        def fn(x):
+            if reverse:
+                right = get_second().wrapper
+                left = get_first().wrapper
+            else:
+                left = get_first().wrapper
+                right = get_second().wrapper
+            return x + left.tag + right.tag, left is right
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        self.assertEqual(opt_fn(x), (torch.tensor(12), True))
+        if mutate_attribute:
+            cached_fn.tag = 5
+            expected = (torch.tensor(20), True)
+        else:
+            second.wrapper = other_fn
+            expected = (torch.tensor(12), False)
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(backend.frame_count, 2)
+
+    @parametrize("chained", [False, True])
+    def test_lru_cache_wrapper_escaped_constant_dict(self, chained):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        cached_fn.tag = 1
+        holder = types.SimpleNamespace(wrapper=cached_fn)
+
+        @torch._dynamo.assume_constant_result
+        def get_value():
+            return holder if chained else cached_fn
+
+        def fn(x, wrapper):
+            value = get_value()
+            constant = value.wrapper if chained else value
+            view = constant.__dict__
+            same = wrapper is constant
+            return x + view["tag"], same
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(10)
+        self.assertEqual(opt_fn(x, cached_fn), (torch.tensor(11), True))
+        cached_fn.tag = 5
+        self.assertEqual(opt_fn(x, cached_fn), (torch.tensor(15), True))
+        self.assertEqual(backend.frame_count, 2)
+
+    @parametrize("chained", [False, True])
+    @parametrize("graph_break", [False, True])
+    def test_lru_cache_wrapper_constant_mutation(self, chained, graph_break):
+        @functools.lru_cache
+        def cached_fn():
+            return 1
+
+        holder = types.SimpleNamespace(wrapper=cached_fn)
+
+        @torch._dynamo.assume_constant_result
+        def get_value():
+            return holder if chained else cached_fn
+
+        def fn(x, wrapper):
+            value = get_value()
+            constant = value.wrapper if chained else value
+            view = constant.__dict__
+            view["state"] = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+            result = wrapper.state * 2
+            del view["state"]
+            return result
+
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=not graph_break)
+        for value in (1.0, 2.0):
+            cached_fn.state = -1
+            x = torch.tensor(value)
+            self.assertEqual(opt_fn(x, cached_fn), (x + 1) * 2)
+            self.assertNotIn("state", cached_fn.__dict__)
+        if not graph_break:
+            self.assertEqual(backend.frame_count, 1)
 
     def test_lru_cache_wrapper_delattr(self):
         @functools.lru_cache
@@ -6164,12 +6328,14 @@ class GraphModule(torch.nn.Module):
             del wrapper.custom_attr
             return x + 1
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        backend = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         for value in (1.0, 2.0):
             cached_fn.custom_attr = value
             x = torch.tensor(value)
             self.assertEqual(opt_fn(x, cached_fn), x + 1)
             self.assertFalse(hasattr(cached_fn, "custom_attr"))
+        self.assertEqual(backend.frame_count, 1)
 
     def test_wrapper_user_function_hasattr(self):
         # WrapperUserFunctionVariable (e.g. lru_cache-wrapped fn) passed to a
