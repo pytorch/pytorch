@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Context.h>
+#include <c10/util/Deprecated.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 
@@ -15,6 +16,8 @@ TORCH_XPU_API DeviceProp* getCurrentDeviceProperties();
 
 TORCH_XPU_API DeviceProp* getDeviceProperties(DeviceIndex device);
 
+C10_DEPRECATED_MESSAGE(
+    "at::xpu::getGlobalIdxFromDevice() is deprecated since 2.16 and will be removed in 2.18. The SYCL index within the platform equals the torch device index, so use the torch device index instead. See https://github.com/pytorch/pytorch/issues/204019")
 TORCH_XPU_API int32_t getGlobalIdxFromDevice(DeviceIndex device);
 
 TORCH_XPU_API bool canDeviceAccessPeer(DeviceIndex device, DeviceIndex peer);

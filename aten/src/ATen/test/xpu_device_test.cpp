@@ -35,6 +35,9 @@ TEST(XpuDeviceTest, getDeviceFromPtr) {
   ASSERT_THROW(at::xpu::getDeviceFromPtr(&dummy), c10::Error);
 }
 
+// This intentionally tests the deprecated getGlobalIdxFromDevice
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   if (!at::xpu::is_available()) {
     return;
@@ -62,3 +65,4 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   target_device = at::xpu::device_count();
   ASSERT_THROW(at::xpu::getGlobalIdxFromDevice(target_device), c10::Error);
 }
+#pragma GCC diagnostic pop

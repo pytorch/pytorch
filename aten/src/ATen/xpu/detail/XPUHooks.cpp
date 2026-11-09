@@ -27,10 +27,15 @@ std::string XPUHooks::showConfig() const {
   return "XPU backend";
 }
 
+// Forwards to the deprecated at::xpu::getGlobalIdxFromDevice until both are
+// removed.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
   return at::xpu::getGlobalIdxFromDevice(device.index());
 }
+#pragma GCC diagnostic pop
 
 const Generator& XPUHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::xpu::detail::getDefaultXPUGenerator(device_index);
