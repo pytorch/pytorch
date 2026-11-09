@@ -427,9 +427,7 @@ class ScatterPreaggConfig:
 
 @dataclasses.dataclass
 class ROCmScatterPreaggConfig(ScatterPreaggConfig):
-    """
-    ROCm subclass for scatter pre-aggregation, with AMD backend specific tuneable kernargs
-    """
+    """Scatter pre-aggregation config with ROCm-specific kernel arguments."""
 
     waves_per_eu: int = 0
 
@@ -2484,9 +2482,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         return flex_decode_configs
 
     def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
-        # 32-bit atomics run faster at two elements per thread than at the four
-        # the compiler derives from load contiguity, and plain atomics at one
-        # 32-bit word per lane (whole cache lines per wavefront).
+        # Use two elements per thread for sorted 32-bit atomics and one word per
+        # lane for plain atomics.
         return dataclasses.replace(
             super().get_scatter_preagg_target(device),
             atomic_vec=2,
@@ -2504,11 +2501,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         target: ScatterPreaggTarget,
     ) -> ScatterPreaggConfig:
         if target.matrix_preagg(dtype, num_inner, inner_contiguous):
-            # The matrix product is fastest at 64 tokens of 32-wide slices;
-            # 64-wide slices only pay past 128-wide rows of cold duplicates
-            # (at least as many destinations as tokens). One wavefront keeps
-            # the block's reductions within it, which suits the plain atomics
-            # of blocks without duplicates.
+            # 64-wide slices pay only on wide rows with mostly distinct keys.
             wide = num_inner > 128 and (num_keys is None or num_keys >= num_tokens)
             max_block_d = 64 if wide else 32
             return self._scatter_preagg_config(
@@ -2524,8 +2517,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         )
         if dtype != torch.float32 or not inner_contiguous:
             return cfg
-        # The sort branch's registers also limit the occupancy of plain
-        # blocks; 256 threads (and a register cap on narrow rows) help.
+        # More threads offset the sort branch's register pressure.
         if 1 < num_inner <= 8:
             return ROCmScatterPreaggConfig(
                 **dataclasses.asdict(cfg) | {"num_warps": target.warps(256)},

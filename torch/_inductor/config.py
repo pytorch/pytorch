@@ -1396,14 +1396,8 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# On ROCm, lower accumulating scatters (index_put(accumulate=True), index_add,
-# scatter_add, scatter_reduce(sum), embedding backward) to a Triton template
-# that pre-sums each block's duplicate destinations, or issues plain atomics in
-# blocks with too few duplicates. It also takes the scatters that would use the
-# eager fallback (deterministic mode, bf16, int64) or lack atomics (8/16-bit
-# ints), with a sorted atomic-free lowering for deterministic mode and 8/16-bit
-# ints; under max_autotune it benchmarks its configs. Only ROCm devices take it
-# (see InductorChoices.should_use_scatter_preagg_template).
+# Adaptive scatter pre-aggregation on ROCm, including the sorted lowering for
+# deterministic mode and 8/16-bit integers.
 scatter_preagg_template: bool = (
     os.environ.get(
         "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE",

@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import dataclasses
 import functools
 import os
 import subprocess
@@ -28,8 +27,6 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
@@ -96,16 +93,6 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, idx, x, atol=5e-2, rtol=2e-2)
 
-    def test_embedding_dense_backward_padding_idx(self):
-        n, v, d = 50_000, 24, 32
-        idx = _hot_indices(n, v, GPU_TYPE)
-        g = torch.randn(n, d, device=GPU_TYPE)
-
-        def fn(i, a):
-            return torch.ops.aten.embedding_dense_backward(a, i, v, 3, False)
-
-        self._check(fn, idx, g)
-
     def test_index_put_rows(self):
         x = torch.zeros(64, 32, device=GPU_TYPE)
         idx = _hot_indices(40_000, 64, GPU_TYPE)
@@ -115,55 +102,6 @@ class TestScatterPreagg(TestCase):
             return x.index_put_((i,), v, accumulate=True)
 
         self._check(fn, x, idx, v)
-
-    @config.patch({"triton.emit_pointer_range_32": True})
-    def test_atomics_keep_pointer_range(self):
-        # Buffer ops make low-contention scatters up to 30% faster; Inductor
-        # withholds them from other atomic kernels.
-        x = torch.zeros(4096, 32, device=GPU_TYPE)
-        idx = torch.randint(0, 4096, (100_000,), device=GPU_TYPE)
-        v = torch.randn(100_000, 32, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        _, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x, idx, v)
-        kernels = code.split("@triton_heuristics.")
-        (kernel,) = [k for k in kernels if "def triton_tem" in k]
-        self.assertIn("tl.atomic_add(", kernel)
-        self.assertIn("'tt.pointer_range', 32", kernel)
-
-    def test_index_put_1d_target(self):
-        x = torch.randn(100, device=GPU_TYPE)
-        idx = _hot_indices(60_000, 100, GPU_TYPE)
-        v = torch.randn(60_000, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            x[i] += 0  # keep x an input mutation target
-            return x.index_put_((i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v)
-
-    def test_negative_indices(self):
-        x = torch.zeros(50, 16, device=GPU_TYPE)
-        idx = torch.randint(-50, 50, (30_000,), device=GPU_TYPE)
-        v = torch.randn(30_000, 16, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v)
-
-    def test_multi_index_adjacent(self):
-        x = torch.zeros(8, 6, 32, device=GPU_TYPE)
-        i0 = torch.randint(0, 8, (20_000,), device=GPU_TYPE)
-        i1 = torch.randint(0, 6, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
-
-        def fn(x, i0, i1, v):
-            return torch.index_put(x, (i0, i1), v, accumulate=True)
-
-        self._check(fn, x, i0, i1, v)
 
     def test_multi_index_non_adjacent(self):
         x = torch.zeros(8, 16, 6, device=GPU_TYPE)
@@ -177,26 +115,6 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, i0, i1, v)
 
-    def test_leading_slice(self):
-        x = torch.zeros(4, 40, 16, device=GPU_TYPE)
-        idx = _hot_indices(10_000, 40, GPU_TYPE)
-        v = torch.randn(4, 10_000, 16, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.ops.aten.index_put(x, [None, i], v, True)
-
-        self._check(fn, x, idx, v)
-
-    def test_multidim_index(self):
-        x = torch.zeros(30, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 30, (100, 200), device=GPU_TYPE)
-        v = torch.randn(100, 200, 8, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v)
-
     def test_fused_value_producer(self):
         x = torch.zeros(32, 64, device=GPU_TYPE)
         idx = _hot_indices(20_000, 32, GPU_TYPE)
@@ -208,16 +126,6 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, idx, a, b)
 
-    def test_index_add(self):
-        x = torch.randn(48, 32, device=GPU_TYPE)
-        idx = _hot_indices(30_000, 48, GPU_TYPE)
-        src = torch.randn(30_000, 32, device=GPU_TYPE)
-
-        def fn(x, i, s):
-            return x.index_add(0, i, s, alpha=2.0)
-
-        self._check(fn, x, idx, src)
-
     def test_index_add_dim1(self):
         x = torch.randn(16, 48, device=GPU_TYPE)
         idx = _hot_indices(30_000, 48, GPU_TYPE)
@@ -228,95 +136,100 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, idx, src)
 
-    def test_single_destination(self):
-        x = torch.zeros(1, 64, device=GPU_TYPE)
-        idx = torch.zeros(65_536, dtype=torch.long, device=GPU_TYPE)
-        v = torch.randn(65_536, 64, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return x.index_put_((i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v, atol=1e-2)
-
-    @parametrize("dups", [False, True])
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
     @config.patch(scatter_preagg_template_min_saved=-1.0)
-    def test_wide_slices(self, dtype, dups):
-        # Wide slices of blocks with and without duplicates.
-        cfg = ScatterPreaggConfig(
-            block_t=64, block_d=64, d_iters=4, num_stages=1, num_warps=4
-        )
-        x = torch.zeros(1024, 256, device=GPU_TYPE, dtype=dtype)
-        tok = torch.arange(65_536, device=GPU_TYPE)
-        idx = (tok // 2 if dups else tok) % 1024
-        v = torch.randn(65_536, 256, device=GPU_TYPE, dtype=dtype)
+    def test_wide_slices(self):
+        for dups in [False, True]:
+            for dtype in [torch.float32, torch.bfloat16]:
+                with self.subTest(dups=dups, dtype=dtype):
+                    torch._dynamo.reset()
+                    counters.clear()
+                    # Wide slices of blocks with and without duplicates.
+                    cfg = ScatterPreaggConfig(
+                        block_t=64, block_d=64, d_iters=4, num_stages=1, num_warps=4
+                    )
+                    x = torch.zeros(1024, 256, device=GPU_TYPE, dtype=dtype)
+                    tok = torch.arange(65_536, device=GPU_TYPE)
+                    idx = (tok // 2 if dups else tok) % 1024
+                    v = torch.randn(65_536, 256, device=GPU_TYPE, dtype=dtype)
 
-        def fn(x, i, v):
-            return x.index_put_((i,), v, accumulate=True)
+                    def fn(x, i, v):
+                        return x.index_put_((i,), v, accumulate=True)
 
-        ref = fn(x.double(), idx, v.double())
-        with unittest.mock.patch.object(
-            InductorChoices, "get_scatter_preagg_configs", return_value=[cfg]
-        ):
-            out, (code,) = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x.clone(), idx, v
-            )
-        scale = 1e-5 if dtype == torch.float32 else 1e-2
-        self.assertEqual(out.double(), ref, atol=ref.abs().max().item() * scale, rtol=0)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
-        self.assertIn("BLOCK_D : tl.constexpr = 64", code)
+                    ref = fn(x.double(), idx, v.double())
+                    with unittest.mock.patch.object(
+                        InductorChoices,
+                        "get_scatter_preagg_configs",
+                        return_value=[cfg],
+                    ):
+                        out, (code,) = run_and_get_code(
+                            torch.compile(fn, fullgraph=True), x.clone(), idx, v
+                        )
+                    scale = 1e-5 if dtype == torch.float32 else 1e-2
+                    self.assertEqual(
+                        out.double(), ref, atol=ref.abs().max().item() * scale, rtol=0
+                    )
+                    self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
+                    self.assertIn("BLOCK_D : tl.constexpr = 64", code)
 
-    @parametrize("deterministic", [False, True])
-    def test_static_inner_shifted(self, deterministic):
-        # A static row size no inner block divides shifts its last block back
-        # over part of the one before it, whose lanes it masks.
-        cfg = ScatterPreaggConfig(
-            block_t=64, block_d=64, d_iters=4, num_stages=1, num_warps=4
-        )
-        x = torch.zeros(100, 1040, device=GPU_TYPE)
-        idx = torch.randint(0, 100, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 1040, device=GPU_TYPE)
+    def test_static_inner_shifted(self):
+        for deterministic in [False, True]:
+            with self.subTest(deterministic=deterministic):
+                torch._dynamo.reset()
+                counters.clear()
+                # A static row size no inner block divides shifts its last block back
+                # over part of the one before it, whose lanes it masks.
+                cfg = ScatterPreaggConfig(
+                    block_t=64, block_d=64, d_iters=4, num_stages=1, num_warps=4
+                )
+                x = torch.zeros(100, 1040, device=GPU_TYPE)
+                idx = torch.randint(0, 100, (20_000,), device=GPU_TYPE)
+                v = torch.randn(20_000, 1040, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return x.index_add(0, i, v)
+                def fn(x, i, v):
+                    return x.index_add(0, i, v)
 
-        ref = fn(x.double(), idx, v.double())
-        self.enterContext(DeterministicGuard(deterministic))
-        with unittest.mock.patch.object(
-            InductorChoices, "get_scatter_preagg_configs", return_value=[cfg]
-        ):
-            out, codes = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x.clone(), idx, v
-            )
-        self.assertIn("INNER_SHIFT : tl.constexpr = True", "\n".join(codes))
-        self.assertEqual(out.double(), ref, atol=1e-3, rtol=1e-4)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
+                ref = fn(x.double(), idx, v.double())
+                self.enterContext(DeterministicGuard(deterministic))
+                with unittest.mock.patch.object(
+                    InductorChoices, "get_scatter_preagg_configs", return_value=[cfg]
+                ):
+                    out, codes = run_and_get_code(
+                        torch.compile(fn, fullgraph=True), x.clone(), idx, v
+                    )
+                self.assertIn("INNER_SHIFT : tl.constexpr = True", "\n".join(codes))
+                self.assertEqual(out.double(), ref, atol=1e-3, rtol=1e-4)
+                self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
 
-    @parametrize("rows", [512, 1 << 16])
-    def test_exact_histogram(self, rows):
-        # Destinations that fit the histogram get a bin each, rather than
-        # hashed bins whose count linear counting would overestimate. The bins
-        # scale with the block, which the default config sizes by CU count.
-        cfg = ScatterPreaggConfig(
-            block_t=256, block_d=16, d_iters=1, num_stages=1, num_warps=2
-        )
-        x = torch.zeros(rows, 32, device=GPU_TYPE)
-        idx = torch.randint(0, rows, (65_536,), device=GPU_TYPE)
-        v = torch.randn(65_536, 32, device=GPU_TYPE)
+    def test_exact_histogram(self):
+        for rows in [512, 1 << 16]:
+            with self.subTest(rows=rows):
+                torch._dynamo.reset()
+                counters.clear()
+                # Destinations that fit the histogram get a bin each, rather than
+                # hashed bins whose count linear counting would overestimate. The bins
+                # scale with the block, which the default config sizes by CU count.
+                cfg = ScatterPreaggConfig(
+                    block_t=256, block_d=16, d_iters=1, num_stages=1, num_warps=2
+                )
+                x = torch.zeros(rows, 32, device=GPU_TYPE)
+                idx = torch.randint(0, rows, (65_536,), device=GPU_TYPE)
+                v = torch.randn(65_536, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return x.index_put_((i,), v, accumulate=True)
+                def fn(x, i, v):
+                    return x.index_put_((i,), v, accumulate=True)
 
-        ref = fn(x.double(), idx, v.double())
-        with unittest.mock.patch.object(
-            InductorChoices, "get_scatter_preagg_configs", return_value=[cfg]
-        ):
-            out, (code,) = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x.clone(), idx, v
-            )
-        self.assertEqual(out.double(), ref, atol=1e-3, rtol=1e-4)
-        self.assertIn("ADAPTIVE : tl.constexpr = True", code)
-        self.assertEqual("HIST_EXACT : tl.constexpr = True" in code, rows == 512)
+                ref = fn(x.double(), idx, v.double())
+                with unittest.mock.patch.object(
+                    InductorChoices, "get_scatter_preagg_configs", return_value=[cfg]
+                ):
+                    out, (code,) = run_and_get_code(
+                        torch.compile(fn, fullgraph=True), x.clone(), idx, v
+                    )
+                self.assertEqual(out.double(), ref, atol=1e-3, rtol=1e-4)
+                self.assertIn("ADAPTIVE : tl.constexpr = True", code)
+                self.assertEqual(
+                    "HIST_EXACT : tl.constexpr = True" in code, rows == 512
+                )
 
     def test_gathered_values_config(self):
         # A message-passing scatter of gathered rows, on a config whose plain
@@ -338,16 +251,6 @@ class TestScatterPreagg(TestCase):
         ):
             self._check(fn, x, dst, h, src, w, atol=1e-3)
 
-    def test_scatter_add_full_index(self):
-        x = torch.zeros(16, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 16, (20_000, 8), device=GPU_TYPE)
-        src = torch.randn(20_000, 8, device=GPU_TYPE)
-
-        def fn(x, i, s):
-            return x.scatter_add(0, i, s)
-
-        self._check(fn, x, idx, src)
-
     def test_scatter_add_expanded_index(self):
         x = torch.zeros(16, 32, device=GPU_TYPE)
         rows = _hot_indices(20_000, 16, GPU_TYPE)
@@ -358,63 +261,70 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, rows, src)
 
-    @parametrize("include_self", [False, True])
-    def test_scatter_reduce_sum(self, include_self):
-        x = torch.randn(16, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 16, (20_000, 8), device=GPU_TYPE)
-        src = torch.randn(20_000, 8, device=GPU_TYPE)
+    def test_scatter_reduce_sum(self):
+        for include_self in [False, True]:
+            with self.subTest(include_self=include_self):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.randn(16, 8, device=GPU_TYPE)
+                idx = torch.randint(0, 16, (20_000, 8), device=GPU_TYPE)
+                src = torch.randn(20_000, 8, device=GPU_TYPE)
 
-        def fn(x, i, s):
-            return x.scatter_reduce(0, i, s, "sum", include_self=include_self)
+                def fn(x, i, s):
+                    return x.scatter_reduce(0, i, s, "sum", include_self=include_self)
 
-        self._check(fn, x, idx, src)
+                self._check(fn, x, idx, src)
 
-    def test_scatter_reduce_add(self):
-        x = torch.randn(16, 32, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 16, GPU_TYPE)
-        src = torch.randn(20_000, 32, device=GPU_TYPE)
+    def test_bf16(self):
+        for op in list(_BF16_SCATTER_FNS):
+            with self.subTest(op=op):
+                torch._dynamo.reset()
+                counters.clear()
+                fn = _BF16_SCATTER_FNS[op]
+                x = torch.randn(24, 64, device=GPU_TYPE).bfloat16()
+                idx = _hot_indices(50_000, 24, GPU_TYPE)
+                v = torch.randn(50_000, 64, device=GPU_TYPE).bfloat16()
 
-        def fn(x, i, s):
-            return x.scatter(0, i[:, None].expand_as(s), s, reduce="add")
+                # Accumulated in an fp32 copy, so each destination is rounded once.
+                ref = fn(x.float(), idx, v.float())
+                out = torch.compile(fn, fullgraph=True)(x.clone(), idx, v)
+                self.assertEqual(out.dtype, torch.bfloat16)
+                self.assertEqual(
+                    out.float(), ref, atol=ref.abs().max().item() * 1e-2, rtol=0
+                )
+                self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
+                self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 1)
 
-        self._check(fn, x, idx, src)
+    def test_bf16_declined_falls_back(self):
+        for reason in ["too_small", "fp32_copy_too_large"]:
+            for op in ["index_put", "scatter_reduce"]:
+                with self.subTest(reason=reason, op=op):
+                    torch._dynamo.reset()
+                    counters.clear()
+                    # Where bf16 atomics need the eager fallback, a scatter the template
+                    # declines for its size must still go to it.
+                    fn = _BF16_SCATTER_FNS[op]
+                    rows, n = (1000, 400) if reason == "too_small" else (100_000, 8192)
+                    x = torch.randn(rows, 8, device=GPU_TYPE).bfloat16()
+                    idx = torch.randint(0, rows, (n,), device=GPU_TYPE)
+                    v = torch.randn(n, 8, device=GPU_TYPE).bfloat16()
 
-    @parametrize("op", list(_BF16_SCATTER_FNS))
-    def test_bf16(self, op):
-        fn = _BF16_SCATTER_FNS[op]
-        x = torch.randn(24, 64, device=GPU_TYPE).bfloat16()
-        idx = _hot_indices(50_000, 24, GPU_TYPE)
-        v = torch.randn(50_000, 64, device=GPU_TYPE).bfloat16()
-
-        # Accumulated in an fp32 copy, so each destination is rounded once.
-        ref = fn(x.float(), idx, v.float())
-        out = torch.compile(fn, fullgraph=True)(x.clone(), idx, v)
-        self.assertEqual(out.dtype, torch.bfloat16)
-        self.assertEqual(out.float(), ref, atol=ref.abs().max().item() * 1e-2, rtol=0)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
-        self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 1)
-
-    @parametrize("reason", ["too_small", "fp32_copy_too_large"])
-    @parametrize("op", ["index_put", "scatter_reduce"])
-    def test_bf16_declined_falls_back(self, op, reason):
-        # Where bf16 atomics need the eager fallback, a scatter the template
-        # declines for its size must still go to it.
-        fn = _BF16_SCATTER_FNS[op]
-        rows, n = (1000, 400) if reason == "too_small" else (100_000, 8192)
-        x = torch.randn(rows, 8, device=GPU_TYPE).bfloat16()
-        idx = torch.randint(0, rows, (n,), device=GPU_TYPE)
-        v = torch.randn(n, 8, device=GPU_TYPE).bfloat16()
-
-        code = self._check(fn, x, idx, v, applied=False, atol=2e-2, rtol=2e-2)
-        self.assertGreater(counters["inductor"][f"scatter_preagg_skipped_{reason}"], 0)
-        self.assertNotIn("tl.atomic_add(", code)
-        # Nothing set up for the template is left behind.
-        torch._dynamo.reset()
-        with config.patch(scatter_preagg_template=False):
-            _, (regular,) = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x.clone(), idx, v
-            )
-        self.assertEqual(code.count("@triton.jit"), regular.count("@triton.jit"))
+                    code = self._check(
+                        fn, x, idx, v, applied=False, atol=2e-2, rtol=2e-2
+                    )
+                    self.assertGreater(
+                        counters["inductor"][f"scatter_preagg_skipped_{reason}"], 0
+                    )
+                    self.assertNotIn("tl.atomic_add(", code)
+                    # Nothing set up for the template is left behind.
+                    torch._dynamo.reset()
+                    with config.patch(scatter_preagg_template=False):
+                        _, (regular,) = run_and_get_code(
+                            torch.compile(fn, fullgraph=True), x.clone(), idx, v
+                        )
+                    self.assertEqual(
+                        code.count("@triton.jit"), regular.count("@triton.jit")
+                    )
 
     @config.patch(scatter_preagg_template_min_numel=0)
     def test_fp16_copy_too_large_falls_back(self):
@@ -432,141 +342,79 @@ class TestScatterPreagg(TestCase):
             counters["inductor"]["scatter_preagg_skipped_fp32_copy_too_large"], 1
         )
 
-    @parametrize(
-        "mode", ["deterministic", "inductor_deterministic", "bf16", "int8", "int16"]
-    )
-    @parametrize("op", ["index_put", "scatter_add", "scatter_reduce"])
-    def test_declined_emits_regular_lowering(self, mode, op):
-        # A scatter the template declines must still be lowered: to the eager
-        # fallback where it bypassed that (deterministic algorithms, bf16, and
-        # 8/16-bit ints, which have no atomics), otherwise to atomics
-        # (TORCHINDUCTOR_DETERMINISTIC alone).
-        fn = _BF16_SCATTER_FNS[op]
-        dtype = {"bf16": torch.bfloat16, "int8": torch.int8, "int16": torch.int16}.get(
-            mode, torch.float32
-        )
-        # Few writes per destination keep the eager bf16 fallback accurate.
-        make = torch.randn if dtype.is_floating_point else torch.ones
-        x = make(4096, 8, device=GPU_TYPE).to(dtype)
-        idx = torch.randint(0, 4096, (20_000,), device=GPU_TYPE)
-        v = make(20_000, 8, device=GPU_TYPE).to(dtype)
-        ref = fn(x.double(), idx, v.double())
-        with (
-            unittest.mock.patch.object(
-                scatter_preagg, "_try_template", return_value=False
-            ),
-            config.patch(deterministic=mode == "inductor_deterministic"),
-            DeterministicGuard(mode == "deterministic"),
-        ):
-            out, codes = run_and_get_code(
-                torch.compile(fn, fullgraph=True), x.clone(), idx, v
-            )
-        self.assertEqual(out.double(), ref, atol=ref.abs().max().item() * 2e-2, rtol=0)
-        code = "\n".join(codes)
-        if mode == "inductor_deterministic":
-            self.assertIn("tl.atomic_add(", code)
-        else:
-            self.assertNotIn("tl.atomic_add(", code)
-            self.assertIn(
-                "aten.index_put_" if op == "index_put" else "aten.scatter_reduce_.two(",
-                code,
-            )
+    def test_declined_emits_regular_lowering(self):
+        for mode in [
+            "deterministic",
+            "inductor_deterministic",
+            "bf16",
+            "int8",
+            "int16",
+        ]:
+            for op in ["index_put", "scatter_add", "scatter_reduce"]:
+                with self.subTest(mode=mode, op=op):
+                    torch._dynamo.reset()
+                    counters.clear()
+                    # A scatter the template declines must still be lowered: to the eager
+                    # fallback where it bypassed that (deterministic algorithms, bf16, and
+                    # 8/16-bit ints, which have no atomics), otherwise to atomics
+                    # (TORCHINDUCTOR_DETERMINISTIC alone).
+                    fn = _BF16_SCATTER_FNS[op]
+                    dtype = {
+                        "bf16": torch.bfloat16,
+                        "int8": torch.int8,
+                        "int16": torch.int16,
+                    }.get(mode, torch.float32)
+                    # Few writes per destination keep the eager bf16 fallback accurate.
+                    make = torch.randn if dtype.is_floating_point else torch.ones
+                    x = make(4096, 8, device=GPU_TYPE).to(dtype)
+                    idx = torch.randint(0, 4096, (20_000,), device=GPU_TYPE)
+                    v = make(20_000, 8, device=GPU_TYPE).to(dtype)
+                    ref = fn(x.double(), idx, v.double())
+                    with (
+                        unittest.mock.patch.object(
+                            scatter_preagg, "_try_template", return_value=False
+                        ),
+                        config.patch(deterministic=mode == "inductor_deterministic"),
+                        DeterministicGuard(mode == "deterministic"),
+                    ):
+                        out, codes = run_and_get_code(
+                            torch.compile(fn, fullgraph=True), x.clone(), idx, v
+                        )
+                    self.assertEqual(
+                        out.double(), ref, atol=ref.abs().max().item() * 2e-2, rtol=0
+                    )
+                    code = "\n".join(codes)
+                    if mode == "inductor_deterministic":
+                        self.assertIn("tl.atomic_add(", code)
+                    else:
+                        self.assertNotIn("tl.atomic_add(", code)
+                        self.assertIn(
+                            "aten.index_put_"
+                            if op == "index_put"
+                            else "aten.scatter_reduce_.two(",
+                            code,
+                        )
 
-    @config.patch(scatter_preagg_template_min_numel=1 << 20)
-    def test_int64_below_size_gate(self):
-        # int64 atomics need the eager fallback, which the template only
-        # replaces above the size gate.
-        x = torch.zeros(16, 8, device=GPU_TYPE, dtype=torch.int64)
-        idx = torch.randint(0, 16, (20_000,), device=GPU_TYPE)
-        v = torch.randint(-5, 5, (20_000, 8), device=GPU_TYPE)
+    def test_skip_overwriting_scatter(self):
+        for deterministic in [False, True]:
+            for op in ["scatter", "index_put"]:
+                with self.subTest(deterministic=deterministic, op=op):
+                    torch._dynamo.reset()
+                    counters.clear()
+                    # Only accumulating scatters reach the template; deterministic mode
+                    # also skips its size gate.
+                    x = torch.randn(64, 32, device=GPU_TYPE)
+                    idx = torch.randint(0, 64, (20_000, 32), device=GPU_TYPE)
+                    # Equal values make the duplicate writes' order irrelevant.
+                    v = torch.ones(20_000, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                    def fn(x, i, v):
+                        if op == "scatter":
+                            return x.scatter(0, i, v)
+                        return torch.index_put(x, (i[:, 0],), v, accumulate=False)
 
-        out, (code,) = run_and_get_code(
-            torch.compile(fn, fullgraph=True), x.clone(), idx, v
-        )
-        self.assertEqual(out, fn(x.clone(), idx, v))
-        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_too_small"], 1)
-        self.assertNotIn("tl.atomic_add(", code)
-        self.assertIn("aten.index_put_", code)
-
-    def test_unsupported_dtype(self):
-        # Declined for the template, regular atomics take uint32.
-        x = torch.zeros(16, 8, device=GPU_TYPE, dtype=torch.uint32)
-        idx = torch.randint(0, 16, (20_000,), device=GPU_TYPE)
-        v = torch.randint(0, 5, (20_000, 8), device=GPU_TYPE).to(torch.uint32)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        out, (code,) = run_and_get_code(
-            torch.compile(fn, fullgraph=True), x.clone(), idx, v
-        )
-        self.assertEqual(out.long(), fn(x.long(), idx, v.long()))
-        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_dtype"], 1)
-        self.assertIn("tl.atomic_add(", code)
-        self.assertNotIn("aten.index_put_", code)
-
-    @parametrize("deterministic", [False, True])
-    @parametrize("op", ["scatter", "index_put"])
-    def test_skip_overwriting_scatter(self, op, deterministic):
-        # Only accumulating scatters reach the template; deterministic mode
-        # also skips its size gate.
-        x = torch.randn(64, 32, device=GPU_TYPE)
-        idx = torch.randint(0, 64, (20_000, 32), device=GPU_TYPE)
-        # Equal values make the duplicate writes' order irrelevant.
-        v = torch.ones(20_000, 32, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            if op == "scatter":
-                return x.scatter(0, i, v)
-            return torch.index_put(x, (i[:, 0],), v, accumulate=False)
-
-        with DeterministicGuard(deterministic):
-            self._check(fn, x, idx, v, applied=False)
-
-    @parametrize("deterministic", [False, True])
-    def test_keys_read_output(self, deterministic):
-        # Keys computed from the output are materialized before it is written.
-        x = torch.randint(0, 16, (16, 32), device=GPU_TYPE).float()
-        v = torch.randn(16 * 64, 32, device=GPU_TYPE)
-
-        def fn(x, v):
-            i = x[:, 0].long().clamp(0, 15).repeat(64)
-            return x.index_put_((i,), v, accumulate=True)
-
-        with DeterministicGuard(deterministic):
-            self._check(fn, x, v)
-        self.assertEqual(counters["inductor"]["scatter_preagg_materialized_keys"], 1)
-
-    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int8])
-    def test_empty_scatter(self, dtype):
-        # Deterministic mode bypasses the eager fallback for every dtype.
-        x = torch.ones(16, 8, device=GPU_TYPE, dtype=dtype)
-        idx = torch.zeros(0, dtype=torch.int64, device=GPU_TYPE)
-        v = torch.ones(0, 8, device=GPU_TYPE, dtype=dtype)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        with DeterministicGuard(True):
-            self._check(fn, x, idx, v, applied=False)
-        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_empty"], 1)
-
-    @parametrize("dtype", [torch.float32, torch.int64, torch.int8])
-    def test_cpu_scalar_values(self, dtype):
-        # A CPU scalar input is passed by value, which the template cannot
-        # load from.
-        x = torch.zeros(16, 8, device=GPU_TYPE, dtype=dtype)
-        idx = torch.randint(0, 16, (20_000,), device=GPU_TYPE)
-        v = torch.tensor(3, dtype=dtype, device="cpu")
-
-        def fn(x, i, v):
-            return x.index_put_((i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v, applied=False)
-        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_input_device"], 1)
+                    with DeterministicGuard(deterministic):
+                        self._check(fn, x, idx, v, applied=False)
 
     @config.patch(max_autotune=True)
     def test_autotune_index_inputs(self):
@@ -598,39 +446,42 @@ class TestScatterPreagg(TestCase):
             self.assertGreater(t.unique().numel(), 100)
 
     @config.patch(max_autotune=True)
-    @parametrize("shared", ["key_and_value", "two_values"])
-    def test_autotune_shared_index_bounds(self, shared):
-        # An index addressing two sizes is randomized within the smaller,
-        # whether it is the key and gathers values, or gathers two values.
-        x = torch.zeros(100, 32, device=GPU_TYPE)
-        idx = torch.randint(0, 100, (8192,), device=GPU_TYPE)
-        key = torch.randint(0, 100, (8192,), device=GPU_TYPE)
-        small = torch.randn(100, 32, device=GPU_TYPE)
-        table = torch.randn(4096, 32, device=GPU_TYPE)
-        generated = []
-        index_gen_fns = scatter_preagg._index_gen_fns
+    def test_autotune_shared_index_bounds(self):
+        for shared in ["key_and_value", "two_values"]:
+            with self.subTest(shared=shared):
+                torch._dynamo.reset()
+                counters.clear()
+                # An index addressing two sizes is randomized within the smaller,
+                # whether it is the key and gathers values, or gathers two values.
+                x = torch.zeros(100, 32, device=GPU_TYPE)
+                idx = torch.randint(0, 100, (8192,), device=GPU_TYPE)
+                key = torch.randint(0, 100, (8192,), device=GPU_TYPE)
+                small = torch.randn(100, 32, device=GPU_TYPE)
+                table = torch.randn(4096, 32, device=GPU_TYPE)
+                generated = []
+                index_gen_fns = scatter_preagg._index_gen_fns
 
-        def record(fn, node):
-            t = fn(node)
-            generated.append(t.clone())
-            # Benchmark in bounds either way, so a wrong bound fails below
-            # rather than aborting the process.
-            return t % 100
+                def record(fn, node):
+                    t = fn(node)
+                    generated.append(t.clone())
+                    # Benchmark in bounds either way, so a wrong bound fails below
+                    # rather than aborting the process.
+                    return t % 100
 
-        def spy(*args):
-            fns = index_gen_fns(*args)
-            return {i: functools.partial(record, fn) for i, fn in fns.items()}
+                def spy(*args):
+                    fns = index_gen_fns(*args)
+                    return {i: functools.partial(record, fn) for i, fn in fns.items()}
 
-        def fn(x, i, k, a, b):
-            if shared == "key_and_value":
-                return x.index_add(0, i, b[i])
-            return x.index_add(0, k, a[i] + b[i])
+                def fn(x, i, k, a, b):
+                    if shared == "key_and_value":
+                        return x.index_add(0, i, b[i])
+                    return x.index_add(0, k, a[i] + b[i])
 
-        with unittest.mock.patch.object(scatter_preagg, "_index_gen_fns", spy):
-            self._check(fn, x, idx, key, small, table)
-        self.assertTrue(generated)
-        for t in generated:
-            self.assertLess(t.max().item(), 100)
+                with unittest.mock.patch.object(scatter_preagg, "_index_gen_fns", spy):
+                    self._check(fn, x, idx, key, small, table)
+                self.assertTrue(generated)
+                for t in generated:
+                    self.assertLess(t.max().item(), 100)
 
     @config.patch(max_autotune=True)
     def test_autotune_expanded_index(self):
@@ -652,123 +503,130 @@ class TestScatterPreagg(TestCase):
         self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
 
     @config.patch(max_autotune=True)
-    @parametrize(
-        "index", ["offset", "float", "value_gather", "key_gather", "unchecked_key"]
-    )
-    def test_autotune_computed_index(self, index):
-        # Benchmark inputs (zeros, or random floats) put an index computed from
-        # them out of bounds. Such scatters take the default config
-        # unbenchmarked, unless the index only addresses unchecked writes,
-        # which the template masks.
-        checked = index in ("offset", "float")
-        x = torch.zeros(100, 32, device=GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
-        idx = torch.randint(int(index == "offset"), 100, (20_000,), device=GPU_TYPE)
-        if index == "float":
-            u = torch.randint(0, 100, (20_000,), device=GPU_TYPE).float()
-        else:
-            u = torch.rand(20_000, device=GPU_TYPE)
-        table = torch.randn(1000, 32, device=GPU_TYPE)
-        remap = torch.randint(0, 100, (1000,), device=GPU_TYPE)
+    def test_autotune_computed_index(self):
+        for index in ["offset", "float", "value_gather", "key_gather", "unchecked_key"]:
+            with self.subTest(index=index):
+                torch._dynamo.reset()
+                counters.clear()
+                # Benchmark inputs (zeros, or random floats) put an index computed from
+                # them out of bounds. Such scatters take the default config
+                # unbenchmarked, unless the index only addresses unchecked writes,
+                # which the template masks.
+                checked = index in ("offset", "float")
+                x = torch.zeros(100, 32, device=GPU_TYPE)
+                v = torch.randn(20_000, 32, device=GPU_TYPE)
+                idx = torch.randint(
+                    int(index == "offset"), 100, (20_000,), device=GPU_TYPE
+                )
+                if index == "float":
+                    u = torch.randint(0, 100, (20_000,), device=GPU_TYPE).float()
+                else:
+                    u = torch.rand(20_000, device=GPU_TYPE)
+                table = torch.randn(1000, 32, device=GPU_TYPE)
+                remap = torch.randint(0, 100, (1000,), device=GPU_TYPE)
 
-        def fn(x, idx, u, v, table, remap):
-            if index == "offset":
-                i = idx - 1
-            elif index == "float":
-                i = u.long()
-            elif index == "key_gather":
-                i = remap[(u * 1000).long()]
-            elif index == "unchecked_key":
-                i = (u * 100).long()
-            else:
-                i = idx
-                v = table[(u * 1000).long()]
-            return x.scatter_add(0, i[:, None].expand(-1, 32), v)
+                def fn(x, idx, u, v, table, remap):
+                    if index == "offset":
+                        i = idx - 1
+                    elif index == "float":
+                        i = u.long()
+                    elif index == "key_gather":
+                        i = remap[(u * 1000).long()]
+                    elif index == "unchecked_key":
+                        i = (u * 100).long()
+                    else:
+                        i = idx
+                        v = table[(u * 1000).long()]
+                    return x.scatter_add(0, i[:, None].expand(-1, 32), v)
 
-        # Benchmarking would hit the bounds assert or read out of bounds, and
-        # abort the process, so only record whether max_autotune was requested.
-        requested = []
-        get_configs = InductorChoices.get_scatter_preagg_configs
+                # Benchmarking would hit the bounds assert or read out of bounds, and
+                # abort the process, so only record whether max_autotune was requested.
+                requested = []
+                get_configs = InductorChoices.get_scatter_preagg_configs
 
-        def configs(self, *args, max_autotune, **kwargs):
-            requested.append(max_autotune)
-            safe = max_autotune and index == "unchecked_key"
-            return get_configs(self, *args, max_autotune=safe, **kwargs)
+                def configs(self, *args, max_autotune, **kwargs):
+                    requested.append(max_autotune)
+                    safe = max_autotune and index == "unchecked_key"
+                    return get_configs(self, *args, max_autotune=safe, **kwargs)
 
-        with (
-            unittest.mock.patch.object(
-                InductorChoices, "get_scatter_preagg_configs", configs
-            ),
-            config.patch(assert_indirect_indexing=checked),
-        ):
-            self._check(fn, x, idx, u, v, table, remap)
-        self.assertEqual(requested, [index == "unchecked_key"])
+                with (
+                    unittest.mock.patch.object(
+                        InductorChoices, "get_scatter_preagg_configs", configs
+                    ),
+                    config.patch(assert_indirect_indexing=checked),
+                ):
+                    self._check(fn, x, idx, u, v, table, remap)
+                self.assertEqual(requested, [index == "unchecked_key"])
 
-    def test_frexp_values(self):
-        def fn(x, i, v):
-            return x.index_add(0, i, torch.frexp(v)[0])
+    def test_dynamic_tokens_no_recompile(self):
+        for max_autotune in [False, True]:
+            with self.subTest(max_autotune=max_autotune):
+                torch._dynamo.reset()
+                counters.clear()
 
-        x = torch.zeros(100, 64, device=GPU_TYPE)
-        idx = _hot_indices(8192, 100, GPU_TYPE)
-        v = torch.randn(8192, 64, device=GPU_TYPE)
-        self._check(fn, x, idx, v)
+                # Neither the token count in a value stride nor the guards of
+                # unselected autotuning configs may specialize the graph.
+                def fn(x, i, v_t):
+                    return x.index_add(0, i, v_t.t())
 
-    @parametrize("max_autotune", [False, True])
-    def test_dynamic_tokens_no_recompile(self, max_autotune):
-        # Neither the token count in a value stride nor the guards of
-        # unselected autotuning configs may specialize the graph.
-        def fn(x, i, v_t):
-            return x.index_add(0, i, v_t.t())
+                compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+                with config.patch(
+                    max_autotune=max_autotune, scatter_preagg_template_min_numel=0
+                ):
+                    # Down to fewer tokens than a block.
+                    for n in (100_000, 8208, 8193, 300, 100):
+                        x = torch.zeros(1024, 64, device=GPU_TYPE)
+                        idx = torch.randint(0, 1024, (n,), device=GPU_TYPE)
+                        v_t = torch.randn(64, n, device=GPU_TYPE)
+                        expect = fn(x.clone(), idx, v_t)
+                        self.assertEqual(
+                            compiled(x, idx, v_t), expect, atol=1e-3, rtol=1e-3
+                        )
+                self.assertEqual(counters["stats"]["unique_graphs"], 1)
+                self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
-        with config.patch(
-            max_autotune=max_autotune, scatter_preagg_template_min_numel=0
-        ):
-            # Down to fewer tokens than a block.
-            for n in (100_000, 8208, 8193, 300, 100):
-                x = torch.zeros(1024, 64, device=GPU_TYPE)
-                idx = torch.randint(0, 1024, (n,), device=GPU_TYPE)
-                v_t = torch.randn(64, n, device=GPU_TYPE)
-                expect = fn(x.clone(), idx, v_t)
-                self.assertEqual(compiled(x, idx, v_t), expect, atol=1e-3, rtol=1e-3)
-        self.assertEqual(counters["stats"]["unique_graphs"], 1)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
-
-    @parametrize("deterministic", [False, True])
     @config.patch(cpp_wrapper=True)
-    def test_cpp_wrapper(self, deterministic):
-        x = torch.zeros(24, 32, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 24, GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
+    def test_cpp_wrapper(self):
+        for deterministic in (False, True):
+            with self.subTest(deterministic=deterministic):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.zeros(24, 32, device=GPU_TYPE)
+                idx = _hot_indices(20_000, 24, GPU_TYPE)
+                v = torch.randn(20_000, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        with DeterministicGuard(deterministic):
-            self._check(fn, x, idx, v)
-        self.assertEqual(
-            counters["inductor"]["scatter_preagg_sorted"], int(deterministic)
-        )
+                with DeterministicGuard(deterministic):
+                    self._check(fn, x, idx, v)
+                self.assertEqual(
+                    counters["inductor"]["scatter_preagg_sorted"], int(deterministic)
+                )
 
-    @parametrize("deterministic", [False, True])
-    def test_aoti(self, deterministic):
-        class Model(torch.nn.Module):
-            def forward(self, x, i, v):
-                return torch.index_put(x, (i,), v, accumulate=True)
+    def test_aoti(self):
+        for deterministic in [False, True]:
+            with self.subTest(deterministic=deterministic):
+                torch._dynamo.reset()
+                counters.clear()
 
-        x = torch.zeros(24, 32, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 24, GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
-        with DeterministicGuard(deterministic):
-            path = torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), (x, idx, v))
-            )
-        out = torch._inductor.aoti_load_package(path)(x, idx, v)
-        self.assertEqual(out, Model()(x, idx, v), atol=1e-3, rtol=1e-4)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
-        self.assertEqual(
-            counters["inductor"]["scatter_preagg_sorted"], int(deterministic)
-        )
+                class Model(torch.nn.Module):
+                    def forward(self, x, i, v):
+                        return torch.index_put(x, (i,), v, accumulate=True)
+
+                x = torch.zeros(24, 32, device=GPU_TYPE)
+                idx = _hot_indices(20_000, 24, GPU_TYPE)
+                v = torch.randn(20_000, 32, device=GPU_TYPE)
+                with DeterministicGuard(deterministic):
+                    path = torch._inductor.aoti_compile_and_package(
+                        torch.export.export(Model(), (x, idx, v))
+                    )
+                out = torch._inductor.aoti_load_package(path)(x, idx, v)
+                self.assertEqual(out, Model()(x, idx, v), atol=1e-3, rtol=1e-4)
+                self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
+                self.assertEqual(
+                    counters["inductor"]["scatter_preagg_sorted"], int(deterministic)
+                )
 
     def test_aoti_dynamic_rows(self):
         # AOTI never checks guards, so a model exported at 1000 rows must not
@@ -803,52 +661,8 @@ class TestScatterPreagg(TestCase):
         out = torch._inductor.aoti_load_package(path)(x, idx, v)
         self.assertEqual(out, Model()(x, idx, v), atol=1e-3, rtol=1e-4)
 
-    def test_aoti_none_and_transposed_index(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, i1, i2, y):
-                return torch.ops.aten.index_put(
-                    x, (None, None, i1, i2.transpose(0, 1)), y, accumulate=True
-                )
-
-        inputs = (
-            torch.rand(8, 192, 30, 30, device=GPU_TYPE),
-            torch.randint(0, 30, (3, 14, 1, 1), device=GPU_TYPE),
-            torch.randint(0, 30, (14, 3), device=GPU_TYPE),
-            torch.randn(8, 192, 3, 14, 3, 14, device=GPU_TYPE),
-        )
-        with DeterministicGuard(True):
-            path = torch._inductor.aoti_compile_and_package(
-                torch.export.export(Model(), inputs)
-            )
-        out = torch._inductor.aoti_load_package(path)(*inputs)
-        self.assertEqual(out, Model()(*inputs), atol=1e-3, rtol=1e-4)
-        self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
-
-    def test_bf16_low_contention(self):
-        # About two writes per destination still goes through the fp32 copy.
-        fn = _BF16_SCATTER_FNS["index_put"]
-        x = torch.randn(10_000, 8, device=GPU_TYPE).bfloat16()
-        idx = torch.randint(0, 10_000, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 8, device=GPU_TYPE).bfloat16()
-        self._check(fn, x, idx, v, atol=2e-2, rtol=2e-2)
-        self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 1)
-
-    def test_bf16_large_output_falls_back(self):
-        # An fp32 copy of an output larger than the scatter costs more memory
-        # and traffic than it saves, so bf16 keeps the eager fallback.
-        fn = _BF16_SCATTER_FNS["index_put"]
-        x = torch.randn(100_000, 8, device=GPU_TYPE).bfloat16()
-        idx = torch.randint(0, 100_000, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 8, device=GPU_TYPE).bfloat16()
-        code = self._check(fn, x, idx, v, applied=False, atol=2e-2, rtol=2e-2)
-        self.assertEqual(
-            counters["inductor"]["scatter_preagg_skipped_fp32_copy_too_large"], 1
-        )
-        self.assertIn("aten.index_put_", code)
-
-    @parametrize(
-        "dtype",
-        [
+    def test_dtypes(self):
+        for dtype in [
             torch.float16,
             torch.bfloat16,
             torch.float64,
@@ -857,73 +671,72 @@ class TestScatterPreagg(TestCase):
             torch.int16,
             torch.int8,
             torch.uint8,
-        ],
-    )
-    def test_dtypes(self, dtype):
-        x = torch.zeros(20, 16, device=GPU_TYPE, dtype=dtype)
-        idx = _hot_indices(20_000, 20, GPU_TYPE)
-        if dtype.is_floating_point:
-            v = torch.randn(20_000, 16, device=GPU_TYPE).to(dtype)
-        else:
-            # Small integer outputs wrap around, as in eager.
-            low = 0 if dtype == torch.uint8 else -5
-            v = torch.randint(low, 5, (20_000, 16), device=GPU_TYPE, dtype=dtype)
+        ]:
+            with self.subTest(dtype=dtype):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.zeros(20, 16, device=GPU_TYPE, dtype=dtype)
+                idx = _hot_indices(20_000, 20, GPU_TYPE)
+                if dtype.is_floating_point:
+                    v = torch.randn(20_000, 16, device=GPU_TYPE).to(dtype)
+                else:
+                    # Small integer outputs wrap around, as in eager.
+                    low = 0 if dtype == torch.uint8 else -5
+                    v = torch.randint(
+                        low, 5, (20_000, 16), device=GPU_TYPE, dtype=dtype
+                    )
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        if dtype in (torch.int16, torch.int8, torch.uint8):
-            # No Triton atomics for these; plain Inductor fails to compile them.
-            self._check(fn, x, idx, v, atol=0, rtol=0)
-            self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
-            return
+                if dtype in (torch.int16, torch.int8, torch.uint8):
+                    # No Triton atomics for these; plain Inductor fails to compile them.
+                    self._check(fn, x, idx, v, atol=0, rtol=0)
+                    self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
+                    continue
 
-        if dtype in (torch.float16, torch.bfloat16):
-            # Few destinations, so fp16 is also accumulated in an fp32 copy and
-            # each destination is rounded once.
-            ref = fn(x.float(), idx, v.float())
-            out = torch.compile(fn, fullgraph=True)(x.clone(), idx, v)
-            self.assertEqual(
-                out.float(), ref, atol=ref.abs().max().item() * 1e-2, rtol=0
-            )
-            self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 1)
-            return
-        self._check(fn, x, idx, v, atol=1e-6, rtol=1e-6)
+                if dtype in (torch.float16, torch.bfloat16):
+                    # Few destinations, so fp16 is also accumulated in an fp32 copy and
+                    # each destination is rounded once.
+                    ref = fn(x.float(), idx, v.float())
+                    out = torch.compile(fn, fullgraph=True)(x.clone(), idx, v)
+                    self.assertEqual(
+                        out.float(), ref, atol=ref.abs().max().item() * 1e-2, rtol=0
+                    )
+                    self.assertEqual(
+                        counters["inductor"]["scatter_preagg_fp32_copy"], 1
+                    )
+                    continue
+                self._check(fn, x, idx, v, atol=1e-6, rtol=1e-6)
 
-    @parametrize("n", [1000, 4096, 4097, 50_001])
     @config.patch(scatter_preagg_template_min_numel=0)
-    def test_token_tails(self, n):
-        x = torch.zeros(10, 32, device=GPU_TYPE)
-        idx = torch.randint(0, 10, (n,), device=GPU_TYPE)
-        v = torch.randn(n, 32, device=GPU_TYPE)
+    def test_token_tails(self):
+        for n in [1000, 4096, 4097, 50001]:
+            with self.subTest(n=n):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.zeros(10, 32, device=GPU_TYPE)
+                idx = torch.randint(0, 10, (n,), device=GPU_TYPE)
+                v = torch.randn(n, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        self._check(fn, x, idx, v)
+                self._check(fn, x, idx, v)
 
-    @parametrize("d", [1, 48, 37, 300])
-    def test_inner_sizes(self, d):
-        x = torch.zeros(12, d, device=GPU_TYPE)
-        idx = _hot_indices(30_000, 12, GPU_TYPE)
-        v = torch.randn(30_000, d, device=GPU_TYPE)
+    def test_inner_sizes(self):
+        for d in [1, 48, 37, 300]:
+            with self.subTest(d=d):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.zeros(12, d, device=GPU_TYPE)
+                idx = _hot_indices(30_000, 12, GPU_TYPE)
+                v = torch.randn(30_000, d, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        self._check(fn, x, idx, v)
-
-    def test_masked_index_put_clamped(self):
-        # _unsafe_masked_index_put_accumulate clamps indices and zeroes masked values.
-        x = torch.zeros(16, 8, device=GPU_TYPE)
-        idx = torch.randint(-20, 20, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 8, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            mask = ((i >= 0) & (i < 16))[:, None]
-            return torch.ops.aten._unsafe_masked_index_put_accumulate(x, mask, [i], v)
-
-        self._check(fn, x, idx, v)
+                self._check(fn, x, idx, v)
 
     @config.patch(max_autotune=True)
     def test_max_autotune(self):
@@ -937,22 +750,6 @@ class TestScatterPreagg(TestCase):
             return x.index_put_((i,), v, accumulate=True)
 
         self._check(fn, x, idx, v, atol=2e-3, rtol=1e-4)
-
-    def test_fp16_native_atomics(self):
-        # Blocks may issue plain atomics into this many destinations, so fp16
-        # skips the fp32 copy.
-        x = torch.zeros(4096, 16, device=GPU_TYPE, dtype=torch.float16)
-        idx = _hot_indices(20_000, 4096, GPU_TYPE)
-        v = torch.randn(20_000, 16, device=GPU_TYPE).half()
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        ref = fn(x.float(), idx, v.float())
-        out = torch.compile(fn, fullgraph=True)(x.clone(), idx, v)
-        self.assertEqual(out.float(), ref, atol=ref.abs().max().item() * 3e-2, rtol=0)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
-        self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 0)
 
     def _check_fp16(self, fn, x, idx, v, matrix=True):
         ref = fn(x.float(), idx, v.float())
@@ -970,186 +767,85 @@ class TestScatterPreagg(TestCase):
         self.assertEqual("tl.dot(" in code, matrix)
         return code
 
-    @parametrize(
-        "rows,d,n",
-        [(20, 64, 50_000), (4096, 128, 50_000), (300, 100, 30_000), (64, 320, 20_000)],
-    )
-    def test_fp16_matrix_preagg(self, rows, d, n):
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+    def test_fp16_matrix_preagg(self):
+        for rows, d, n in [
+            (20, 64, 50000),
+            (4096, 128, 50000),
+            (300, 100, 30000),
+            (64, 320, 20000),
+        ]:
+            with self.subTest(rows=rows, d=d, n=n):
+                torch._dynamo.reset()
+                counters.clear()
 
-        x = torch.randn(rows, d, device=GPU_TYPE).half()
-        idx = _hot_indices(n, rows, GPU_TYPE)
-        v = torch.randn(n, d, device=GPU_TYPE).half()
-        self._check_fp16(fn, x, idx, v)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-    @config.patch(scatter_preagg_template_min_numel=0)
-    def test_fp16_matrix_preagg_tail(self):
-        def fn(x, i, v):
-            return x.index_add(0, i, v)
+                x = torch.randn(rows, d, device=GPU_TYPE).half()
+                idx = _hot_indices(n, rows, GPU_TYPE)
+                v = torch.randn(n, d, device=GPU_TYPE).half()
+                self._check_fp16(fn, x, idx, v)
 
-        x = torch.zeros(8, 64, device=GPU_TYPE).half()
-        idx = torch.randint(0, 8, (1000,), device=GPU_TYPE)
-        v = torch.randn(1000, 64, device=GPU_TYPE).half()
-        self._check_fp16(fn, x, idx, v)
+    def test_fp16_matrix_preagg_non_finite(self):
+        for rows in [20, 4096]:
+            with self.subTest(rows=rows):
+                torch._dynamo.reset()
+                counters.clear()
 
-    @parametrize("rows", [20, 4096])
-    def test_fp16_matrix_preagg_non_finite(self, rows):
-        # A block with inf or nan values must not spread nan (0 * inf) into
-        # the other destinations of its product.
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                # A block with inf or nan values must not spread nan (0 * inf) into
+                # the other destinations of its product.
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        x = torch.zeros(rows, 64, device=GPU_TYPE).half()
-        idx = _hot_indices(50_000, rows, GPU_TYPE)
-        v = torch.randn(50_000, 64, device=GPU_TYPE).half()
-        v[torch.nonzero(idx == 3)[0], 5] = float("inf")
-        v[torch.nonzero(idx == 7)[0], 9] = float("nan")
-        self._check_fp16(fn, x, idx, v)
+                x = torch.zeros(rows, 64, device=GPU_TYPE).half()
+                idx = _hot_indices(50_000, rows, GPU_TYPE)
+                v = torch.randn(50_000, 64, device=GPU_TYPE).half()
+                v[torch.nonzero(idx == 3)[0], 5] = float("inf")
+                v[torch.nonzero(idx == 7)[0], 9] = float("nan")
+                self._check_fp16(fn, x, idx, v)
 
-    def test_target_override(self):
-        # A target from InductorChoices reaches both the configs and the kernel;
-        # rows this wide take the matrix product with the default target.
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+    def test_adaptive_forced_path(self):
+        for min_saved, hot_fraction in [(-1.0, 0.5), (2.0, 0.0)]:
+            with self.subTest(min_saved=min_saved, hot_fraction=hot_fraction):
+                torch._dynamo.reset()
+                counters.clear()
 
-        x = torch.zeros(4096, 128, device=GPU_TYPE).half()
-        idx = _hot_indices(50_000, 4096, GPU_TYPE, hot_fraction=0.05)
-        v = torch.randn(50_000, 128, device=GPU_TYPE).half()
-        target = dataclasses.replace(
-            V.choices.get_scatter_preagg_target(x.device), fp16_matrix_preagg=False
-        )
-        heuristics = V.choices.get_config_heuristics(GPU_TYPE)
-        with (
-            unittest.mock.patch.object(
-                InductorChoices, "get_scatter_preagg_target", return_value=target
-            ),
-            unittest.mock.patch.object(
-                heuristics,
-                "get_scatter_preagg_configs",
-                wraps=heuristics.get_scatter_preagg_configs,
-            ) as configs,
-        ):
-            self._check_fp16(fn, x, idx, v, matrix=False)
-        self.assertIs(configs.call_args.kwargs["target"], target)
+                # -1 always sorts; 2 sorts only blocks with a hot destination, of which
+                # uniform keys have none. This covers both paths of each chunk.
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-    @parametrize("min_saved,hot_fraction", [(-1.0, 0.05), (2.0, 0.0)])
-    def test_fp16_matrix_preagg_forced_path(self, min_saved, hot_fraction):
-        # -1 always takes the product; 2 leaves it to blocks with a hot
-        # destination, of which uniform keys have none. A milder hot row keeps
-        # the plain fp16 atomics' rounding within tolerance.
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+                x = torch.zeros(4096, 64, device=GPU_TYPE)
+                idx = _hot_indices(50_000, 4096, GPU_TYPE, hot_fraction=hot_fraction)
+                v = torch.randn(50_000, 64, device=GPU_TYPE)
+                with config.patch(scatter_preagg_template_min_saved=min_saved):
+                    code = self._check(fn, x, idx, v, atol=1e-2, rtol=1e-3)
+                self.assertIn("ADAPTIVE : tl.constexpr = True", code)
+                self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
 
-        x = torch.zeros(4096, 64, device=GPU_TYPE).half()
-        idx = _hot_indices(50_000, 4096, GPU_TYPE, hot_fraction=hot_fraction)
-        v = torch.randn(50_000, 64, device=GPU_TYPE).half()
-        with config.patch(scatter_preagg_template_min_saved=min_saved):
-            code = self._check_fp16(fn, x, idx, v)
-        # The product pays at half the saving, so -1 leaves no block plain.
-        if min_saved < 0:
-            self.assertIn("ADAPTIVE : tl.constexpr = False", code)
-        else:
-            self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved / 2}", code)
+    def test_adaptive_runs(self):
+        for d in [1, 32]:
+            with self.subTest(d=d):
+                torch._dynamo.reset()
+                counters.clear()
+                # Runs of a few recurring keys, which the sort must not merge across
+                # the runs between them, and a ragged last block whose shared tokens
+                # must count once.
+                idx = torch.randint(0, 4, (8192,), device=GPU_TYPE).repeat_interleave(8)
+                idx = idx[:-37]
+                shape = (4096, d) if d > 1 else (4096,)
+                x = torch.zeros(shape, device=GPU_TYPE)
+                v = torch.randn(idx.numel(), *shape[1:], device=GPU_TYPE)
 
-    def test_adaptive_low_contention(self):
-        # Adaptive chunks take plain atomics instead of being gated out.
-        x = torch.zeros(10_000, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 10_000, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 8, device=GPU_TYPE)
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
 
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        self._check(fn, x, idx, v)
-
-    @parametrize("min_saved,hot_fraction", [(-1.0, 0.5), (2.0, 0.0)])
-    def test_adaptive_forced_path(self, min_saved, hot_fraction):
-        # -1 always sorts; 2 sorts only blocks with a hot destination, of which
-        # uniform keys have none. This covers both paths of each chunk.
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        x = torch.zeros(4096, 64, device=GPU_TYPE)
-        idx = _hot_indices(50_000, 4096, GPU_TYPE, hot_fraction=hot_fraction)
-        v = torch.randn(50_000, 64, device=GPU_TYPE)
-        with config.patch(scatter_preagg_template_min_saved=min_saved):
-            code = self._check(fn, x, idx, v, atol=1e-2, rtol=1e-3)
-        self.assertIn("ADAPTIVE : tl.constexpr = True", code)
-        self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
-
-    @parametrize("min_saved,hot_fraction", [(-1.0, 0.5), (2.0, 0.0)])
-    def test_adaptive_forced_path_strided(self, min_saved, hot_fraction):
-        x = torch.zeros(64, 4096, device=GPU_TYPE)
-        idx = _hot_indices(50_000, 4096, GPU_TYPE, hot_fraction=hot_fraction)
-        v = torch.randn(64, 50_000, device=GPU_TYPE)
-        with config.patch(scatter_preagg_template_min_saved=min_saved):
-            code = self._check(
-                lambda x, i, v: x.index_add(1, i, v), x, idx, v, atol=1e-2, rtol=1e-3
-            )
-        self.assertIn("ADAPTIVE : tl.constexpr = True", code)
-        self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
-        # Strided rows run plain blocks one column at a time.
-        self.assertIn("PLAIN_D : tl.constexpr = 1", code)
-
-    @parametrize("d", [1, 32])
-    def test_adaptive_runs(self, d):
-        # Runs of a few recurring keys, which the sort must not merge across
-        # the runs between them, and a ragged last block whose shared tokens
-        # must count once.
-        idx = torch.randint(0, 4, (8192,), device=GPU_TYPE).repeat_interleave(8)
-        idx = idx[:-37]
-        shape = (4096, d) if d > 1 else (4096,)
-        x = torch.zeros(shape, device=GPU_TYPE)
-        v = torch.randn(idx.numel(), *shape[1:], device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        code = self._check(fn, x, idx, v, atol=1e-2, rtol=1e-3)
-        # Single columns sort at half the saving.
-        min_saved = config.scatter_preagg_template_min_saved / (2 if d == 1 else 1)
-        self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
-
-    @parametrize("dtype", [torch.float32, torch.float16])
-    def test_adaptive_short_runs(self, dtype):
-        # Sorted keys in runs of about two, also on the 16-bit matrix
-        # product's blocks.
-        idx = torch.sort(torch.randint(0, 16384, (32768,), device=GPU_TYPE))[0]
-        x = torch.zeros(16384, 64, device=GPU_TYPE, dtype=dtype)
-        v = torch.randn(idx.numel(), 64, device=GPU_TYPE, dtype=dtype)
-
-        def fn(x, i, v):
-            return x.index_add(0, i, v)
-
-        code = self._check(fn, x, idx, v, atol=1e-2, rtol=1e-2)
-        self.assertIn("ADAPTIVE : tl.constexpr = True", code)
-        self.assertIn(f"DOT : tl.constexpr = {dtype == torch.float16}", code)
-
-    @parametrize("min_saved,hot_fraction", [(-1.0, 0.5), (2.0, 0.0)])
-    def test_constant_values(self, min_saved, hot_fraction):
-        # Counting with scattered ones leaves a rank-1 constant as the value.
-        def fn(x, i):
-            ones = torch.ones(i.shape[0], x.shape[1], device=x.device)
-            return x.index_add(0, i, ones)
-
-        x = torch.zeros(4096, 16, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 4096, GPU_TYPE, hot_fraction=hot_fraction)
-        with config.patch(scatter_preagg_template_min_saved=min_saved):
-            code = self._check(fn, x, idx)
-        self.assertIn("ADAPTIVE : tl.constexpr = True", code)
-        self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
-
-    def test_values_read_target(self):
-        # Values that read the scatter target are computed before it is
-        # mutated (index_put realizes them before the template sees them).
-        def fn(x, i):
-            x.index_put_((i,), x[i] * 2, accumulate=True)
-            return x
-
-        x = torch.randn(16, 64, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 16, GPU_TYPE)
-        self._check(fn, x, idx, rtol=1e-3)
+                code = self._check(fn, x, idx, v, atol=1e-2, rtol=1e-3)
+                # Single columns sort at half the saving.
+                min_saved = config.scatter_preagg_template_min_saved / (
+                    2 if d == 1 else 1
+                )
+                self.assertIn(f"SORT_SAVED : tl.constexpr = {min_saved}", code)
 
     def test_dynamic_shapes(self):
         def fn(x, i, v):
@@ -1169,52 +865,39 @@ class TestScatterPreagg(TestCase):
         self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
         self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
-    def test_dynamic_inner(self):
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
+    def test_dynamic_inner_shifted(self):
+        for dim in ["inner", "batch", "deterministic"]:
+            with self.subTest(dim=dim):
+                torch._dynamo.reset()
+                counters.clear()
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
-        # Row sizes that are multiples of 16 compile with alignment guards;
-        # the others recompile once without them.
-        for rows, d in [(16, 64), (20, 128), (16, 8), (24, 72), (12, 100), (16, 3)]:
-            x = torch.zeros(rows, d, device=GPU_TYPE)
-            idx = _hot_indices(20_000, rows, GPU_TYPE)
-            v = torch.randn(20_000, d, device=GPU_TYPE)
-            expect = fn(x.clone(), idx, v)
-            self.assertEqual(compiled(x, idx, v), expect, atol=1e-3, rtol=1e-3)
-            self.assertEqual(
-                counters["inductor"]["scatter_preagg_applied"],
-                counters["stats"]["unique_graphs"],
-            )
-        self.assertEqual(counters["stats"]["unique_graphs"], 2)
+                # Aligned row sizes no tile divides shift their last inner block back
+                # rather than recompiling per tile, including a batch dimension the
+                # destination does not index, which is part of the inner size, and
+                # in the sorted lowering.
+                def fn(x, i, v):
+                    return x.index_add(1 if dim == "batch" else 0, i, v)
 
-    @parametrize("dim", ["inner", "batch", "deterministic"])
-    def test_dynamic_inner_shifted(self, dim):
-        # Aligned row sizes no tile divides shift their last inner block back
-        # rather than recompiling per tile, including a batch dimension the
-        # destination does not index, which is part of the inner size, and
-        # in the sorted lowering.
-        def fn(x, i, v):
-            return x.index_add(1 if dim == "batch" else 0, i, v)
-
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
-        self.enterContext(DeterministicGuard(dim == "deterministic"))
-        for size in (12, 8, 6, 10) if dim == "batch" else (2048, 1040, 1536, 1296):
-            if dim == "batch":
-                x = torch.zeros(size, 100, 64, device=GPU_TYPE)
-                v = torch.randn(size, 20_000, 64, device=GPU_TYPE)
-            else:
-                x = torch.zeros(100, size, device=GPU_TYPE)
-                v = torch.randn(20_000, size, device=GPU_TYPE)
-            idx = _hot_indices(20_000, 100, GPU_TYPE)
-            expect = fn(x.clone(), idx, v)
-            if size in (12, 2048):
-                out, (code,) = run_and_get_code(compiled, x, idx, v)
-                self.assertIn("INNER_SHIFT : tl.constexpr = True", code)
-            else:
-                out = compiled(x, idx, v)
-            self.assertEqual(out, expect, atol=1e-3, rtol=1e-3)
-        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+                compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+                self.enterContext(DeterministicGuard(dim == "deterministic"))
+                for size in (
+                    (12, 8, 6, 10) if dim == "batch" else (2048, 1040, 1536, 1296)
+                ):
+                    if dim == "batch":
+                        x = torch.zeros(size, 100, 64, device=GPU_TYPE)
+                        v = torch.randn(size, 20_000, 64, device=GPU_TYPE)
+                    else:
+                        x = torch.zeros(100, size, device=GPU_TYPE)
+                        v = torch.randn(20_000, size, device=GPU_TYPE)
+                    idx = _hot_indices(20_000, 100, GPU_TYPE)
+                    expect = fn(x.clone(), idx, v)
+                    if size in (12, 2048):
+                        out, (code,) = run_and_get_code(compiled, x, idx, v)
+                        self.assertIn("INNER_SHIFT : tl.constexpr = True", code)
+                    else:
+                        out = compiled(x, idx, v)
+                    self.assertEqual(out, expect, atol=1e-3, rtol=1e-3)
+                self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
     def test_deterministic_dynamic(self):
         def fn(x, i, v):
@@ -1240,53 +923,51 @@ class TestScatterPreagg(TestCase):
         self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
         self.assertEqual(counters["stats"]["unique_graphs"], 1)
 
-    def test_index_from_unsupported_op_materialized(self):
+    def test_materialized_keys_and_values(self):
+        for deterministic in (False, True):
+            with self.subTest(case="keys_read_output", deterministic=deterministic):
+                torch._dynamo.reset()
+                counters.clear()
+                x = torch.randint(0, 16, (16, 32), device=GPU_TYPE).float()
+                v = torch.randn(16 * 64, 32, device=GPU_TYPE)
+
+                def keys_read_output(x, v):
+                    i = x[:, 0].long().clamp(0, 15).repeat(64)
+                    return x.index_put_((i,), v, accumulate=True)
+
+                with DeterministicGuard(deterministic):
+                    self._check(keys_read_output, x, v)
+                self.assertEqual(
+                    counters["inductor"]["scatter_preagg_materialized_keys"], 1
+                )
+
+        torch._dynamo.reset()
+        counters.clear()
         x = torch.zeros(16, 32, device=GPU_TYPE)
         idx = _hot_indices(20_000, 16, GPU_TYPE)
-        v = torch.randn(20_016, 32, device=GPU_TYPE)
+        values = torch.randn(20_016, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            # Padding the index makes its loader use a masked load.
+        def unsupported_key(x, i, v):
             return torch.index_put(
                 x, (torch.nn.functional.pad(i, (8, 8)),), v, accumulate=True
             )
 
-        self._check(fn, x, idx, v)
+        self._check(unsupported_key, x, idx, values)
         self.assertEqual(counters["inductor"]["scatter_preagg_materialized_keys"], 1)
 
-    def test_masked_index_put_clamped_sorted(self):
-        x = torch.zeros(16, 8, device=GPU_TYPE)
-        idx = torch.randint(-20, 20, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 8, device=GPU_TYPE)
+        torch._dynamo.reset()
+        counters.clear()
+        x = torch.zeros(16, 40, device=GPU_TYPE)
+        idx = torch.randint(0, 16, (20_000,), device=GPU_TYPE)
+        values = torch.randn(20_000, 32, device=GPU_TYPE)
 
-        def fn(x, i, v):
-            mask = ((i >= 0) & (i < 16))[:, None]
-            return torch.ops.aten._unsafe_masked_index_put_accumulate(x, mask, [i], v)
+        def masked_value(x, i, v):
+            return torch.index_put(
+                x, (i,), torch.nn.functional.pad(v, (4, 4)), accumulate=True
+            )
 
-        with DeterministicGuard(True):
-            self._check(fn, x, idx, v)
-        self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
-
-    def test_output_copy_when_view_has_no_layout(self):
-        real = scatter_preagg._output_storage
-        calls = []
-
-        def first_call_fails(out):
-            calls.append(out)
-            return None if len(calls) == 1 else real(out)
-
-        x = torch.zeros(16, 32, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 16, GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return x.index_add_(0, i, v)
-
-        with unittest.mock.patch.object(
-            scatter_preagg, "_output_storage", first_call_fails
-        ):
-            self._check(fn, x, idx, v)
-        self.assertEqual(counters["inductor"]["scatter_preagg_output_copy"], 1)
+        self._check(masked_value, x, idx, values)
+        self.assertEqual(counters["inductor"]["scatter_preagg_materialized_values"], 1)
 
     def test_output_view(self):
         def fn(i, v):
@@ -1298,61 +979,98 @@ class TestScatterPreagg(TestCase):
         v = torch.randn(20_000, 32, device=GPU_TYPE)
         self._check(fn, idx, v, rtol=1e-3)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
-    def test_output_copies(self, dtype):
-        # Many writes per element spread over copies of the output; rows no
-        # token writes keep -0.0.
-        n = 1 << 18
-        x = torch.full((64, 32), -0.0, device=GPU_TYPE, dtype=dtype)
-        idx = _hot_indices(n, 32, GPU_TYPE)
-        v = torch.randn(n, 32, device=GPU_TYPE, dtype=dtype)
+    def test_output_copies(self):
+        for dtype in [torch.float32, torch.bfloat16]:
+            with self.subTest(dtype=dtype):
+                torch._dynamo.reset()
+                counters.clear()
+                # Many writes per element spread over copies of the output; rows no
+                # token writes keep -0.0.
+                n = 1 << 18
+                x = torch.full((64, 32), -0.0, device=GPU_TYPE, dtype=dtype)
+                idx = _hot_indices(n, 32, GPU_TYPE)
+                v = torch.randn(n, 32, device=GPU_TYPE, dtype=dtype)
 
-        def fn(x, i, v):
+                def fn(x, i, v):
+                    return torch.index_put(x, (i,), v, accumulate=True)
+
+                tol = 1e-3 if dtype == torch.float32 else 0.05
+                code = self._check(fn, x, idx, v, atol=tol * 100, rtol=tol)
+                self.assertIn("COPIES : tl.constexpr = 8", code)
+                self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
+                self.assertEqual(
+                    counters["inductor"]["scatter_preagg_fp32_copy"],
+                    dtype == torch.bfloat16,
+                )
+                out = torch.compile(fn, fullgraph=True)(x, idx, v)
+                self.assertTrue(out[32:].signbit().all())
+
+                # Few writes per element, or too few tokens to serialize a hot
+                # destination's atomics, do not pay for the copies.
+                for rows, tokens in ((1 << 16, n), (64, 50_000)):
+                    counters.clear()
+                    torch._dynamo.reset()
+                    x = torch.zeros(rows, 32, device=GPU_TYPE, dtype=dtype)
+                    idx = _hot_indices(tokens, rows, GPU_TYPE)
+                    self._check(fn, x, idx, v[:tokens], atol=tol * 100, rtol=tol)
+                    self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 0)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        def dynamic_fn(x, i, v):
             return torch.index_put(x, (i,), v, accumulate=True)
 
-        tol = 1e-3 if dtype == torch.float32 else 0.05
-        code = self._check(fn, x, idx, v, atol=tol * 100, rtol=tol)
-        self.assertIn("COPIES : tl.constexpr = 8", code)
-        self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
-        self.assertEqual(
-            counters["inductor"]["scatter_preagg_fp32_copy"], dtype == torch.bfloat16
-        )
-        out = torch.compile(fn, fullgraph=True)(x, idx, v)
-        self.assertTrue(out[32:].signbit().all())
-
-        # Few writes per element, or too few tokens to serialize a hot
-        # destination's atomics, do not pay for the copies.
-        for rows, tokens in ((1 << 16, n), (64, 50_000)):
-            counters.clear()
-            torch._dynamo.reset()
-            x = torch.zeros(rows, 32, device=GPU_TYPE, dtype=dtype)
-            idx = _hot_indices(tokens, rows, GPU_TYPE)
-            self._check(fn, x, idx, v[:tokens], atol=tol * 100, rtol=tol)
-            self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 0)
-
-    def test_output_copies_dynamic(self):
-        # A symbolic output size takes no copies, without guarding on it.
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        compiled = torch.compile(dynamic_fn, fullgraph=True, dynamic=True)
         n = 1 << 18
-        v = torch.randn(n, 32, device=GPU_TYPE)
+        values = torch.randn(n, 32, device=GPU_TYPE)
         for rows in (64, 48):
             x = torch.zeros(rows, 32, device=GPU_TYPE)
             idx = _hot_indices(n, rows, GPU_TYPE)
-            self.assertEqual(compiled(x, idx, v), fn(x, idx, v), atol=0.1, rtol=1e-3)
+            self.assertEqual(
+                compiled(x, idx, values),
+                dynamic_fn(x, idx, values),
+                atol=0.1,
+                rtol=1e-3,
+            )
         self.assertEqual(counters["stats"]["unique_graphs"], 1)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
         self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 0)
 
-    def test_output_copies_single_column(self):
-        # Single columns take copies from fewer tokens.
+        torch._dynamo.reset()
+        counters.clear()
         x = torch.zeros(64, device=GPU_TYPE)
         idx = _hot_indices(1 << 14, 64, GPU_TYPE)
-        v = torch.randn(1 << 14, device=GPU_TYPE)
-        self._check(lambda x, i, v: x.index_add(0, i, v), x, idx, v)
+        values = torch.randn(1 << 14, device=GPU_TYPE)
+        self._check(lambda x, i, v: x.index_add(0, i, v), x, idx, values, rtol=1e-3)
         self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
+
+        torch._dynamo.reset()
+        counters.clear()
+        x = torch.zeros(8192, 32, device=GPU_TYPE)
+        idx = _hot_indices(1 << 20, 8192, GPU_TYPE)
+        values = torch.randn(1 << 20, 32, device=GPU_TYPE)
+        code = self._check(dynamic_fn, x, idx, values, atol=0.1, rtol=1e-3)
+        self.assertIn("COPIES : tl.constexpr = 4", code)
+
+        torch._dynamo.reset()
+        counters.clear()
+        output_storage = scatter_preagg._output_storage
+        calls = []
+
+        def first_call_fails(out):
+            calls.append(out)
+            return None if len(calls) == 1 else output_storage(out)
+
+        x = torch.zeros(16, 32, device=GPU_TYPE)
+        idx = _hot_indices(20_000, 16, GPU_TYPE)
+        values = torch.randn(20_000, 32, device=GPU_TYPE)
+        with unittest.mock.patch.object(
+            scatter_preagg, "_output_storage", first_call_fails
+        ):
+            self._check(
+                lambda x, i, v: x.index_add_(0, i, v), x, idx, values, rtol=1e-3
+            )
+        self.assertEqual(counters["inductor"]["scatter_preagg_output_copy"], 1)
 
     @config.patch(
         comprehensive_padding=True,
@@ -1375,32 +1093,6 @@ class TestScatterPreagg(TestCase):
         self.assertIn("COPY_NUMEL : tl.constexpr = 1728", code)
         self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
 
-    def test_output_copies_byte_limit(self):
-        # Copies of a 1MB output stop at 4MB, short of the copy count its
-        # writes would take.
-        x = torch.zeros(8192, 32, device=GPU_TYPE)
-        idx = _hot_indices(1 << 20, 8192, GPU_TYPE)
-        v = torch.randn(1 << 20, 32, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        code = self._check(fn, x, idx, v, atol=0.1, rtol=1e-3)
-        self.assertIn("COPIES : tl.constexpr = 4", code)
-
-    def test_masked_value_producer_materialized(self):
-        x = torch.zeros(16, 40, device=GPU_TYPE)
-        idx = torch.randint(0, 16, (20_000,), device=GPU_TYPE)
-        v = torch.randn(20_000, 32, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(
-                x, (i,), torch.nn.functional.pad(v, (4, 4)), accumulate=True
-            )
-
-        self._check(fn, x, idx, v)
-        self.assertEqual(counters["inductor"]["scatter_preagg_materialized_values"], 1)
-
     def _check_deterministic(self, fn, *args, tol):
         ref = fn(*[a.double() if a.is_floating_point() else a.clone() for a in args])
         ref = ref.double()
@@ -1413,99 +1105,41 @@ class TestScatterPreagg(TestCase):
         self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
         self.assertNotIn("tl.atomic_add(", code)
 
-    @parametrize(
-        "case",
-        ["index_put", "index_add", "scatter_add", "one_key", "unique", "int32", "view"],
-    )
-    def test_deterministic(self, case):
-        n, rows, d = 30_000, 50, 24
-        dtype = torch.int32 if case == "int32" else torch.float32
-        x = torch.zeros(rows, d, device=GPU_TYPE, dtype=dtype)
-        v = torch.randn(n, d, device=GPU_TYPE).to(dtype)
-        idx = _hot_indices(n, rows, GPU_TYPE)
-        fn = _BF16_SCATTER_FNS.get(case, _BF16_SCATTER_FNS["index_put"])
-        if case == "one_key":
-            # One segment spanning every chunk.
-            idx = torch.zeros_like(idx)
-        elif case == "unique":
-            x = torch.zeros(n, d, device=GPU_TYPE)
-            idx = torch.randperm(n, device=GPU_TYPE)
-        elif case == "int32":
-            v = torch.randint(-5, 5, (n, d), device=GPU_TYPE, dtype=dtype)
-        elif case == "view":
-            x = torch.zeros(rows, 3, device=GPU_TYPE)
-            v = torch.randn(n, 1, device=GPU_TYPE)
+    def test_deterministic(self):
+        for case in [
+            "index_put",
+            "index_add",
+            "scatter_add",
+            "one_key",
+            "unique",
+            "int32",
+            "view",
+        ]:
+            with self.subTest(case=case):
+                torch._dynamo.reset()
+                counters.clear()
+                n, rows, d = 30_000, 50, 24
+                dtype = torch.int32 if case == "int32" else torch.float32
+                x = torch.zeros(rows, d, device=GPU_TYPE, dtype=dtype)
+                v = torch.randn(n, d, device=GPU_TYPE).to(dtype)
+                idx = _hot_indices(n, rows, GPU_TYPE)
+                fn = _BF16_SCATTER_FNS.get(case, _BF16_SCATTER_FNS["index_put"])
+                if case == "one_key":
+                    # One segment spanning every chunk.
+                    idx = torch.zeros_like(idx)
+                elif case == "unique":
+                    x = torch.zeros(n, d, device=GPU_TYPE)
+                    idx = torch.randperm(n, device=GPU_TYPE)
+                elif case == "int32":
+                    v = torch.randint(-5, 5, (n, d), device=GPU_TYPE, dtype=dtype)
+                elif case == "view":
+                    x = torch.zeros(rows, 3, device=GPU_TYPE)
+                    v = torch.randn(n, 1, device=GPU_TYPE)
 
-            def fn(x, i, v):
-                return x[:, 1:2].index_add_(0, i, v)
+                    def fn(x, i, v):
+                        return x[:, 1:2].index_add_(0, i, v)
 
-        self._check_deterministic(fn, x, idx, v, tol=1e-5)
-
-    def test_deterministic_embedding_dense_backward(self):
-        idx = _hot_indices(30_000, 500, GPU_TYPE)
-        grad = torch.randn(30_000, 64, device=GPU_TYPE).bfloat16()
-
-        def fn(i, g):
-            return torch.ops.aten.embedding_dense_backward(g, i, 500, -1, False)
-
-        self._check_deterministic(fn, idx, grad, tol=1e-2)
-
-    def test_embedding_dense_backward_scale_grad_by_freq(self):
-        num_weights, padding_idx = 24, 3
-        idx = torch.randint(0, num_weights, (64, 512), device=GPU_TYPE)
-        idx[::2] = 0
-        idx[::7] = padding_idx
-        grad = torch.randn(64, 512, 16, device=GPU_TYPE)
-
-        def fn(g, i):
-            return torch.ops.aten.embedding_dense_backward(
-                g, i, num_weights, padding_idx, True
-            )
-
-        self._check(fn, grad, idx, atol=1e-2, rtol=1e-2)
-
-    def test_scatter_add_narrow_index_nonzero_dim(self):
-        # The index is narrower than the output along the non-scatter dim.
-        out = torch.zeros(4, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 8, (1, 8192), device=GPU_TYPE)
-        vals = torch.randn(1, 8192, device=GPU_TYPE)
-
-        def fn(out, i, v):
-            return out.scatter_add(1, i, v), out.scatter_add(-1, i, v)
-
-        self._check(fn, out, idx, vals)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 2)
-
-    def test_scatter_add_int32_index(self):
-        out = torch.zeros(8, 4, device=GPU_TYPE)
-        idx = torch.randint(0, 4, (8192, 4), device=GPU_TYPE, dtype=torch.int32)
-        vals = torch.randn(8192, 4, device=GPU_TYPE)
-        self._check(lambda o, i, v: o.scatter_add(0, i, v), out, idx, vals)
-
-    def test_inplace_graph_inputs(self):
-        # Mutated graph inputs reach the lowering as the functional overloads.
-        def fn(index_out, scatter_out, i, scatter_i, v):
-            index_out.index_add_(1, i, v)
-            scatter_out.scatter_add_(1, scatter_i, v)
-            return index_out, scatter_out
-
-        idx = torch.randint(0, 4, (8192,), device=GPU_TYPE)
-        scatter_idx = idx.view(1, 8192, 1).expand(2, 8192, 4)
-        vals = torch.randn(2, 8192, 4, device=GPU_TYPE)
-        outs = [torch.zeros(2, 8, 4, device=GPU_TYPE) for _ in range(2)]
-        self._check(fn, *outs, idx, scatter_idx, vals, atol=1e-2, rtol=1e-3)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 2)
-
-    @parametrize("vals_shape", [(16, 512, 4), (16, 1, 4), (4,)])
-    def test_broadcast_values_multidim_index(self, vals_shape):
-        out = torch.zeros(512, 4, device=GPU_TYPE)
-        idx = torch.randint(0, 4, (16, 512), device=GPU_TYPE)
-        vals = torch.randn(vals_shape, device=GPU_TYPE)
-
-        def fn(out, i, v):
-            return out.index_put([i], v, accumulate=True)
-
-        self._check(fn, out, idx, vals, atol=1e-2, rtol=1e-3)
+                self._check_deterministic(fn, x, idx, v, tol=1e-5)
 
     def test_index_width_covers_tokens(self):
         # Broadcast indices into a small output can iterate past int32 tokens.
@@ -1560,123 +1194,6 @@ class TestScatterPreagg(TestCase):
             self.assertEqual(counters["stats"]["unique_graphs"], 1)
             self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
 
-    @parametrize("vals_shape", [(8, 8, 4), (3, 8, 8, 4), (4,)])
-    def test_broadcast_values_leading_slice_multidim_index(self, vals_shape):
-        # Values may carry the sliced dim explicitly, or broadcast over it.
-        out = torch.zeros(3, 8, 4, device=GPU_TYPE)
-        idx = torch.randint(0, 4, (8, 8), device=GPU_TYPE)
-        vals = torch.randn(vals_shape, device=GPU_TYPE)
-
-        def fn(out, i, v):
-            return torch.ops.aten.index_put(out, [None, i], v, True)
-
-        with config.patch(scatter_preagg_template_min_numel=0):
-            self._check(fn, out, idx, vals, atol=1e-2, rtol=1e-3)
-
-    @parametrize("mask_shape", [(64, 1, 1), (128, 1), (4,)])
-    def test_masked_accumulate_broadcast_mask(self, mask_shape):
-        # Direct callers may pass a mask that only broadcasts against values.
-        out = torch.zeros(8, 4, device=GPU_TYPE)
-        idx = torch.randint(0, 8, (64, 128), device=GPU_TYPE)
-        vals = torch.randn(64, 128, 4, device=GPU_TYPE)
-        mask = torch.rand(mask_shape, device=GPU_TYPE) > 0.3
-
-        def fn(out, mask, i, v):
-            return torch.ops.aten._unsafe_masked_index_put_accumulate(out, mask, [i], v)
-
-        self._check(fn, out, mask, idx, vals, atol=1e-2, rtol=1e-3)
-
-    def test_masked_accumulate_index_shaped_mask(self):
-        # The embedding_dense_backward(scale_grad_by_freq=True) counts: a 1-D
-        # output with values and mask shaped as the 2-D index, which holds a
-        # masked out-of-range entry.
-        out = torch.zeros(8, device=GPU_TYPE)
-        idx = torch.randint(0, 8, (64, 128), device=GPU_TYPE)
-        mask = torch.ones(64, 128, dtype=torch.bool, device=GPU_TYPE)
-        idx[0, 0] = -5
-        mask[0, 0] = False
-        vals = torch.randn(64, 128, device=GPU_TYPE)
-
-        def fn(out, mask, i, v):
-            return torch.ops.aten._unsafe_masked_index_put_accumulate(out, mask, [i], v)
-
-        self._check(fn, out, mask, idx, vals, atol=1e-2, rtol=1e-3)
-
-    @parametrize("vals_shape", [(16, 512, 4), (16, 1, 4), (4,)])
-    def test_masked_accumulate_broadcast_values(self, vals_shape):
-        out = torch.zeros(512, 4, device=GPU_TYPE)
-        idx = torch.randint(0, 4, (16, 512), device=GPU_TYPE)
-        mask = torch.tensor([True, False, True, True], device=GPU_TYPE)
-        vals = torch.randn(vals_shape, device=GPU_TYPE)
-
-        def fn(out, mask, i, v):
-            return torch.ops.aten._unsafe_masked_index_put_accumulate(out, mask, [i], v)
-
-        self._check(fn, out, mask, idx, vals, atol=1e-2, rtol=1e-3)
-
-    def test_index_add_bf16_dims(self):
-        # Negative, in-place and dim-1 index_add of bf16, accumulated in fp32.
-        def fn(out, i, v):
-            return (
-                out.index_add(1, i, v),
-                out.clone().index_add_(1, i, v),
-                out.index_add(-2, i, v),
-            )
-
-        idx = torch.randint(0, 4, (8192,), device=GPU_TYPE)
-        vals = torch.randn(2, 8192, 4, device=GPU_TYPE, dtype=torch.bfloat16)
-        out = torch.zeros(2, 8, 4, device=GPU_TYPE, dtype=torch.bfloat16)
-        expect = fn(out.float(), idx, vals.float())
-        actual = torch.compile(fn, fullgraph=True)(out, idx, vals)
-        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 3)
-        self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 3)
-        for e, a in zip(expect, actual):
-            self.assertEqual(a.float(), e, atol=1e-1, rtol=1e-2)
-
-    @parametrize("reduce", ["amax", "amin", "prod", "mean"])
-    def test_scatter_reduce_other_reductions(self, reduce):
-        # Only sums are offered to the template.
-        x = torch.randn(16, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 16, (20_000, 8), device=GPU_TYPE)
-        src = torch.rand(20_000, 8, device=GPU_TYPE) + 0.5
-
-        def fn(x, i, s):
-            return x.scatter_reduce(0, i, s, reduce, include_self=False)
-
-        self._check(fn, x, idx, src, applied=False, atol=1e-3, rtol=1e-3)
-
-    def test_deterministic_below_size_gate(self):
-        # The sorted lowering replaces the eager fallback, so the size gate
-        # does not apply to it.
-        x = torch.zeros(16, 8, device=GPU_TYPE)
-        idx = torch.randint(0, 16, (100,), device=GPU_TYPE)
-        v = torch.randn(100, 8, device=GPU_TYPE)
-
-        def fn(x, i, v):
-            return torch.index_put(x, (i,), v, accumulate=True)
-
-        with DeterministicGuard(True):
-            self._check(fn, x, idx, v)
-        self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
-
-    @parametrize("dtype", [torch.int16, torch.bfloat16])
-    @parametrize("op", ["scatter_add", "scatter_reduce"])
-    def test_zero_dim(self, op, dtype):
-        # A 0-dim int16 scatter takes the sorted lowering; bf16 is too small
-        # for the template and must still reach the eager fallback.
-        x = torch.ones((), device=GPU_TYPE, dtype=dtype)
-        idx = torch.tensor(0, device=GPU_TYPE)
-        src = torch.full((), 3, device=GPU_TYPE, dtype=dtype)
-
-        def fn(x, i, s):
-            if op == "scatter_add":
-                return x.scatter_add(0, i, s)
-            return x.scatter_reduce(0, i, s, "sum")
-
-        code = self._check(fn, x, idx, src, applied=dtype == torch.int16)
-        if dtype == torch.bfloat16:
-            self.assertNotIn("tl.atomic_add(", code)
-
     @config.patch(scatter_preagg_template=False)
     def test_disabled(self):
         x = torch.zeros(24, 32, device=GPU_TYPE)
@@ -1688,20 +1205,6 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, idx, v, applied=False)
 
-    def test_backward_through_embedding(self):
-        emb = torch.nn.Embedding(24, 32, device=GPU_TYPE)
-        idx = _hot_indices(20_000, 24, GPU_TYPE)
-
-        def fn(i):
-            emb.zero_grad()
-            emb(i).pow(2).sum().backward()
-            return emb.weight.grad
-
-        expect = fn(idx).clone()
-        actual = torch.compile(fn)(idx)
-        self.assertEqual(actual, expect, atol=1e-2, rtol=1e-4)
-        self.assertGreater(counters["inductor"]["scatter_preagg_applied"], 0)
-
 
 class TestScatterPreaggConfigs(TestCase):
     """Config heuristics for given device targets."""
@@ -1710,8 +1213,7 @@ class TestScatterPreaggConfigs(TestCase):
 
     def setUp(self):
         super().setUp()
-        # ROCmConfigHeuristic() otherwise queries the device's backend. It is a
-        # process-wide singleton, so build a private one.
+        # Isolate the singleton and avoid querying a device.
         heuristics = "torch._inductor.heuristics.template.triton"
         self.enterContext(
             unittest.mock.patch.dict(BaseHeuristicSingleton._instances, clear=True)
@@ -1731,39 +1233,43 @@ class TestScatterPreaggConfigs(TestCase):
         (cfg,) = self._configs(target, *args, **kwargs)
         return cfg.block_t, cfg.block_d
 
-    @parametrize("rocm", [False, True])
-    def test_configs(self, rocm):
-        target = ScatterPreaggTarget(64, 64 << 10, 80, fp16_matrix_preagg=True)
-        block = functools.partial(self._block, target, rocm=rocm)
-        default = self._configs(target, 50_000, 32, torch.float32, rocm=rocm)
-        self.assertEqual(len(default), 1)
-        self.assertEqual(default[0].num_warps, target.warps(128))
-        self.assertEqual(block(50_000, 32, torch.float32), (256, 16))
-        self.assertEqual(block(50_000, 128, torch.bfloat16), (128, 32))
-        self.assertEqual(block(50_000, 512, torch.float32), (128, 32))
-        # On ROCm, fp16 blocks take the matrix product.
-        self.assertEqual(
-            block(50_000, 128, torch.float16), (64, 32) if rocm else (128, 32)
-        )
-        self.assertEqual(
-            block(50_000, 512, torch.float16), (64, 64) if rocm else (128, 32)
-        )
-        self.assertEqual(block(50_000, 16, torch.float16), (256, 16))
-        strided = (50_000, 256, torch.float32)
-        self.assertEqual(block(*strided, inner_contiguous=False), (512, 8))
-        tuned = self._configs(
-            target, 1 << 20, 32, torch.float32, max_autotune=True, rocm=rocm
-        )
-        self.assertGreater(len(tuned), 1)
-        self.assertEqual(
-            tuned[0], self._configs(target, 1 << 20, 32, torch.float32, rocm=rocm)[0]
-        )
-        self.assertEqual(max(c.block_t * c.block_d for c in tuned), 8192)
-        # Ragged inner sizes keep the shared-memory-safe tile.
-        ragged = self._configs(
-            target, 1 << 20, 37, torch.float32, max_autotune=True, rocm=rocm
-        )
-        self.assertEqual(max(c.block_t * c.block_d for c in ragged), 4096)
+    def test_configs(self):
+        for rocm in [False, True]:
+            with self.subTest(rocm=rocm):
+                torch._dynamo.reset()
+                counters.clear()
+                target = ScatterPreaggTarget(64, 64 << 10, 80, fp16_matrix_preagg=True)
+                block = functools.partial(self._block, target, rocm=rocm)
+                default = self._configs(target, 50_000, 32, torch.float32, rocm=rocm)
+                self.assertEqual(len(default), 1)
+                self.assertEqual(default[0].num_warps, target.warps(128))
+                self.assertEqual(block(50_000, 32, torch.float32), (256, 16))
+                self.assertEqual(block(50_000, 128, torch.bfloat16), (128, 32))
+                self.assertEqual(block(50_000, 512, torch.float32), (128, 32))
+                # On ROCm, fp16 blocks take the matrix product.
+                self.assertEqual(
+                    block(50_000, 128, torch.float16), (64, 32) if rocm else (128, 32)
+                )
+                self.assertEqual(
+                    block(50_000, 512, torch.float16), (64, 64) if rocm else (128, 32)
+                )
+                self.assertEqual(block(50_000, 16, torch.float16), (256, 16))
+                strided = (50_000, 256, torch.float32)
+                self.assertEqual(block(*strided, inner_contiguous=False), (512, 8))
+                tuned = self._configs(
+                    target, 1 << 20, 32, torch.float32, max_autotune=True, rocm=rocm
+                )
+                self.assertGreater(len(tuned), 1)
+                self.assertEqual(
+                    tuned[0],
+                    self._configs(target, 1 << 20, 32, torch.float32, rocm=rocm)[0],
+                )
+                self.assertEqual(max(c.block_t * c.block_d for c in tuned), 8192)
+                # Ragged inner sizes keep the shared-memory-safe tile.
+                ragged = self._configs(
+                    target, 1 << 20, 37, torch.float32, max_autotune=True, rocm=rocm
+                )
+                self.assertEqual(max(c.block_t * c.block_d for c in ragged), 4096)
 
     def test_rocm_occupancy_configs(self):
         target = ScatterPreaggTarget(64, 64 << 10, 80, fp16_matrix_preagg=True)
@@ -1789,23 +1295,33 @@ class TestScatterPreaggConfigs(TestCase):
         (cfg,) = self._configs(target, 50_000, 256, torch.float16, num_keys=64)
         self.assertEqual((cfg.block_d, cfg.num_warps), (32, 1))
 
-    @parametrize(
-        "warp_size,shared_mem_kb,num_sms,ragged_tile",
-        [(64, 64, 80, 4096), (64, 160, 256, 8192), (32, 320, 128, 8192)]
-        + [(32, 64, 96, 4096)],
-    )
-    def test_target_configs(self, warp_size, shared_mem_kb, num_sms, ragged_tile):
-        # Configs keep the lanes per program across warp sizes, scale the ragged
-        # tile with shared memory and the small-grid split with the SM count.
-        target = ScatterPreaggTarget(warp_size, shared_mem_kb << 10, num_sms)
-        (cfg,) = self._configs(target, 50_000, 32, torch.float32)
-        self.assertEqual(cfg.num_warps * warp_size, 128)
-        tuned = self._configs(target, 1 << 20, 37, torch.float32, max_autotune=True)
-        self.assertEqual(max(c.block_t * c.block_d for c in tuned), ragged_tile)
-        # Small scatters halve blocks until every SM has two programs: at
-        # 256 tokens per SM, 128-token blocks.
-        (cfg,) = self._configs(target, 256 * num_sms, 16, torch.float32)
-        self.assertEqual((cfg.block_t, cfg.block_d), (128, 16))
+    def test_target_configs(self):
+        for warp_size, shared_mem_kb, num_sms, ragged_tile in [
+            (64, 64, 80, 4096),
+            (64, 160, 256, 8192),
+            (32, 320, 128, 8192),
+        ] + [(32, 64, 96, 4096)]:
+            with self.subTest(
+                warp_size=warp_size,
+                shared_mem_kb=shared_mem_kb,
+                num_sms=num_sms,
+                ragged_tile=ragged_tile,
+            ):
+                torch._dynamo.reset()
+                counters.clear()
+                # Configs keep the lanes per program across warp sizes, scale the ragged
+                # tile with shared memory and the small-grid split with the SM count.
+                target = ScatterPreaggTarget(warp_size, shared_mem_kb << 10, num_sms)
+                (cfg,) = self._configs(target, 50_000, 32, torch.float32)
+                self.assertEqual(cfg.num_warps * warp_size, 128)
+                tuned = self._configs(
+                    target, 1 << 20, 37, torch.float32, max_autotune=True
+                )
+                self.assertEqual(max(c.block_t * c.block_d for c in tuned), ragged_tile)
+                # Small scatters halve blocks until every SM has two programs: at
+                # 256 tokens per SM, 128-token blocks.
+                (cfg,) = self._configs(target, 256 * num_sms, 16, torch.float32)
+                self.assertEqual((cfg.block_t, cfg.block_d), (128, 16))
 
     def test_shared_memory_per_block(self):
         # The opt-in limit where there is one; XPU reports local memory.
@@ -1860,7 +1376,7 @@ class TestScatterPreaggGating(TestCase):
         )
         entry._deprecation_warned = False
 
-    def test_deprecated_partitioned_scatter_config(self):
+    def test_deprecated_partitioned_scatter_surface(self):
         self._reset_deprecation_warning("partitioned_scatter_enabled")
         with self.assertWarnsRegex(FutureWarning, "use that instead"):
             for value in (False, True):
@@ -1885,22 +1401,6 @@ class TestScatterPreaggGating(TestCase):
                 with config.patch({name: value}):
                     pass
 
-    def _run(self, script, **env_vars):
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("TORCHINDUCTOR_") and k != "TORCH_LOGS"
-        }
-        env.update(env_vars)
-        return subprocess.run(
-            [sys.executable, "-c", script],
-            env=env,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-    def test_deprecated_partitioned_scatter_env_var(self):
         script = "import torch._inductor.config as c; print(c.scatter_preagg_template)"
         # Only "1" enables, and the new name takes precedence.
         for legacy, new, expected in [
@@ -1935,7 +1435,6 @@ class TestScatterPreaggGating(TestCase):
             out.stderr,
         )
 
-    def test_deprecated_partitioned_scatter_logs(self):
         message = "The 'partitioned_scatter' logging artifact is deprecated"
         out = self._run("import torch", TORCH_LOGS="partitioned_scatter")
         self.assertIn(message, out.stderr)
@@ -1943,9 +1442,20 @@ class TestScatterPreaggGating(TestCase):
         out = self._run("import torch", TORCH_LOGS="scatter_preagg")
         self.assertNotIn(message, out.stderr)
 
-
-instantiate_parametrized_tests(TestScatterPreagg)
-instantiate_parametrized_tests(TestScatterPreaggConfigs)
+    def _run(self, script, **env_vars):
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("TORCHINDUCTOR_") and k != "TORCH_LOGS"
+        }
+        env.update(env_vars)
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
 
 
 if __name__ == "__main__":

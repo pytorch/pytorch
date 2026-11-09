@@ -677,7 +677,7 @@ class ScatterPreaggTemplate(TritonTemplate):
         )
 
 
-# Each template is its source file after the macros shared by all three.
+# Each template includes the shared macros first.
 _COMMON_SOURCE = load_kernel_template("triton_scatter_preagg_common")
 
 scatter_preagg_atomic_template = ScatterPreaggTemplate(
@@ -700,20 +700,15 @@ _MAX_COPY_BYTES = 4 << 20
 _MIN_COPY_TOKENS = 1 << 18
 _MIN_COPY_TOKENS_SINGLE_COLUMN = 1 << 14
 
-# The sorted lowering: tokens arrive sorted by destination (SKEYS; PERM holds
-# their original positions). Each program sums the segments of its BLOCK_T
-# tokens in a fixed order, adding segments it owns to OUT directly. Segments
-# crossing a chunk boundary go to PART (slot 0: first, slot 1: last) for the
-# fixup kernel to add in chunk order.
+# The sorted lowering sums each BLOCK_T chunk in a fixed order. Segments that
+# cross chunk boundaries go to PART for the merge kernel.
 scatter_sorted_chunk_template = ScatterPreaggTemplate(
     "scatter_sorted_chunk",
     _COMMON_SOURCE + load_kernel_template("triton_scatter_sorted_chunk"),
 )
-# The chunk where a crossing segment starts owns it: it adds the head parts of
-# the following chunks, in order, to its tail part and writes the destination.
-scatter_sorted_fixup_template = ScatterPreaggTemplate(
-    "scatter_sorted_fixup",
-    _COMMON_SOURCE + load_kernel_template("triton_scatter_sorted_fixup"),
+scatter_sorted_merge_template = ScatterPreaggTemplate(
+    "scatter_sorted_merge",
+    _COMMON_SOURCE + load_kernel_template("triton_scatter_sorted_merge"),
 )
 
 
@@ -1463,7 +1458,7 @@ def _lower_sorted(
     layout = _placeholder_layout(out, plan, configs)
     stages = [
         ("scatter_sorted_chunk", scatter_sorted_chunk_template, [out, part], inputs),
-        ("scatter_sorted_fixup", scatter_sorted_fixup_template, [out], []),
+        ("scatter_sorted_merge", scatter_sorted_merge_template, [out], []),
     ]
     # Generate both kernels before emitting either.
     selections = []
