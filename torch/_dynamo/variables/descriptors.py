@@ -17,9 +17,9 @@ import types
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
-from torch._guards import Source
+from torch._guards import CompileContext, Source
 
-from .. import graph_break_hints, variables
+from .. import config, graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
 from ..exc import (
     raise_attribute_error,
@@ -605,15 +605,26 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return (
             self.value is None
             and self.obj.source is None
-            and any(self.obj.python_type() is kind for kind in (list, dict, set))
+            and (
+                (
+                    self.obj.mutation_type is not None
+                    and self.obj.mutation_type.scope > 0
+                )
+                or isinstance(self.obj, variables.RangeVariable)
+            )
+            and not (
+                isinstance(self.obj, variables.TupleVariable)
+                and self.obj.python_type() is tuple
+                and not self.obj.items
+            )
         )
 
     def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        obj = self.obj.realize()
         tracker = tx.output.builtin_method_keys
-        tracker.activate(tx, unguarded=self.value is None)
+        tracker.track(tx, unguarded=self.value is None)
         if self.value is not None:
             return hash(self.value), False
+        obj = self.obj.realize()
         if obj.source is not None:
             receiver = tracker.add_receiver(tx, obj.source)
             return hash(_bind_builtin_method(self.descriptor, receiver)), True
@@ -651,7 +662,17 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                         *graph_break_hints.DIFFICULT,
                     ],
                 )
-        return hash(_bind_builtin_method(self.descriptor, receiver)), True
+        # Ordinary compilation can pin a constant receiver. Saved graphs cannot
+        # retain its address-based hash when identity guards are filtered out.
+        context = CompileContext.try_get()
+        is_aot_capture = context is not None and context.is_aot_capture
+        is_fake = (
+            type(obj) is not ConstantVariable
+            or is_aot_capture
+            or config.caching_precompile
+            or tx.export
+        )
+        return hash(_bind_builtin_method(self.descriptor, receiver)), is_fake
 
     def tp_richcompare_impl(self, tx, other, op):
         # meth_richcompare: equal iff both are builtin methods with the same
