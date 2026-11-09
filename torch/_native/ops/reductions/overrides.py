@@ -2,17 +2,20 @@
 
 Conditions check capability and fall through to ATen for unsupported calls.
 Supported layouts use a fast path or the general TensorIterator decode. Full prod and
-the Python out= overloads (sum.IntList_out, mean.out, amax.out, amin.out,
-prod.int_out) are not registered, so they stay on ATen, whose results can differ
-bitwise from the served overloads'. aten::sum.out and at::sum_out route through
-sum.default to sum.dim_IntList and are served.
+the Python out= overloads (sum.IntList_out, mean.out, mean.dtype_out, amax.out,
+amin.out, prod.int_out) are not registered here, so they stay on ATen, whose results
+can differ bitwise from the served overloads', unless PYTORCH_SUM_INNER_TREE has
+cutedsl_impl register sum.IntList_out and prod.int_out. aten::sum.out (the dtype-only
+at::sum_out) routes through sum.default to sum.dim_IntList and is served.
 
 Of the launch policies, these one-field operations reach only the one-field rules;
 index and Welford rules serve direct kernel calls.
 
 Opt out with torch.backends.python_native.cutedsl.disabled(), or per overload with
-disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin");
-bare "sum", "mean" or "prod" match no registration.
+disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin").
+Names need the full overload: disable_operations("sum") matches nothing. Disabling
+sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of
+that symbol.
 
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
@@ -112,7 +115,6 @@ def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
         and cap.device_ok(self, _ARCH_MAJORS)
         and self.dtype in _SUPPORTED_DTYPES
         and not self.is_neg()
-        and not self.is_conj()
         # Conservative: the kernels narrow their loads for lower alignment, but served
         # calls are measured and tested from 16-byte aligned bases only.
         and const_data_ptr(self) % 16 == 0

@@ -204,18 +204,23 @@ class TestCuTeDSLReductionWiring(TestCase):
     @parametrize("op", ["sum", "mean", "prod", "amax", "amin"])
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_matches_aten(self, device, dtype, op):
-        """Match ATen across input dtypes, multi-dimension keepdim, and full reductions;
-        amax and amin exactly."""
+        """Match ATen across input dtypes, negative and unsorted keepdim dims, and full
+        reductions; amax and amin exactly."""
         x = torch.rand(6, 33, 40, device=device, dtype=dtype) + 0.5
         exact = op in ("amax", "amin")
         tolerance = {"atol": 0, "rtol": 0} if exact else _TOL[dtype]
         fn = getattr(torch, op)
-        calls = [lambda: fn(x, dim=1), lambda: fn(x, dim=1, keepdim=True)]
+        calls = [
+            lambda: fn(x, dim=1),
+            lambda: fn(x, dim=1, keepdim=True),
+            lambda: fn(x, dim=-1, keepdim=True),
+        ]
         if op != "prod":
             # amax and amin spell reduce-all as an empty dim list, not None.
             all_dims = () if op in ("amax", "amin") else None
             calls += [
                 lambda: fn(x, dim=(0, 2), keepdim=True),
+                lambda: fn(x, dim=(2, 0), keepdim=True),
                 lambda: fn(x),
                 lambda: fn(x, dim=all_dims, keepdim=True),
             ]

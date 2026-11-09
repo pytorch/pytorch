@@ -1324,7 +1324,8 @@ class TestOrderedColDevice(TestCase):
             rows=rows,
             full_tiles=True,
         )
-        self.assertEqual({f["tile_columns"] for f in ops}, {cfg.tile_columns})
+        # The C 128-257 band: 4 or 5 partials, so 16-column tiles.
+        self.assertEqual({f["tile_columns"] for f in ops}, {16})
         # A ragged last partition keeps every partition's clamps.
         ragged = plan.split[1] != plan.split[2]
         tiles = [cfg.full_tiles and not ragged]
