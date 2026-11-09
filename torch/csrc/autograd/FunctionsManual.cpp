@@ -3973,9 +3973,9 @@ Tensor svd_backward(
   // Im(diag(U^H gU)) + Im(diag(V^H gV)) = 0
   if (is_complex) {
     const auto imdiag_UhgU =
-        gU.defined() ? at::imag(UhgU.diagonal(0, -2, -1)) : at::zeros({}, S.options());
+        gU.defined() ? at::imag(UhgU.diagonal(0, -2, -1)) : at::zeros_like(S);
     const auto imdiag_VhgV =
-        gVh.defined() ? at::imag(VhgV.diagonal(0, -2, -1)) : at::zeros({}, S.options());
+        gVh.defined() ? at::imag(VhgV.diagonal(0, -2, -1)) : at::zeros_like(S);
     // Rather lax atol and rtol, as we don't want false positives
     TORCH_CHECK(
         at::allclose(imdiag_UhgU, -imdiag_VhgV, /*rtol=*/1e-2, /*atol=*/1e-2),
@@ -4094,7 +4094,7 @@ Tensor linalg_eig_backward(
     TORCH_CHECK(
         at::allclose(
             imdiag_VhgV,
-            at::zeros({}, imdiag_VhgV.options()),
+            at::zeros_like(imdiag_VhgV),
             /*rtol=*/1e-2,
             /*atol=*/1e-2),
         is_hermitian ? "linalg_eigh_backward" : "linalg_eig_backward",

@@ -1235,7 +1235,7 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
             gi = gi.to_dense()
             di = di.to_dense()
         if masked:
-            if not torch.allclose(gi, gi.new_zeros(())):
+            if not torch.allclose(gi, torch.zeros_like(gi)):
                 raise GradcheckError("backward not multiplied by grad_output")
         elif not gi.eq(0).all():
             raise GradcheckError("backward not multiplied by grad_output")

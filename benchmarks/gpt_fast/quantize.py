@@ -21,8 +21,8 @@ def dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
 
     # calculate scales and zero_points based on min and max
     # reference: https://fburl.com/code/srbiybme
-    min_val_neg = torch.min(min_val, min_val.new_zeros(()))
-    max_val_pos = torch.max(max_val, max_val.new_zeros(()))
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
     device = min_val_neg.device
 
     # reference: https://fburl.com/code/4wll53rk

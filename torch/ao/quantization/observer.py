@@ -371,8 +371,8 @@ class UniformQuantizationObserverBase(ObserverBase):
             )
 
         quant_min, quant_max = self.quant_min, self.quant_max
-        min_val_neg = torch.min(min_val, min_val.new_zeros(()))
-        max_val_pos = torch.max(max_val, max_val.new_zeros(()))
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
         device = min_val_neg.device
         scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)

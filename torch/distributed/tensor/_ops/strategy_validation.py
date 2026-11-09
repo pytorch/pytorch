@@ -397,9 +397,13 @@ def _create_partial_input(
         mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
-                r_offset = torch.where(mask, 0, torch.full_like(flat, min_offset))
+                r_offset = torch.where(
+                    mask, torch.zeros_like(flat), torch.full_like(flat, min_offset)
+                )
             else:
-                r_offset = torch.where(mask, torch.full_like(flat, min_offset), 0)
+                r_offset = torch.where(
+                    mask, torch.full_like(flat, min_offset), torch.zeros_like(flat)
+                )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
@@ -410,9 +414,13 @@ def _create_partial_input(
         mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
-                r_offset = torch.where(mask, 0, torch.full_like(flat, max_offset))
+                r_offset = torch.where(
+                    mask, torch.zeros_like(flat), torch.full_like(flat, max_offset)
+                )
             else:
-                r_offset = torch.where(mask, torch.full_like(flat, max_offset), 0)
+                r_offset = torch.where(
+                    mask, torch.full_like(flat, max_offset), torch.zeros_like(flat)
+                )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     else:
