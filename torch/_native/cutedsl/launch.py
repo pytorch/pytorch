@@ -109,8 +109,8 @@ def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
     """Call compiled `fn` on `device`'s current stream. `ins`, a tensor or a list of
     tensors, is exported read-only; tensors in `args`, bare or in lists, are outputs.
 
-    Under `recording`, an output not seen before must be scratch that only launches
-    write: a replay allocates it uninitialized and does not repeat torch ops on it.
+    Compiled kernels launched through here must treat outputs as write-only scratch: a
+    replay allocates them uninitialized and repeats only the launches.
     """
     record = _RECORD.get()
     if record is not None:
@@ -123,15 +123,15 @@ class LaunchRecord:
     """The launches that computed outputs from `x`, replayable on any input that matches
     x's dtype, device, sizes, strides, storage offset, storage size and pointer alignment.
 
-    Callers must ensure that no torch op mutates a buffer a launch has seen and that
-    launch outputs are write-only scratch: a replay allocates them uninitialized and
-    repeats only the launches. finish() returns None unless every operand views `x` or a
-    buffer whose storage first appeared in a launch's output position, before any input
-    position, and every output views a distinct such buffer. Torch-op results that a
-    launch reads, or that are returned without a launch writing them, therefore decline;
-    the write-only-scratch contract is what protects tensors first passed as launch
-    outputs. Buffers are keyed by storage, since views made below autograd do not record
-    their base.
+    Callers must ensure that no torch op writes data to a buffer a launch has seen
+    (metadata changes such as resize_ are fine) and that launch outputs are write-only
+    scratch: a replay allocates them uninitialized and repeats only the launches.
+    finish() returns None unless every operand views `x` or a buffer whose storage first
+    appeared in a launch's output position, before any input position, and every output
+    views a distinct such buffer. Torch-op results that a launch reads, or that are
+    returned without a launch writing them, therefore decline; the write-only-scratch
+    contract is what protects tensors first passed as launch outputs. Buffers are keyed
+    by storage, since views made below autograd do not record their base.
     """
 
     def __init__(self, x: torch.Tensor) -> None:
@@ -142,6 +142,21 @@ class LaunchRecord:
         self._allocs: list[tuple[int, torch.dtype]] = []
         self._launches: list[tuple[Function, int, Any, tuple[Any, ...]]] = []
         self._ok = True
+
+    @staticmethod
+    def input_key(x: torch.Tensor, max_align: int) -> tuple[Any, ...]:
+        """The metadata of `x` a replay must match, alignment capped at `max_align`."""
+        # Routes and compiled kernels assume the pointer's alignment, and a storage base
+        # need not be allocator-aligned (e.g. a sliced UntypedStorage).
+        return (
+            x.dtype,
+            x.get_device(),
+            x.shape,
+            x.stride(),
+            x.storage_offset(),
+            x.untyped_storage().nbytes(),
+            supported_alignment(x, max_align),
+        )
 
     def _view(self, t: torch.Tensor, written: bool) -> _View | None:
         slot = self._slots.get(_storage_id(t))
@@ -168,7 +183,7 @@ class LaunchRecord:
             view = self._view(value, written)
             self._ok = self._ok and view is not None
             return view
-        # A replay substitutes tensors only in lists, so one anywhere else would be stale.
+        # Replays substitute bare tensors and tensors in lists only; others go stale.
         if any(isinstance(leaf, torch.Tensor) for leaf in tree_leaves(value)):
             self._ok = False
         return value
