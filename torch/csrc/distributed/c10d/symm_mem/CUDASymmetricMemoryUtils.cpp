@@ -14,6 +14,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -293,7 +294,7 @@ std::vector<int> IpcChannel::all_gather_fds(
   fds[rank] = fd;
 
   int dst_rank = (rank + 1) % world_size;
-  for (int step = 1; step < world_size; ++step) {
+  for (const auto step : c10::irange(1, world_size)) {
     int src_rank = (rank + world_size - step) % world_size;
     send_fd(pids[dst_rank], fd);
     fd = recv_fd();
@@ -310,7 +311,7 @@ int IpcChannel::broadcast_fds(
   int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
-    for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
+    for (const auto dst_rank : c10::irange(world_size)) {
       if (dst_rank == rank) {
         continue;
       }

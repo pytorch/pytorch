@@ -1725,6 +1725,26 @@ class TestMetaCore(TestCase):
         with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
             t.masked_fill_((t > 0).unsqueeze(0), 0.1)
 
+    def test_masked_scatter_mask_dtype_error(self):
+        # Like eager, masked_scatter only accepts bool masks, even for empty
+        # inputs
+        for n, op in itertools.product((3, 0), (torch.Tensor.masked_scatter_, torch.Tensor.masked_scatter)):
+            for device in ('cpu', 'meta'):
+                with self.subTest(n=n, op=op.__name__, device=device):
+                    with self.assertRaisesRegex(RuntimeError, "masked_scatter_ only supports boolean masks"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, device=device),
+                        )
+                    # The self/source dtype check comes first, as in eager
+                    with self.assertRaisesRegex(RuntimeError, "expected self and source to have same dtypes"):
+                        op(
+                            torch.zeros(n, device=device),
+                            torch.ones(n, dtype=torch.uint8, device=device),
+                            torch.ones(n, dtype=torch.double, device=device),
+                        )
+
     def test_inplace_bin_ops_error(self):
         t = torch.randn(3, 3, device='meta')
         for op in (torch.Tensor.add_, torch.Tensor.sub_, torch.Tensor.mul_, torch.Tensor.div_,
@@ -2438,6 +2458,44 @@ class TestMetaKernelRegistrations(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             op(inp, other, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_index_dtype_mismatch(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+        self_tensor = torch.zeros(2, 3, device="meta")
+        index = torch.zeros(2, 3, dtype=torch.float32, device="meta")
+        src = torch.ones(2, 3, device="meta")
+        out = torch.empty_like(self_tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64 for index"):
+            torch.ops.aten.scatter_add.out(self_tensor, 1, index, src, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_shape_mismatch(self):
+        self_tensor = torch.zeros(2, 3, device="meta")
+        index = torch.zeros(2, 4, dtype=torch.long, device="meta")
+        src = torch.ones(2, 4, device="meta")
+        out = torch.empty_like(self_tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected index"):
+            torch.ops.aten.scatter_add.out(self_tensor, 0, index, src, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_shape_mismatch_symbolic_index(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            torch._check(size >= 1)
+            self_tensor = torch.zeros(2, 3)
+            index = torch.zeros(size, 4, dtype=torch.long)
+            src = torch.ones(size, 4)
+            out = torch.empty_like(self_tensor)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected index"):
+                torch.ops.aten.scatter_add.out(self_tensor, 0, index, src, out=out)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_aminmax_out_dtype_mismatch(self):
