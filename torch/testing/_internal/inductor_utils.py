@@ -47,23 +47,52 @@ from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
+# Set by test_cpu() when the CPU Inductor capability probe fails. Kept so
+# requested CPU tests can re-raise the original toolchain error instead of
+# disappearing during collection when HAS_CPU is false.
+CPU_PROBE_EXCEPTION: BaseException | None = None
 
-def test_cpu():
+
+def test_cpu() -> bool:
+    global CPU_PROBE_EXCEPTION
     try:
         from torch._inductor.codecache import CppCodeCache
 
         CppCodeCache.load("")
+        CPU_PROBE_EXCEPTION = None
         return True
     except (
         CalledProcessError,
         OSError,
         torch._inductor.exc.InvalidCxxCompiler,
         torch._inductor.exc.CppCompileError,
-    ):
+    ) as e:
+        CPU_PROBE_EXCEPTION = e
         return False
 
 
+# True when a minimal CPU Inductor C++ kernel compiles successfully.
 HAS_CPU = LazyVal(test_cpu)
+
+
+def require_cpu_inductor() -> None:
+    """Raise the preserved CPU Inductor capability-probe failure, if any."""
+    if HAS_CPU:
+        return
+    if CPU_PROBE_EXCEPTION is not None:
+        raise CPU_PROBE_EXCEPTION
+    raise RuntimeError(
+        "CPU Inductor capability probe failed without a recorded exception"
+    )
+
+
+class RequiresCPUInductor:
+    """Mixin that fails with the CPU Inductor probe exception when HAS_CPU is false."""
+
+    def setUp(self):
+        require_cpu_inductor()
+        super().setUp()
+
 
 HAS_TRITON = has_triton()
 # Respect triton_disable_device_detection when probing the CPU backend.
@@ -120,19 +149,21 @@ RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
-# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
-# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
+# Whether CPU inductor tests are selected by the device filter. Distinct from
+# HAS_CPU (probe success): requested CPU tests must stay discoverable when the
+# toolchain is broken so collection can surface InvalidCxxCompiler / etc.
+#
+# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 includes CPU even when
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves it out (but not when
 # PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the
 # nogpu_NO_AVX2 job, which runs a CUDA build (so ONLY_FOR=cuda) on a machine
-# without a GPU.
-# test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
-RUN_CPU = LazyVal(
-    lambda: HAS_CPU
-    and (
-        any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-        or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
-    )
-)
+# without a GPU. test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
+CPU_TESTS_REQUESTED = any(
+    getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases
+) or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
+
+# True when CPU tests are both selected and the capability probe succeeded.
+RUN_CPU = LazyVal(lambda: bool(HAS_CPU) and CPU_TESTS_REQUESTED)
 
 HAS_TPU = LazyVal(has_tpu_pallas)
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires

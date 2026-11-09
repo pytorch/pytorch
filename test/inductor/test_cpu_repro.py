@@ -57,7 +57,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
-from torch.testing._internal.inductor_utils import RUN_CPU
+from torch.testing._internal.inductor_utils import (
+    CPU_TESTS_REQUESTED,
+    RequiresCPUInductor,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -154,12 +157,14 @@ class LstmModule(torch.nn.Module):
 
 # Not a module-level skip: other test files import this one, including on GPU
 # jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+# Skip only when CPU is not selected; a failed capability probe must still
+# surface as InvalidCxxCompiler / CppCompileError via RequiresCPUInductor.
 @unittest.skipIf(
-    not RUN_CPU,
-    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+    not CPU_TESTS_REQUESTED,
+    "CPU tests not selected by the device filter",
 )
 @instantiate_parametrized_tests
-class CPUReproTests(TestCase):
+class CPUReproTests(RequiresCPUInductor, TestCase):
     hw_classification = HardwareClassification.CPU
     common = check_model
 
@@ -8125,5 +8130,5 @@ class CPUReproTests(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU and not IS_MACOS:
+    if CPU_TESTS_REQUESTED and not IS_MACOS:
         run_tests(needs="filelock")
