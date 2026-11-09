@@ -484,7 +484,9 @@ wrap_triton_enabled_default = True
 @contextlib.contextmanager
 def set_wrap_triton_enabled(enabled: bool) -> Generator[None, None, None]:
     """If triton kernels annotated with @wrap_triton should dispatch via HOP
-    or go straight to the triton kernel execution.
+    or go straight to the triton kernel execution. It also governs the wrappers
+    that torch._library.cutedsl.wrap_cutedsl returns: with it disabled, a call
+    of one checks its arguments and launches the CuTeDSL kernel directly.
 
     We have this switch because eager-mode performance of HOP dispatch is slow
     enough to matter (~1ms) and we know that wrap_triton isn't necessary in

@@ -257,6 +257,18 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
         return False
 
+    def define_user_defined_cutedsl_kernel(
+        self,
+        kernel: Any,
+        *,
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+        device: torch.device,
+    ) -> str:
+        raise NotImplementedError(
+            "User-defined CuTeDSL kernels are not supported by the FX wrapper"
+        )
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
