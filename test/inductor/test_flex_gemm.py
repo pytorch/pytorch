@@ -169,7 +169,25 @@ class TestFlexGemmRuntimeImport(TestCase):
             self.assertTrue(lowering.has_flex_gemm_quack())
 
 
+@instantiate_parametrized_tests
 class TestFlexGemmOutputLayout(TestCase):
+    @parametrize("capacity", (9, 10, 11, 12))
+    @parametrize("swap_ab", (False, True))
+    def test_blocked_layout_supports_config(self, capacity, swap_ab):
+        from torch._inductor.kernel.flex_gemm.output_layout import BLOCKED_128X4
+
+        config = SimpleNamespace(
+            device_capacity=capacity,
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            swap_ab=swap_ab,
+        )
+        self.assertEqual(
+            BLOCKED_128X4.supports_config_fn(config, 1, 32), capacity in (10, 11)
+        )
+        self.assertFalse(BLOCKED_128X4.supports_config_fn(config, 0, 32))
+
     def test_builtin_layout_contracts(self):
         from torch._inductor.kernel.flex_gemm.output_layout import (
             BLOCKED_128X4,
@@ -260,6 +278,19 @@ def _skip_unless_quack_deps(test, block_copy=False):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (10, 11))
+    def test_quack_config_space_includes_device_default(self, capacity):
+        _skip_unless_quack_deps(self)
+        from torch._vendor.quack.gemm_config import (
+            _default_config_for_cap,
+            get_all_configs,
+        )
+
+        configs = [c for c in get_all_configs() if c.device_capacity == capacity]
+        self.assertTrue(configs)
+        self.assertIn(_default_config_for_cap(capacity), configs)
+
     @recover_orig_fp32_precision
     def test_quack_fp32_operands_follow_matmul_precision(self):
         def operand(dtype, device="cuda"):
@@ -807,6 +838,43 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=16))
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=32))
         self.assertTrue(grouped_reduce_supports_config(sm120, axis=0, group=32))
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (9, 10, 11, 12))
+    def test_swapped_grouped_n_reduce_supports_config(self, capacity):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            grouped_reduce_supports_config,
+        )
+
+        config = SimpleNamespace(
+            device_capacity=capacity,
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=1,
+            swap_ab=True,
+        )
+        self.assertEqual(
+            grouped_reduce_supports_config(config, axis=1, group=32),
+            capacity in (10, 11),
+        )
+        self.assertFalse(grouped_reduce_supports_config(config, axis=0, group=32))
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize("capacity", (9, 10, 11, 12))
+    @parametrize("swap_ab", (False, True))
+    def test_interleaved_supports_config(self, capacity, swap_ab):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
+            InterleavedMainStore,
+            InterleavedTileLoad,
+        )
+
+        config = SimpleNamespace(device_capacity=capacity, swap_ab=swap_ab)
+        expected = capacity in (10, 11) and not swap_ab
+        self.assertEqual(InterleavedMainStore("out").supports_config(config), expected)
+        self.assertEqual(InterleavedTileLoad("h").supports_config(config), expected)
 
     def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
         from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
@@ -1433,15 +1501,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
 
+MISSING_CUTEDSL = SM100OrLater and not lowering.has_flex_gemm_quack()
+
+
+@unittest.skipIf(MISSING_CUTEDSL, "requires CuTeDSL")
 class FlexGemmTestCase(TestCase):
     K, N = 32, 16
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        if SM100OrLater:
-            if not lowering.has_flex_gemm_quack():
-                raise unittest.SkipTest("requires CuTeDSL")
 
     @contextlib.contextmanager
     def limitEpiModAutotune(self):
@@ -2864,6 +2929,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "Quack TF32 GEMM requires SM100/SM110")
     @recover_orig_fp32_precision
     def test_mm_fp32_high_precision_runs_tf32_on_quack(self):
         torch.set_float32_matmul_precision("high")
@@ -7075,7 +7141,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 pingpong=False,
                 cluster_m=2,
                 cluster_n=2,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -7130,7 +7196,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 pingpong=False,
                 cluster_m=cluster_m,
                 cluster_n=cluster_n,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -8434,7 +8500,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability()[0],
             )
         )
 
@@ -10793,7 +10859,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -10841,7 +10907,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11233,7 +11299,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11285,7 +11351,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11366,7 +11432,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=False,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11425,7 +11491,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                     cluster_m=2,
                     cluster_n=1,
                     swap_ab=swap_ab,
-                    device_capacity=10,
+                    device_capacity=torch.cuda.get_device_capability(device)[0],
                 )
             )
             return flex_gemm(
@@ -11561,7 +11627,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 cluster_m=2,
                 cluster_n=1,
                 swap_ab=True,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11710,7 +11776,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             pingpong=False,
             cluster_m=2,
             cluster_n=1,
-            device_capacity=10,
+            device_capacity=torch.cuda.get_device_capability(device)[0],
         )
         config_key = self.quackConfigKey(expected_config)
         config = dict(config_key)
@@ -11799,7 +11865,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 is_dynamic_persistent=True,
                 cluster_m=2,
                 cluster_n=1,
-                device_capacity=10,
+                device_capacity=torch.cuda.get_device_capability(device)[0],
             )
         )
 
@@ -11858,7 +11924,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             pingpong=False,
             cluster_m=cluster_m,
             cluster_n=cluster_n,
-            device_capacity=10,
+            device_capacity=torch.cuda.get_device_capability(device)[0],
         )
         config_key = self.quackConfigKey(expected_config)
         config = dict(config_key)
