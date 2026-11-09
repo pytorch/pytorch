@@ -11,6 +11,13 @@ inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.sym_numel() == 0 && t.dim() == 1;
 }
 
+// cat for dtypes without typed kernels (see c10::hasNonPowerOfTwoElementSize):
+// concatenates uint8 views of the inputs that have a trailing byte dim.
+TORCH_API void cat_as_bytes(
+    const MaterializedITensorListRef& tensors,
+    int64_t dim,
+    const Tensor& result);
+
 // Check to see if the shape of tensors is compatible
 // for being concatenated along a given dimension.
 inline void check_cat_shape_except_dim(
