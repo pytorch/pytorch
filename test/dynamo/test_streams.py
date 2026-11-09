@@ -14,6 +14,7 @@ from torch._dynamo import trace_rules
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
+    get_interface_for_device,
     register_interface_for_device,
 )
 from torch._dynamo.graph_bytecode_inputs import (
@@ -752,6 +753,89 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
                 torch.ones(2, 2, device="cpu")
             )
 
+    def test_stream_context_python_type_slot_and_derivation(self):
+        """The slot wins; without it torch.<device type>.StreamContext is derived."""
+        from torch._dynamo.variables.streams import StreamContextVariable
+
+        class FakeStreamContext:
+            pass
+
+        stub = types.SimpleNamespace(user_object_index=0)
+        var = StreamContextVariable.create(
+            None, stub, stream_context_type=FakeStreamContext
+        )
+        self.assertIs(var.python_type(), FakeStreamContext)
+
+        dev = types.SimpleNamespace(type="stream_ctx_fakedev")
+        var = StreamContextVariable.create(
+            None, types.SimpleNamespace(user_object_index=0, device=dev)
+        )
+        fake_module = types.SimpleNamespace(StreamContext=FakeStreamContext)
+        with patch.object(torch, "stream_ctx_fakedev", fake_module, create=True):
+            self.assertIs(var.python_type(), FakeStreamContext)
+
+    def test_stream_context_python_type_cuda_fallback_warns(self):
+        """Unknown device: falls back to torch.cuda and warns only once."""
+        from torch._dynamo.variables.streams import StreamContextVariable
+        from torch._logging import warning_once
+
+        dev = types.SimpleNamespace(type="stream_ctx_unknown_dev")
+        var = StreamContextVariable.create(
+            None, types.SimpleNamespace(user_object_index=0, device=dev)
+        )
+        warning_once.cache_clear()
+        self.addCleanup(warning_once.cache_clear)
+        with self.assertLogs("torch._dynamo.variables.streams", "WARNING") as logs:
+            self.assertIs(var.python_type(), torch.cuda.StreamContext)
+            self.assertIs(var.python_type(), torch.cuda.StreamContext)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("No StreamContext type", logs.output[0])
+
+    def test_stream_context_slot_and_handler(self):
+        """In-tree interfaces fill StreamContext and wire the stream handler."""
+        from torch._dynamo.device_interface import (
+            DeviceInterface,
+            get_interface_for_device,
+        )
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        with self.assertRaisesRegex(NotImplementedError, "StreamContext slot"):
+            DeviceInterface.StreamContext()
+        handlers = TorchInGraphFunctionVariable._get_handlers()
+        for dev in ("cuda", "xpu", "mtia"):
+            self.assertIs(
+                get_interface_for_device(dev).StreamContext,
+                getattr(torch, dev).StreamContext,
+            )
+            self.assertIn(getattr(torch, dev).stream, handlers)
+        for dev in ("cpu", "mps", "tpu"):
+            self.assertIs(
+                get_interface_for_device(dev).StreamContext,
+                DeviceInterface.StreamContext,
+            )
+
+    def test_stream_context_handler_without_slot(self):
+        """An interface that only sets `stream` leaves the slot empty."""
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        def fake_stream(_):
+            pass
+
+        fake_interface = type(
+            "FakeInterface",
+            (DeviceInterface,),
+            {"stream": staticmethod(fake_stream), "is_gpu": staticmethod(bool)},
+        )
+        # patch.dict, not cache_clear: backends mutate the cached handler dict.
+        with patch.dict(device_interfaces):
+            register_interface_for_device("fakedev", fake_interface)
+            handler = TorchInGraphFunctionVariable._get_handlers()[torch.cuda.stream]
+            stub = types.SimpleNamespace(
+                user_object_index=0, device=torch.device("cuda")
+            )
+            ctx = handler(types.SimpleNamespace(value=fake_stream), None, stub)
+        self.assertIsNone(ctx.stream_context_type)
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -762,6 +846,52 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_stream_context_python_type(self, device):
+        device_mod = getattr(torch, torch.device(device).type)
+
+        def fn(s):
+            ctx = device_mod.stream(s)
+            return (
+                torch.ones(2)
+                if isinstance(ctx, device_mod.StreamContext)
+                else torch.zeros(2)
+            )
+
+        s = device_mod.Stream()
+        res = torch.compile(fn, backend="eager", fullgraph=True)(s)
+        self.assertEqual(res, torch.ones(2))
+        self.assertEqual(res, fn(s))
+
+    def test_stream_context_handler_slot_propagation(self, device):
+        """The per-device stream handler forwards the device's StreamContext."""
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        device_mod = getattr(torch, torch.device(device).type)
+        handler = TorchInGraphFunctionVariable._get_handlers().get(device_mod.stream)
+        if handler is None:
+            self.skipTest(f"{device_mod.__name__}.stream has no registered handler")
+        if handler.__code__.co_name != "handle_device_interface_stream":
+            self.skipTest(f"{device_mod.__name__} overrides the stream handler")
+        if (
+            get_interface_for_device(torch.device(device).type).StreamContext
+            is DeviceInterface.StreamContext
+        ):
+            self.skipTest(f"{device_mod.__name__} does not fill the StreamContext slot")
+        stub = types.SimpleNamespace(user_object_index=0, device=torch.device(device))
+        ctx = handler(types.SimpleNamespace(value=device_mod.stream), None, stub)
+        self.assertIs(ctx.stream_context_type, device_mod.StreamContext)
+        self.assertIs(ctx.python_type(), device_mod.StreamContext)
+
+    def test_stream_context_handler_derivation_without_slot(self, device):
+        """A variable built without the slot derives this device's StreamContext."""
+        from torch._dynamo.variables.streams import StreamContextVariable
+
+        stub = types.SimpleNamespace(user_object_index=0, device=torch.device(device))
+        var = StreamContextVariable.create(None, stub)
+        self.assertIsNone(var.stream_context_type)
+        device_mod = getattr(torch, torch.device(device).type)
+        self.assertIs(var.python_type(), device_mod.StreamContext)
 
     def test_stream_weakref(self, device):
         s = torch.Stream(device=device)

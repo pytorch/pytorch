@@ -94,6 +94,14 @@ class DeviceInterface:
                 "Stream should be inherited from torch.Stream, otherwise, it couldn't be captured by dynamo."
             )
 
+    class StreamContext:
+        def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+            raise NotImplementedError(
+                "StreamContext should be assigned to the DeviceInterface's "
+                "StreamContext slot (e.g. StreamContext = torch.cuda.StreamContext), "
+                "otherwise, it couldn't be captured by dynamo."
+            )
+
     class Worker:
         """
         Worker API to query device properties that will work in multi processing
@@ -373,6 +381,7 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+    StreamContext = torch.cuda.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def supports_pad_mm(device: torch.types.Device = None) -> bool:
@@ -529,6 +538,7 @@ class MtiaInterface(DeviceInterface):
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
+    StreamContext = torch.mtia.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def is_gpu() -> bool:
@@ -640,6 +650,7 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+    StreamContext = torch.xpu.StreamContext  # type: ignore[assignment]
 
     @staticmethod
     def supports_pad_mm(device: torch.types.Device = None) -> bool:
