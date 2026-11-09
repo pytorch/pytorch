@@ -6139,6 +6139,12 @@ def check_grid_sampler_pixel(input: Tensor, grid: Tensor):
         lambda: "grid_sampler(): expected grid dtype to match the input's "
         f"({input.dtype}) or to be Double, but got {grid.dtype}",
     )
+    # the pixel ops have CPU and CUDA kernels only: a trace refuses what eager cannot run
+    torch._check(
+        device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): pixel units are not supported "
+        f"on {device_hint(input)}",
+    )
 
 
 @register_meta(aten._grid_sampler_2d_pixel)

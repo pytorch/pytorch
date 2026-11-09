@@ -607,10 +607,11 @@ namespace {
     index_t gOut_sH = grad_output.strides[2];
     index_t gOut_sW = grad_output.strides[3];
     // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
-    index_t gInp_sN;
-    index_t gInp_sC;
-    index_t gInp_sH;
-    index_t gInp_sW;
+    // zero when grad_input is not asked for: the pixel bicubic branch still steps its offsets
+    index_t gInp_sN = 0;
+    index_t gInp_sC = 0;
+    index_t gInp_sH = 0;
+    index_t gInp_sW = 0;
     if (input_requires_grad) {
       gInp_sN = grad_input.strides[0];
       gInp_sC = grad_input.strides[1];
