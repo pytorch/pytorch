@@ -157,9 +157,7 @@ jobs:
           amd-smi monitor -ptumv || true
           amd-smi process || true
           ls -l /dev/kfd /dev/dri || true
-          for f in memory.max memory.current; do
-            echo "cgroup ${f}: $(cat "/sys/fs/cgroup/${f}" 2>/dev/null || echo n/a)"
-          done
+          grep -H . /sys/fs/cgroup/memory.{current,max} 2>/dev/null || true
 
       - name: Get workflow job id
         id: get-job-id
@@ -322,7 +320,9 @@ jobs:
         if: failure()
         run: |
           source /etc/rocm_env.sh || true
+          amd-smi monitor -ptumv || true
           amd-smi process || true
+          grep -H . /sys/fs/cgroup/memory.{current,max} 2>/dev/null || true
           ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
       - name: Stop monitoring script
