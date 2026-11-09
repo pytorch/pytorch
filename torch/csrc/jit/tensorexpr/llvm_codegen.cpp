@@ -2905,7 +2905,11 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // Take a look at the PassBuilder constructor parameters for more
   // customization, e.g. specifying a TargetMachine or various debugging
   // options.
+#if LLVM_VERSION_MAJOR >= 24
+  llvm::PassBuilder PB(M.getContext(), &TM);
+#else
   llvm::PassBuilder PB(&TM);
+#endif
 
 #if LLVM_VERSION_MAJOR >= 18 && LLVM_VERSION_MAJOR < 19
   TM.registerPassBuilderCallbacks(PB, false);

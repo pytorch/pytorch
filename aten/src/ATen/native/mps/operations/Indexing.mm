@@ -4,6 +4,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Indexing.h>
+#include <utility>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
@@ -957,6 +958,8 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
   const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
   const bool is_dense_broadcast = is_dense_broadcastable(mask, self);
   const auto flavor = is_dense ? "dense" : is_dense_broadcast ? "broadcast" : "strided";
+  TORCH_CHECK(is_dense || is_dense_broadcast || offsetsFitIn<int32_t>(self, *b_mask),
+              "masked_fill: non-contiguous tensors whose offsets exceed 2**31 are not supported on MPS");
   auto fillPSO = lib.getPipelineStateForFunc(
       fmt::format("masked_fill_scalar_{}_{}", flavor, getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1120,6 +1123,13 @@ static void index_fill_mps_kernel(TensorIterator& iter,
   // is where the mask's O(numel) sequential scan beats scatter's growing write-
   // conflict overhead.
   const bool use_mask = (indices_numel * 16 >= dim_size);
+  // The strided kernels index in int32 and the dense mask kernel in uint32; dense scatter uses int64
+  TORCH_CHECK(!is_dense ? offsetsFitIn<int32_t>(self) : !use_mask || std::in_range<uint32_t>(self.numel()),
+              "index_fill: MPS does not support a tensor of size ",
+              self.sizes(),
+              " and strides ",
+              self.strides(),
+              " (too large for 32-bit indexing)");
 
   auto stream = getCurrentMPSStream();
   if (use_mask) {
