@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._all_gather_layout import AllGatherLayout
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
@@ -48,6 +47,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from ._all_gather_layout import AllGatherLayout
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -948,11 +948,6 @@ class FSDPModule:
             recurse (bool): Whether to also set the layout for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        if not isinstance(layout, AllGatherLayout):
-            raise TypeError(
-                f"expected an AllGatherLayout, e.g. DefaultAllGatherLayout(fn), but "
-                f"got {layout!r}"
-            )
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         groups = []

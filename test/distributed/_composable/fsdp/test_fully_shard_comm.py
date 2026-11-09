@@ -3353,13 +3353,9 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         fully_shard(other, mesh=init_device_mesh("cpu", (self.world_size,)))
         other.set_custom_all_gather(group._all_gather_comm)
         other.set_all_gather_layout(_ParamContiguousLayout("custom"))
-        # Replacing the layout keeps the comm. The layout must be given, and 2.15's
-        # hook fails loudly
+        # Replacing the layout keeps the comm, and 2.15's hook fails loudly
         model.set_all_gather_layout(DefaultAllGatherLayout())
         self.assertIs(type(group._all_gather_comm), _ParamContiguousAllGather)
-        for not_a_layout in (None, all_gather_output_fn_with_native_copy):
-            with self.assertRaisesRegex(TypeError, "expected an AllGatherLayout"):
-                model.set_all_gather_layout(not_a_layout)
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
