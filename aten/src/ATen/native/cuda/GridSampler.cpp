@@ -102,13 +102,8 @@ _grid_sampler_2d_pixel_backward_cuda(const Tensor& grad_output, const Tensor& in
                                      int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
                                      double cubic_coeff_a, std::array<bool, 2> output_mask) {
   auto input_requires_grad = output_mask[0];
-  Tensor grad_input = ([&]() {
-    if (input_requires_grad) {
-      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    } else {
-      return Tensor();
-    }
-  })();
+  Tensor grad_input = input_requires_grad
+      ? at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : Tensor();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   launch__grid_sampler_2d_pixel_backward_kernel(
       grad_input, grad_grid, grad_output, input,
@@ -134,13 +129,8 @@ _grid_sampler_3d_pixel_backward_cuda(const Tensor& grad_output, const Tensor& in
                                      int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
                                      double cubic_coeff_a, std::array<bool, 2> output_mask) {
   auto input_requires_grad = output_mask[0];
-  Tensor grad_input = ([&]() {
-    if (input_requires_grad) {
-      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    } else {
-      return Tensor();
-    }
-  })();
+  Tensor grad_input = input_requires_grad
+      ? at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : Tensor();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   launch__grid_sampler_3d_pixel_backward_kernel(
       grad_input, grad_grid, grad_output, input,

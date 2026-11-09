@@ -90,41 +90,9 @@ namespace {
   // The pixel route's source index: the padding applied in pixel units, for any
   // coordinate. Border clips from any magnitude, reflection takes its parity with
   // fmod, and zeros sends a coordinate the later integer casts cannot hold to an
-  // out-of-volume sentinel.
-  template <typename coord_t>
-  static inline coord_t pixel_source_index(coord_t x, int64_t size,
-                                           GridSamplerPadding padding_mode,
-                                           bool align_corners) {
-    x = nonfinite_to_far(x);
-    if (padding_mode == GridSamplerPadding::Border) {
-      x = std::min(static_cast<coord_t>(size - 1),
-                   std::max(x, static_cast<coord_t>(0)));
-    } else if (padding_mode == GridSamplerPadding::Reflection) {
-      // the bounds reflect_coordinates halves, formed without doubling the extent
-      const coord_t low =
-          align_corners ? static_cast<coord_t>(0) : static_cast<coord_t>(-0.5);
-      const coord_t span = static_cast<coord_t>(align_corners ? size - 1 : size);
-      if (span == 0) {
-        x = 0;
-      } else {
-        const coord_t in = std::fabs(x - low);
-        const coord_t extra = std::fmod(in, span);
-        const bool odd =
-            std::fmod(std::floor(in / span), static_cast<coord_t>(2)) != 0;
-        x = odd ? span - extra + low : extra + low;
-      }
-      x = std::min(static_cast<coord_t>(size - 1),
-                   std::max(x, static_cast<coord_t>(0)));
-    } else if (!(x > static_cast<coord_t>(-9.0e15) &&
-                 x < static_cast<coord_t>(9.0e15))) {
-      x = static_cast<coord_t>(-100.0);
-    }
-    return x;
-  }
-
-  // The set_grad twin: the padding's own derivative, one where the mapping is
-  // locally the identity, zero where border clips, the reflection's sign where
-  // it folds.
+  // out-of-volume sentinel. grad_in is the padding's own derivative: one where the
+  // mapping is locally the identity, zero where border clips, the reflection's sign
+  // where it folds.
   template <typename coord_t>
   static inline coord_t pixel_source_index_set_grad(
       coord_t x, int64_t size, GridSamplerPadding padding_mode,
@@ -170,18 +138,39 @@ namespace {
     return x;
   }
 
-  // The Keys coefficients with a as an argument, for the pixel route. a = -0.75 gives
-  // the bits of get_cubic_upsample_coefficients.
-  template <typename opmath_t>
-  static inline void get_cubic_coefficients_poly(opmath_t coeffs[4], opmath_t t, opmath_t a) {
-    opmath_t x1 = t;
-    coeffs[0] = cubic_convolution2<opmath_t>(x1 + 1.0, a);
-    coeffs[1] = cubic_convolution1<opmath_t>(x1, a);
-    opmath_t x2 = 1.0 - t;
-    coeffs[2] = cubic_convolution1<opmath_t>(x2, a);
-    coeffs[3] = cubic_convolution2<opmath_t>(x2 + 1.0, a);
+  template <typename coord_t>
+  static inline coord_t pixel_source_index(coord_t x, int64_t size,
+                                           GridSamplerPadding padding_mode,
+                                           bool align_corners) {
+    coord_t grad_in;
+    return pixel_source_index_set_grad(x, size, padding_mode, align_corners, &grad_in);
   }
 
+  // The source index of either route: the padded pixel coordinate, or the
+  // normalized coordinate unnormalized and padded.
+  template <bool pixel_coords, typename coord_t>
+  static inline coord_t source_index(coord_t x, int64_t size,
+                                     GridSamplerPadding padding_mode, bool align_corners) {
+    if constexpr (pixel_coords) {
+      return pixel_source_index(x, size, padding_mode, align_corners);
+    } else {
+      return grid_sampler_compute_source_index(x, size, padding_mode, align_corners);
+    }
+  }
+
+  template <bool pixel_coords, typename coord_t>
+  static inline coord_t source_index_set_grad(coord_t x, int64_t size,
+                                              GridSamplerPadding padding_mode, bool align_corners,
+                                              coord_t* grad_in) {
+    if constexpr (pixel_coords) {
+      return pixel_source_index_set_grad(x, size, padding_mode, align_corners, grad_in);
+    } else {
+      return grid_sampler_compute_source_index_set_grad(x, size, padding_mode, align_corners, grad_in);
+    }
+  }
+
+  // The Keys coefficients with a as an argument. a = -0.75 gives the bits of
+  // get_cubic_upsample_coefficients.
   template <typename opmath_t>
   static inline void get_cubic_coefficients_a(opmath_t coeffs[4], opmath_t t, opmath_t a) {
     // At an integer location the weights are [0, 1, 0, 0] for every a, which the
@@ -193,7 +182,12 @@ namespace {
       coeffs[3] = 0;
       return;
     }
-    get_cubic_coefficients_poly<opmath_t>(coeffs, t, a);
+    opmath_t x1 = t;
+    coeffs[0] = cubic_convolution2<opmath_t>(x1 + 1.0, a);
+    coeffs[1] = cubic_convolution1<opmath_t>(x1, a);
+    opmath_t x2 = 1.0 - t;
+    coeffs[2] = cubic_convolution1<opmath_t>(x2, a);
+    coeffs[3] = cubic_convolution2<opmath_t>(x2 + 1.0, a);
   }
 
   template <typename opmath_t>
@@ -207,36 +201,6 @@ namespace {
     coeffs[2] = (3 * (a + 2) * x - 2 * (a + 3)) * x;
     x = 2 - t;
     coeffs[3] = (3 * a * x - 10 * a) * x + 8 * a;
-  }
-
-  // The normalized route's taps: the polynomial at a = -0.75, with no integer-location
-  // branch. The overload below, which takes a, is the pixel route's.
-  template <typename coord_t, typename opmath_t, typename index_t>
-  static inline void resolve_cubic_taps(
-      coord_t coord,
-      index_t size,
-      GridSamplerPadding padding_mode,
-      bool align_corners,
-      opmath_t coeffs[4],
-      opmath_t* coeffs_grad,
-      index_t indices[4]) {
-    const coord_t base = std::floor(coord);
-    const opmath_t t = static_cast<opmath_t>(coord - base);
-    get_cubic_upsample_coefficients<opmath_t>(coeffs, t);
-    if (coeffs_grad != nullptr) {
-      get_cubic_coefficients_grad<opmath_t>(coeffs_grad, t);
-    }
-    const coord_t index_limit =
-        static_cast<coord_t>(std::numeric_limits<index_t>::max());
-    for (const auto i : c10::irange(4)) {
-      const coord_t tap =
-          compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
-      // a tap that is not finite, or past the index type, fails before the cast
-      const index_t index = (tap >= 0 && tap < index_limit)
-          ? static_cast<index_t>(tap)
-          : static_cast<index_t>(-1);
-      indices[i] = index < size ? index : static_cast<index_t>(-1);
-    }
   }
 
   // `coord_t` places the taps (double when the grid is double), `opmath_t` is the
@@ -334,12 +298,9 @@ namespace {
               // coordinates
               coord_t ix{}, iy{}, iz{};
               if (interpolation_mode != GridSamplerInterpolation::Bicubic) {
-                ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-                iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-                iz = pixel_coords ? pixel_source_index(z, inp_D, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
+                ix = source_index<pixel_coords>(x, inp_W, padding_mode, align_corners);
+                iy = source_index<pixel_coords>(y, inp_H, padding_mode, align_corners);
+                iz = source_index<pixel_coords>(z, inp_D, padding_mode, align_corners);
               }
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
@@ -444,22 +405,20 @@ namespace {
                 using tap_t = at::opmath_type<grid_t>;
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
+                tap_t cx, cy, cz;
                 if constexpr (pixel_coords) {
-                  const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
-                  resolve_cubic_taps(nonfinite_to_far(static_cast<tap_t>(x)), inp_W, padding_mode, align_corners,
-                                     cubic_a, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
-                  resolve_cubic_taps(nonfinite_to_far(static_cast<tap_t>(y)), inp_H, padding_mode, align_corners,
-                                     cubic_a, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
-                  resolve_cubic_taps(nonfinite_to_far(static_cast<tap_t>(z)), inp_D, padding_mode, align_corners,
-                                     cubic_a, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
+                  cx = nonfinite_to_far(static_cast<tap_t>(x));
+                  cy = nonfinite_to_far(static_cast<tap_t>(y));
+                  cz = nonfinite_to_far(static_cast<tap_t>(z));
                 } else {
-                  resolve_cubic_taps(grid_sampler_unnormalize(static_cast<tap_t>(x), inp_W, align_corners),
-                                     inp_W, padding_mode, align_corners, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
-                  resolve_cubic_taps(grid_sampler_unnormalize(static_cast<tap_t>(y), inp_H, align_corners),
-                                     inp_H, padding_mode, align_corners, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
-                  resolve_cubic_taps(grid_sampler_unnormalize(static_cast<tap_t>(z), inp_D, align_corners),
-                                     inp_D, padding_mode, align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
+                  cx = grid_sampler_unnormalize(static_cast<tap_t>(x), inp_W, align_corners);
+                  cy = grid_sampler_unnormalize(static_cast<tap_t>(y), inp_H, align_corners);
+                  cz = grid_sampler_unnormalize(static_cast<tap_t>(z), inp_D, align_corners);
                 }
+                const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
+                resolve_cubic_taps(cx, inp_W, padding_mode, align_corners, cubic_a, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
+                resolve_cubic_taps(cy, inp_H, padding_mode, align_corners, cubic_a, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
+                resolve_cubic_taps(cz, inp_D, padding_mode, align_corners, cubic_a, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
 
                 // Only zero padding drops a tap, near the rim. With none dropped, all 64 are read
                 // without a per-tap test, for the vectoriser; the OR of the indices is negative
@@ -506,13 +465,18 @@ namespace {
     return output;
   }
 
-  template<typename scalar_t, typename grid_t>
-  Tensor grid_sampler_2d_pixel_cpu_impl(const Tensor& input, const Tensor& grid,
-                                        GridSamplerInterpolation interpolation_mode,
-                                        GridSamplerPadding padding_mode,
-                                        bool align_corners, double cubic_coeff_a) {
+  // The scalar 2-D route, both spellings: pixel_coords = false is the fallback of the
+  // vectorised kernel, over a float grid, pixel_coords = true the pixel route over any
+  // payload. coord_t places a sample: the accumulate type for a pixel coordinate, an index
+  // a half grid cannot hold past 2048, and grid_t for a normalized one. opmath_t blends
+  // the taps.
+  template<typename scalar_t, typename grid_t, bool pixel_coords>
+  Tensor grid_sampler_2d_cpu_impl(const Tensor& input, const Tensor& grid,
+                                  GridSamplerInterpolation interpolation_mode,
+                                  GridSamplerPadding padding_mode,
+                                  bool align_corners, double cubic_coeff_a) {
     using opmath_t = at::opmath_type<scalar_t>;
-    using coord_t = at::opmath_type<grid_t>;
+    using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
 
     int64_t N = input.size(0);
     int64_t C = input.size(1);
@@ -539,37 +503,46 @@ namespace {
     const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
     scalar_t *out_ptr = output.data_ptr<scalar_t>();
     const grid_t *grid_ptr = grid.const_data_ptr<grid_t>();
+    // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
       for (const auto n : c10::irange(start, end)) {
         const grid_t *grid_ptr_N = grid_ptr + n * grid_sN;
         const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
         for (const auto h : c10::irange(out_H)) {
           for (const auto w : c10::irange(out_W)) {
+            // get the corresponding input x, y coordinates from grid
             const grid_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-            coord_t x = nonfinite_to_far<coord_t>(*grid_ptr_NHW);
-            coord_t y = nonfinite_to_far<coord_t>(grid_ptr_NHW[grid_sCoor]);
+            coord_t x = *grid_ptr_NHW;
+            coord_t y = grid_ptr_NHW[grid_sCoor];
 
-            // the source index is the padded grid value; the bicubic taps pad one by one
-            coord_t ix = pixel_source_index(x, inp_W, padding_mode, align_corners);
-            coord_t iy = pixel_source_index(y, inp_H, padding_mode, align_corners);
+            // the source index is the padded grid value; bicubic reads the raw coordinates
+            coord_t ix = source_index<pixel_coords>(x, inp_W, padding_mode, align_corners);
+            coord_t iy = source_index<pixel_coords>(y, inp_H, padding_mode, align_corners);
 
             if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+              // get corner pixel values from (x, y)
+              // for 4d, we use north-east-south-west
               int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
               int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+
               int64_t ix_ne = ix_nw + 1;
               int64_t iy_ne = iy_nw;
+
               int64_t ix_sw = ix_nw;
               int64_t iy_sw = iy_nw + 1;
+
               int64_t ix_se = ix_nw + 1;
               int64_t iy_se = iy_nw + 1;
 
-              coord_t nw = (ix_se - ix) * (iy_se - iy);
-              coord_t ne = (ix - ix_sw) * (iy_sw - iy);
-              coord_t sw = (ix_ne - ix) * (iy - iy_ne);
-              coord_t se = (ix - ix_nw) * (iy - iy_nw);
+              // get surfaces to each neighbor:
+              coord_t nw = (ix_se - ix)    * (iy_se - iy);
+              coord_t ne = (ix    - ix_sw) * (iy_sw - iy);
+              coord_t sw = (ix_ne - ix)    * (iy    - iy_ne);
+              coord_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
-              scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
+              // calculate bilinear weighted pixel value and set output pixel
               const scalar_t *inp_ptr_NC = inp_ptr_N;
+              scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
               for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
                 // coord_t places the sample; the taps blend in the payload's accumulate type,
                 // as on CUDA
@@ -592,6 +565,7 @@ namespace {
               int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
               int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
 
+              // assign nearest neighbour pixel value to output pixel
               scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
               const scalar_t *inp_ptr_NC = inp_ptr_N;
               for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
@@ -602,30 +576,70 @@ namespace {
                 }
               }
             } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-              using tap_t = at::opmath_type<grid_t>;
-              const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
-              opmath_t x_coeffs[4], y_coeffs[4];
-              int64_t x_taps[4], y_taps[4];
-              resolve_cubic_taps(static_cast<tap_t>(x), inp_W, padding_mode, align_corners,
-                                 cubic_a, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
-              resolve_cubic_taps(static_cast<tap_t>(y), inp_H, padding_mode, align_corners,
-                                 cubic_a, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
+              if constexpr (pixel_coords) {
+                // the taps sit around the unclipped index, at the raw x, y, padded one by one
+                const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
+                opmath_t x_coeffs[4], y_coeffs[4];
+                int64_t x_taps[4], y_taps[4];
+                resolve_cubic_taps(nonfinite_to_far(x), inp_W, padding_mode, align_corners,
+                                   cubic_a, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
+                resolve_cubic_taps(nonfinite_to_far(y), inp_H, padding_mode, align_corners,
+                                   cubic_a, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
 
-              scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
-              const scalar_t *inp_ptr_NC = inp_ptr_N;
-              for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-                opmath_t value = static_cast<opmath_t>(0);
-                for (const auto j : c10::irange(4)) {
-                  const bool row_reads = y_taps[j] >= 0;
-                  const scalar_t *row = row_reads ? inp_ptr_NC + y_taps[j] * inp_sH : inp_ptr_NC;
-                  for (const auto i : c10::irange(4)) {
-                    const opmath_t sample = row_reads && x_taps[i] >= 0
-                        ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
-                        : static_cast<opmath_t>(0);
-                    value += sample * y_coeffs[j] * x_coeffs[i];
+                scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+                for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+                  opmath_t value = static_cast<opmath_t>(0);
+                  for (const auto j : c10::irange(4)) {
+                    const bool row_reads = y_taps[j] >= 0;
+                    const scalar_t *row = row_reads ? inp_ptr_NC + y_taps[j] * inp_sH : inp_ptr_NC;
+                    for (const auto i : c10::irange(4)) {
+                      const opmath_t sample = row_reads && x_taps[i] >= 0
+                          ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                          : static_cast<opmath_t>(0);
+                      value += sample * y_coeffs[j] * x_coeffs[i];
+                    }
                   }
+                  *out_ptr_NCHW = static_cast<scalar_t>(value);
                 }
-                *out_ptr_NCHW = static_cast<scalar_t>(value);
+              } else {
+                // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding,
+                // which would cause calculation to be wrong,
+                // for example x = -0.1 -> ix = 0 for zero padding, but in bicubic ix = floor(x) = -1
+                // There would be more problem in reflection padding, since the -1 and +1 direction is not fixed in boundary condition
+                ix = grid_sampler_unnormalize(x, inp_W, align_corners);
+                iy = grid_sampler_unnormalize(y, inp_H, align_corners);
+
+                scalar_t ix_nw = std::floor(ix);
+                scalar_t iy_nw = std::floor(iy);
+
+                const scalar_t tx = ix - ix_nw;
+                const scalar_t ty = iy - iy_nw;
+
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+                scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
+                for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+                  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+                  scalar_t coefficients[4];
+
+                  // Interpolate 4 values in the x direction
+                  for (const auto i : c10::irange(4)) {
+                    coefficients[i] = cubic_interp1d<scalar_t>(
+                      get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                      get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                      get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                      get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                      tx);
+                  }
+
+                  // Interpolate in the y direction
+                  *out_ptr_NCHW = cubic_interp1d<scalar_t>(
+                    coefficients[0],
+                    coefficients[1],
+                    coefficients[2],
+                    coefficients[3],
+                    ty);
+                }
               }
             }
           }
@@ -635,25 +649,20 @@ namespace {
     return output;
   }
 
-  template<typename scalar_t, typename grid_t>
+  template<typename scalar_t, typename grid_t, bool pixel_coords>
   std::tuple<Tensor, Tensor>
-  grid_sampler_2d_pixel_backward_cpu_impl(const Tensor& grad_output,
-                                          const Tensor& input, const Tensor& grid,
-                                          GridSamplerInterpolation interpolation_mode,
-                                          GridSamplerPadding padding_mode,
-                                          bool align_corners, double cubic_coeff_a,
-                                          std::array<bool, 2> output_mask) {
+  grid_sampler_2d_backward_cpu_impl(const Tensor& grad_output,
+                                    const Tensor& input, const Tensor& grid,
+                                    GridSamplerInterpolation interpolation_mode,
+                                    GridSamplerPadding padding_mode,
+                                    bool align_corners, double cubic_coeff_a,
+                                    std::array<bool, 2> output_mask) {
     using opmath_t = at::opmath_type<scalar_t>;
-    using coord_t = at::opmath_type<grid_t>;
+    using coord_t = std::conditional_t<pixel_coords, at::opmath_type<grid_t>, grid_t>;
 
     const auto input_requires_grad = output_mask[0];
-    Tensor grad_input = ([&]() {
-      if (input_requires_grad) {
-        return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      } else {
-        return Tensor();
-      }
-    })();
+    Tensor grad_input = input_requires_grad
+        ? at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : Tensor();
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     if (grid.numel() == 0 || input.numel() == 0) {
       grad_grid.zero_();
@@ -696,6 +705,7 @@ namespace {
     scalar_t *gInp_ptr = input_requires_grad ? grad_input.data_ptr<scalar_t>() : nullptr;
     grid_t *gGrid_ptr = grad_grid.data_ptr<grid_t>();
     const grid_t *grid_ptr = grid.const_data_ptr<grid_t>();
+    // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
       for (const auto n : c10::irange(start, end)) {
         const grid_t *grid_ptr_N = grid_ptr + n * grid_sN;
@@ -703,38 +713,46 @@ namespace {
         grid_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
         for (const auto h : c10::irange(out_H)) {
           for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
+            // get the corresponding input x, y coordinates from grid
             const grid_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-            coord_t x = nonfinite_to_far<coord_t>(*grid_ptr_NHW);
-            coord_t y = nonfinite_to_far<coord_t>(grid_ptr_NHW[grid_sCoor]);
+            coord_t x = *grid_ptr_NHW;
+            coord_t y = grid_ptr_NHW[grid_sCoor];
 
-            // multipliers for gradients on ix and iy, from the padding mapping alone; the
-            // bicubic branch reads x and y with no multiplier
-            coord_t gix_mult, giy_mult;
-            coord_t ix = pixel_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-            coord_t iy = pixel_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+            // multipliers for gradients on ix, iy; the bicubic branches place their own
+            coord_t gix_mult{}, giy_mult{};
+            coord_t ix = source_index_set_grad<pixel_coords>(x, inp_W, padding_mode, align_corners, &gix_mult);
+            coord_t iy = source_index_set_grad<pixel_coords>(y, inp_H, padding_mode, align_corners, &giy_mult);
 
             if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+              // get corner pixel values from (x, y)
+              // for 4d, we use north-east-south-west
               int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
               int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+
               int64_t ix_ne = ix_nw + 1;
               int64_t iy_ne = iy_nw;
+
               int64_t ix_sw = ix_nw;
               int64_t iy_sw = iy_nw + 1;
+
               int64_t ix_se = ix_nw + 1;
               int64_t iy_se = iy_nw + 1;
 
-              coord_t nw = (ix_se - ix) * (iy_se - iy);
-              coord_t ne = (ix - ix_sw) * (iy_sw - iy);
-              coord_t sw = (ix_ne - ix) * (iy - iy_ne);
-              coord_t se = (ix - ix_nw) * (iy - iy_nw);
+              // get surfaces to each neighbor:
+              coord_t nw = (ix_se - ix)    * (iy_se - iy);
+              coord_t ne = (ix    - ix_sw) * (iy_sw - iy);
+              coord_t sw = (ix_ne - ix)    * (iy    - iy_ne);
+              coord_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
               coord_t gix = static_cast<coord_t>(0), giy = static_cast<coord_t>(0);
               const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
               int64_t NC_offset = n * gInp_sN;
               const scalar_t *inp_ptr_NC = inp_ptr_N;
+              // calculate bilinear weighted pixel value and set output pixel
               for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
                 scalar_t gOut = *gOut_ptr_NCHW;
 
+                // calculate and set grad_input
                 if (input_requires_grad) {
                   safe_add_2d(gInp_ptr + NC_offset, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, static_cast<scalar_t>(nw * gOut));
                   safe_add_2d(gInp_ptr + NC_offset, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, static_cast<scalar_t>(ne * gOut));
@@ -742,6 +760,7 @@ namespace {
                   safe_add_2d(gInp_ptr + NC_offset, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, static_cast<scalar_t>(se * gOut));
                 }
 
+                // calculate grad_grid
                 if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
                   coord_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
                   gix -= nw_val * (iy_se - iy) * gOut;
@@ -763,6 +782,8 @@ namespace {
                   giy += se_val * (ix - ix_nw) * gOut;
                 }
               }
+
+              // assuming grad_grid is contiguous
               gGrid_ptr_NHW[0] = static_cast<grid_t>(gix_mult * gix);
               gGrid_ptr_NHW[1] = static_cast<grid_t>(giy_mult * giy);
             } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
@@ -770,53 +791,110 @@ namespace {
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
 
+                // assign nearest neighbour pixel value to output pixel
                 const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
                 int64_t NC_offset = n * gInp_sN;
                 for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC) {
+                  // calculate and set grad_input
                   safe_add_2d(gInp_ptr + NC_offset, iy_nearest, ix_nearest,
                               gInp_sH, gInp_sW, inp_H, inp_W, *gOut_ptr_NCHW);
                 }
               }
             } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-              using tap_t = at::opmath_type<grid_t>;
-              const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
-              opmath_t x_coeffs[4], y_coeffs[4];
-              opmath_t x_coeffs_grad[4], y_coeffs_grad[4];
-              int64_t x_taps[4], y_taps[4];
-              resolve_cubic_taps(static_cast<tap_t>(x), inp_W, padding_mode, align_corners,
-                                 cubic_a, x_coeffs, x_coeffs_grad, x_taps);
-              resolve_cubic_taps(static_cast<tap_t>(y), inp_H, padding_mode, align_corners,
-                                 cubic_a, y_coeffs, y_coeffs_grad, y_taps);
+              if constexpr (pixel_coords) {
+                const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
+                opmath_t x_coeffs[4], y_coeffs[4];
+                opmath_t x_coeffs_grad[4], y_coeffs_grad[4];
+                int64_t x_taps[4], y_taps[4];
+                resolve_cubic_taps(nonfinite_to_far(x), inp_W, padding_mode, align_corners,
+                                   cubic_a, x_coeffs, x_coeffs_grad, x_taps);
+                resolve_cubic_taps(nonfinite_to_far(y), inp_H, padding_mode, align_corners,
+                                   cubic_a, y_coeffs, y_coeffs_grad, y_taps);
 
-              opmath_t gix = static_cast<opmath_t>(0);
-              opmath_t giy = static_cast<opmath_t>(0);
-              const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-              const scalar_t *inp_ptr_NC = inp_ptr_N;
-              int64_t gInp_offset_NC = n * gInp_sN;
-              for (int64_t c = 0; c < C;
-                   ++c, gOut_ptr_NCHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {
-                const opmath_t gOut = static_cast<opmath_t>(*gOut_ptr_NCHW);
-                for (const auto j : c10::irange(4)) {
-                  const bool row_reads = y_taps[j] >= 0;
-                  const scalar_t *row = row_reads ? inp_ptr_NC + y_taps[j] * inp_sH : inp_ptr_NC;
-                  const int64_t grad_row = row_reads ? gInp_offset_NC + y_taps[j] * gInp_sH
-                                                     : gInp_offset_NC;
-                  for (const auto i : c10::irange(4)) {
-                    const bool reads = row_reads && x_taps[i] >= 0;
-                    if (input_requires_grad && reads) {
-                      gInp_ptr[grad_row + x_taps[i] * gInp_sW] += static_cast<scalar_t>(
-                          gOut * x_coeffs[i] * y_coeffs[j]);
+                opmath_t gix = static_cast<opmath_t>(0);
+                opmath_t giy = static_cast<opmath_t>(0);
+                const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+                int64_t gInp_offset_NC = n * gInp_sN;
+                for (int64_t c = 0; c < C;
+                     ++c, gOut_ptr_NCHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+                  const opmath_t gOut = static_cast<opmath_t>(*gOut_ptr_NCHW);
+                  for (const auto j : c10::irange(4)) {
+                    const bool row_reads = y_taps[j] >= 0;
+                    const scalar_t *row = row_reads ? inp_ptr_NC + y_taps[j] * inp_sH : inp_ptr_NC;
+                    const int64_t grad_row = row_reads ? gInp_offset_NC + y_taps[j] * gInp_sH
+                                                       : gInp_offset_NC;
+                    for (const auto i : c10::irange(4)) {
+                      const bool reads = row_reads && x_taps[i] >= 0;
+                      if (input_requires_grad && reads) {
+                        gInp_ptr[grad_row + x_taps[i] * gInp_sW] += static_cast<scalar_t>(
+                            gOut * x_coeffs[i] * y_coeffs[j]);
+                      }
+                      const opmath_t value = reads
+                          ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                          : static_cast<opmath_t>(0);
+                      gix -= value * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+                      giy -= value * x_coeffs[i] * y_coeffs_grad[j] * gOut;
                     }
-                    const opmath_t value = reads
-                        ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
-                        : static_cast<opmath_t>(0);
-                    gix -= value * x_coeffs_grad[i] * y_coeffs[j] * gOut;
-                    giy -= value * x_coeffs[i] * y_coeffs_grad[j] * gOut;
                   }
                 }
+                gGrid_ptr_NHW[0] = static_cast<grid_t>(gix);
+                gGrid_ptr_NHW[1] = static_cast<grid_t>(giy);
+              } else {
+                ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
+                iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
+
+                scalar_t ix_nw = std::floor(ix);
+                scalar_t iy_nw = std::floor(iy);
+
+                const scalar_t tx = ix - ix_nw;
+                const scalar_t ty = iy - iy_nw;
+
+                // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+                scalar_t x_coeffs[4];
+                // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+                scalar_t y_coeffs[4];
+                // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+                scalar_t x_coeffs_grad[4];
+                // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+                scalar_t y_coeffs_grad[4];
+
+                get_cubic_upsample_coefficients<scalar_t>(x_coeffs, tx);
+                get_cubic_upsample_coefficients<scalar_t>(y_coeffs, ty);
+                get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+                get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+                scalar_t gix = static_cast<scalar_t>(0);
+                scalar_t giy = static_cast<scalar_t>(0);
+
+                const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+                scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+
+                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
+                  scalar_t gOut = *gOut_ptr_NCHW;
+
+                  for (const auto i : c10::irange(4)) {
+                    for (const auto j : c10::irange(4)) {
+
+                      // set input gradient
+                      if (input_requires_grad) {
+                        add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                          inp_W, inp_H, gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
+                      }
+
+                      // set grid gradient
+                      scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                        inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+
+                      gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+                      giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
+                    }
+                  }
+                }
+                gGrid_ptr_NHW[0] = gix_mult * gix;
+                gGrid_ptr_NHW[1] = giy_mult * giy;
               }
-              gGrid_ptr_NHW[0] = static_cast<grid_t>(gix);
-              gGrid_ptr_NHW[1] = static_cast<grid_t>(giy);
             }
           }
         }
@@ -925,22 +1003,13 @@ namespace {
               coord_t gix_mult{}, giy_mult{}, giz_mult{};
               coord_t ix{}, iy{}, iz{};
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-                if constexpr (pixel_coords) {
-                  ix = pixel_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-                  iy = pixel_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-                  iz = pixel_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
-                } else {
-                  ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-                  iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-                  iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
-                }
+                ix = source_index_set_grad<pixel_coords>(x, inp_W, padding_mode, align_corners, &gix_mult);
+                iy = source_index_set_grad<pixel_coords>(y, inp_H, padding_mode, align_corners, &giy_mult);
+                iz = source_index_set_grad<pixel_coords>(z, inp_D, padding_mode, align_corners, &giz_mult);
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-                ix = pixel_coords ? pixel_source_index(x, inp_W, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-                iy = pixel_coords ? pixel_source_index(y, inp_H, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-                iz = pixel_coords ? pixel_source_index(z, inp_D, padding_mode, align_corners)
-                                  : grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
+                ix = source_index<pixel_coords>(x, inp_W, padding_mode, align_corners);
+                iy = source_index<pixel_coords>(y, inp_H, padding_mode, align_corners);
+                iz = source_index<pixel_coords>(z, inp_D, padding_mode, align_corners);
               }
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
@@ -1092,18 +1161,15 @@ namespace {
                   cy = nonfinite_to_far(static_cast<tap_t>(y));
                   cz = nonfinite_to_far(static_cast<tap_t>(z));
                   x_mult = y_mult = z_mult = static_cast<tap_t>(1);
-                  const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
-                  resolve_cubic_taps(cx, inp_W, padding_mode, align_corners, cubic_a, x_coeffs, x_coeffs_grad, x_taps);
-                  resolve_cubic_taps(cy, inp_H, padding_mode, align_corners, cubic_a, y_coeffs, y_coeffs_grad, y_taps);
-                  resolve_cubic_taps(cz, inp_D, padding_mode, align_corners, cubic_a, z_coeffs, z_coeffs_grad, z_taps);
                 } else {
                   cx = grid_sampler_unnormalize_set_grad(static_cast<tap_t>(x), inp_W, align_corners, &x_mult);
                   cy = grid_sampler_unnormalize_set_grad(static_cast<tap_t>(y), inp_H, align_corners, &y_mult);
                   cz = grid_sampler_unnormalize_set_grad(static_cast<tap_t>(z), inp_D, align_corners, &z_mult);
-                  resolve_cubic_taps(cx, inp_W, padding_mode, align_corners, x_coeffs, x_coeffs_grad, x_taps);
-                  resolve_cubic_taps(cy, inp_H, padding_mode, align_corners, y_coeffs, y_coeffs_grad, y_taps);
-                  resolve_cubic_taps(cz, inp_D, padding_mode, align_corners, z_coeffs, z_coeffs_grad, z_taps);
                 }
+                const opmath_t cubic_a = static_cast<opmath_t>(cubic_coeff_a);
+                resolve_cubic_taps(cx, inp_W, padding_mode, align_corners, cubic_a, x_coeffs, x_coeffs_grad, x_taps);
+                resolve_cubic_taps(cy, inp_H, padding_mode, align_corners, cubic_a, y_coeffs, y_coeffs_grad, y_taps);
+                resolve_cubic_taps(cz, inp_D, padding_mode, align_corners, cubic_a, z_coeffs, z_coeffs_grad, z_taps);
 
                 opmath_t gix = static_cast<opmath_t>(0);
                 opmath_t giy = static_cast<opmath_t>(0);
@@ -1276,149 +1342,10 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
 
-  auto interpolation_mode = static_cast<GridSamplerInterpolation>(interpolation_mode_);
-  auto padding_mode = static_cast<GridSamplerPadding>(padding_mode_);
-  using scalar_t = float;
-
-  int64_t N = input.size(0);
-  int64_t C = input.size(1);
-  int64_t inp_H = input.size(2);
-  int64_t inp_W = input.size(3);
-  int64_t out_H = grid.size(1);
-  int64_t out_W = grid.size(2);
-  auto output = at::empty({N, C, out_H, out_W}, input.options());
-  if (output.numel() == 0) {
-      return output;
-  }
-  int64_t inp_sN = input.stride(0);
-  int64_t inp_sC = input.stride(1);
-  int64_t inp_sH = input.stride(2);
-  int64_t inp_sW = input.stride(3);
-  int64_t grid_sN = grid.stride(0);
-  int64_t grid_sH = grid.stride(1);
-  int64_t grid_sW = grid.stride(2);
-  int64_t grid_sCoor = grid.stride(3);
-  int64_t out_sN = output.stride(0);
-  int64_t out_sC = output.stride(1);
-  int64_t out_sH = output.stride(2);
-  int64_t out_sW = output.stride(3);
-  const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
-  scalar_t *out_ptr = output.data_ptr<scalar_t>();
-  const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
-  // loop over each output pixel
-  at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (const auto n : c10::irange(start, end)) {
-      const scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
-      const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-      for (const auto h : c10::irange(out_H)) {
-        for (const auto w : c10::irange(out_W)) {
-          // get the corresponding input x, y, z coordinates from grid
-          const scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-          scalar_t x = *grid_ptr_NHW;
-          scalar_t y = grid_ptr_NHW[grid_sCoor];
-
-          scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-          scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-
-          if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-            // get corner pixel values from (x, y)
-            // for 4d, we use north-east-south-west
-            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
-            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
-
-            int64_t ix_ne = ix_nw + 1;
-            int64_t iy_ne = iy_nw;
-
-            int64_t ix_sw = ix_nw;
-            int64_t iy_sw = iy_nw + 1;
-
-            int64_t ix_se = ix_nw + 1;
-            int64_t iy_se = iy_nw + 1;
-
-
-            // get surfaces to each neighbor:
-            scalar_t nw = (ix_se - ix)    * (iy_se - iy);
-            scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-            scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-            scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
-
-            // calculate bilinear weighted pixel value and set output pixel
-            const scalar_t *inp_ptr_NC = inp_ptr_N;
-            scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
-            for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-              auto res = static_cast<scalar_t>(0);
-              if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-                res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
-              }
-              if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-                res += inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne;
-              }
-              if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-                res += inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw;
-              }
-              if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-                res += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
-              }
-              *out_ptr_NCHW = res;
-            }
-          } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-            int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
-            int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
-
-            // assign nearest neighbour pixel value to output pixel
-            scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
-            const scalar_t *inp_ptr_NC = inp_ptr_N;
-            for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-              if (within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W)) {
-                *out_ptr_NCHW = inp_ptr_NC[iy_nearest * inp_sH + ix_nearest * inp_sW];
-              } else {
-                *out_ptr_NCHW = static_cast<scalar_t>(0);
-              }
-            }
-          } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding,
-            // which would cause calculation to be wrong,
-            // for example x = -0.1 -> ix = 0 for zero padding, but in bicubic ix = floor(x) = -1
-            // There would be more problem in reflection padding, since the -1 and +1 direction is not fixed in boundary condition
-            ix = grid_sampler_unnormalize(x, inp_W, align_corners);
-            iy = grid_sampler_unnormalize(y, inp_H, align_corners);
-
-            scalar_t ix_nw = std::floor(ix);
-            scalar_t iy_nw = std::floor(iy);
-
-            const scalar_t tx = ix - ix_nw;
-            const scalar_t ty = iy - iy_nw;
-
-            const scalar_t *inp_ptr_NC = inp_ptr_N;
-            scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
-            for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
-              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-              scalar_t coefficients[4];
-
-              // Interpolate 4 values in the x direction
-              for (const auto i : c10::irange(4)) {
-                coefficients[i] = cubic_interp1d<scalar_t>(
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-                  tx);
-              }
-
-              // Interpolate in the y direction
-              *out_ptr_NCHW = cubic_interp1d<scalar_t>(
-                coefficients[0],
-                coefficients[1],
-                coefficients[2],
-                coefficients[3],
-                ty);
-            }
-          }
-        }
-      }
-    }
-  });
-  return output;
+  return grid_sampler_2d_cpu_impl<float, float, /*pixel_coords=*/false>(
+      input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode_),
+      static_cast<GridSamplerPadding>(padding_mode_), align_corners,
+      /*cubic_coeff_a=*/-0.75);
 }
 
 std::tuple<Tensor, Tensor>
@@ -1431,200 +1358,11 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_2d_backward(input, grid, grad_output);
 
-  const auto interpolation_mode = static_cast<GridSamplerInterpolation>(interpolation_mode_);
-  const auto padding_mode = static_cast<GridSamplerPadding>(padding_mode_);
-  using scalar_t = float;
-
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (grid.numel() == 0 || input.numel() == 0) {
-    grad_grid.zero_();
-    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
-  }
-  // If interpolation mode is Nearest, then grad_grid is not filled in the
-  // loop below.
-  if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-    grad_grid.zero_();
-  }
-  int64_t N = input.size(0);
-  int64_t C = input.size(1);
-  int64_t inp_H = input.size(2);
-  int64_t inp_W = input.size(3);
-  int64_t out_H = grid.size(1);
-  int64_t out_W = grid.size(2);
-  int64_t inp_sN = input.stride(0);
-  int64_t inp_sC = input.stride(1);
-  int64_t inp_sH = input.stride(2);
-  int64_t inp_sW = input.stride(3);
-  int64_t grid_sN = grid.stride(0);
-  int64_t grid_sH = grid.stride(1);
-  int64_t grid_sW = grid.stride(2);
-  int64_t grid_sCoor = grid.stride(3);
-  int64_t gOut_sN = grad_output.stride(0);
-  int64_t gOut_sC = grad_output.stride(1);
-  int64_t gOut_sH = grad_output.stride(2);
-  int64_t gOut_sW = grad_output.stride(3);
-  int64_t gInp_sN = grad_input.stride(0);
-  int64_t gInp_sC = grad_input.stride(1);
-  int64_t gInp_sH = grad_input.stride(2);
-  int64_t gInp_sW = grad_input.stride(3);
-  int64_t gGrid_sN = grad_grid.stride(0);
-  int64_t gGrid_sW = grad_grid.stride(2);
-  const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
-  const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
-  const scalar_t *gOut_ptr = grad_output.const_data_ptr<scalar_t>();
-  scalar_t *gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
-  scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
-  // loop over each output pixel
-  at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (const auto n : c10::irange(start, end)) {
-      const scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
-      const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-      scalar_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
-      for (const auto h : c10::irange(out_H)) {
-        for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
-          // get the corresponding input x, y coordinates from grid
-          const scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-          scalar_t x = *grid_ptr_NHW;
-          scalar_t y = grid_ptr_NHW[grid_sCoor];
-
-          // multipliers for gradients on ix, iy
-          scalar_t gix_mult{}, giy_mult{};
-          scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-          scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
-
-          if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-            // get corner pixel values from (x, y)
-            // for 4d, we use north-east-south-west
-            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
-            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
-
-            int64_t ix_ne = ix_nw + 1;
-            int64_t iy_ne = iy_nw;
-
-            int64_t ix_sw = ix_nw;
-            int64_t iy_sw = iy_nw + 1;
-
-            int64_t ix_se = ix_nw + 1;
-            int64_t iy_se = iy_nw + 1;
-
-            // get surfaces to each neighbor:
-            scalar_t nw = (ix_se - ix)    * (iy_se - iy);
-            scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-            scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-            scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
-
-            scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
-            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-            scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-            const scalar_t *inp_ptr_NC = inp_ptr_N;
-            // calculate bilinear weighted pixel value and set output pixel
-            for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
-              scalar_t gOut = *gOut_ptr_NCHW;
-
-              // calculate and set grad_input
-              safe_add_2d(gInp_ptr_NC, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut);
-              safe_add_2d(gInp_ptr_NC, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut);
-              safe_add_2d(gInp_ptr_NC, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut);
-              safe_add_2d(gInp_ptr_NC, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut);
-
-              // calculate grad_grid
-              if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-                scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
-                gix -= nw_val * (iy_se - iy) * gOut;
-                giy -= nw_val * (ix_se - ix) * gOut;
-              }
-              if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-                scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
-                gix += ne_val * (iy_sw - iy) * gOut;
-                giy -= ne_val * (ix - ix_sw) * gOut;
-              }
-              if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-                scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
-                gix -= sw_val * (iy - iy_ne) * gOut;
-                giy += sw_val * (ix_ne - ix) * gOut;
-              }
-              if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-                scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
-                gix += se_val * (iy - iy_nw) * gOut;
-                giy += se_val * (ix - ix_nw) * gOut;
-              }
-            }
-
-            // assuming grad_grid is contiguous
-            gGrid_ptr_NHW[0] = gix_mult * gix;
-            gGrid_ptr_NHW[1] = giy_mult * giy;
-          } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-            int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
-            int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
-
-            // assign nearest neighbour pixel value to output pixel
-            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-            scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-            for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
-              // calculate and set grad_input
-              safe_add_2d(gInp_ptr_NC, iy_nearest, ix_nearest, gInp_sH, gInp_sW,
-                          inp_H, inp_W, *gOut_ptr_NCHW);
-            }
-          } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-
-            ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
-            iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
-
-            scalar_t ix_nw = std::floor(ix);
-            scalar_t iy_nw = std::floor(iy);
-
-            const scalar_t tx = ix - ix_nw;
-            const scalar_t ty = iy - iy_nw;
-
-            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-            scalar_t x_coeffs[4];
-            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-            scalar_t y_coeffs[4];
-            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-            scalar_t x_coeffs_grad[4];
-            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-            scalar_t y_coeffs_grad[4];
-
-            get_cubic_upsample_coefficients<scalar_t>(x_coeffs, tx);
-            get_cubic_upsample_coefficients<scalar_t>(y_coeffs, ty);
-            get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
-            get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
-
-            scalar_t gix = static_cast<scalar_t>(0);
-            scalar_t giy = static_cast<scalar_t>(0);
-
-            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-            scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-            const scalar_t *inp_ptr_NC = inp_ptr_N;
-
-            for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
-              scalar_t gOut = *gOut_ptr_NCHW;
-
-              for (const auto i : c10::irange(4)) {
-                for (const auto j : c10::irange(4)) {
-
-                  // set input gradient
-                  add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
-                    inp_W, inp_H, gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
-
-                  // set grid gradient
-                  scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
-                    inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
-
-                  gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
-                  giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
-                }
-              }
-            }
-            gGrid_ptr_NHW[0] = gix_mult * gix;
-            gGrid_ptr_NHW[1] = giy_mult * giy;
-          }
-        }
-      }
-    }
-  });
-  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
+  return grid_sampler_2d_backward_cpu_impl<float, float, /*pixel_coords=*/false>(
+      grad_output, input, grid,
+      static_cast<GridSamplerInterpolation>(interpolation_mode_),
+      static_cast<GridSamplerPadding>(padding_mode_), align_corners,
+      /*cubic_coeff_a=*/-0.75, /*output_mask=*/{true, true});
 }
 
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
@@ -1804,11 +1542,11 @@ Tensor _grid_sampler_2d_pixel_cpu(const Tensor& input, const Tensor& grid,
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "_grid_sampler_2d_pixel_cpu", [&] {
     if (grid.scalar_type() == input.scalar_type()) {
-      return grid_sampler_2d_pixel_cpu_impl<scalar_t, scalar_t>(
+      return grid_sampler_2d_cpu_impl<scalar_t, scalar_t, /*pixel_coords=*/true>(
         input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
         static_cast<GridSamplerPadding>(padding_mode), align_corners, cubic_coeff_a);
     }
-    return grid_sampler_2d_pixel_cpu_impl<scalar_t, double>(
+    return grid_sampler_2d_cpu_impl<scalar_t, double, /*pixel_coords=*/true>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
       static_cast<GridSamplerPadding>(padding_mode), align_corners, cubic_coeff_a);
   });
@@ -1824,12 +1562,12 @@ _grid_sampler_2d_pixel_backward_cpu(const Tensor& grad_output, const Tensor& inp
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "_grid_sampler_2d_pixel_backward_cpu", [&] {
     if (grid.scalar_type() == input.scalar_type()) {
-      return grid_sampler_2d_pixel_backward_cpu_impl<scalar_t, scalar_t>(
+      return grid_sampler_2d_backward_cpu_impl<scalar_t, scalar_t, /*pixel_coords=*/true>(
         grad_output, input, grid,
         static_cast<GridSamplerInterpolation>(interpolation_mode),
         static_cast<GridSamplerPadding>(padding_mode), align_corners, cubic_coeff_a, output_mask);
     }
-    return grid_sampler_2d_pixel_backward_cpu_impl<scalar_t, double>(
+    return grid_sampler_2d_backward_cpu_impl<scalar_t, double, /*pixel_coords=*/true>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),
       static_cast<GridSamplerPadding>(padding_mode), align_corners, cubic_coeff_a, output_mask);
