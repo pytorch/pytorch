@@ -351,7 +351,7 @@ class TestNativeTorchlib(common_utils.TestCase):
         self.assertTrue(gelu)
         self.assertEqual(
             isinstance(gelu[0].onnx_function, _custom_translation.NativeTranslation),
-            opset >= 20,
+            True,
         )
         self.assertTrue(registry.get_decomps(torch.ops.aten.add.Tensor))
         abs_entries = registry.get_decomps(torch.ops.aten.abs.default)

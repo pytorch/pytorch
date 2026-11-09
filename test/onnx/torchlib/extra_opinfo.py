@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+from typing import Any
 
 import torch
 from torch.testing import make_tensor
@@ -1507,6 +1508,956 @@ OPS_DB.extend(
             op=getattr(torch.ops.aten, "_grouped_mm", lambda *args, **kwargs: None),
             dtypes=common_dtype.floating_types(),
             sample_inputs_func=sample_inputs_grouped_mm,
+            supports_out=False,
+        ),
+    ]
+)
+
+
+def sample_inputs_linear_1d_weight(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for linear with a 1D weight (in_features,), no out_features dim.
+
+    Regression coverage for https://github.com/microsoft/onnxscript/issues/2982:
+    the upstream `sample_inputs_linear` in
+    torch/testing/_internal/common_methods_invocations.py never generates a
+    1D-weight case, so this branch of aten_linear went untested.
+
+    Note: aten::linear does not accept a bias together with a 1D weight
+    ("mat2 must be a matrix, got 1-D tensor"), so no bias samples are
+    generated here.
+    """
+    del op_info
+    del kwargs
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    for in_features, batch_shape in itertools.product([3, 8], [(), (2,), (2, 3)]):
+        input_tensor = make_arg((*batch_shape, in_features))
+        weight = make_arg((in_features,))
+        yield opinfo_core.SampleInput(input_tensor, args=(weight, None))
+
+
+def sample_inputs_col2im(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    # input_shape, output_size, kernel, dilation, padding, stride
+    cases = (
+        (
+            (1, 12, 12),
+            (4, 5),
+            (2, 2),
+            {"dilation": (1, 1), "padding": (0, 0), "stride": (1, 1)},
+        ),
+        (
+            (1, 8, 30),
+            (4, 5),
+            (2, 2),
+            {"dilation": (1, 1), "padding": (1, 1), "stride": (1, 1)},
+        ),
+        (
+            (1, 8, 9),
+            (4, 4),
+            (2, 2),
+            {"dilation": (1, 1), "padding": (0, 0), "stride": (1, 1)},
+        ),
+        (
+            (1, 8, 25),
+            (4, 4),
+            (2, 2),
+            {"dilation": (1, 1), "padding": (1, 1), "stride": (1, 1)},
+        ),
+        (
+            (1, 8, 9),
+            (4, 4),
+            (2, 2),
+            {"dilation": (1, 1), "padding": (1, 1), "stride": (2, 2)},
+        ),
+        (
+            (1, 9, 4),
+            (4, 4),
+            (3, 3),
+            {"dilation": (1, 1), "padding": (1, 1), "stride": (2, 2)},
+        ),
+        (
+            (1, 18, 16),
+            (2, 2),
+            (1, 1),
+            {"dilation": (2, 2), "padding": (3, 3), "stride": (2, 2)},
+        ),
+    )
+
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    for shape, output_size, kernel_size, kwargs in cases:
+        tensor = make_arg(shape)
+        yield opinfo_core.SampleInput(
+            tensor, args=(output_size, kernel_size), kwargs=kwargs
+        )
+
+
+def sample_inputs_conv3d(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    # Ordered as shapes for input, weight, bias,
+    # and a dict of values of (stride, padding, dilation, groups)
+    cases: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], dict[str, Any]] = (  # type: ignore[assignment]
+        (
+            (1, 3, 3, 224, 224),
+            (32, 3, 3, 3, 3),
+            None,
+            {
+                "stride": (2, 2, 2),
+                "padding": (1, 1, 1),
+                "dilation": (1, 1, 1),
+                "groups": 1,
+            },
+        ),
+        (
+            (2, 4, 3, 56, 56),
+            (32, 4, 3, 3, 3),
+            (32,),
+            {
+                "stride": (3, 3, 3),
+                "padding": (2, 2, 2),
+                "dilation": (1, 1, 1),
+                "groups": 1,
+            },
+        ),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:  # type: ignore[assignment]
+        # Batched
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),
+            args=(make_arg(weight), make_arg(bias) if bias is not None else bias),
+            kwargs=kwargs,
+        )
+        # Unbatched
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape[1:]),  # type: ignore[index]
+            args=(make_arg(weight), make_arg(bias) if bias is not None else bias),
+            kwargs=kwargs,
+        )
+
+
+def sample_inputs_convolution(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    # Ordered as shapes for input, weight, bias,
+    # and a dict of values of (stride, padding, dilation, groups)
+    cases: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], dict[str, Any]] = (  # type: ignore[assignment]
+        (
+            (1, 3, 4),
+            (3, 3, 3),
+            (3,),
+            {
+                "stride": (2,),
+                "padding": (2,),
+                "dilation": (1,),
+                "transposed": False,
+                "output_padding": (0,),
+                "groups": 1,
+            },
+        ),
+        (
+            (1, 3, 4),
+            (3, 3, 3),
+            None,
+            {
+                "stride": (2,),
+                "padding": (2,),
+                "dilation": (1,),
+                "transposed": True,
+                "output_padding": (0,),
+                "groups": 1,
+            },
+        ),
+        (
+            (1, 3, 224, 224),
+            (32, 3, 3, 3),
+            None,
+            {
+                "stride": (2, 2),
+                "padding": (1, 1),
+                "dilation": (1, 1),
+                "transposed": False,
+                "output_padding": (0, 0),
+                "groups": 1,
+            },
+        ),
+        (
+            (1, 3, 224, 224),
+            (32, 3, 3, 3),
+            None,
+            {
+                "stride": (2,),
+                "padding": (1,),
+                "dilation": (1,),
+                "transposed": False,
+                "output_padding": (0, 0),
+                "groups": 1,
+            },
+        ),
+        (
+            (1, 3, 3, 224, 224),
+            (32, 3, 3, 3, 3),
+            (32,),
+            {
+                "stride": (2, 2, 2),
+                "padding": (1, 1, 1),
+                "dilation": (1, 1, 1),
+                "transposed": False,
+                "output_padding": (0, 0, 0),
+                "groups": 1,
+            },
+        ),
+        (
+            (1, 3, 224, 224, 224),
+            (32, 3, 3, 3, 3),
+            (32,),
+            {
+                "stride": (2, 2, 2),
+                "padding": (1, 1, 1),
+                "dilation": (1, 1, 1),
+                "transposed": False,
+                "output_padding": (0, 0, 0),
+                "groups": 1,
+            },
+        ),
+        (
+            (2, 4, 6, 6),
+            (4, 1, 3, 3),
+            (4,),
+            {
+                "stride": (3, 2),
+                "padding": (1, 1),
+                "dilation": (1, 1),
+                "transposed": True,
+                "output_padding": (0, 0),
+                "groups": 4,
+            },
+        ),
+    )
+
+    for input_shape, weight, bias, kwargs in cases:  # type: ignore[assignment]
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),
+            args=(make_arg(weight), make_arg(bias) if bias is not None else bias),
+            kwargs=kwargs,
+        )
+
+
+def sample_inputs_layer_norm(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info  # unused
+    del kwargs
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    # Ordered as input shape, normalized_shape, eps
+    cases: tuple[tuple[int], tuple[int], float] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), 0.5),
+        ((2, 2, 3), (2, 3), -0.5),
+        ((1,), (1,), 1e-5),
+        ((1, 2), (2,), 1e-5),
+        ((0, 1), (1,), 1e-5),
+    )
+
+    for input_shape, normalized_shape, eps in cases:  # type: ignore[misc]
+        # Shape of weight and bias should be the same as normalized_shape
+        weight = make_arg(normalized_shape)  # type: ignore[has-type]
+        bias = make_arg(normalized_shape)  # type: ignore[has-type]
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),  # type: ignore[has-type]
+            args=(normalized_shape, weight, bias, eps),  # type: ignore[has-type]
+        )
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),  # type: ignore[has-type]
+            args=(normalized_shape, None, bias, eps),  # type: ignore[has-type]
+        )
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),  # type: ignore[has-type]
+            args=(normalized_shape, weight, None, eps),  # type: ignore[has-type]
+        )
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),  # type: ignore[has-type]
+            args=(normalized_shape, None, None, eps),  # type: ignore[has-type]
+        )
+
+
+class _TestParamsMaxPoolEmptyStrideBase:
+    # Adapted from https://github.com/pytorch/pytorch/blob/d6d55f8590eab05d2536756fb4efcfb2d07eb81a/torch/testing/_internal/common_methods_invocations.py#L3203
+    def __init__(self):
+        self.kwargs = {
+            "kernel_size": [3],
+            "stride": [()],
+            "ceil_mode": [True, False],
+            "padding": [0, 1],
+            "dilation": [1],
+        }
+
+        # fmt: off
+        self.shapes = [
+            [1, 2, None],  # batch
+            [2],  # channels
+            [3, 6]  # signal
+        ]
+        # fmt: on
+
+    def _gen_shape(self):
+        for shape in itertools.product(*self.shapes):
+            # shape[0] is None indicates missing batch dimension
+            if shape[0] is None:
+                shape = shape[1:]
+
+            yield shape, torch.contiguous_format
+            # only 2d (N, C, H, W) rank 4 tensors support channels_last memory format
+            if len(self.shapes) == 4 and len(shape) == 4:
+                yield shape, torch.channels_last
+
+    def _gen_kwargs(self):
+        keys = self.kwargs.keys()
+        for values in itertools.product(*self.kwargs.values()):
+            yield dict(zip(keys, values))
+
+    def gen_input_params(self):
+        yield from itertools.product(self._gen_shape(), self._gen_kwargs())
+
+
+class _TestParamsMaxPool1dEmptyStride(_TestParamsMaxPoolEmptyStrideBase):
+    def __init__(self):
+        super().__init__()
+        self.kwargs["kernel_size"] += [(3,)]
+        self.kwargs["stride"] += [(2,)]
+        self.kwargs["padding"] += [(1,)]
+        self.kwargs["dilation"] += [(1,)]
+
+
+class _TestParamsMaxPool2dEmptyStride(_TestParamsMaxPoolEmptyStrideBase):
+    def __init__(self):
+        super().__init__()
+        self.kwargs["kernel_size"] += [(3, 2)]
+        self.kwargs["stride"] += [(2, 1)]
+        self.kwargs["padding"] += [(1, 1)]
+        self.kwargs["dilation"] += [(1, 2)]
+
+        self.shapes.append([6])
+
+
+class _TestParamsMaxPool3dEmptyStride(_TestParamsMaxPoolEmptyStrideBase):
+    def __init__(self):
+        super().__init__()
+        self.kwargs["kernel_size"] += [(3, 2, 3)]
+        self.kwargs["stride"] += [(2, 1, 2)]
+        self.kwargs["dilation"] += [(1, 2, 1)]
+
+        self.shapes.append([6])
+        self.shapes.append([5])
+
+
+def sample_inputs_max_pool_empty_strides(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+
+    # FIXME: (RuntimeError: non-empty 3D or 4D (batch mode) tensor expected for input)
+
+    params_generator_type_dict = {
+        "ops.aten.max_pool1d": _TestParamsMaxPool1dEmptyStride,
+        "ops.aten.max_pool2d": _TestParamsMaxPool2dEmptyStride,
+        "ops.aten.max_pool3d": _TestParamsMaxPool3dEmptyStride,
+    }
+
+    params_generator = params_generator_type_dict[op_info.name]()
+    for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
+        yield opinfo_core.SampleInput(arg, kwargs=kwargs)
+
+
+def sample_inputs_max_pool1d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    params_generator = (
+        common_methods_invocations._TestParamsMaxPool1d()  # pylint: disable=protected-access
+    )
+    for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
+        yield opinfo_core.SampleInput(arg, kwargs=kwargs)
+
+
+def sample_inputs_max_pool2d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    params_generator = (
+        common_methods_invocations._TestParamsMaxPool2d()  # pylint: disable=protected-access
+    )
+    for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
+        yield opinfo_core.SampleInput(arg, kwargs=kwargs)
+
+
+def sample_inputs_max_pool3d_with_indices(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    params_generator = (
+        common_methods_invocations._TestParamsMaxPool3d()  # pylint: disable=protected-access
+    )
+    for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        arg = (
+            make_arg(shape)
+            .to(memory_format=memory_format)
+            .requires_grad_(requires_grad)
+        )
+        yield opinfo_core.SampleInput(arg, kwargs=kwargs)
+
+
+def sample_inputs_native_group_norm(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    # Ordered as input shape, C,N,HxW, and kwargs for group and eps
+    cases = (
+        ((1, 6, 3), (6,), (6,), 1, 6, 3, {"group": 2, "eps": 0.5}),
+        ((2, 6, 3), (6,), (6,), 2, 6, 3, {"group": 3, "eps": -0.5}),
+        ((5, 5, 5), (5,), (5,), 5, 5, 5, {"group": 1, "eps": 1e-5}),
+        ((5, 8, 10), (8,), (8,), 5, 8, 10, {"group": 4, "eps": 1e-5}),
+    )
+
+    for input_shape, weight, bias, N, C, HxW, kwargs in cases:
+        # args: running mean, running var, weight and bias should necessarily be of shape: (channels,)
+        channels = input_shape[1] if len(input_shape) > 1 else 0
+        weight = make_arg(channels) if channels > 0 else None
+        bias = make_arg(channels) if channels > 0 else None
+
+        yield opinfo_core.SampleInput(
+            make_arg(input_shape),
+            args=(
+                weight,
+                bias,
+                N,
+                C,
+                HxW,
+            ),
+            kwargs=kwargs,
+        )
+
+
+def sample_inputs__native_batch_norm_legit(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    samples = common_methods_invocations.sample_inputs_batch_norm(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        training = sample.kwargs.get("training", True)
+        momentum = sample.kwargs.get("momentum", 0.5)
+        eps = sample.kwargs.get("eps", 1e-5)
+        if args[0] is not None and args[1] is not None:
+            yield opinfo_core.SampleInput(
+                sample.input,
+                args=(args[2], args[3], args[0], args[1]),
+                kwargs={"training": training, "momentum": momentum, "eps": eps},
+            )
+
+
+def sample_inputs__native_batch_norm_legit_no_stats(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    samples = common_methods_invocations.sample_inputs_batch_norm(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        training = sample.kwargs.get("training", True)
+        momentum = sample.kwargs.get("momentum", 0.5)
+        eps = sample.kwargs.get("eps", 1e-5)
+        if args[0] is not None and args[1] is None:
+            yield opinfo_core.SampleInput(
+                sample.input,
+                args=(args[2], args[3]),
+                kwargs={"training": training, "momentum": momentum, "eps": eps},
+            )
+
+
+def sample_inputs_reflection_pad1d(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    cases: tuple = (  # ignore
+        ((2, 3), (1, 2)),
+        ((4, 5), (0, 1)),
+        ((6, 7), (1, 1)),
+        ((8, 9), (1, 0)),
+    )
+
+    make_inp = opinfo_core.partial(
+        torch.testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+
+    for shape, pad in cases:
+        yield opinfo_core.SampleInput(make_inp(shape), args=(pad,))
+
+
+def sample_inputs_replication_pad1d(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    cases: tuple = (  # ignore
+        ((2, 3), (1, 2)),
+        ((4, 5), (0, 1)),
+        ((6, 7), (1, 1)),
+        ((8, 9), (1, 0)),
+    )
+
+    make_inp = opinfo_core.partial(
+        torch.testing.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+
+    for shape, pad in cases:
+        yield opinfo_core.SampleInput(make_inp(shape), args=(pad,))
+
+
+def _upsample_sample_factory(device, dtype, requires_grad):
+    def shape(size, rank, with_batch_channel=True):
+        return tuple(([2, 3] if with_batch_channel else []) + [size] * rank)
+
+    return shape, functools.partial(
+        make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        low=-1,
+        high=1,
+    )
+
+
+def sample_inputs_upsample(
+    op_info, device, dtype, requires_grad, *, rank, nearest=False, vec=False, **kwargs
+):
+    shape, make_arg = _upsample_sample_factory(device, dtype, requires_grad)
+    if nearest:
+        for size in (S, 5):
+            args = (
+                (shape(size, rank, False), None) if vec else (shape(size, rank, False),)
+            )
+            yield opinfo_core.SampleInput(make_arg(shape(4, rank)), args=args)
+        if not vec:
+            return
+        # output_size must be None with scale_factors.
+        scales = ([0.6] * rank, [1.7] * rank)
+        if vec:
+            scales += ([0.6, 1.7, 4.2][:rank],)
+        for factors in scales:
+            if vec:
+                args, options = (None,), {"scale_factors": factors}
+            else:
+                args = (None,)
+                keys = (
+                    ("scales",)
+                    if rank == 1
+                    else ("scales_h", "scales_w")
+                    if rank == 2
+                    else ("scales_d", "scales_h", "scales_w")
+                )
+                options = dict(zip(keys, factors))
+            yield opinfo_core.SampleInput(
+                make_arg(shape(4, rank)), args=args, kwargs=options
+            )
+        return
+
+    args = (shape(3, rank, False), True, None) if vec else (shape(3, rank, False), True)
+    yield opinfo_core.SampleInput(make_arg(shape(4, rank)), args=args)
+    for align_corners in (True, False):
+        sizes = (
+            (1, S, 5)
+            if rank == 2
+            else (1, 5)
+            if vec and rank == 1
+            else (3, S, 5)
+            if rank == 3
+            else (S, 5)
+        )
+        for size in sizes:
+            args = (shape(size, rank, False), align_corners)
+            if vec:
+                args += (None,)
+            yield opinfo_core.SampleInput(make_arg(shape(4, rank)), args=args)
+        if vec:
+            factors = (
+                [1.7] * rank,
+                [0.6] * rank,
+                [4.2] if rank == 1 else [0.6, 4.2] if rank == 2 else [0.6, 1.7, 4.2],
+            )
+            for scale_factors in factors:
+                yield opinfo_core.SampleInput(
+                    make_arg(shape(4, rank)),
+                    args=(None, align_corners),
+                    kwargs={"scale_factors": scale_factors},
+                )
+        elif rank != 3:
+            options = (
+                ({"scales": 4.2},)
+                if rank == 1
+                else (
+                    {"scales_h": 0.6, "scales_w": 4.2},
+                    {"scales_h": 4.2, "scales_w": 0.6},
+                )
+            )
+            for values in options:
+                yield opinfo_core.SampleInput(
+                    make_arg(shape(4, rank)),
+                    args=(shape(5, rank, False), align_corners),
+                    kwargs=values,
+                )
+
+
+sample_inputs_upsample_2d = functools.partial(
+    sample_inputs_upsample, rank=2, nearest=False, vec=False
+)
+sample_inputs_upsample_2d_vec = functools.partial(
+    sample_inputs_upsample, rank=2, nearest=False, vec=True
+)
+sample_inputs_upsample_linear1d = functools.partial(
+    sample_inputs_upsample, rank=1, nearest=False, vec=False
+)
+sample_inputs_upsample_linear1d_vec = functools.partial(
+    sample_inputs_upsample, rank=1, nearest=False, vec=True
+)
+sample_inputs_upsample_trilinear3d = functools.partial(
+    sample_inputs_upsample, rank=3, nearest=False, vec=False
+)
+sample_inputs_upsample_trilinear3d_vec = functools.partial(
+    sample_inputs_upsample, rank=3, nearest=False, vec=True
+)
+sample_inputs_upsample_nearest1d = functools.partial(
+    sample_inputs_upsample, rank=1, nearest=True, vec=False
+)
+sample_inputs_upsample_nearest1d_vec = functools.partial(
+    sample_inputs_upsample, rank=1, nearest=True, vec=True
+)
+sample_inputs_upsample_nearest2d = functools.partial(
+    sample_inputs_upsample, rank=2, nearest=True, vec=False
+)
+sample_inputs_upsample_nearest2d_vec = functools.partial(
+    sample_inputs_upsample, rank=2, nearest=True, vec=True
+)
+sample_inputs_upsample_nearest3d = functools.partial(
+    sample_inputs_upsample, rank=3, nearest=True, vec=False
+)
+sample_inputs_upsample_nearest3d_vec = functools.partial(
+    sample_inputs_upsample, rank=3, nearest=True, vec=True
+)
+
+
+OPS_DB.extend(
+    [
+        opinfo_core.OpInfo(
+            "ops.aten.linear.1d_weight",
+            op=torch.nn.functional.linear,
+            aten_name="linear",
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_linear_1d_weight,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.col2im",
+            aten_name="col2im",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.half, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_col2im,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.conv3d",
+            aten_name="conv3d",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.int64, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_conv3d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.convolution",
+            aten_name="convolution",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.int64, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_convolution,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.layer_norm",
+            aten_name="layer_norm",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.int64, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_layer_norm,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.max_pool1d",
+            variant_test_name="empty_strides",
+            aten_name="max_pool1d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool_empty_strides,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.max_pool2d",
+            variant_test_name="empty_strides",
+            aten_name="max_pool2d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool_empty_strides,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.max_pool3d",
+            variant_test_name="empty_strides",
+            aten_name="max_pool3d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool_empty_strides,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.native_group_norm",
+            aten_name="native_group_norm",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.half, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_native_group_norm,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._native_batch_norm_legit",
+            aten_name="_native_batch_norm_legit",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            dtypesIfCUDA=common_dtype.floating_types_and(torch.float16, torch.bfloat16),
+            supports_forward_ad=True,
+            supports_fwgrad_bwgrad=True,
+            assert_jit_shape_analysis=True,
+            sample_inputs_func=sample_inputs__native_batch_norm_legit,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._native_batch_norm_legit_functional",
+            aten_name="_native_batch_norm_legit_functional",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            dtypesIfCUDA=common_dtype.floating_types_and(torch.float16, torch.bfloat16),
+            supports_forward_ad=True,
+            supports_fwgrad_bwgrad=True,
+            assert_jit_shape_analysis=True,
+            sample_inputs_func=sample_inputs__native_batch_norm_legit,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._native_batch_norm_legit.no_stats",
+            aten_name="_native_batch_norm_legit.no_stats",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            dtypesIfCUDA=common_dtype.floating_types_and(torch.float16, torch.bfloat16),
+            supports_forward_ad=True,
+            supports_fwgrad_bwgrad=True,
+            assert_jit_shape_analysis=True,
+            sample_inputs_func=sample_inputs__native_batch_norm_legit_no_stats,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.reflection_pad1d",
+            aten_name="ops.aten.reflection_pad1d",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.int64, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_reflection_pad1d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.replication_pad1d",
+            aten_name="ops.aten.replication_pad1d",
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.int64, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_replication_pad1d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_bicubic2d.default",
+            aten_name="upsample_bicubic2d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._upsample_bicubic2d_aa",
+            aten_name="_upsample_bicubic2d_aa",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_bicubic2d.vec",
+            aten_name="upsample_bicubic2d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_bilinear2d.default",
+            aten_name="upsample_bilinear2d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._upsample_bilinear2d_aa",
+            aten_name="_upsample_bilinear2d_aa",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_bilinear2d.vec",
+            aten_name="upsample_bilinear2d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_2d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_linear1d",
+            aten_name="upsample_linear1d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_linear1d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_linear1d.vec",
+            aten_name="upsample_linear1d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_linear1d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest1d",
+            aten_name="upsample_nearest1d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest1d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest1d.vec",
+            aten_name="upsample_nearest1d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest1d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest2d",
+            aten_name="upsample_nearest2d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest2d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest2d.vec",
+            aten_name="upsample_nearest2d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest2d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest3d",
+            aten_name="upsample_nearest3d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest3d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_nearest3d.vec",
+            aten_name="upsample_nearest3d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_nearest3d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_trilinear3d.default",
+            aten_name="upsample_trilinear3d",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_trilinear3d,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten.upsample_trilinear3d.vec",
+            aten_name="upsample_trilinear3d.vec",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_upsample_trilinear3d_vec,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "nn.functional.max_pool1d_with_indices",
+            aten_name="max_pool1d_with_indices",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool1d_with_indices,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "nn.functional.max_pool2d_with_indices",
+            aten_name="max_pool2d_with_indices",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool2d_with_indices,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "nn.functional.max_pool3d_with_indices",
+            aten_name="max_pool3d_with_indices",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            sample_inputs_func=sample_inputs_max_pool3d_with_indices,
             supports_out=False,
         ),
     ]

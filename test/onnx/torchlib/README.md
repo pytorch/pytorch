@@ -78,8 +78,19 @@ Embedding bags use explicitly typed `Loop`/`If` subgraphs with lexical captures,
 including empty bags, padding, per-sample weights, and auxiliary outputs.
 `test_native_recurrent_residual_ops.py` compares these graphs with PyTorch and
 exports models with optimization both enabled and disabled without legacy
-translations. Convolution and normalization remain on the existing fallback
-until their next migration layer.
+translations.
+
+Convolution and normalization now live in `normalization.py`, including complex
+convolutions and functional batch-normalization outputs. Training is retained
+rather than forced to inference for older ORT kernels. Saved inference statistics
+keep source torchlib's CUDA convention, which differs from CPU's empty outputs.
+`neural.py` contains source NN translations, including opset18 GELU, group norm,
+and attention alternatives to the newer implementations in `nn.py`. Grouped-query
+attention requires static head counts; batch and sequence sizes may be dynamic.
+`test_native_neural_ops.py` checks native-only dynamic FX exports with optimization
+off/on. Source OpInfo mappings retain numerical tolerances and known limitations.
+The two CUDA-only experimental flash/efficient-attention wrappers remain on the
+legacy fallback for the final migration layer.
 
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
