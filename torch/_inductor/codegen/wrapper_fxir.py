@@ -67,6 +67,7 @@ from .wrapper import (
     Line,
     MultiOutputLine,
     NullLine,
+    ProfilerMarkerLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
@@ -251,6 +252,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self, input_names: Iterable[str], stream: int = 0
     ) -> None:
         """FXIR does not emit deferred alignment copies."""
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
+        return False
 
     @classmethod
     def create(
@@ -601,7 +606,7 @@ class FxConverter:
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                     device=device,
                     outer_name=unique_name,
-                    dtype=buffer.get_dtype(),
+                    dtype=node.get_dtype(),
                 )
 
                 # Generate FX IR for the view.
@@ -849,6 +854,11 @@ class FxConverter:
             raise AssertionError(f"expected CommentLine, got {type(line)}")
         # We ignore comments in FX IR.
 
+    def _generate_profiler_marker(self, line: WrapperLine) -> None:
+        if not isinstance(line, ProfilerMarkerLine):
+            raise AssertionError(f"expected ProfilerMarkerLine, got {type(line)}")
+        # Profiler markers are emitted only by the Python wrapper.
+
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         if not isinstance(line, DynamicScalarLine):
             raise AssertionError(f"expected DynamicScalarLine, got {type(line)}")
@@ -961,6 +971,10 @@ class FxConverter:
 
         # Map ReinterpretView to as_strided.
         result_node = self._create_as_strided(input_node, size, stride, offset)
+        if layout.dtype != input_buffer.get_dtype():
+            result_node = self.gm.graph.call_function(
+                torch.ops.aten.view.dtype, args=(result_node, layout.dtype)
+            )
         result_node.name = name
         self._record_allocation(result_buffer, result_node)
 
@@ -1174,7 +1188,14 @@ class FxConverter:
                 elif not hinted(arg):
                     can_tune = False
                     break
-            if can_tune:
+            if (line.inductor_meta or {}).get("asserts_need_real_inputs"):
+                # Tuning runs the kernel on zeros, which need not hold what its device
+                # asserts check, and a failed device assert leaves the device unusable.
+                log.info(
+                    "Skipping compile-time autotuning for kernel %s, which has device asserts.",
+                    kernel_name,
+                )
+            elif can_tune:
                 tune_kernel(tuner, call_args)
             else:
                 log.info(
@@ -1321,6 +1342,10 @@ class FxConverter:
             k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
             for k, v in kernel.kwargs.items()
         }
+        # Symbolic scalar args, e.g. a SymInt output_size, must be FX nodes.
+        args, kwargs = pytree.tree_map_only(
+            sympy.Expr, self._generate_sym_node, (args, kwargs)
+        )
 
         result_buffer: str | None = None
         if isinstance(kernel, ir.ExternKernelOut):

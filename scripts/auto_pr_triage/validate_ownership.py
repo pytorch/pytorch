@@ -24,7 +24,7 @@ from schemas import (
     LLMResult,
     OwnershipResult,
 )
-from step_summary import summary_prose
+from step_summary import print_log_json, summary_code, summary_prose
 
 
 def load_action_execution(path: Path) -> tuple[LLMResult, dict[str, Any]]:
@@ -68,9 +68,7 @@ def write_json(*, path: Path, value: Any) -> None:
 def log_analysis_record(record: dict[str, Any]) -> None:
     """Print LLM reasoning safely without allowing workflow commands."""
 
-    for line in json.dumps(record, indent=2, sort_keys=True).splitlines():
-        safe_line = line.replace("::", r"\u003a\u003a").replace("##[", r"\u0023\u0023[")
-        print(f"Auto PR Triage result | {safe_line}")
+    print_log_json(prefix="Auto PR Triage result", value=record)
 
 
 def is_excerpt_of_patch(*, excerpt_lines: list[str], patch_lines: list[str]) -> bool:
@@ -248,9 +246,9 @@ def build_ownership_result(
 
 
 def evidence_files(concern: Concern) -> str:
-    """Render a concern's evidence files as inert Markdown."""
+    """Render a concern's evidence files as inline code."""
 
-    return ", ".join(summary_prose(item.file) for item in concern.evidence)
+    return ", ".join(summary_code(item.file) for item in concern.evidence)
 
 
 def write_github_step_summary(
@@ -260,7 +258,7 @@ def write_github_step_summary(
     result: OwnershipResult,
     validation_errors: list[str],
 ) -> None:
-    """Append a compact human-readable analysis summary."""
+    """Append the analysis record as a collapsed block above the plan summary."""
 
     def joined(values: tuple[str, ...]) -> str:
         return ", ".join(values) or "none"
@@ -302,7 +300,7 @@ def write_github_step_summary(
         ("Validation errors", str(len(validation_errors))),
     ]
     with path.open("a") as output:
-        output.write("## Auto PR Triage\n\n")
+        output.write("<details><summary>Auto PR Triage analysis</summary>\n\n")
         output.write("| Field | Value |\n|---|---|\n")
         for label, value in rows:
             output.write(f"| {label} | {value} |\n")
@@ -342,6 +340,7 @@ def write_github_step_summary(
                     f"Evidence: {evidence_files(item.concern)}\n"
                 )
         output.write("\nPlanning derives the GitHub effects from this record.\n")
+        output.write("\n</details>\n\n")
 
 
 def parse_args() -> argparse.Namespace:
