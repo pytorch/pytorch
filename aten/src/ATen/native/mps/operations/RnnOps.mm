@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Rnn.h>
 #include <ATen/native/mps/operations/MatmulUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -20,7 +21,6 @@
 #endif
 
 #include <c10/util/TypeCast.h>
-#include <limits>
 
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
 
@@ -33,13 +33,14 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Rnn_metallib.h>
 #endif
 
-// A batched at::mm_out runs MPSGraph on every timestep and closes the cell's encoder, so batches use the Metal kernels.
-// A single row keeps ATen's native GEMV, and reductions above this size measured slower on the Metal kernels.
-constexpr int64_t kMetalMmMaxReduction = 512;
-
+// MPSGraph rejects views whose storage past the offset exceeds INT32_MAX elements, such as one step of the states,
+// so those batches take the Metal kernels at any reduction size.
 void lstm_mm(Tensor& out, const Tensor& a, const Tensor& b) {
   const bool batched = a.size(0) > 1;
-  if (batched && a.size(1) <= kMetalMmMaxReduction) {
+  const auto too_large = [&] {
+    return isTooLargeForMPSGraph(out) || isTooLargeForMPSGraph(a) || isTooLargeForMPSGraph(b);
+  };
+  if (batched && (a.size(1) <= kMetalMmMaxReduction || too_large())) {
     metal_mm_out(a, b, out);
   } else {
     at::mm_out(out, a, b);
@@ -58,7 +59,7 @@ void lstm_cell(MTLComputePipelineState_t pso, const Tensor& cell, const Args&...
       getMPSProfiler().beginProfileKernel(pso, "lstm_cell", {cell}, stream);
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, args..., c10::checked_convert<uint32_t>(cell.size(-1), "hidden size"));
-      mtl_dispatch1DJob(encoder, pso, cell.numel());
+      mtl_dispatch2DJob(encoder, pso, cell.size(-1), cell.size(0));
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
@@ -146,12 +147,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   const auto seq_len = layer_input.size(0), batch = layer_input.size(1), hidden = hx[0].size(2);
   const int64_t directions = bidirectional ? 2 : 1, stride = has_biases ? 4 : 2;
   TORCH_CHECK(seq_len > 0, "Expected sequence length to be larger than 0 in RNN");
-  // Cell elements are indexed by a 32-bit thread position.
-  TORCH_CHECK_NOT_IMPLEMENTED(batch * hidden <= std::numeric_limits<uint32_t>::max(),
-                              "LSTM on MPS supports at most 2^32 - 1 elements per step, got batch ",
-                              batch,
-                              " and hidden size ",
-                              hidden);
   const bool dropout = train && dropout_p > 0 && num_layers > 1;
   auto gates = at::empty({num_layers * directions, seq_len, batch, 4 * hidden}, input.options());
   auto graph_gates = at::empty({num_layers, seq_len, batch, directions * 4 * hidden}, input.options());
@@ -161,7 +156,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       ? at::empty({1}, input.options())
       : at::empty({(num_layers - 1) * (dropout ? 2 : 1), seq_len, batch, directions * hidden}, input.options());
   auto hy = at::empty(hx[0].sizes(), input.options()), cy = at::empty(hx[1].sizes(), input.options());
-  auto pso = lib.getPipelineStateForFunc("lstm_cell_forward_" + scalarToMetalTypeString(input));
+  // A cell step indexes batch rows of 4 * hidden gates, shaped like recurrent_gates.
+  auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
+  auto pso = lib.getPipelineStateForFunc(fmt::format(
+      "lstm_cell_forward_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(offsetsFitIn<uint32_t>(recurrent_gates))));
   for (const auto layer : c10::irange(num_layers)) {
     std::vector<Tensor> outputs;
     for (const auto direction : c10::irange(directions)) {
@@ -176,13 +174,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       auto x = direction ? layer_input.flip({0}) : layer_input;
       auto z = gates[index], h = states[index][0], c = states[index][1];
       auto z_flat = z.view({seq_len * batch, 4 * hidden});
-      at::mm_out(z_flat, x.reshape({seq_len * batch, x.size(2)}), params[param].t());
+      lstm_mm(z_flat, x.reshape({seq_len * batch, x.size(2)}), params[param].t());
       h[0].copy_(hx[0][index]);
       c[0].copy_(hx[1][index]);
       auto bias = has_biases ? params[param + 2].add(params[param + 3]).expand({4 * hidden}).contiguous()
                              : at::zeros({4 * hidden}, input.options());
       const auto recurrent_weight = params[param + 1].contiguous().t();
-      auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
       for (const auto step : c10::irange(seq_len)) {
         lstm_mm(recurrent_gates, h[step], recurrent_weight);
         lstm_cell(pso, c[step], z[step], recurrent_gates, c[step], c[step + 1], h[step + 1], bias);
