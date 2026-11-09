@@ -39,6 +39,16 @@ parametrize_pytree_module = parametrize(
 )
 
 
+class _ChangingHashKey:
+    def __init__(self):
+        self.value = 1
+        self.calls = 0
+
+    def __hash__(self):
+        self.calls += 1
+        return self.value
+
+
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
@@ -163,21 +173,36 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
-    @parametrize("streaming", [False, True])
-    @parametrize("explicit_new", [False, True])
-    def test_constructor_preserves_key_comparisons(self, explicit_new, streaming):
+    @parametrize(
+        "operation, explicit_new, streaming",
+        [
+            ("construct", new, stream)
+            for new in (False, True)
+            for stream in (False, True)
+        ]
+        + [("subscribe", False, False)],
+    )
+    def test_key_comparisons(self, operation, explicit_new, streaming):
         class Key:
             calls = 0
+
+            if operation == "subscribe":
+
+                def __init__(self):
+                    self.calls = 0
 
             def __hash__(self):
                 return 42
 
             def __eq__(self, other):
                 self.calls += 1
-                return self.calls > 1
+                return operation == "subscribe" or self.calls > 1
 
         def fn(x):
             first, second = Key(), Key()
+            if operation == "subscribe":
+                mapping = builtins.frozendict([(first, x)])
+                return mapping[second] + 1, first.calls
 
             def pairs():
                 yield first, x
@@ -191,29 +216,11 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 mapping = builtins.frozendict(data)
             return x + len(mapping), first.calls
 
-        x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 2, 0 if streaming else 1))
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_subscription_compares_key_once(self):
-        class Key:
-            def __init__(self):
-                self.calls = 0
-
-            def __hash__(self):
-                return 42
-
-            def __eq__(self, other):
-                self.calls += 1
-                return True
-
-        def fn(x):
-            stored, probe = Key(), Key()
-            mapping = builtins.frozendict([(stored, x)])
-            return mapping[probe] + 1, stored.calls
-
-        x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 1, 1))
+        x = torch.randn(3)
+        expected = (
+            (x + 1, 1) if operation == "subscribe" else (x + 2, 0 if streaming else 1)
+        )
+        self.assertEqual(fn(x), expected)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("backend", ["eager", "aot_eager", "export"])
@@ -317,18 +324,26 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize(
-        "args",
+        "name,args",
         [
-            subtest((), name="missing"),
-            subtest((object(),), name="object"),
-            subtest((dict,), name="unrelated"),
-            subtest((getattr(builtins, "frozendict", dict), {}, {}), name="extra"),
+            subtest(("__new__", ()), name="new_missing"),
+            subtest(("__new__", (object(),)), name="new_object"),
+            subtest(("__new__", (dict,)), name="new_unrelated"),
+            subtest(
+                ("__new__", (getattr(builtins, "frozendict", dict), {}, {})),
+                name="new_extra",
+            ),
+            ("keys", ({},)),
+            ("__len__", ({},)),
         ],
     )
-    def test_new_invalid_arguments(self, args):
+    def test_descriptor_type_errors(self, name, args):
         def fn(x):
             try:
-                builtins.frozendict.__new__(*args)
+                if name == "__new__":
+                    builtins.frozendict.__new__(*args)
+                else:
+                    getattr(builtins.frozendict, name)(*args)
             except TypeError:
                 return x + 1
             return x - 1
@@ -420,14 +435,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         ],
     )
     def test_preexisting_custom_key_hash(self, wrap):
-        class Key:
-            def __init__(self):
-                self.value = 1
-                self.calls = 0
-
-            def __hash__(self):
-                self.calls += 1
-                return self.value
+        Key = _ChangingHashKey
 
         key = Key()
         wrapped = wrap(key)
@@ -445,44 +453,44 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(key.calls, calls)
 
     @parametrize(
-        "key_type",
-        [python_pytree.MappingKey, python_pytree.SequenceKey, python_pytree.GetAttrKey],
+        "key_type, changed_field",
+        [
+            (kind, True)
+            for kind in (
+                python_pytree.MappingKey,
+                python_pytree.SequenceKey,
+                python_pytree.GetAttrKey,
+            )
+        ]
+        + [(kind, False) for kind in (object, type, types.ModuleType, torch.Tensor)],
     )
-    def test_preexisting_changed_pytree_key(self, key_type):
-        key = key_type("a" if key_type is python_pytree.GetAttrKey else 0)
-        mapping = builtins.frozendict({key: 7})
-        changed = "b" if key_type is python_pytree.GetAttrKey else 1
-        object.__setattr__(key, next(iter(key_type.__dataclass_fields__)), changed)
-
-        def fn(x, mapping):
-            return x + mapping.get(key, 0)
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hash"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
-
-    @parametrize("base", [object, type, types.ModuleType, torch.Tensor])
-    def test_preexisting_restored_identity_hash(self, base):
-        class Key(base):
-            def __hash__(self):
-                return object.__hash__(self) + 1
-
-        if base is type:
-            key = Key("Key", (), {})
-        elif base is types.ModuleType:
-            key = Key(__name__)
+    def test_preexisting_changed_key_hash(self, key_type, changed_field):
+        if changed_field:
+            key = key_type("a" if key_type is python_pytree.GetAttrKey else 0)
         else:
-            key = Key()
+
+            class Key(key_type):
+                def __hash__(self):
+                    return object.__hash__(self) + 1
+
+            key = (
+                Key("Key", (), {})
+                if key_type is type
+                else Key(__name__)
+                if key_type is types.ModuleType
+                else Key()
+            )
         mapping = builtins.frozendict([(key, 7)])
-        if base is type or base is object:
+        if changed_field:
+            changed = "b" if key_type is python_pytree.GetAttrKey else 1
+            object.__setattr__(key, next(iter(key_type.__dataclass_fields__)), changed)
+        elif key_type is type or key_type is object:
             Key.__hash__ = object.__hash__
         else:
-            key.__class__ = base
+            key.__class__ = key_type
 
         def fn(x, mapping):
-            return x + (key in mapping)
+            return x + (mapping.get(key, 0) if changed_field else key in mapping)
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
@@ -505,14 +513,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("with_kwargs", [False, True])
     def test_conversion_preserves_stored_key_hashes(self, with_kwargs):
-        class Key:
-            def __init__(self):
-                self.value = 1
-                self.calls = 0
-
-            def __hash__(self):
-                self.calls += 1
-                return self.value
+        Key = _ChangingHashKey
 
         def fn(x):
             key = Key()
@@ -560,18 +561,6 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
-
-    @parametrize("name", ["keys", "__len__"])
-    def test_descriptor_receiver_errors(self, name):
-        def fn(x):
-            try:
-                getattr(builtins.frozendict, name)({})
-            except TypeError:
-                return x + 1
-            return x - 1
-
-        x = torch.randn(3)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_guard_invalidation(self):
         counter = CompileCounter()
@@ -677,40 +666,33 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(result), ["b", "a"])
 
     @torch._dynamo.config.patch(trace_autograd_ops=True)
-    @parametrize("construct", [False, True])
-    def test_autograd(self, construct):
+    @parametrize("construct, backward", [(False, False), (True, False), (True, True)])
+    def test_autograd(self, construct, backward):
         def fn(x, y, inputs):
             if construct:
                 inputs = builtins.frozendict(y=y, x=x)
-            return torch.autograd.grad((x * x + 3 * y).sum(), inputs)
-
-        x = torch.randn(3, requires_grad=True)
-        y = torch.randn(3, requires_grad=True)
-        inputs = builtins.frozendict(y=y, x=x)
-        expected = fn(x, y, inputs)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x, y, inputs)
-        self.assertIs(type(result), dict)
-        self.assertEqual(list(result), ["y", "x"])
-        self.assertEqual(result, expected)
-        self.assertEqual(result["y"], torch.full_like(y, 3))
-        self.assertEqual(result["x"], 2 * x)
-
-    @torch._dynamo.config.patch(trace_autograd_ops=True)
-    def test_backward_and_unused(self):
-        def fn(x, y):
-            inputs = builtins.frozendict(y=y, x=x)
-            grad = torch.autograd.grad((x * x).sum(), inputs, allow_unused=True)
-            (x * x + 3 * y).sum().backward(inputs=inputs)
+            output = x * x if backward else x * x + 3 * y
+            grad = torch.autograd.grad(output.sum(), inputs, allow_unused=backward)
+            if backward:
+                (x * x + 3 * y).sum().backward(inputs=inputs)
             return grad
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3, requires_grad=True)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        result = compiled(x, y)
-        self.assertIsNone(result["y"])
+        inputs = builtins.frozendict(y=y, x=x)
+        if not backward:
+            expected = fn(x, y, inputs)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, y, inputs)
+        self.assertIs(type(result), dict)
+        self.assertEqual(list(result), ["y", "x"])
         self.assertEqual(result["x"], 2 * x)
-        self.assertEqual(x.grad, 2 * x)
-        self.assertEqual(y.grad, torch.full_like(y, 3))
+        if backward:
+            self.assertIsNone(result["y"])
+            self.assertEqual(x.grad, 2 * x)
+            self.assertEqual(y.grad, torch.full_like(y, 3))
+        else:
+            self.assertEqual(result, expected)
+            self.assertEqual(result["y"], torch.full_like(y, 3))
 
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     @runWithoutCompiledAutograd("Test external GradientEdge validation")
@@ -744,6 +726,17 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_constructed_hash_requires_operators(self):
+        def fn(x):
+            return x + 1, builtins.frozendict(a=1) in {builtins.frozendict(a=1)}
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "frozendict operators"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     @parametrize("base_type", [dict, OrderedDict, defaultdict])
     def test_fromkeys_dict_constructor_returns_frozendict(self, base_type):
