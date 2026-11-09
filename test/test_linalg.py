@@ -6395,17 +6395,20 @@ class TestLinalg(TestCase):
     @onlyCUDA
     def test_addmm_out_row_size_one_stride(self, device):
         # A (1, N) out is contiguous for any stride(0); here stride(0) == 1 < N
-        a, b, bias = (torch.randn(*s, device=device) for s in ((1, 8), (8, 16), (16,)))
+        a = torch.randn(1, 8, device=device)
+        b = torch.randn(8, 16, device=device)
+        bias = torch.randn(16, device=device)
         out = torch.zeros(16, 1, device=device).t()
-        self.assertEqual(torch.addmm(bias, a, b, out=out), torch.addmm(bias, a, b))
+        torch.addmm(bias, a, b, out=out)
+        self.assertEqual(out, torch.addmm(bias, a, b))
 
     @onlyCUDA
     @dtypes(torch.float32, torch.bfloat16)
     def test_bmm_out_size_one_dim_stride_zero(self, device, dtype):
         a = torch.randn(3, 5, 7, device=device, dtype=dtype)
         b = torch.randn(3, 7, 1, device=device, dtype=dtype)
-        out = torch.empty(15, device=device, dtype=dtype).as_strided((3, 5, 1), (5, 1, 0))
-        # cuBLASLt normalizes leading dims itself; the fix is in the cuBLAS helper
+        out = torch.empty_strided((3, 5, 1), (5, 1, 0), device=device, dtype=dtype)
+        # Exercise the cuBLAS leading-dimension checks, not the cuBLASLt path
         with blas_library_context("cublas"):
             self.assertEqual(torch.bmm(a, b, out=out), torch.bmm(a, b))
 
@@ -6413,21 +6416,22 @@ class TestLinalg(TestCase):
     def test_mv_out_length_one_stride_zero(self, device):
         mat, vec = torch.randn(1, 4, device=device), torch.randn(4, device=device)
         out = torch.empty(1, device=device).as_strided((1,), (0,))
-        self.assertEqual(torch.mv(mat, vec, out=out), mat @ vec)
+        self.assertEqual(torch.mv(mat, vec, out=out), (mat * vec).sum(-1))
 
     @onlyCUDA
     def test_mv_length_one_vector_large_stride(self, device):
         mat = torch.randn(3, 1, device=device)
         vec = torch.randn(1, device=device).as_strided((1,), (2**40,))
-        self.assertEqual(torch.mv(mat, vec), mat @ vec.contiguous())
+        # contiguous() keeps a size-1 tensor's stride, so use a non-BLAS reference
+        self.assertEqual(torch.mv(mat, vec), (mat * vec).sum(-1))
 
     @onlyCUDA
     def test_dot_length_one_large_stride(self, device):
         a = torch.randn(1, device=device).as_strided((1,), (2**40,))
         b = torch.randn(1, device=device)
-        self.assertEqual(torch.dot(a, b), a.contiguous() @ b)
+        self.assertEqual(torch.dot(a, b), (a * b).sum())
         a, b = a.to(torch.complex64), b.to(torch.complex64)
-        self.assertEqual(torch.vdot(a, b), a.contiguous().conj() @ b)
+        self.assertEqual(torch.vdot(a, b), (a.conj() * b).sum())
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})

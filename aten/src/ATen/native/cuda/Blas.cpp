@@ -528,8 +528,8 @@ bool launchGemmWithDistinctCAndDCublasLt(
     const Tensor& self,
     const Scalar& alpha,
     const Scalar& beta) {
-  // `self` is row-major with a valid leading dimension (guarded), so stride(0)
-  // can be passed directly; it may legitimately differ from result_ld.
+  // The guard keeps `self` row-major with stride(0) >= size(1), so stride(0) is
+  // already a valid ld; unlike result_ld it is not normalized.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.stride(1) == 1);
   return at::cuda::blas::gemm_and_bias<scalar_t>(
     args.transa == 't',
@@ -1095,11 +1095,11 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
-      // A length-1 result can be contiguous with any stride, including zero
-      auto r_stride = result.size(0) == 1 ? int64_t(1) : result.stride(0);
-      // An expanded vector needs a materialized copy; a length-1 vector can be contiguous with any stride
-      const auto vec_contiguous = vec.size(0) > 1 && vec.stride(0) == 0 ? vec.contiguous() : vec;
-      const auto vec_stride = vec_contiguous.size(0) == 1 ? int64_t(1) : vec_contiguous.stride(0);
+      // A length-1 vector's increment is never stepped, so pass 1 whatever its
+      // stride; a longer expanded (stride 0) vector must be materialized.
+      const int64_t r_stride = result.size(0) == 1 ? 1 : result.stride(0);
+      const auto vec_contiguous = vec.stride(0) == 0 ? vec.contiguous() : vec;
+      const int64_t vec_stride = vec.size(0) == 1 ? 1 : vec_contiguous.stride(0);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();
