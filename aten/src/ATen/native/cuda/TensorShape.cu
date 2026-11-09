@@ -46,27 +46,27 @@ namespace detail {
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
-// The mixed-dtype copy (bf16 -> fp32 in FSDP) vectorizes chunks of at least
-// this many dst bytes (8 KiB). Tuned: smaller chunks are faster with the
-// per-element loop.
-static constexpr int64_t MIN_VECTORIZED_CAST_BYTES = 4 * BYTES_PER_BLOCK;
 // 16-byte dst vectors each thread converts per step in the vectorized cast.
 static constexpr int64_t CAST_VECS_PER_THREAD = 2;
-// On SM 10.7, calls that write at least MIN_SM107_WIDE_CAST_BYTES use
-// SM107_WIDE_CAST_VECS_PER_THREAD vectors per thread per step. Tuned: faster
-// than CAST_VECS_PER_THREAD at and above this size, slower below.
+// The same, on SM 10.7 for calls above a tuned size, see
+// get_cast_vecs_per_thread.
 static constexpr int64_t SM107_WIDE_CAST_VECS_PER_THREAD = 4;
-static constexpr int64_t MIN_SM107_WIDE_CAST_BYTES = 8 * 1024 * 1024;
+static_assert(
+    SM107_WIDE_CAST_VECS_PER_THREAD != CAST_VECS_PER_THREAD,
+    "kernels with SM107_WIDE_CAST_VECS_PER_THREAD compile to a stub outside "
+    "SM 10.x, so the default must use a different value");
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
-// Whether the mixed-dtype copy vectorizes a chunk of `chunk_bytes` dst bytes.
-// The host sizes the grid with the same test, so a vectorized chunk gets
-// cast_vecs_per_thread times fewer blocks.
+// Whether the mixed-dtype copy (bf16 -> fp32 in FSDP) vectorizes a chunk of
+// `chunk_bytes` dst bytes. The host sizes the grid with the same test, so a
+// vectorized chunk gets cast_vecs_per_thread times fewer blocks.
 static __host__ __device__ inline bool is_vectorized_cast(int64_t chunk_bytes) {
-  return chunk_bytes >= MIN_VECTORIZED_CAST_BYTES;
+  // Tuned: smaller chunks are faster with the per-element loop.
+  constexpr int64_t kMinVectorizedCastBytes = 8 * 1024;
+  return chunk_bytes >= kMinVectorizedCastBytes;
 }
 
 // Vectors per thread per step for the vectorized chunks of a mixed-dtype call
@@ -74,9 +74,13 @@ static __host__ __device__ inline bool is_vectorized_cast(int64_t chunk_bytes) {
 static int64_t get_cast_vecs_per_thread(
     int64_t out_bytes,
     c10::DeviceIndex device) {
+  // Tuned on SM 10.7 with SM107_WIDE_CAST_VECS_PER_THREAD = 4 and
+  // CAST_VECS_PER_THREAD = 2: the wide one was faster at and above this size,
+  // slower below.
+  constexpr int64_t kMinSm107WideCastBytes = 8 * 1024 * 1024;
   const cudaDeviceProp* prop = at::cuda::getDeviceProperties(device);
   const bool sm107 = prop->major == 10 && prop->minor == 7;
-  return sm107 && out_bytes >= MIN_SM107_WIDE_CAST_BYTES
+  return sm107 && out_bytes >= kMinSm107WideCastBytes
       ? SM107_WIDE_CAST_VECS_PER_THREAD
       : CAST_VECS_PER_THREAD;
 }
@@ -369,7 +373,7 @@ static __device__ inline uint4 cast_or_pad_vec(
 //   tail [body_end, max_num_elems): the rest, less than one vector.
 // Each thread converts `vecs_per_thread` vectors per step and issues all their
 // loads before any store, to keep more bytes in flight. Only called for chunks
-// of at least MIN_VECTORIZED_CAST_BYTES, so head and tail lie inside the chunk.
+// is_vectorized_cast accepts, so head and tail lie inside the chunk.
 template <int64_t vecs_per_thread, typename dst_t, typename src_t>
 static __device__ inline void cast_chunk_with_pad_vectorized(
     dst_t* dst_ptr,
@@ -423,6 +427,8 @@ static __device__ inline void cast_chunk_with_pad_vectorized(
 // zero when `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
 // src elements are cast to dst_t when the two types differ, with
 // `cast_vecs_per_thread` vectors per thread per step (0: per element only).
+// torch/csrc/distributed/fsdp/ChunkCat.cu has a copy of this function without
+// the vectorized cast.
 template <typename dst_t, typename src_t, int64_t cast_vecs_per_thread>
 __device__ __inline__ void copy_chunk_with_pad(
     dst_t* dst_ptr,
