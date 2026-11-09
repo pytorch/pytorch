@@ -2971,7 +2971,7 @@ class TensorVariable(VariableTracker):
         if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
             return VariableTracker.build(tx, NotImplemented)
         args = (other, self) if reverse else (self, other)
-        kwargs = {}
+        kwargs: dict[str, VariableTracker] = {}
 
         if can_dispatch_torch_function(tx, args=args, kwargs=kwargs):
             fn = SourcelessBuilder.create(tx, torch.divmod)
