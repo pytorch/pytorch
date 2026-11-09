@@ -24,7 +24,8 @@ function install_cuda {
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
   chmod +x ${runfile}
-  ./${runfile} --toolkit --silent
+  # --silent prints nothing on failure; surface the installer's own log.
+  ./${runfile} --toolkit --silent || { tail -n 100 /var/log/cuda-installer.log; exit 1; }
   rm -f ${runfile}
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
 }
