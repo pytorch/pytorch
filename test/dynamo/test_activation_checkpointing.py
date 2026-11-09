@@ -38,7 +38,9 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     instantiate_device_type_tests,
+    requires_capabilities,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
@@ -50,7 +52,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -287,8 +288,7 @@ class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
                     msg="Gradient mismatch between the original version and the checkpointed version of the same function",
                 )
 
-        if HAS_TRITON:
-            run(functools.partial(torch.compile, fullgraph=fullgraph))
+        run(functools.partial(torch.compile, fullgraph=fullgraph))
         if fullgraph:
 
             def export_compiler(fn):
@@ -1032,6 +1032,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
             self.assertEqual(call_count, expected_calls)
             self.assertEqual(x.grad, x.cos())
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1087,6 +1092,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1216,6 +1226,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1272,6 +1287,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1343,6 +1363,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1395,6 +1420,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1446,6 +1476,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1500,6 +1535,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
     )
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @parametrize(
         "partition_fn",
         [
@@ -1552,7 +1592,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_triton()
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
     @parametrize(
@@ -1620,7 +1664,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @skipIfXpu(msg="XPU has some known limitations on flash attention.")
-    @requires_gpu_and_triton
     def test_autocast_flash_attention(self, device):
         def fn(primals_1, primals_2, primals_3):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(
@@ -1644,11 +1687,12 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @requires_triton()
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "This platform doesn't support efficient attention",
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
     )
+    @requires_capabilities(Capability.attention.mem_efficient_attention)
     def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
         def eager_attn(x):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(
@@ -1730,7 +1774,11 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @requires_gpu_and_triton
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
         # tests percolate_tags
@@ -1797,10 +1845,10 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
 
-class ActivationCheckpointingViaTagsCPUOnlyTests(
+class ActivationCheckpointingViaTagsGenericTests(
     ActivationCheckpointingViaTagsTestBase
 ):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     @torch._functorch.config.patch(recompute_views=True)
     @torch._inductor.config.patch(fx_graph_cache=False)
@@ -1885,12 +1933,6 @@ Expected additional saved tensors: {expected_additional_saved_tensors} but got: 
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
         )
-
-
-class ActivationCheckpointingViaTagsGenericTests(
-    ActivationCheckpointingViaTagsTestBase
-):
-    hw_classification = HardwareClassification.GENERIC
 
     def test_sac_with_partial_context_fn(self):
         class CustomPolicy:
