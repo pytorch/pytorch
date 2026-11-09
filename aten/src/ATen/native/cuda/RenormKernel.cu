@@ -14,10 +14,9 @@ void renorm_scale_factor_impl(TensorIteratorBase& iter, double maxnorm) {
     gpu_kernel(
       iter,
       [maxnorm_s] GPU_LAMBDA (scalar_t norm) -> scalar_t {
-        const auto eps = static_cast<scalar_t>(1e-7);
         const auto one = static_cast<scalar_t>(1.0);
         return (norm > maxnorm_s) ?
-            maxnorm_s / (norm + eps) : one;
+            maxnorm_s / norm : one;
       });
   });
 }

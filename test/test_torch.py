@@ -4479,6 +4479,17 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
+    def test_renorm_exact_maxnorm(self, device):
+        small = torch.tensor([[2e-6, 0.0]], device=device).renorm(2, 0, 1e-6)
+        self.assertEqual(small.norm(), 1e-6, atol=1e-8, rtol=0)
+
+        inf_norm = torch.tensor([[3.0, -4.0]], device=device).renorm(
+            float("inf"), 0, 2.0
+        )
+        self.assertEqual(
+            inf_norm, torch.tensor([[2.0, -2.0]], device=device), atol=1e-8, rtol=0
+        )
+
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyAccelerator
