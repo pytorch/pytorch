@@ -3633,6 +3633,21 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
+            if name == "__repr__":
+                if not isinstance(obj, ConstDictVariable):
+                    unimplemented(
+                        gb_type="Unsupported builtin dictionary storage operation",
+                        context=f"dict.{name} on {obj.python_type_name()}",
+                        explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+                        hints=[],
+                    )
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
+                )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)

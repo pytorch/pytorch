@@ -6779,6 +6779,14 @@
       ]
     }
   ],
+  "GB3043": [
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": []
+    }
+  ],
   "GB0356": [
     {
       "Gb_type": "failed to handle argument for FlexAttentionBackward HOP",

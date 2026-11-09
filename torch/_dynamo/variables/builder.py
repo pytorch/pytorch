@@ -964,6 +964,27 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
         )
 
 
+def _build_dict_items(
+    value: dict[Any, Any],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
+    snapshot = _dict_input_snapshot(value)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return {key: item for _, key, item in entries}
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1519,7 +1540,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1561,9 +1582,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            result = _build_dict_items(value, build_key_value)
 
             if istype(value, (dict, collections.OrderedDict)) and any(
                 value is getattr(torch.nn.modules.module, name)
@@ -2608,9 +2627,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            kv_items = _build_dict_items(value, build_key_value)
 
             if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
