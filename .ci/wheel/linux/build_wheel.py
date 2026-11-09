@@ -4,8 +4,8 @@
 Usage: build_wheel.py <output_dir>
 
 Expects all build env vars (USE_CUDA, TORCH_CUDA_ARCH_LIST, etc.) to be set
-by the caller (GitHub Actions workflow env). This script only adds the BLAS
-plumbing that depends on the host architecture.
+by the caller (GitHub Actions workflow env). Adds the BLAS plumbing for the
+host architecture and clears native-AOT embedding from previous wheel builds.
 """
 
 import argparse
@@ -14,6 +14,11 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
+
+
+REPO = Path(__file__).resolve().parents[3]
+sys.path.append(str(REPO))
+from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE, write_nothing_to_embed
 
 
 def configure_blas_env() -> None:
@@ -74,6 +79,13 @@ def main() -> None:
     args = parser.parse_args()
 
     configure_blas_env()
+
+    # Clear the previous interpreter's embedding before the raw wheel configures
+    # CMake. Keep the exported objects for stage 2 to reuse.
+    artifacts_dir = REPO / "build" / "native_aot"
+    if (artifacts_dir / CMAKE_INCLUDE).exists():
+        write_nothing_to_embed(str(artifacts_dir))
+        print("native-AOT: cleared previous embedding before wheel build", flush=True)
 
     subprocess.run([sys.executable, "-m", "pip", "install", "build"], check=True)
     subprocess.run(
