@@ -862,7 +862,9 @@ def reduce_row_tile(
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
-    x's device must be current.
+    x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
+    edges (one kernel per N); rows of whole 16-byte vectors ignore it. Ragged rows need
+    the linear order, no TMA, and a contiguous, 16-byte aligned input.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -875,6 +877,13 @@ def reduce_row_tile(
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
+    # Empty rows have no defined min, max or arg result.
+    if ragged_vector and N < 1:
+        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
+    # Rows of whole vectors have no edges; the rolled path folds them with one kernel
+    # per vector class rather than one per width.
+    whole = N % (tile.TRANSFER_ALIGNMENT // x.element_size()) == 0
+    ragged_vector = ragged_vector and not whole
     if ragged_vector and order == "inner_tree":
         raise ValueError("ragged vectors require the linear order")
     if ragged_vector and use_tma:
@@ -890,12 +899,12 @@ def reduce_row_tile(
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
     # Row edges come from the logical row offset, so rows must start at r * N from a
-    # 16-byte aligned base. Edge loads are unconditional, so rows must be nonempty.
+    # 16-byte aligned base.
     full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
-    if ragged_vector and N < 1:
-        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
     if ragged_vector and not x.is_contiguous():
-        raise ValueError(f"ragged vectors require contiguous rows, got {x.stride()=}")
+        raise ValueError(
+            f"ragged vectors require rows packed at stride N (a contiguous input), got {x.stride()=}"
+        )
     if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
         raise ValueError(
             f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
