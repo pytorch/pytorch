@@ -87,11 +87,25 @@ if(INTERN_BUILD_ATEN_OPS)
     # for example, it will enable building for SM 90a in case PyTorch
     # built for SM 90, etc.  For examples of how to use the function,
     # see below the function itself.
+    #
+    # TORCH_CUDA_EXACT_ARCH_LIST (CMake or environment variable, default off): when on, an
+    # additional arch is added only if TORCH_CUDA_ARCH_LIST itself names it, so a build gets
+    # exactly the arches it asked for. Off keeps the behavior above (e.g. sm_121a for
+    # RowwiseScaledMM.cu when building for 12.0).
+    if(NOT DEFINED TORCH_CUDA_EXACT_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_EXACT_ARCH_LIST})
+      set(TORCH_CUDA_EXACT_ARCH_LIST "$ENV{TORCH_CUDA_EXACT_ARCH_LIST}")
+    endif()
+    if(TORCH_CUDA_EXACT_ARCH_LIST)
+      message(STATUS "TORCH_CUDA_EXACT_ARCH_LIST: no additional per-file CUDA arches beyond TORCH_CUDA_ARCH_LIST")
+    endif()
     function(_BUILD_FOR_ADDITIONAL_ARCHS file archs)
       torch_cuda_get_nvcc_gencode_flag(_existing_arch_flags)
 
       set(_file_compile_flags "")
       foreach(_arch ${archs})
+        if(TORCH_CUDA_EXACT_ARCH_LIST AND NOT _existing_arch_flags MATCHES "compute_${_arch}([^0-9a-z]|$)")
+          continue()
+        endif()
         if("${_arch}" STREQUAL "89")
           if(_existing_arch_flags MATCHES ".*compute_86.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_89,code=sm_89")
