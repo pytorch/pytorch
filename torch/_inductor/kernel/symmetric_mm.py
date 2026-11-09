@@ -1,9 +1,43 @@
 import torch
 from torch import Tensor
+from torch._prims_common import make_contiguous_strides_for
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
 from ..ir import ExternKernel, FixedLayout, FlexibleLayout
 from ..lowering import register_lowering
 from ..select_algorithm import ExternKernelChoice, realize_inputs
+
+
+_QUACK_SYMMETRIC_ALIGNMENT = 8
+_QUACK_SYMMETRIC_MIN_M = 4096
+
+
+def can_use_quack_symmetric_mm(x: Tensor) -> bool:
+    """Check tensor eligibility for symmetric MM using BF16 GB200 heuristics.
+
+    Accepts real tensors and FakeTensors without inspecting data pointers.
+    Runtime pointer alignment is checked by ``_quack_symmetric_mm``.
+    """
+    from ..utils import ensure_cute_available
+
+    if x.ndim not in (2, 3):
+        return False
+    # Contiguity and divisibility are TMA requirements. The dtype, architecture,
+    # minimum size, and aspect ratio limits are backed by BF16 GB200 benchmarks.
+    return (
+        x.device.type == "cuda"
+        and torch.version.hip is None
+        and ensure_cute_available()
+        and x.dtype == torch.bfloat16
+        and statically_known_true(
+            sym_eq(x.stride(), make_contiguous_strides_for(x.shape))
+        )
+        and statically_known_true(x.shape[-2] >= _QUACK_SYMMETRIC_MIN_M)
+        and statically_known_true(x.shape[-1] >= x.shape[-2])
+        and statically_known_true(x.shape[-2] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and statically_known_true(x.shape[-1] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and torch.cuda.get_device_capability(x.device)[0] == 10
+    )
 
 
 def _quack_symmetric_mm(x: Tensor, *, out: Tensor) -> None:

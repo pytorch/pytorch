@@ -5,15 +5,87 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.kernel.symmetric_mm import can_use_quack_symmetric_mm
 from torch._inductor.utils import run_and_get_code
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
     TestCase,
 )
+
+
+@instantiate_parametrized_tests
+class SymmetricMMHeuristicTest(TestCase):
+    @parametrize(
+        "shape",
+        [(4096, 4096), (5120, 8192), (2, 4096, 8192), (0, 4096, 4096)],
+    )
+    def test_supported_shapes(self, shape):
+        with FakeTensorMode():
+            x = torch.empty(shape, device="cuda", dtype=torch.bfloat16)
+        with (
+            mock.patch(
+                "torch._inductor.utils.ensure_cute_available", return_value=True
+            ),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(10, 0)
+            ),
+        ):
+            self.assertTrue(can_use_quack_symmetric_mm(x))
+
+    @parametrize(
+        "case",
+        [
+            "rank",
+            "cpu",
+            "dtype",
+            "layout",
+            "min_m",
+            "aspect_ratio",
+            "m_alignment",
+            "k_alignment",
+            "no_cute",
+            "hip",
+            "architecture",
+        ],
+    )
+    def test_unsupported_inputs(self, case):
+        shape = {
+            "rank": (1, 1, 4096, 4096),
+            "min_m": (4088, 4096),
+            "aspect_ratio": (4104, 4096),
+            "m_alignment": (4097, 4104),
+            "k_alignment": (4096, 4097),
+        }.get(case, (4096, 4096))
+        with FakeTensorMode():
+            x = torch.empty(
+                shape,
+                device="cpu" if case == "cpu" else "cuda",
+                dtype=torch.float16 if case == "dtype" else torch.bfloat16,
+            )
+            if case == "layout":
+                x = torch.empty_strided(
+                    (4096, 4096), (8192, 2), device="cuda", dtype=torch.bfloat16
+                )
+        with (
+            mock.patch(
+                "torch._inductor.utils.ensure_cute_available",
+                return_value=case != "no_cute",
+            ),
+            mock.patch.object(torch.version, "hip", "6.3" if case == "hip" else None),
+            mock.patch.object(
+                torch.cuda,
+                "get_device_capability",
+                return_value=(11, 0) if case == "architecture" else (10, 0),
+            ),
+        ):
+            self.assertFalse(can_use_quack_symmetric_mm(x))
 
 
 class SymmetricMMTest(TestCase):
@@ -113,10 +185,6 @@ class SymmetricMMTest(TestCase):
             kwargs={"x": SimpleNamespace(meta={"val": x}), "dims": [1, 0]}
         )
         with (
-            mock.patch(
-                "torch._inductor.fx_passes.post_grad.ensure_cute_available",
-                return_value=case != "no_cute",
-            ),
             mock.patch(
                 "torch._inductor.utils.ensure_cute_available",
                 return_value=case != "no_cute",
