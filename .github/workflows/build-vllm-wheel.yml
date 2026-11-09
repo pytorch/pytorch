@@ -33,20 +33,12 @@ jobs:
       matrix:
         python-version: [ '3.12' ]
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu130', 'cu132' ]
+        device: [ 'cu132' ]
         include:
-          - platform: manylinux_2_28_x86_64
-            device: cu130
-            manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
-            runner: "mt-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
           - platform: manylinux_2_28_x86_64
             device: cu132
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.2'
             runner: "mt-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
-          - platform: manylinux_2_28_aarch64
-            device: cu130
-            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.0'
-            runner: "mt-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}"
           - platform: manylinux_2_28_aarch64
             device: cu132
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.2'
@@ -133,7 +125,13 @@ jobs:
             "${RUNNER_TEMP}"/artifacts/torch-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchvision-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchaudio-*.whl
-          "${PYTHON_EXECUTABLE}" use_existing_torch.py
+          # vLLM moved use_existing_torch.py into tools/ (vllm-project/vllm#58572).
+          # TODO: keep only the tools/ path once the vLLM pin includes that change.
+          if [ -f tools/use_existing_torch.py ]; then
+            "${PYTHON_EXECUTABLE}" tools/use_existing_torch.py
+          else
+            "${PYTHON_EXECUTABLE}" use_existing_torch.py
+          fi
           "${PYTHON_EXECUTABLE}" -m pip install -r requirements/build/cuda.txt
 
           # sccache (S3 compiler cache) is best-effort: install if missing, never fail on it.
@@ -181,7 +179,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu130', 'cu132' ]
+        device: [ 'cu132' ]
     env:
       PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}

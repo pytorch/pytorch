@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
-import importlib.util
 import math
 import os
 import sys
@@ -18,6 +17,7 @@ import torch
 from torch._dynamo import device_interface as di
 from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config as inductor_config, utils as inductor_utils
@@ -37,9 +37,11 @@ from torch._inductor.fx_utils import (
 from torch._inductor.utils import (
     _get_device_dram_gbps,
     _get_device_info_key,
+    _get_device_tflops,
     _gpu_types,
     _infer_scale_swizzle_impl,
     device_need_guard,
+    ensure_nv_universal_gemm_available,
     get_device_dram_gbps,
     get_device_tflops,
     get_gpu_dram_gbps,
@@ -51,7 +53,9 @@ from torch._inductor.utils import (
     sympy_subs,
 )
 from torch._inductor.virtualized import V
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
@@ -65,6 +69,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
@@ -81,7 +86,7 @@ class _TestDeviceInterface(DeviceInterface):
             return cls.properties[device]
 
 
-class TestDeviceDramBandwidth(TestCase):
+class _TestDeviceInfoTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.device = torch.device("privateuseone:0")
@@ -96,6 +101,11 @@ class TestDeviceDramBandwidth(TestCase):
         device_mapping_patcher = mock.patch.dict(_device_mapping)
         device_mapping_patcher.start()
         self.addCleanup(device_mapping_patcher.stop)
+
+
+class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
 
         _get_device_dram_gbps.cache_clear()
         get_gpu_dram_gbps.cache_clear()
@@ -219,6 +229,7 @@ class TestDeviceDramBandwidth(TestCase):
         "requires Triton",
     )
     def test_get_gpu_dram_gbps_preserves_triton_fallback(self):
+        """Use Triton's active-device bandwidth query when no datasheet value exists."""
         with (
             mock.patch(
                 "torch._inductor.utils.datasheet_dram_bw_gbs",
@@ -231,7 +242,63 @@ class TestDeviceDramBandwidth(TestCase):
         fallback.assert_called_once_with()
 
 
+@instantiate_parametrized_tests
+class TestFlopsFx(TestCase):
+    @parametrize("hint", [1, 2])
+    @fx_config.patch(backed_size_oblivious=True)
+    def test_flops_fx_does_not_specialize_dynamic_shapes(self, hint):
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+        symbol = shape_env.create_symbol(
+            hint,
+            source=ConstantSource("batch"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        batch = shape_env.create_symintnode(symbol, hint=hint)
+        graph = torch.fx.Graph()
+        bias, mat1, mat2 = (
+            graph.placeholder(name) for name in ("bias", "mat1", "mat2")
+        )
+        with fake_mode, shape_env.suppress_guards():
+            bias.meta["val"] = torch.empty(3)
+            mat1.meta["val"] = torch.empty(batch, 4)
+            mat2.meta["val"] = torch.empty(4, 3)
+        node = graph.call_function(aten.addmm.default, args=(bias, mat1, mat2))
+        guards = list(shape_env.guards)
+        ranges = dict(shape_env.var_to_range)
+        replacements = dict(shape_env.replacements)
+
+        flops = count_flops_fx(node)
+
+        self.assertIsInstance(flops, torch.SymInt)
+        self.assertEqual(flops.node.expr, 24 * symbol)
+        self.assertEqual(shape_env.guards, guards)
+        self.assertEqual(shape_env.var_to_range, ranges)
+        self.assertEqual(shape_env.replacements, replacements)
+
+
 class TestUtils(TestCase):
+    @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
+    def test_is_big_gpu_min_sms_config(self):
+        # https://github.com/pytorch/pytorch/issues/201471
+        jetson_like = types.SimpleNamespace(multi_processor_count=20, major=8, minor=7)
+        # The result is cached per (device, threshold); make sure the mocked
+        # GPU neither reads a cached real result nor leaks into later tests.
+        inductor_utils._is_big_gpu.cache_clear()
+        self.addCleanup(inductor_utils._is_big_gpu.cache_clear)
+        with mock.patch.object(
+            inductor_utils.DeviceProperties, "create", return_value=jetson_like
+        ):
+            device = torch.device("cuda", 0)
+            # Default threshold (68) excludes a 20-SM GPU.
+            with inductor_config.patch(max_autotune_gemm_min_sms=None):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=16):
+                self.assertTrue(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=21):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
             os.path.dirname(os.path.abspath(torch.__file__))
@@ -520,11 +587,37 @@ class TestUtils(TestCase):
             self.assertEqual(flops, expected)
 
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    @unittest.skipIf(
+        not torch.cuda.is_available() and not torch.xpu.is_available(),
+        "skip if no device",
+    )
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
+
+
+class TestDeviceTflopsTritonFallback(TestCase):
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    def test_get_device_tflops_triton_fallback_magnitude(self):
+        # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
+        # helpers, which are dimensioned in kHz. Getting that wrong under-reports
+        # peak throughput by 1000x, which a type-only assertion cannot catch, so
+        # pin the magnitude too. Measured fp16 values: the worst pre-fix case is
+        # ~1.06 (MI300X) and the smallest post-fix case is ~312 (A100), so 10.0
+        # clears the former by ~10x and sits far below the latter.
+        with mock.patch.object(inductor_utils, "datasheet_tops", return_value=None):
+            ret = get_device_tflops(torch.float16)
+        self.assertGreater(ret, 10.0)
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
@@ -562,7 +655,12 @@ class TestLoadTemplate(TestCase):
         self.assertIn("bad.py.jinja", str(cm.exception))
 
 
-class TestRuntimeEstimation(TestCase):
+class TestRuntimeEstimation(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
     def test_roofline_estimate_uses_exported_tuple_metadata(self):
         from torch._functorch._aot_autograd.streams import get_roofline_estimate
 
@@ -586,13 +684,205 @@ class TestRuntimeEstimation(TestCase):
             mock.patch(
                 "torch._functorch._aot_autograd.streams.get_compute_time",
                 return_value=2.0,
-            ),
+            ) as get_compute_time,
         ):
             self.assertEqual(get_roofline_estimate(node), 2.0 / 1e6)
 
         self.assertEqual(
             get_transfer_time.call_args.kwargs["device"], torch.device("cpu")
         )
+        self.assertEqual(
+            get_compute_time.call_args.kwargs["device"], torch.device("cpu")
+        )
+
+    def test_get_device_tflops_uses_registered_device_info(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {"arch": "test_arch"}}
+        register_device_info(
+            "test_arch",
+            DeviceInfo(
+                tops={torch.bfloat16: 321.0},
+                dram_bw_gbs=1.0,
+                dram_gb=1.0,
+            ),
+        )
+        self.assertEqual(
+            get_device_tflops(torch.bfloat16, device=self.device),
+            321.0,
+        )
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_device_index(self):
+        device = torch.device("cuda:1")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_current_device(self):
+        device = torch.device("cuda")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch("torch.cuda.current_device", return_value=1) as current_device,
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        current_device.assert_called_once_with()
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
+
+    def test_get_device_tflops_unindexed_device_tracks_current_device(self):
+        device_interface = mock.Mock()
+        device_interface.Worker.current_device.side_effect = [0, 1]
+        with (
+            mock.patch(
+                "torch._inductor.utils.get_interface_for_device",
+                return_value=device_interface,
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["gpu 0", "gpu 1"],
+            ) as get_device_info_key,
+            mock.patch(
+                "torch._inductor.utils.datasheet_tops",
+                side_effect=[100.0, 101.0],
+            ),
+        ):
+            device = torch.device("cuda")
+            self.assertEqual(get_device_tflops(torch.float16, device), 100.0)
+            self.assertEqual(get_device_tflops(torch.float16, device), 101.0)
+
+        self.assertEqual(
+            [call.args[0] for call in get_device_info_key.call_args_list],
+            [
+                torch.device("cuda:0"),
+                torch.device("cuda:1"),
+            ],
+        )
+
+    def test_get_device_tflops_none_tracks_current_accelerator(self):
+        with (
+            mock.patch(
+                "torch._inductor.utils._current_accelerator_device",
+                side_effect=[torch.device("mtia:0"), torch.device("mtia:1")],
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["mtia:0", "mtia:1"],
+            ),
+        ):
+            register_device_info(
+                "mtia:0",
+                DeviceInfo(
+                    tops={torch.bfloat16: 100.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            register_device_info(
+                "mtia:1",
+                DeviceInfo(
+                    tops={torch.bfloat16: 101.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            self.assertEqual(get_device_tflops(torch.bfloat16), 100.0)
+            self.assertEqual(get_device_tflops(torch.bfloat16), 101.0)
+
+    def test_get_device_tflops_unknown_device_returns_zero(self):
+        with mock.patch("torch._inductor.utils.datasheet_tops") as datasheet_tops:
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("meta")),
+                0.0,
+            )
+
+        datasheet_tops.assert_not_called()
+
+    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
+        with (
+            mock.patch("torch._inductor.utils._get_device_info_key", return_value=None),
+            mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("torch.cuda.get_device_capability") as get_capability,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("cuda")),
+                0.0,
+            )
+
+        get_capability.assert_not_called()
+
+    def test_flops_to_ns_gpu_type_takes_precedence_over_device(self):
+        from torch.utils._runtime_estimation import flops_to_ns
+
+        with (
+            mock.patch(
+                "torch.utils._runtime_estimation.datasheet_tops",
+                return_value=100.0,
+            ) as datasheet_tops,
+            mock.patch(
+                "torch.utils._runtime_estimation.get_device_tflops"
+            ) as get_tflops,
+        ):
+            result_ns = flops_to_ns(
+                150_000.0,
+                torch.float32,
+                gpu_type="NVIDIA H100",
+                device=torch.device("mtia"),
+            )
+
+        datasheet_tops.assert_called_once_with(
+            torch.float32,
+            is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+            device_name="NVIDIA H100",
+        )
+        get_tflops.assert_not_called()
+        self.assertEqual(result_ns, 1.0)
 
     def test_get_transfer_time_uses_requested_device(self):
         from torch.utils._runtime_estimation import get_transfer_time
@@ -642,27 +932,66 @@ class TestRuntimeEstimation(TestCase):
         expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9
         self.assertAlmostEqual(result_ns, expected_ns)
 
+    def test_get_compute_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_compute_time
+
+        device = torch.device("mtia:1")
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        out = torch.mm(a, b)
+
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_tflops",
+            return_value=1000.0,
+        ) as get_tflops:
+            get_compute_time(
+                torch.ops.aten.mm,
+                (a, b),
+                {},
+                out,
+                {torch.float32},
+                device=device,
+            )
+
+        get_tflops.assert_called_once_with(torch.float32, device=device)
+
 
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
+    def test_ensure_nv_universal_gemm_import_error(self):
+        from torch._inductor import utils
+
+        utils.ensure_nv_universal_gemm_available.cache_clear()
+        self.addCleanup(utils.ensure_nv_universal_gemm_available.cache_clear)
+        with (
+            mock.patch.object(utils.importlib.util, "find_spec", return_value=object()),
+            mock.patch.object(
+                utils, "_ensure_fp4_dtype_registered", side_effect=ImportError
+            ),
+        ):
+            self.assertFalse(utils.ensure_nv_universal_gemm_available())
+
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
+        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
+        "requires CUDA and cutlass.operators",
     )
     def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        """_ensure_fp4_dtype_registered should map torch FP4 to cutlass.Float4E2M1FN."""
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
         import cutlass
-        import cutlass_api.utils
+        import cutlass.operators.utils.dtype
 
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        result = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float4_e2m1fn_x2
+        )
         self.assertEqual(result, cutlass.Float4E2M1FN)
 
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        result_fp32 = cutlass.operators.utils.dtype.cutlass_type_from_torch_type(
+            torch.float32
+        )
         self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):
@@ -674,14 +1003,18 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_rand_strided_fp4_cuda(self):
+    @unittest.skipIf(
+        not torch.cuda.is_available() and not torch.xpu.is_available(), "requires GPU"
+    )
+    def test_rand_strided_fp4_gpu(self):
         from torch._dynamo.testing import rand_strided
 
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
+        t = rand_strided(
+            (16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=GPU_TYPE
+        )
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (16, 32))
-        self.assertTrue(t.is_cuda)
+        self.assertEqual(t.device.type, GPU_TYPE)
 
 
 class TestTritonTypeMapping(TestCase):
@@ -1409,6 +1742,10 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
             if raise_exc is not None:
                 raise raise_exc
 
+    raised = type(raise_exc).__name__ if raise_exc is not None else "none"
+    _FakeInterface.__name__ = (
+        f"_FakeInterface(available={available}, capable={capable}, raised={raised})"
+    )
     return _FakeInterface
 
 
@@ -1495,6 +1832,328 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
+
+    def test_has_triton_accepts_zero_arg_override(self):
+        # The process-wide gate calls the probes with no arguments, so an
+        # override that takes none keeps working through it.
+        class _ZeroArg(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable() -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable() -> None:
+                return None
+
+        self.assertTrue(self._run([("fake", _ZeroArg)]))
+
+    def _run_for_device(
+        self,
+        device,
+        interface,
+        *,
+        has_package=True,
+        detection_disabled=False,
+    ):
+        # has_triton_for_device resolves the interface by device type and reads
+        # the package/config gates live; a mock lookup keeps the global device
+        # interface registry untouched.
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
+            mock.patch.object(di, "get_interface_for_device", return_value=interface),
+        ):
+            return triton_utils.has_triton_for_device(device)
+
+    def test_has_triton_for_device_registry_contract(self):
+        # The scoped conjunction: device available + per-device capable +
+        # backend built; package/config gates re-read per call; cpu, names
+        # torch.device cannot parse, and unregistered types are False.
+        ready = _make_triton_interface()
+        _TOO_OLD = _GPUTooOldForTriton()
+        self.assertFalse(self._run_for_device("hpu", ready, has_package=False))
+        self.assertTrue(self._run_for_device("hpu", ready))
+        for iface, expected in (
+            (_make_triton_interface(available=False), False),
+            (_make_triton_interface(capable=False), False),
+            (
+                _make_triton_interface(
+                    raise_exc=TritonUnavailableError("backend not built")
+                ),
+                False,
+            ),
+            # The capability gate answers before the backend probe runs, so a
+            # non-TritonUnavailableError from the probe never escapes.
+            (_make_triton_interface(capable=False, raise_exc=_TOO_OLD), False),
+            (ready, True),
+        ):
+            with self.subTest(interface=iface.__name__):
+                self.assertEqual(self._run_for_device("hpu", iface), expected)
+        self.assertFalse(self._run_for_device("hpu", ready, detection_disabled=True))
+        self.assertTrue(self._run_for_device("hpu", ready))
+        self.assertFalse(self._run_for_device("cpu", ready))
+        self.assertFalse(self._run_for_device("nosuchdevice", ready))
+        # A parseable type no backend registers resolves to no interface.
+        with mock.patch.object(triton_utils, "has_triton_package", return_value=True):
+            self.assertFalse(triton_utils.has_triton_for_device("vulkan:0"))
+
+    def test_has_triton_for_device_is_index_aware(self):
+        # The probes receive the operand's full device, index included: :0 and
+        # :1 get different answers and nothing is asked about the current device.
+        received = []
+
+        class _PerIndex(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                received.append(device)
+                index = device.index if isinstance(device, torch.device) else None
+                return index == 1
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        self.assertFalse(self._run_for_device("hpu:0", _PerIndex))
+        self.assertTrue(self._run_for_device("hpu:1", _PerIndex))
+        self.assertEqual(received, [torch.device("hpu:0"), torch.device("hpu:1")])
+
+    def test_has_triton_for_device_rejects_out_of_range_index(self):
+        # An operand naming a device this host doesn't have (a fake or
+        # exported graph on cuda:3 with two GPUs) is resolved against
+        # device_count before any probe runs: the answer is False, not the
+        # IndexError from indexing that host's per-index properties list.
+        probed = []
+
+        class _TwoGpu(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 2
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                probed.append(device)
+                return [True, True][device.index]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        # In range: the full device reaches the probe, index preserved.
+        self.assertTrue(self._run_for_device("hpu:1", _TwoGpu))
+        self.assertEqual(probed, [torch.device("hpu:1")])
+        # Out of range: device_count answers it before the probe runs.
+        probed.clear()
+        self.assertFalse(self._run_for_device("hpu:3", _TwoGpu))
+        self.assertEqual(probed, [])
+
+    def test_has_triton_for_device_propagates_probe_errors_after_validation(
+        self,
+    ):
+        # Once device_count has validated the index, an error a probe still
+        # raises (e.g. the device vanished mid-decision) is a real fault and
+        # propagates: only the out-of-range answer may come without a probe.
+        class _CapableFaulty(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 100
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                raise IndexError("no such device")
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        class _BackendFaulty(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def device_count() -> int:
+                return 100
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                raise RuntimeError("driver is on fire")
+
+        for iface, exc in (
+            (_CapableFaulty, IndexError),
+            (_BackendFaulty, RuntimeError),
+        ):
+            with self.subTest(interface=iface.__name__, exc=exc.__name__):
+                with self.assertRaises(exc):
+                    self._run_for_device("hpu:5", iface)
+
+    def test_has_triton_for_device_falls_through_without_device_count(self):
+        # An interface declaring no count (base DeviceInterface.device_count
+        # raises NotImplementedError) gets no pre-check: the full device,
+        # index included, reaches the probes and they answer.
+        received = []
+
+        class _NoCount(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                received.append(device)
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        self.assertTrue(self._run_for_device("hpu:7", _NoCount))
+        self.assertEqual(received, [torch.device("hpu:7")])
+
+    def test_has_triton_for_device_propagates_body_typeerror(self):
+        # A TypeError raised inside a device-taking probe's body is a real bug
+        # in the backend and must surface to the caller.
+        class _DeviceTakingBodyBug(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                if device is not None:
+                    raise TypeError("bad index arithmetic inside the probe body")
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _DeviceTakingBodyBug)
+
+    def test_has_triton_for_device_kwargs_interface_fails_loudly(self):
+        # The probes are called positionally, per the DeviceInterface contract;
+        # an override that only takes **kwargs ignores it and must raise rather
+        # than silently answer about the current device.
+        class _VarKeyword(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(**kwargs) -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable(**kwargs) -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _VarKeyword)
+
+    def test_has_triton_for_device_zero_arg_override_fails_loudly(self):
+        # The asymmetry is the contract: has_triton() calls the probes with no
+        # arguments, a concrete device is passed positionally. An override
+        # taking no arguments therefore fails loudly for one device instead of
+        # silently answering about the process's current device.
+        class _ZeroArg(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable() -> bool:
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable() -> None:
+                return None
+
+        with self.assertRaises(TypeError):
+            self._run_for_device("hpu:1", _ZeroArg)
+
+    def test_has_triton_cache_clear_reprobes_every_interface(self):
+        # has_triton() holds the only cache on its path: clearing it alone
+        # re-evaluates every interface through the uncached per-interface rule.
+        class _Toggling(DeviceInterface):
+            answers = {"capable": True}
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return _Toggling.answers["capable"]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        with (
+            mock.patch.object(triton_utils, "has_triton_package", return_value=True),
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=[("fake", _Toggling)],
+            ),
+        ):
+            triton_utils.has_triton.cache_clear()
+            self.assertTrue(triton_utils.has_triton())
+            _Toggling.answers["capable"] = False
+            # The outer cache keeps answering...
+            self.assertTrue(triton_utils.has_triton())
+            # ...and clearing only that cache re-reads the interface.
+            triton_utils.has_triton.cache_clear()
+            self.assertFalse(triton_utils.has_triton())
+
+    def test_has_triton_for_device_memoizes_per_interface_and_device(self):
+        # The (interface, device) memo: a new index probes fresh, the same
+        # pairing keeps the old answer until the memo itself is cleared.
+        class _Memoized(DeviceInterface):
+            answers = {"capable": True}
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def is_triton_capable(device=None) -> bool:
+                return _Memoized.answers["capable"]
+
+            @staticmethod
+            def raise_if_triton_unavailable(device=None) -> None:
+                return None
+
+        memo = triton_utils._has_triton_for_interface_on_device
+        memo.cache_clear()
+        self.addCleanup(memo.cache_clear)
+        self.assertTrue(self._run_for_device("hpu:0", _Memoized))
+        _Memoized.answers["capable"] = False
+        self.assertFalse(self._run_for_device("hpu:1", _Memoized))
+        self.assertTrue(self._run_for_device("hpu:0", _Memoized))
+        memo.cache_clear()
+        self.assertFalse(self._run_for_device("hpu:0", _Memoized))
 
 
 class _GpuWithStream(DeviceInterface):
@@ -1718,6 +2377,7 @@ class TestDeviceClassification(TestCase):
         self.assertFalse(device_need_guard("mps"))
         self.assertFalse(is_gpu("cpu"))
         self.assertFalse(is_gpu("cuda:0"))
+        self.assertFalse(is_gpu("xpu:0"))
 
 
 @instantiate_parametrized_tests

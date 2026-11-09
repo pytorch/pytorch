@@ -27,6 +27,7 @@ import pathlib
 import platform
 import random
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -103,6 +104,7 @@ except ImportError:
     has_pytest = False
 
 SEED = 1234
+MI450_ARCH = ("gfx1250",)
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
@@ -130,8 +132,11 @@ class HardwareClassification(Enum):
     Test classes declare a ``hw_classification`` class attribute to indicate
     the kind of hardware their tests require.  When ``--hw-classification``
     is passed, only tests whose classification matches one of the requested
-    values are executed.  When the flag is not specified, all test discovery
-    and execution paths remain unchanged.
+    values are executed.  ``PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION``, a
+    comma-separated list, instead drops the listed classifications (they are
+    not reported as skipped) and keeps unclassified tests; with both set, both
+    apply.  With neither set, all test discovery and execution paths remain
+    unchanged.
 
     Currently there are three hardware classification categories:
 
@@ -184,6 +189,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_TORCHCI_REPORTS = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -208,45 +214,55 @@ def get_hw_classification(
 
 def filter_by_hw_classification(
     items: Iterable[Any],
-    requirement: set[HardwareClassification],
+    requirement: set[HardwareClassification] | None,
     get_class: Callable[[Any], type | None],
     *,
     on_match: Callable[[Any], None],
-) -> None:
-    """Filter items by hardware classification and print a summary.
+    exclude: frozenset[HardwareClassification] = frozenset(),
+) -> int:
+    """Filter items by hardware classification, print a summary, and return the
+    number of items dropped.
 
     For each item, `get_class` extracts the associated test class. Items whose
-    hardware classification is in `requirement` are passed to `on_match`, if
-    provided. Prints a summary of matched, mismatched, unclassified, and
-    classless items.
+    hardware classification is in `requirement` and not in `exclude` are passed
+    to `on_match`. A `requirement` of None accepts every classification,
+    including unclassified and classless items. The summary counts each dropped
+    item once, by the reason it was dropped, and is printed when a requirement
+    is set or something was dropped.
     """
-    total = 0
-    passed = 0
-    no_class = 0
-    unclassified = 0
+    total = passed = excluded = mismatched = unclassified = no_class = 0
     for item in items:
         total += 1
         cls = get_class(item)
-        if cls is None:
-            no_class += 1
-            continue
-        classification = get_hw_classification(cls)
-        if classification is None:
-            unclassified += 1
-        elif classification in requirement:
+        classification = None if cls is None else get_hw_classification(cls)
+        if classification in exclude:
+            excluded += 1
+        elif requirement is None or classification in requirement:
             passed += 1
             on_match(item)
+        elif cls is None:
+            no_class += 1
+        elif classification is None:
+            unclassified += 1
+        else:
+            mismatched += 1
 
-    mismatched = total - passed - unclassified - no_class
-    parts = [
-        f"HW classification mode active ({[e.name for e in requirement]}):",
-        f"total={total}, passed={passed},",
-        f"unclassified={unclassified},",
-    ]
-    if no_class > 0:
-        parts.append(f"no_class={no_class},")
-    parts.append(f"mismatched={mismatched}")
-    print(" ".join(parts))
+    dropped = total - passed
+    if requirement is not None or dropped:
+        header = "HW classification mode active"
+        if requirement is not None:
+            header += f" ({[e.name for e in requirement]})"
+        if exclude:
+            header += f" (exclude={sorted(e.name for e in exclude)})"
+        parts = [f"{header}:", f"total={total}, passed={passed},", f"unclassified={unclassified},"]
+        if no_class > 0:
+            parts.append(f"no_class={no_class},")
+        parts.append(f"mismatched={mismatched}")
+        if exclude:
+            parts[-1] += ","
+            parts.append(f"excluded={excluded}")
+        print(" ".join(parts))
+    return dropped
 
 
 def is_navi3_arch():
@@ -268,8 +284,12 @@ def freeze_rng_state(*args, **kwargs):
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
-    # are not implied. Maps from env var name -> value (int)
+    # are not implied. Maps from env var name -> the env var's string value.
     repro_env_vars: dict = {}
+    # The value as set, unparsed ("" if unset), of every include_in_repro flag and
+    # every include_in_report setting; an unset flag that's on anyway (by default
+    # or implication) is "1". Read by torchci/environment.py.
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -285,7 +305,8 @@ class TestEnvironment:
     #         variable and unimplied. Default: False
     #     include_in_repro (bool): Indicates whether this flag should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure), and in env_var_values, which test
+    #         run reports record as their flags. Default: True
     #     enabled_fn (Callable): Callable returning whether the flag should be enabled
     #         given the environment variable value and the default value. Default: Lambda
     #         requiring "0" to disable if on by default OR "1" to enable if off by default.
@@ -314,8 +335,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = env_var_val or ("1" if enabled else "")
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -337,7 +360,11 @@ class TestEnvironment:
     #         variable. Default: None
     #     include_in_repro (bool): Indicates whether this setting should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure). Default: True
+    #         relevant to reproducing the test failure). The repro gets the env var's
+    #         string, not the parsed value. Default: True
+    #     include_in_report (bool | None): Indicates whether this setting should be
+    #         included in env_var_values, which test run reports record as their flags.
+    #         Default: None, meaning the same as include_in_repro
     #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
     #         the string itself.
     @staticmethod
@@ -347,11 +374,16 @@ class TestEnvironment:
         default=None,
         include_in_repro=True,
         parse_fn=lambda maybe_val_str: maybe_val_str,
+        *,
+        include_in_report=None,
     ):
-        value = default if env_var is None else os.getenv(env_var)
-        value = parse_fn(value)
-        if include_in_repro and (value != default):
-            TestEnvironment.repro_env_vars[env_var] = value
+        raw = None if env_var is None else os.getenv(env_var)
+        value = parse_fn(default if env_var is None else raw)
+        if include_in_repro if include_in_report is None else include_in_report:
+            if env_var is not None:
+                TestEnvironment.env_var_values[env_var] = raw or ""
+        if include_in_repro and (raw is not None) and (value != default):
+            TestEnvironment.repro_env_vars[env_var] = raw
 
         # export setting globally for convenience
         if name in globals():
@@ -365,7 +397,7 @@ class TestEnvironment:
     # Example: "PYTORCH_TEST_WITH_ASAN=1 PYTORCH_TEST_WITH_ROCM=1"
     @staticmethod
     def repro_env_var_prefix() -> str:
-        return " ".join([f"{env_var}={value}"
+        return " ".join([f"{env_var}={shlex.quote(str(value))}"
                          for env_var, value in TestEnvironment.repro_env_vars.items()])
 
 
@@ -411,6 +443,14 @@ IS_REMOTE_GPU: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_REMOTE_GPU",
     include_in_repro=False,
 )
+# Drop tests that are already marked skipped when their class is defined, so
+# they are never collected. Only correct when tests are listed on the same kind
+# of machine that runs them, since skip conditions are often hardware checks.
+OMIT_SKIPPED_TESTS: bool = TestEnvironment.def_flag(
+    "OMIT_SKIPPED_TESTS",
+    env_var="PYTORCH_TEST_OMIT_SKIPPED",
+    include_in_repro=False,
+)
 
 DISABLE_RUNNING_SCRIPT_CHK: bool = TestEnvironment.def_flag(
     "DISABLE_RUNNING_SCRIPT_CHK",
@@ -447,6 +487,35 @@ OPINFO_RESTRICT_TO_DSL: str | None = TestEnvironment.def_setting(
     # be queried from the tracked sample input instead
     include_in_repro=True,
     parse_fn=lambda val: None if val is None else str(val),
+)
+
+
+_HW_CLASSIFICATION_EXCLUDE_ENV_VAR = "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"
+
+
+def _parse_hw_classification_exclude(val: str | None) -> frozenset[HardwareClassification]:
+    names = [name.strip().upper() for name in (val or "").split(",") if name.strip()]
+    if unknown := [name for name in names if name not in HardwareClassification.__members__]:
+        raise ValueError(
+            f"{_HW_CLASSIFICATION_EXCLUDE_ENV_VAR}: unknown hardware classification(s) {unknown}; "
+            f"expected a comma-separated list of {', '.join(HardwareClassification.__members__)}"
+        )
+    return frozenset(HardwareClassification[name] for name in names)
+
+
+# Comma-separated hw_classification names (e.g. GENERIC) whose test classes are
+# dropped: not loaded under unittest, deselected under pytest. Unclassified
+# classes still run (see filter_by_hw_classification). There is no flag form:
+# test.sh runs some test files directly rather than through run_test.py, and a
+# job-level environment variable reaches those too. It is left out of repro
+# commands, since a test that ran wasn't excluded, but reports record it.
+HW_CLASSIFICATION_EXCLUDE: frozenset[HardwareClassification] = TestEnvironment.def_setting(
+    "HW_CLASSIFICATION_EXCLUDE",
+    env_var=_HW_CLASSIFICATION_EXCLUDE_ENV_VAR,
+    default=frozenset(),
+    include_in_repro=False,
+    include_in_report=True,
+    parse_fn=_parse_hw_classification_exclude,
 )
 
 
@@ -767,7 +836,16 @@ def instantiate_parametrized_tests(generic_cls):
                 test = decorator(test)
 
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    _omit_skipped_tests(generic_cls)
     return generic_cls
+
+
+def _omit_skipped_tests(cls) -> None:
+    if not OMIT_SKIPPED_TESTS:
+        return
+    for name, attr in list(vars(cls).items()):
+        if name.startswith("test") and getattr(attr, "__unittest_skip__", False):
+            delattr(cls, name)
 
 
 class subtest:
@@ -1140,6 +1218,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_TORCHCI_REPORTS
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1157,6 +1236,7 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-torchci-reports', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1198,6 +1278,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_TORCHCI_REPORTS = args.save_torchci_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1228,17 +1309,13 @@ def wait_for_process(p, timeout=None):
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
+            # Still alive after the grace period; the finally's wait() would hang.
             p.kill()
+        # Re-raised even when pytest exits in the grace period, so the caller sees
+        # a timeout (retry_shell's 124), not the interrupted run's exit code.
         raise
     except:
         p.kill()
@@ -1421,9 +1498,14 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
-    def __init__(self, hw_classification):
+    def __init__(self, hw_classification, *, exclude=frozenset()):
         super().__init__()
         self.hw_classification = hw_classification
+        self.exclude = exclude
+        # Tests dropped from whole-module loads. Tests requested by name aren't
+        # counted, so a run of only filtered-out named tests still looks like
+        # "nothing ran" to exit_code.
+        self.dropped_from_modules = 0
 
     @staticmethod
     def iter_test_cases_recursively(
@@ -1437,25 +1519,30 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         for element in suite_or_case:
             yield from _iter(element)
 
-    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
-        if self.hw_classification is None:
-            return tests
+    def _filter(self, tests: unittest.TestSuite) -> tuple[unittest.TestSuite, int]:
+        if self.hw_classification is None and not self.exclude:
+            return tests, 0
 
         filtered_suite = unittest.TestSuite()
         _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
-        filter_by_hw_classification(
+        dropped = filter_by_hw_classification(
             _iter(tests),
             self.hw_classification,
             get_class=lambda tc: tc.__class__,
             on_match=filtered_suite.addTest,
+            exclude=self.exclude,
         )
-        return filtered_suite
+        return filtered_suite, dropped
+
+    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+        return self._filter(tests)[0]
 
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
-        suite = super().loadTestsFromModule(
-            module, *args, pattern=pattern, **kwargs
+        suite, dropped = self._filter(
+            super().loadTestsFromModule(module, *args, pattern=pattern, **kwargs)
         )
-        return self.get_filtered_suite(suite)
+        self.dropped_from_modules += dropped
+        return suite
 
     def loadTestsFromName(self, name, module=None, *args, **kwargs):
         suite = super().loadTestsFromName(name, module, *args, **kwargs)
@@ -1468,6 +1555,19 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         if tests and isinstance(tests[0], unittest.loader._FailedTest):
             return suite
         return self.get_filtered_suite(suite)
+
+    def exit_code(self, result: unittest.TestResult) -> int:
+        """The process exit code for result: 1 on any failure (including a
+        setUpClass error before any test ran), else 5 if nothing ran and the
+        filter dropped nothing (a -k typo, or only named tests the filter
+        dropped) on Python 3.12+, like unittest.main(), else 0. So a run the
+        filter emptied succeeds, as on the pytest path; test.sh runs some files
+        directly, where Python 3.12+'s unittest.main() would exit 5."""
+        if not result.wasSuccessful():
+            return 1
+        if result.testsRun == 0 and not result.skipped and not self.dropped_from_modules and sys.version_info >= (3, 12):
+            return 5
+        return 0
 
 
 def run_tests(argv=None):
@@ -1503,9 +1603,16 @@ def run_tests(argv=None):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    testLoader = unittest.loader.defaultTestLoader
-    if HW_CLASSIFICATION is not None:
-        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
+    hw_loader = None
+    if HW_CLASSIFICATION is not None or HW_CLASSIFICATION_EXCLUDE:
+        hw_loader = HardwareClassificationTestLoader(HW_CLASSIFICATION, exclude=HW_CLASSIFICATION_EXCLUDE)
+    testLoader = unittest.loader.defaultTestLoader if hw_loader is None else hw_loader
+
+    def unittest_main(**kwargs):
+        if hw_loader is None:
+            unittest.main(testLoader=testLoader, **kwargs)
+        else:
+            sys.exit(hw_loader.exit_code(unittest.main(testLoader=hw_loader, exit=False, **kwargs).result))
 
     if SHOWLOCALS:
         argv = [
@@ -1527,6 +1634,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_TORCHCI_REPORTS:
+            other_args.append(f'--save-torchci-reports={TEST_SAVE_TORCHCI_REPORTS}')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1592,6 +1701,9 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if TEST_SAVE_TORCHCI_REPORTS:
+            prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
@@ -1635,16 +1747,17 @@ def run_tests(argv=None):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        unittest_main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose), testLoader=testLoader)
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv, testLoader=testLoader)
+        unittest_main(argv=argv)
+
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
@@ -1746,8 +1859,15 @@ TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_availab
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+
+# The CI fleet runs M1 (Apple7, 16 GB) and M2 Pro (Apple8, 32 GB) on the same
+# macOS release, so MACOS_VERSION on its own no longer tells the two apart.
+# Tests that need the memory or the Metal feature set have to say so.
+# Covers M1 Pro/Max/Ultra too: all are Apple7 and share the feature set.
+IS_APPLE_M1 = TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1")
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -1873,11 +1993,23 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+# The CI job's test config, such as default, distributed or periodic
+TEST_CONFIG: str | None = TestEnvironment.def_setting(
+    "TEST_CONFIG",
+    env_var="TEST_CONFIG",
+)
+# Enables @periodic tests, which CI runs only in periodic-strict and in periodic
+# jobs that set this (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG == "periodic",
+)
+# Runs inductor's RUN_CPU test classes even when ONLY_FOR leaves out cpu (unless
+# EXCEPT_FOR excludes it); see inductor_utils.RUN_CPU
+TEST_INDUCTOR_RUN_CPU: bool = TestEnvironment.def_flag(
+    "TEST_INDUCTOR_RUN_CPU",
+    env_var="PYTORCH_TEST_INDUCTOR_RUN_CPU",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -2166,6 +2298,25 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
+
+
+def skipIfCppFakeTensor(reason):
+    if not isinstance(reason, str):
+        raise AssertionError("please provide a reason")
+    from torch._dynamo import config
+
+    return unittest.skipIf(config.use_cpp_fake_tensor, reason)
+
+
+_CppFakeExpectedT = TypeVar("_CppFakeExpectedT")
+
+
+def expectedIfCppFakeTensor(
+    cpp_expected: _CppFakeExpectedT, python_expected: _CppFakeExpectedT
+) -> _CppFakeExpectedT:
+    from torch._dynamo import config
+
+    return cpp_expected if config.use_cpp_fake_tensor else python_expected
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -2673,6 +2824,21 @@ def requires_cuda_p2p_access():
         "cuda p2p access is not available",
     )
 
+def requires_accelerator_p2p_access():
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == "cuda":
+        return requires_cuda_p2p_access()
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    can_access_peer = getattr(device_module, "can_device_access_peer", None)
+    num_devices = torch.accelerator.device_count()
+    p2p_access_available = can_access_peer is not None and num_devices >= 2 and all(
+        can_access_peer(i, j) for i in range(num_devices) for j in range(i + 1, num_devices)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not p2p_access_available,
+        "accelerator p2p access is not available",
+    )
+
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
 def setLinalgBackendsToDefaultFinally(fn):
@@ -2883,6 +3049,23 @@ def skipIfNoXNNPACK(fn):
 def skipIfNoLapack(fn):
     return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
+def skipIfNoNativeAot(op, *, device="cuda"):
+    """Skip unless this op has native-AOT kernels embedded for the given device."""
+    def unavailable():
+        from torch._native.aot_manifest import get_coverage
+
+        coverage = get_coverage(op, "CUDA")
+        return (
+            coverage is None
+            or not torch.cuda.is_available()
+            or not coverage.is_available(torch.device(device))
+        )
+
+    return lazy_skip_if(
+        unavailable,
+        f"AOT kernels for {op} not embedded for {device}",
+    )
+
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -2919,20 +3102,53 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def requires_multigpu(fn):
+    """Marks a test that needs more than one GPU.
+
+    Attaches the pytest marker the distributed CI configs partition on, so the
+    test lands in the multi-GPU run rather than the single-GPU one where it
+    could only ever skip, and skips it wherever fewer than two GPUs are visible.
+
+    The marker is attached only when pytest is importable: files using this also
+    run under an internal test runner that has no pytest, where the skip alone
+    is the whole behaviour.
+    """
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.multigpu(fn)
+        return unittest.skipIf(skip, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.multigpu(wrapper)
+
+    return unittest.skipIf(skip, reason)(wrapper)
+
+
 def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run in CI.
+    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
+    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    Tests in files outside the default Python test sweep (e.g. distributed or
+    quantization) never run in CI unless such a job runs those files.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
-    while the periodic gate keeps a test marked both out of the slow shards;
-    it runs only in periodic-strict.
+    while the periodic gate keeps a test marked both out of the slow shards.
+    Such a test runs only in jobs that set both flags, like periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
@@ -2999,8 +3215,9 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -3707,6 +3924,12 @@ class TestCase(expecttest.TestCase):
     _diffThreshold = sys.maxsize
     maxDiff = None
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Runs before class decorators, so a skipped parametrized template is
+        # removed before instantiate_parametrized_tests expands it.
+        _omit_skipped_tests(cls)
+
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
@@ -4175,7 +4398,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to the fp32 precision flags. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -5988,14 +6211,17 @@ def disable_gc():
 
 
 def find_library_location(lib_name: str) -> Path:
-    # return the shared library file in the installed folder if exist,
-    # else the file in the build folder
+    # return the shared library file in the installed folder if it exists,
+    # otherwise the file in the build folder
     torch_root = Path(torch.__file__).resolve().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
     torch_root = Path(__file__).resolve().parents[2]
-    return torch_root / 'build' / 'lib' / lib_name
+    path = torch_root.parent / 'build' / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
+    raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
 
 def skip_but_pass_in_sandcastle(reason):
     """
@@ -6624,11 +6850,36 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# The legacy getter cross-checks the Float32MatmulPrecision enum against the
+# new backend-specific values and raises when they disagree, so a snapshot
+# taken while a test has them out of sync would throw from setUp/tearDown
+# instead of reporting the leak. Report a sentinel instead; restoring the
+# backend-specific values is what puts the pair back in sync.
+_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+
+
+def _get_legacy_float32_matmul_precision():
+    try:
+        return torch.get_float32_matmul_precision()
+    except RuntimeError:
+        return _INCONSISTENT_MATMUL_PRECISION
+
+
+def _set_legacy_float32_matmul_precision(value):
+    if value != _INCONSISTENT_MATMUL_PRECISION:
+        torch.set_float32_matmul_precision(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # Must stay first: set_float32_matmul_precision also writes the cuda
+        # and mkldnn matmul entries, so it has to be restored before them.
+        ("torch.get_float32_matmul_precision()",
+            _get_legacy_float32_matmul_precision,
+            _set_legacy_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),

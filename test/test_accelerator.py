@@ -177,6 +177,13 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
+        with dst_prev_stream:
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+
     # Non-blocking MPS=>CPU copies currently return unpinned storage
     @xfailIfMPS
     def test_pin_memory_on_non_blocking_copy(self):
@@ -211,6 +218,12 @@ class TestAccelerator(TestCase):
             "Both events must be created with argument 'enable_timing=True'",
         ):
             event1.elapsed_time(event2)
+
+    def test_empty_host_cache(self):
+        # Must not dereference the empty registry slot on a backend that
+        # registers no host allocator (MPS), called before any allocation as
+        # in https://github.com/pytorch/pytorch/issues/197561
+        torch.accelerator.empty_host_cache()
 
     def test_memory_stats(self):
         # Ensure that device allocator is initialized

@@ -8,8 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never
+from typing import Any, assert_never, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
@@ -59,6 +58,7 @@ from torchgen.model import (
     DispatchKey,
     FRAGMENT_NAMESPACES,
     FunctionSchema,
+    gets_generated_inplace_meta_kernel,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
     is_ufunc_dispatch_key,
@@ -2196,13 +2196,21 @@ def gen_headers(
     # NB: base names repeat across groups (bmm and bmm.dtype, sum and sum.dim_IntList),
     # so the stub signature must come from the structured group the manifest targets.
     # Validation guarantees exactly one match per manifest.
-    native_aot_groups_by_op = {
+    native_aot_groups_by_op: dict[str, NativeFunction | NativeFunctionsGroup] = {
         op: g
         for g in structured_native_functions
         if g.structured
         for (_, op), m in native_aot_manifests.items()
         if m.matches_group(g)
     }
+    native_aot_groups_by_op.update(
+        {
+            op: f
+            for f in native_functions
+            for (_, op), m in native_aot_manifests.items()
+            if not m.structured and op == str(f.func.name)
+        }
+    )
     if per_operator_headers:
         gen_per_operator_headers(
             native_functions=native_functions,
@@ -2399,6 +2407,10 @@ def gen_source_files(
                         DispatchKey.Meta,
                         DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
+                        is_registered = True
+                    # The generated Meta kernels of unstructured inplace ops need
+                    # their TORCH_API declaration from <op>_meta_dispatch.h.
+                    elif gets_generated_inplace_meta_kernel(g, backend_index):
                         is_registered = True
                     if not is_registered:
                         continue
