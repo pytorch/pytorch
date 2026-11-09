@@ -3220,6 +3220,43 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             self._validate(fn, backend, x, w)
         self.assertIn("is in a memory pool", logs.output[0])
 
+    @parametrize("flag", ["enable_complex_wrapper", "compiled_autograd"])
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_not_applied(self, device, flag):
+        # Both trace the graphs again after the pass, and can't trace its calls:
+        # the complex wrapper failed to compile, and compiled autograd
+        # graph-broke on each backward call. So the pass leaves the graphs
+        # alone.
+        def gn(x, w):
+            return (x @ w).sin().cos()
+
+        def step(x, w):
+            out = torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+            loss = out.abs().sum()
+            loss.backward()
+            return loss
+
+        dtype = torch.complex64 if flag == "enable_complex_wrapper" else torch.float32
+        x = torch.randn(8, 8, dtype=dtype, device=device, requires_grad=True)
+        w = torch.randn(8, 8, dtype=dtype, device=device, requires_grad=True)
+        xe, we = (t.detach().clone().requires_grad_() for t in (x, w))
+        step(xe, we)
+        check = functools.partial(count_shared_recompute_calls, expected=0)
+        backend = aot_autograd(
+            fw_compiler=check,
+            bw_compiler=check,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        functorch_cfg = {flag: True} if flag == "enable_complex_wrapper" else {}
+        dynamo_cfg = {flag: True} if flag == "compiled_autograd" else {}
+        with (
+            torch._functorch.config.patch(**functorch_cfg),
+            torch._dynamo.config.patch(**dynamo_cfg),
+        ):
+            torch.compile(step, backend=backend)(x, w)
+        self.assertEqual(x.grad, xe.grad)
+        self.assertEqual(w.grad, we.grad)
+
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
     @torch._functorch.config.patch(deterministic_recompute=True)
@@ -3270,6 +3307,34 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertIn("no input binds the symbols its sizes use", logs.output[0])
         self.assertEqual(x.grad, xe.grad, atol=1e-4, rtol=1e-4)
         self.assertEqual(w.grad, we.grad, atol=1e-4, rtol=1e-4)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    @torch._functorch.config.patch(
+        deterministic_recompute=True, enable_autograd_cache=True
+    )
+    def test_deterministic_recompute_compiled_autograd_cache_key(self, device):
+        # The pass isn't applied under compiled autograd, so the AOTAutograd
+        # cache must not serve a graph compiled without it.
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                lambda x, w: (x @ w).sin(), x, w, use_reentrant=False
+            )
+
+        x = torch.randn(16, 16, device=device, requires_grad=True)
+        w = torch.randn(16, 16, device=device, requires_grad=True)
+        with fresh_cache():
+            for compiled_autograd in (False, True):
+                torch._dynamo.reset()
+                counters.clear()
+                with torch._dynamo.config.patch(compiled_autograd=compiled_autograd):
+                    compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+                    compiled(x, w).sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_sac(self, device):
