@@ -924,7 +924,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @unittest.skipIf(
         not (has_triton_tma_device() or _is_privateuse1_backend_available()),
-        "Skip when TMA is not available",
+        "Skip when TMA is not available on CUDA/XPU/CPU or custom accelerator backends",
     )
     @skip_on_cpu
     @parametrize_device_dtype("dtypes_fast")
