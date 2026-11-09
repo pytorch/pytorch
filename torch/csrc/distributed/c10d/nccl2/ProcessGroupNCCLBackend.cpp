@@ -432,8 +432,9 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   if (!device.has_index()) {
     // An unbound lazy single-rank group keeps its default device in device_.
     device = getBoundDeviceId().value_or(
-        device_.has_index() ? device_
-                            : at::Device(at::kCUDA, at::cuda::current_device()));
+        device_.has_index()
+            ? device_
+            : at::Device(at::kCUDA, at::cuda::current_device()));
     options = options.device(device);
   }
   TORCH_CHECK(
