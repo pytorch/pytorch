@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 import numbers
+import operator
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from functools import partial
@@ -16,13 +18,34 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
-    import builtins
-
     from ._cuda_stream import _CudaStreamOrdering
 
 
 # TCPStore polls with an int millisecond timeout.
 _MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
+
+
+# Shared by backends so every view and descriptor implements the slice contract
+# below with the same bounds and error messages.
+def _subrange(
+    size: int, offset: int | None, length: int | None, name: str = "registered memory"
+) -> tuple[int, int]:
+    offset = 0 if offset is None else operator.index(offset)
+    if offset < 0 or offset > size:
+        raise ValueError(f"offset is outside the {name}")
+    length = size - offset if length is None else operator.index(length)
+    if length < 0 or length > size - offset:
+        raise ValueError(f"range exceeds the {name}")
+    return offset, length
+
+
+def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
+    if not isinstance(key, builtins.slice):
+        raise TypeError("expected a slice such as [a:b]")
+    start, stop, step = key.indices(size)
+    if step != 1:
+        raise ValueError("slice step must be 1")
+    return start, max(stop - start, 0)
 
 
 @runtime_checkable
