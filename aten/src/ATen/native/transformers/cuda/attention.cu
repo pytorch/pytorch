@@ -1615,15 +1615,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   const int64_t num_heads = query.size(2);
   const int64_t num_heads_kv = key.size(2);
   TORCH_CHECK(num_heads_kv == value.size(2));
-#ifdef USE_ROCM
-  TORCH_CHECK(num_heads == num_heads_kv);
-#else
   TORCH_CHECK(
       (num_heads == 0 && num_heads_kv == 0) ||
           (num_heads > 0 && num_heads_kv > 0 &&
            num_heads % num_heads_kv == 0),
       "Number of heads in key/value must divide number of heads in query");
-#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -1742,6 +1738,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     at::ROCmFABackend::Ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_CHECK(num_heads == num_heads_kv,
+                "CK mem_eff_forward does not support grouped query attention");
     TORCH_CHECK(!window_size.has_value(),
                 "CK mem_eff_forward does not support window_size");
     std::optional<Tensor> out(res);

@@ -431,14 +431,10 @@ _efficient_attention_backward(
   const int64_t nHkv = key.size(2);
   TORCH_CHECK(nHkv == value.size(2));
   TORCH_CHECK(nH == grad_out_.size(2));
-#ifdef USE_ROCM
-  TORCH_CHECK(nH == nHkv);
-#else
   TORCH_CHECK(
       (nH == 0 && nHkv == 0) ||
           (nH > 0 && nHkv > 0 && nH % nHkv == 0),
       "Number of heads in key/value must divide number of heads in query");
-#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -590,6 +586,8 @@ _efficient_attention_backward(
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_CHECK(nH == nHkv,
+                "CK mem_eff_backward does not support grouped query attention");
     TORCH_CHECK(!window_size.has_value(),
                 "CK mem_eff_backward does not support window_size");
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
