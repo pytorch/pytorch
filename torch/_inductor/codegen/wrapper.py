@@ -5620,6 +5620,23 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    def _get_kernel_call_stream_name(
+        self, device: torch.device, graph_name: str, current_stream_idx: int | None
+    ) -> str:
+        """Write the line fetching the raw stream that a kernel call on ``device``
+        runs on, and return the variable holding it."""
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            # Inside a user stream context: emit a fresh get_raw_stream call so
+            # it picks up the active stream at runtime, rather than reusing the
+            # LRU-cached stream0 variable which captured the default stream.
+            self.write_get_raw_stream_header()
+            if config.triton.autotune_at_compile_time:
+                self._write_autotune_get_raw_stream("raw_stream", device.index)
+            device_idx = _coor_device_idx_ref(device.index)
+            self.writeline(f"raw_stream = get_raw_stream({device_idx})")
+            return "raw_stream"
+        return PythonWrapperCodegen.write_get_raw_stream(self, device.index, graph_name)
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
@@ -5649,21 +5666,9 @@ class PythonWrapperCodegen(CodeGen):
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
-        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
-            # Inside a user stream context: emit a fresh get_raw_stream call so
-            # it picks up the active stream at runtime, rather than reusing the
-            # LRU-cached stream0 variable which captured the default stream.
-            self.write_get_raw_stream_header()
-            stream_name = "raw_stream"
-            if config.triton.autotune_at_compile_time:
-                self._write_autotune_get_raw_stream(stream_name, device.index)
-            self.writeline(
-                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
-            )
-        else:
-            stream_name = PythonWrapperCodegen.write_get_raw_stream(
-                self, device.index, graph_name
-            )
+        stream_name = self._get_kernel_call_stream_name(
+            device, graph_name, current_stream_idx
+        )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
             self.writeline(

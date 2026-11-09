@@ -582,13 +582,17 @@ def _compile_lock():
 
 @contextlib.contextmanager
 def _counting_compiles():
-    """A spy on cute.compile, with the eager compile cache emptied for the duration,
-    so that its call count is the number of compiles eager launches did."""
+    """A spy on cute.compile, with the eager compile caches (the shared one and the
+    eager launchers) emptied for the duration, so that its call count is the number
+    of compiles eager launches did."""
     from torch._native.cutedsl import user_kernel as cutedsl_user_kernel
 
-    with mock.patch.dict(cutedsl_user_kernel._compiled, clear=True):
-        with mock.patch.object(cute, "compile", wraps=cute.compile) as compile_spy:
-            yield compile_spy
+    with (
+        mock.patch.dict(cutedsl_user_kernel._compiled, clear=True),
+        mock.patch.dict(cutedsl_user_kernel._eager_launchers, clear=True),
+        mock.patch.object(cute, "compile", wraps=cute.compile) as compile_spy,
+    ):
+        yield compile_spy
 
 
 def _is_constexpr_param(p):
@@ -6389,9 +6393,112 @@ def forward(self, x, y):
                 self.assertEqual(eager_grad, (x + y).detach())
 
 
+@requires_cuda_and_triton
+@requires_cutedsl
+class CuteDSLInductorTests(TestCase):
+    """CuteDSLKernelLauncher, which launches a host function with its constants
+    bound once, and through which eager launches go."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cutedsl_kernel_launcher_keys_constants_once(self):
+        # A launcher checks its argument names, reads the host function's signature
+        # and keys its constants when it is made: a launch keys only its arguments,
+        # so its cost does not grow with the constants. It shares its compile with
+        # an eager launch of the same call.
+        from torch._higher_order_ops import cutedsl_kernel_wrap, user_kernel_hop
+        from torch._native.cutedsl.user_kernel import (
+            CuteDSLKernelLauncher,
+            launch_cutedsl_kernel,
+        )
+
+        def spy(module, name):
+            return mock.patch.object(module, name, wraps=getattr(module, name))
+
+        names = ("mX", "mOut", "n")
+        with self.assertRaisesRegex(TypeError, "bogus"):
+            CuteDSLKernelLauncher(cfg_scale_kernel, names, {"cfg": None, "bogus": 1})
+        cfg = types.SimpleNamespace(alpha=3.0, table=list(range(1000)))
+        x = _rand(1000)
+        out = torch.empty_like(x)
+        stream = torch.cuda.current_stream().cuda_stream
+        with _counting_compiles() as compile_spy:
+            args = {"mX": x, "mOut": out, "n": x.numel(), "cfg": cfg}
+            launch_cutedsl_kernel(cfg_scale_kernel, args)
+            launcher = CuteDSLKernelLauncher(cfg_scale_kernel, names, {"cfg": cfg})
+            with (
+                spy(user_kernel_hop, "constant_key") as key_spy,
+                spy(cutedsl_kernel_wrap, "get_host_fn_info") as info_spy,
+            ):
+                for _ in range(3):
+                    out.zero_()
+                    launcher.run(x, out, x.numel(), stream=stream)
+                    self.assertEqual(out, 3 * x)
+            self.assertEqual(compile_spy.call_count, 1)
+        key_spy.assert_not_called()
+        info_spy.assert_not_called()
+
+    def test_cutedsl_kernel_eager_launches_reuse_a_launcher(self):
+        # Eager launches of one call reuse a launcher, which has their compile. The
+        # constants are keyed on every launch: one changed in place gets a launcher
+        # of its own, and changing it back finds the first launcher again.
+        from torch._native.cutedsl.user_kernel import (
+            CuteDSLKernelLauncher,
+            launch_cutedsl_kernel,
+        )
+
+        get_compiled = CuteDSLKernelLauncher._get_compiled
+        cfg = types.SimpleNamespace(alpha=3.0)
+        x = _rand(1000)
+        out = torch.empty_like(x)
+        args = {"mX": x, "mOut": out, "n": x.numel(), "cfg": cfg}
+        with (
+            _counting_compiles() as compile_spy,
+            mock.patch.object(
+                CuteDSLKernelLauncher,
+                "_get_compiled",
+                autospec=True,
+                side_effect=get_compiled,
+            ) as miss_spy,
+        ):
+            for alpha in (3.0, 3.0, 0.5, 3.0):
+                cfg.alpha = alpha
+                launch_cutedsl_kernel(cfg_scale_kernel, args)
+                self.assertEqual(out, alpha * x)
+        self.assertEqual(miss_spy.call_count, 2)
+        self.assertEqual(compile_spy.call_count, 2)
+
+    @parametrize("device", ["current", "other"])
+    def test_cutedsl_kernel_launch_enters_the_device_only_if_not_current(self, device):
+        # A launch makes the tensors' device current, for DLPack export and the
+        # launch, only if it is not current already.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        if device == "other" and torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+        x, y = _rand(1000), _rand(1000)
+        if device == "other":
+            x, y = x.to("cuda:1"), y.to("cuda:1")
+        out = torch.empty_like(x)
+        launch_cutedsl_kernel(add_kernel, _add_kwargs(x, y, out))  # compiles
+        out.zero_()
+        enter = torch.cuda.device.__enter__
+        with (
+            torch.cuda.device(0),
+            mock.patch.object(
+                torch.cuda.device, "__enter__", autospec=True, side_effect=enter
+            ) as enter_spy,
+        ):
+            launch_cutedsl_kernel(add_kernel, _add_kwargs(x, y, out))
+        self.assertEqual(out, x + y)
+        entered = [call.args[0].idx for call in enter_spy.call_args_list]
+        self.assertEqual(entered, [1] if device == "other" else [])
+
+
 instantiate_parametrized_tests(CuteDSLHOPTests)
 instantiate_parametrized_tests(CuteDSLWrapTests)
 instantiate_parametrized_tests(CuteDSLDynamoTests)
+instantiate_parametrized_tests(CuteDSLInductorTests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
