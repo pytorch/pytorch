@@ -207,7 +207,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
-  auto zeros = self.new_zeroes({});
+  auto zeros = self.new_zeros({});
   auto margin_diff = (margin - self);
   // For Composite Compliance,
   // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
