@@ -782,6 +782,15 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             self.code, r"reinterpret_tensor\(buf\d+, \(1, \), \(0, \), 0\)"
         )
 
+    def test_masked_scalar_load(self):
+        # The pad mask of column 3 is the constant 3 < 4, and s is 0-d.
+        (source,) = self.compile(
+            lambda x, s: torch.nn.functional.pad(x * s, (0, 1))[:, 3] + x[:, 1],
+            torch.randn(64, 4, device="cuda"),
+            torch.tensor(2.0, device="cuda"),
+        )
+        self.assertRegex(source, r"hl\.load\(in1, \[\], extra_mask=tmp\d+\)")
+
     def test_pointwise(self):
         (source,) = self.compile(
             lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device="cuda")
