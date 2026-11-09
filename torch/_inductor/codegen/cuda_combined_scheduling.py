@@ -58,14 +58,12 @@ class CUDACombinedScheduling(BaseScheduling):
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
         self._triton_scheduling: TritonScheduling
-        # HelionScheduling emits native matmul schedules as Helion kernels and
-        # every other schedule as Triton. Like use_helion_native_matmul, it
+        # HelionScheduling emits the schedules it supports as Helion kernels and
+        # the others as Triton. Like use_helion_native_matmul, it
         # needs the Python wrapper: with cpp_wrapper and triton.native_matmul,
         # the C++ wrapper would get helion_fused_add_mm_relu_0(arg0_1, arg1_1,
         # arg2_1, buf1); and fail to load with SyntaxError.
-        if config.helion.native_matmul and not (
-            V.graph.cpp_wrapper or V.graph.fx_wrapper
-        ):
+        if config.helion.enabled and not (V.graph.cpp_wrapper or V.graph.fx_wrapper):
             from .helion import HelionScheduling
 
             self._triton_scheduling = HelionScheduling(scheduler)

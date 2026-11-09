@@ -31,6 +31,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_HELI
 
 HAS_CUTE = importlib.util.find_spec("cutlass") is not None
 SOURCE_RE = re.compile(r'helion_\w+_source = """\\\n(.*?)"""', re.DOTALL)
+DOT_RE = re.compile(r"torch\.b?addb?mm\(")
 BACKENDS = ["triton", "cute"]
 
 
@@ -57,12 +58,14 @@ class TestHelionNativeMatmul(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.enterContext(config.patch({"helion.native_matmul": True}))
+        self.enterContext(
+            config.patch({"helion.enabled": True, "helion.native_matmul": True})
+        )
 
     def compile(
         self, fn, *args, expected=None, tol=None, backend="triton", helion=True
     ):
-        """Run compiled `fn`, check it, and return the Helion kernel modules.
+        """Run compiled `fn`, check it, and return the Helion matmul kernel modules.
 
         By default the result is checked against `fn` on FP32 copies of
         FP16/BF16 inputs, since Helion kernels keep their epilogue in FP32.
@@ -77,7 +80,7 @@ class TestHelionNativeMatmul(TestCase):
             expected = pytree.tree_map(lambda e, r: e.to(r.dtype), expected, result)
         self.assertEqual(result, expected, atol=tol, rtol=tol)
         self.code = "\n".join(codes)
-        sources = SOURCE_RE.findall(self.code)
+        sources = [s for s in SOURCE_RE.findall(self.code) if DOT_RE.search(s)]
         if helion:
             self.assertTrue(sources)
             self.assertNotRegex(self.code, r"extern_kernels\.\w*mm\w*\(")
@@ -413,9 +416,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             fn = lambda a, b: a.permute(1, 0, 2).reshape(40, 64) @ b  # noqa: E731
             args = [randn(8, 40, 8), randn(64, 136)]
         (source,) = self.compile(fn, *args)
-        # The producer stays a Triton kernel and the Helion kernel reads its
-        # output buffer, not the input.
-        self.assertIn("@triton.jit", self.code)
+        # The producer is a kernel of its own, and the Helion matmul kernel
+        # reads its output buffer, not the input.
         self.assertRegex(self.code, r"helion_\w+\((reinterpret_tensor\()?buf0, ")
         self.assertIn("in0[tile_y, tile_r]", source)
 
@@ -676,6 +678,133 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             f'autotune_effort="{effort}", dot_precision="ieee")',
             code,
         )
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
+)
+@instantiate_parametrized_tests
+class TestHelionReduction(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(config.patch({"helion.enabled": True}))
+
+    def compile(self, fn, *args, tol=None):
+        """Run compiled `fn`, check it against eager, and return the Helion kernel modules."""
+        result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(result, fn(*args), atol=tol, rtol=tol)
+        self.code = "\n".join(codes)
+        return SOURCE_RE.findall(self.code)
+
+    def test_reduction_source(self):
+        (source,) = self.compile(
+            lambda x, b: (x * 2).sum(-1) + b,
+            torch.randn(64, 100, device="cuda"),
+            torch.randn(64, device="cuda"),
+            tol=1e-4,
+        )
+        self.assertExpectedInline(
+            source,
+            """\
+import torch
+import helion
+import helion.language as hl
+
+@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee")
+def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
+    for tile_x in hl.tile(64):
+        acc = hl.zeros([tile_x], dtype=torch.float32)
+        for tile_r in hl.tile(100):
+            tmp0 = in0[tile_x, tile_r]
+            tmp1 = hl.full([], 2.0, dtype=torch.float32)
+            tmp2 = tmp0 * tmp1
+            acc = acc + torch.sum(tmp2, -1)
+        tmp3 = in1[tile_x]
+        tmp4 = acc + tmp3
+        out0[tile_x] = tmp4
+""",
+        )
+
+    @parametrize("op", ["sum", "prod", "amax", "amin"])
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int32])
+    def test_reduction_types(self, op, dtype):
+        if dtype == torch.int32:
+            if op == "prod":
+                self.skipTest("an int32 product of 100 values overflows")
+            x = torch.randint(-50, 50, (64, 100), device="cuda", dtype=dtype)
+        else:
+            x = torch.randn(64, 100, device="cuda", dtype=dtype)
+        if op == "prod":
+            x = x / 8 + 1
+        # R = 100 is not a power of two, so the last tile_r block is partial.
+        (source,) = self.compile(lambda x: getattr(torch, op)(x, -1), x, tol=1e-2)
+        self.assertIn(f"torch.{op}(", source)
+
+    def test_second_loop(self):
+        (source,) = self.compile(
+            lambda x: x / x.abs().amax(-1, keepdim=True),
+            torch.randn(64, 100, device="cuda"),
+        )
+        self.assertEqual(source.count("for tile_r in hl.tile(100):"), 2)
+        # The second loop loads x again and views acc as (tile_x, 1).
+        self.assertEqual(source.count(" = in0[tile_x, tile_r]"), 2)
+        self.assertIn(" = acc.reshape([tile_x, 1])", source)
+        self.assertIn("out0[tile_x, tile_r] = ", source)
+
+    def test_value_read_in_a_later_loop(self):
+        def fn(x):
+            # Over 30 ops: Inductor keeps y as a buffer instead of inlining it.
+            y = x
+            for i in range(20):
+                y = torch.sin(y) * 0.9 + 0.1 * i
+            return y * y.sum(-1, keepdim=True)
+
+        (source,) = self.compile(fn, torch.randn(64, 100, device="cuda"), tol=1e-4)
+        self.assertRegex(source, r"out0\[tile_x, tile_r\] = tmp\d+\n")
+        self.assertIn(" = out0[tile_x, tile_r]", source)
+
+    def test_reduction_axis_first_in_memory(self):
+        (source,) = self.compile(
+            lambda x: x.sum(0), torch.randn(100, 64, device="cuda"), tol=1e-4
+        )
+        self.assertIn("reinterpret_tensor(arg0_1, (64, 100), (1, 64), 0)", self.code)
+        self.assertIn(" = in0[tile_x, tile_r]", source)
+
+    def test_full_reduction(self):
+        (source,) = self.compile(
+            lambda x: x.mean(), torch.randn(64, 100, device="cuda"), tol=1e-4
+        )
+        self.assertIn("for tile_x in hl.tile(1):", source)
+        self.assertIn("out0[tile_x] = ", source)
+        self.assertRegex(
+            self.code, r"reinterpret_tensor\(buf\d+, \(1, \), \(0, \), 0\)"
+        )
+
+    def test_pointwise(self):
+        (source,) = self.compile(
+            lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device="cuda")
+        )
+        self.assertIn("for tile_x in hl.tile(6400):", source)
+
+    @parametrize("case", ["softmax", "layer_norm", "any", "argmax", "dynamic"])
+    def test_triton_fallback(self, case):
+        x = torch.randn(64, 100, device="cuda")
+        fn = {
+            "softmax": lambda x: torch.softmax(x, -1),
+            "layer_norm": lambda x: torch.nn.functional.layer_norm(x, (100,)),
+            "any": lambda x: (x > 2).any(-1),
+            "argmax": lambda x: x.argmax(-1),
+            "dynamic": lambda x: x.sum(-1),
+        }[case]
+        if case == "dynamic":
+            torch._dynamo.mark_dynamic(x, 0)
+        # Online softmax, Welford, any and argmax are not Helion reductions yet;
+        # they are rejected before codegen, which would log them as errors.
+        with self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"):
+            self.assertEqual(self.compile(fn, x, tol=1e-4), [])
+        self.assertIn("@triton.jit", self.code)
 
 
 @instantiate_parametrized_tests

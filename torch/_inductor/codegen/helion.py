@@ -1,10 +1,25 @@
 """Inductor codegen for Helion kernels.
 
-``config.helion.native_matmul`` lowers CUDA mm/bmm/addmm/baddbmm to native
-matmul IR (``ops.dot`` plus ``reduction("dot")``), and ``HelionScheduling``
-emits each native matmul schedule, i.e. its dots and fused pointwise epilogue,
-as one Helion kernel. Every other schedule is still Triton. For bf16
-``torch.relu(a @ b + bias)`` the body of the generated ``@helion.kernel`` is::
+With ``config.helion.enabled``, ``HelionScheduling`` emits each schedule that
+``HelionKernel`` supports, e.g. a pointwise kernel or an ``ir.Reduction``, as
+a Helion kernel, and the others as Triton. For ``(x * 2).sum(-1) + b`` the
+body of the generated ``@helion.kernel`` is::
+
+    for tile_x in hl.tile(64):
+        acc = hl.zeros([tile_x], dtype=torch.float32)
+        for tile_r in hl.tile(100):
+            tmp0 = in0[tile_x, tile_r]
+            tmp1 = hl.full([], 2.0, dtype=torch.float32)
+            tmp2 = tmp0 * tmp1
+            acc = acc + torch.sum(tmp2, -1)
+        tmp3 = in1[tile_x]
+        tmp4 = acc + tmp3
+        out0[tile_x] = tmp4
+
+``config.helion.native_matmul`` also lowers CUDA mm/bmm/addmm/baddbmm to
+native matmul IR (``ops.dot`` plus ``reduction("dot")``), so that a matmul and
+its fused pointwise epilogue is one Helion kernel. For bf16
+``torch.relu(a @ b + bias)``::
 
     for tile_y, tile_x in hl.tile([40, 136]):
         acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
@@ -31,7 +46,9 @@ what Helion device code is.
 from __future__ import annotations
 
 import collections
+import contextlib
 import itertools
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -43,7 +60,14 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config
-from ..ir import FixedLayout, IRNode, MutationLayoutSHOULDREMOVE, ReinterpretView
+from ..ir import (
+    ComputedBuffer,
+    FixedLayout,
+    IRNode,
+    MutationLayoutSHOULDREMOVE,
+    ReinterpretView,
+)
+from ..loop_body import MemoryUsageType
 from ..scheduler import SchedulerNode, WhyNoFuse
 from ..utils import (
     get_fused_kernel_name,
@@ -55,11 +79,12 @@ from ..utils import (
 from ..virtualized import V
 from .common import CSEVariable, OpOverrides, PythonPrinter
 from .simd import SIMDKernel
+from .simd_kernel_features import DisableReduction, EnableReduction
 from .triton import TritonScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from ..scheduler import BaseSchedulerNode
 
@@ -67,9 +92,16 @@ if TYPE_CHECKING:
 TileShape = tuple[str | int, ...]
 TILE_NAMES = {"z": "tile_z", "y": "tile_y", "x": "tile_x", "r0_": "tile_r"}
 TILE_AXES = {name: axis for axis, name in TILE_NAMES.items()}
-# Order of tile dims in a subscript, so that dot operands read as
-# in0[tile_y, tile_r] and in1[tile_r, tile_x].
-AXIS_ORDER = ("z", "y", "r0_", "x")
+
+log = logging.getLogger(__name__)
+
+
+def literal(value: bool | float | int) -> str:
+    # repr(-inf) is not Python: hl.full([], -inf, dtype=torch.float32) fails
+    # with UndefinedVariable: inf is not defined.
+    if isinstance(value, float) and not math.isfinite(value):
+        return f"float({repr(value)!r})"
+    return repr(value)
 
 
 class HelionPrinter(PythonPrinter):
@@ -117,13 +149,7 @@ class HelionOverrides(OpOverrides):
         #   tmp2 = 0.0
         #   tmp3 = torch.maximum(acc, tmp2)
         #   TypeError: maximum(): argument 'other' (position 2) must be Tensor, not float
-        # and repr(-inf) is not Python:
-        #   tmp3 = hl.full([], -inf, dtype=torch.float32)
-        #   UndefinedVariable: inf is not defined.
-        literal = repr(value)
-        if isinstance(value, float) and not math.isfinite(value):
-            literal = f"float({literal!r})"
-        return f"hl.full([], {literal}, dtype={upcast_compute_type(dtype)})"
+        return f"hl.full([], {literal(value)}, dtype={upcast_compute_type(dtype)})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -333,6 +359,29 @@ HELION_OPS = OrderedSet(
 ) | OrderedSet(name for name in vars(HelionOverrides) if not name.startswith("_"))
 
 
+def lowest(dtype: torch.dtype) -> bool | float | int:
+    if dtype == torch.bool:
+        return False
+    return -math.inf if dtype.is_floating_point else torch.iinfo(dtype).min
+
+
+def highest(dtype: torch.dtype) -> bool | float | int:
+    if dtype == torch.bool:
+        return True
+    return math.inf if dtype.is_floating_point else torch.iinfo(dtype).max
+
+
+# Reduction types of ir.Reduction that a Helion kernel supports, and the initial
+# value of their accumulator for an input dtype. The others, e.g. argmax or
+# Welford, stay Triton for now.
+REDUCTIONS: dict[str, Callable[[torch.dtype], bool | float | int]] = {
+    "sum": lambda dtype: 0,
+    "prod": lambda dtype: 1,
+    "max": lowest,
+    "min": highest,
+}
+
+
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     # is_native_matmul() asserts on templates, e.g. flex_attention in the graph:
     # AssertionError: type(self.node)=<class 'torch._inductor.ir.TritonTemplateBuffer'>
@@ -355,22 +404,34 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     SIMDScheduling picks the tiling and runs the node bodies as for a Triton
     kernel. The pointwise range trees become the tile loop,
     for tile_z, tile_y, tile_x in hl.tile([Z, Y, X]), and the reduction range
-    tree an inner for tile_r in hl.tile(R) loop. A range tree's index (yindex)
-    stands for its tile's index tensor (tile_y.index), so loads and stores
-    subscript tensors by tile, e.g. in0[tile_y, tile_r], instead of offsetting
+    tree an inner for tile_r in hl.tile(R) loop. A range tree's index (xindex)
+    stands for its tile's index tensor (tile_x.index), so loads and stores
+    subscript tensors by tile, e.g. in0[tile_x, tile_r], instead of offsetting
     a pointer. Helion picks the block sizes and masks partial tiles itself.
 
-    Values in the tile loop keep a shape that broadcasts against the tile, e.g.
-    a row vector is [tile_y, 1], so pointwise ops need no reshapes.
+    Subscripts list their tiles in the order of self.axes: (z, y, x, r0_), as
+    Triton orders XBLOCK and R0_BLOCK, or (z, y, r0_, x) in a native matmul
+    kernel, whose dot operands then read as in0[tile_y, tile_r] and
+    in1[tile_r, tile_x]. Values keep a shape that broadcasts against the tiles
+    in scope, e.g. a row vector is (tile_y, 1) in the tile loop over
+    (tile_y, tile_x), and a value of each row is (tile_x, 1) in a reduction
+    loop over (tile_x, tile_r), so pointwise ops need no reshapes.
     """
 
     overrides = HelionOverrides  # type: ignore[assignment]
 
     def __init__(self, tiling: dict[str, sympy.Expr], **kwargs: Any) -> None:
+        # Values defined outside the reduction loops, which stay in scope.
+        self.outer_vars: OrderedSet[CSEVariable] = OrderedSet()
         super().__init__(tiling, **kwargs)
         if unsupported := OrderedSet(self.numels) - OrderedSet(TILE_NAMES):
             raise NotImplementedError(f"Helion kernels do not tile {unsupported}")
-        self.axes = tuple(axis for axis in AXIS_ORDER if axis in self.numels)
+        if not all(isinstance(n, (int, sympy.Integer)) for n in self.numels.values()):
+            raise NotImplementedError("Helion kernels have static shapes")
+        nodes = tuple(self.features.scheduler_nodes())
+        self.is_matmul = any(node.is_native_matmul() for node in nodes)
+        order = ("z", "y", "r0_", "x") if self.is_matmul else ("z", "y", "x", "r0_")
+        self.axes = tuple(axis for axis in order if axis in self.numels)
         self.outer_axes = tuple(axis for axis in self.axes if axis != "r0_")
         roots = {tree.prefix: tree for tree in self.range_trees}
         self.symbols = {axis: roots[axis].index_sym() for axis in self.axes}
@@ -378,15 +439,18 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # Buffers stored to memory. A fused intermediate is read back through
         # the CSE store cache instead; storing it too would add
         # out0[tile_y, tile_x] = acc.to(torch.bfloat16) to relu(a @ b + c).
-        nodes = tuple(self.features.scheduler_nodes())
         fused_names = OrderedSet(node.get_name() for node in nodes)
+        read_later = self.values_read_in_a_later_loop(nodes)
         self.outputs = OrderedSet(
             buf.get_name()
             for node in nodes
             for buf in node.get_outputs()
             if not isinstance(buf.node.get_layout(), MutationLayoutSHOULDREMOVE)
-            and not V.graph.scheduler.can_buffer_be_removed_through_fusion(
-                buf.get_name(), fused_names
+            and (
+                buf.get_name() in read_later
+                or not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                    buf.get_name(), fused_names
+                )
             )
         )
         self.arguments: dict[tuple[Any, ...], HelionTensorArg] = {}
@@ -399,41 +463,105 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         self.loads = self.compute
         # Masks of the enclosing ops.masked() bodies, outermost first.
         self.load_masks: list[CSEVariable] = []
-        # Dot node name -> its FP32 accumulator.
-        self.accumulators: dict[str, CSEVariable] = {}
+        self.accumulator_count = 0
+        # Buffer -> value stored outside the current reduction loop; see
+        # disable_reduction().
+        self.outer_stores: dict[str, CSEVariable] = {}
+
+    def values_read_in_a_later_loop(
+        self, nodes: Sequence[BaseSchedulerNode]
+    ) -> OrderedSet[str]:
+        """Buffers that a reduction loop computes and a later loop reads.
+
+        A value of a reduction loop is out of scope in the next loop, so it
+        goes through memory even when no other kernel reads it. For y * s with
+        s = y.sum(-1, keepdim=True) and y a chain of 20 sin(y) * 0.9 + 0.1 * i,
+        Inductor keeps y as a buffer, and the kernel emits
+            for tile_r in hl.tile(100):
+                ...
+                out0[tile_x, tile_r] = tmp78
+                acc = acc + torch.sum(tmp78, -1)
+            for tile_r in hl.tile(100):
+                tmp79 = out0[tile_x, tile_r]
+        Without the store, the second loop reads a buffer nothing wrote and the
+        result is wrong. Reduction results are not such values; they live on in
+        their accumulators.
+        """
+        region, current = {}, 0
+        for item in self.features.node_schedule:
+            if item is DisableReduction or item is EnableReduction:
+                current += 1
+            elif isinstance(item, SchedulerNode):
+                region[item.get_name()] = current
+        writers = {buf.get_name(): node for node in nodes for buf in node.get_outputs()}
+        # The schedule starts in a reduction loop: regions 0, 2, ... are loops.
+        return OrderedSet(
+            dep.name
+            for node in nodes
+            for dep in node.read_writes.reads
+            if (writer := writers.get(dep.name)) is not None
+            and not writer.is_reduction()
+            and region[writer.get_name()] % 2 == 0
+            and region[node.get_name()] != region[writer.get_name()]
+            and self.features.is_reduction()
+        )
+
+    @property
+    def in_loop(self) -> bool:
+        """Whether code goes in a reduction loop, for tile_r in hl.tile(R)."""
+        return self.inside_reduction and self.features.is_reduction()
+
+    @property
+    def scope_axes(self) -> tuple[str, ...]:
+        """The tile axes that values in the code being generated broadcast against.
+
+        A native matmul's K loop only holds dot operands, which do not broadcast.
+        """
+        return self.axes if self.in_loop and not self.is_matmul else self.outer_axes
+
+    def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
+        var = super().create_cse_var(*args, **kwargs)
+        if not (hasattr(self, "features") and self.in_loop):
+            self.outer_vars.add(var)
+        return var
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         # Dtype propagation reads SIMDKernel.index_dtype for an index_expr, e.g.
         # the mask of a cat input, which raises NotImplementedError without this.
         return str(dtype)
 
-    def outer_shape(self, axes: Sequence[str] | None = None) -> TileShape:
-        """Shape of a value that depends on `axes`, broadcastable against the tile.
+    def index_axes(self, index: sympy.Expr) -> list[str]:
+        return [axis for axis in self.axes if self.symbols[axis] in index.free_symbols]
 
-        With outer axes (z, y, x): {y, x} -> (tile_y, tile_x), {x} -> (tile_x,),
-        {y} -> (tile_y, 1), {z, x} -> (tile_z, 1, tile_x), {} -> ().
+    def value_shape(self, axes: Sequence[str] | None = None) -> TileShape:
+        """Shape of a value that depends on `axes`, broadcastable against the tiles in scope.
+
+        In the tile loop over (z, y, x): {y, x} -> (tile_y, tile_x), {x} ->
+        (tile_x,), {y} -> (tile_y, 1), {z, x} -> (tile_z, 1, tile_x), {} -> ().
+        In a reduction loop over (x, r0_): {x} -> (tile_x, 1), {r0_} -> (tile_r,).
         """
-        axes = self.outer_axes if axes is None else axes
-        present = [axis for axis in self.outer_axes if axis in axes]
+        scope = self.scope_axes
+        axes = scope if axes is None else axes
+        present = [axis for axis in scope if axis in axes]
         if not present:
             return ()
-        start = self.outer_axes.index(present[0])
+        start = scope.index(present[0])
         return tuple(
-            TILE_NAMES[axis] if axis in present else 1
-            for axis in self.outer_axes[start:]
+            TILE_NAMES[axis] if axis in present else 1 for axis in scope[start:]
         )
 
     def index_tensor(self, axis: str, axes: Sequence[str] | None = None) -> str:
         """Tile index tensor of `axis`.
 
-        By default it broadcasts against the tile, as index arithmetic needs:
-        tile_y.index[:, None] and tile_x.index for outer axes (y, x). With
-        `axes`, it has one dim per axis, as a tensor subscript needs:
-        tile_y.index[:, None] and tile_x.index[None, :] for axes (y, x).
+        By default it broadcasts against the tiles in scope, as index arithmetic
+        needs: tile_y.index[:, None] and tile_x.index for (y, x). With `axes`,
+        it has one dim per axis, as a tensor subscript needs: tile_y.index[:, None]
+        and tile_x.index[None, :] for axes (y, x).
         """
         name = f"{TILE_NAMES[axis]}.index"
         if axes is None:
-            trailing = len(self.outer_axes) - 1 - self.outer_axes.index(axis)
+            scope = self.scope_axes
+            trailing = len(scope) - 1 - scope.index(axis)
             return f"{name}[:{', None' * trailing}]" if trailing else name
         if len(axes) == 1:
             return name
@@ -461,6 +589,19 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if aligned == shape:
             return str(value)
         return f"{value}.reshape([{', '.join(map(str, aligned))}])"
+
+    def in_scope(self, value: CSEVariable) -> CSEVariable:
+        """`value`, computed outside the current reduction loop, shaped for it.
+
+        acc of shape (tile_x,) reads as tmp6 = acc.reshape([tile_x, 1]) in a
+        later loop over (tile_x, tile_r).
+        """
+        axes = [TILE_AXES[str(dim)] for dim in value.shape or () if dim != 1]
+        target = self.value_shape(axes)
+        if target == tuple(value.shape or ()):
+            return value
+        line = self.align(value, self.value_shape())
+        return self.cse.generate(self.compute, line, dtype=value.dtype, shape=target)
 
     def tile_index(self, index: sympy.Expr) -> sympy.Expr:
         """Rewrite `index` over the range tree indices, i.e. the tile indices.
@@ -539,23 +680,28 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         return ReinterpretView(data=buffer, layout=layout)
 
     def subscript(
-        self, buffer: IRNode, index: sympy.Expr, *, output: bool = False
-    ) -> tuple[HelionTensorArg, list[str], TileShape]:
+        self,
+        buffer: IRNode,
+        index: sympy.Expr,
+        axes: Sequence[str],
+        *,
+        output: bool = False,
+        flat: bool = True,
+    ) -> tuple[HelionTensorArg, list[str], TileShape] | None:
         """The parameter and subscript that read `buffer` at `index`, and its shape.
 
+        The subscript has a dim per tile in `axes`, in the order of self.axes.
         Inductor indices are flat offsets into the storage, so the subscript is
         recovered from them, trying in turn:
         1. the buffer's own dims, e.g. [M, N] with strides (N, 1) at
            N*yindex + xindex is in0[tile_y, tile_x], a bias [N] at xindex is
            in0[tile_x] and a 0-d tensor is in0[()];
         2. a view whose dims are tiles, if `index` is affine in them (see
-           tiled_view());
-        3. a flat view of the storage, read at `index` itself like a Triton
-           pointer offset (see flat_subscript()).
+           tiled_view()), e.g. x.sum(0) for x of shape [100, 64] reads
+           reinterpret_tensor(arg0_1, (64, 100), (1, 64), 0) as in0[tile_x, tile_r];
+        3. if `flat`, a flat view of the storage, read at `index` itself like a
+           Triton pointer offset (see flat_subscript()). Otherwise None.
         """
-        axes = [
-            axis for axis in self.outer_axes if self.symbols[axis] in index.free_symbols
-        ]
         layout = buffer.get_layout()
         candidates = [
             [
@@ -567,12 +713,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             for size in layout.size
         ]
         for dims in itertools.product(*candidates):
-            # Tile dims in AXIS_ORDER only. c.t() for c of shape [136, 40] would
-            # match as in2[tile_x, tile_y], a (tile_x, tile_y) value:
+            # Tile dims in the order of self.axes only. c.t() for c of shape
+            # [136, 40] would match as in2[tile_x, tile_y], a (tile_x, tile_y)
+            # value:
             #   NotImplementedError: Cannot broadcast Helion ('tile_x', 'tile_y') to ('tile_y', 'tile_x')
             # tiled_view() reads it as in2[tile_y, tile_x] instead, passing
             # reinterpret_tensor(arg2_1, (40, 136), (1, 40), 0).
-            if [dim for dim in dims if dim is not None] != axes:
+            if [dim for dim in dims if dim is not None] != list(axes):
                 continue
             expected = layout.offset + sum(
                 self.symbols[dim] * stride
@@ -587,10 +734,17 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if (view := self.tiled_view(buffer, index, axes)) is not None:
             tiles = tuple(TILE_NAMES[axis] for axis in axes)
             return self.tensor_arg(view, output=output), list(tiles) or ["()"], tiles
-        return self.flat_subscript(buffer, index, output=output)
+        if not flat:
+            return None
+        return self.flat_subscript(buffer, index, axes, output=output)
 
     def flat_subscript(
-        self, buffer: IRNode, index: sympy.Expr, *, output: bool = False
+        self,
+        buffer: IRNode,
+        index: sympy.Expr,
+        axes: Sequence[str],
+        *,
+        output: bool = False,
     ) -> tuple[HelionTensorArg, list[str], TileShape]:
         """Read a flat view of the storage at `index`, like a Triton pointer offset.
 
@@ -607,25 +761,48 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             flat = FixedLayout(layout.device, layout.dtype, [size], [1], 0)
             operand = ReinterpretView(data=buffer, layout=flat)
         arg = self.tensor_arg(operand, output=output)
-        axes = [
-            axis for axis in self.outer_axes if self.symbols[axis] in index.free_symbols
-        ]
-        return arg, [self.index_tensor_expr(index, axes)], self.outer_shape(axes)
+        return arg, [self.index_tensor_expr(index, axes)], self.value_shape(axes)
+
+    def disable_reduction(self) -> contextlib.AbstractContextManager[None]:
+        outside = super().disable_reduction()
+
+        @contextlib.contextmanager
+        def ctx() -> Iterator[None]:
+            with outside:
+                yield
+            # Back in a reduction loop: a value stored outside it, such as acc
+            # of shape (tile_x,), is read through in_scope(), which emits
+            # tmp3 = acc.reshape([tile_x, 1]). The CSE store cache would return
+            # acc as is, and x / x.abs().amax(-1, keepdim=True) would fail
+            # Inductor's shape propagation, which broadcasts trailing dims:
+            #   AssertionError: expected str(d1) == str(d2), got tile_r != tile_x
+            for name, value in [*self.cse.store_cache.items()]:
+                if value in self.outer_vars:
+                    self.outer_stores[name] = value
+                    del self.cse.store_cache[name]
+
+        return ctx()
 
     def codegen_body(self) -> None:
-        """Move the pending code into self.body; reduction code goes in the K loop.
+        """Move the pending code into self.body; reduction code goes in its loop.
 
-        SIMDKernel.disable_reduction() calls this when the reduction ends, so
+        SIMDKernel.disable_reduction() calls this when a reduction loop ends, so
         the dots end up in for tile_r in hl.tile(K): and the epilogue after it.
         """
         if not (self.compute or self.stores):
             return
-        if self.inside_reduction and self.features.is_reduction():
+        if self.in_loop:
             self.body.writeline(f"for tile_r in hl.tile({self.numels['r0_']}):")
             with self.body.indent():
                 self.body.splice(self.compute)
             # Reduction results are stored after the loop.
             self.body.splice(self.stores)
+            # Values from the loop are out of scope after it. Without this, the
+            # second loop of x / x.abs().amax(-1, keepdim=True) reuses
+            # tmp0 = in0[tile_x, tile_r] from the first one:
+            #   tmp3 = tmp0 / tmp2
+            #   CrossRootDeviceValue: Device value 'tmp0' cannot be carried between top-level loops.
+            self.cse.invalidate(self.outer_vars)
         else:
             self.body.splice(self.compute)
             self.body.splice(self.stores)
@@ -703,13 +880,37 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         wrapper.writeline(wrapper.wrap_kernel_call(name, args))
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        if name in self.outer_stores:
+            return self.in_scope(self.outer_stores[name])
         buffer = V.graph.get_buffer(name)
         index = self.tile_index(index)
-        # In the K loop of a native matmul, the dot node loads its operands.
+        axes = self.index_axes(index)
         node = self.current_node
-        if self.inside_reduction and node is not None and node.is_native_matmul():
-            return self.load_dot_operand(buffer, index)
-        arg, coordinates, shape = self.subscript(buffer, index)
+        if self.in_loop and node is not None and node.is_native_matmul():
+            # A dot operand is a whole matrix tile for torch.addmm/baddbmm,
+            # (z, y, r0_) or (z, r0_, x), even along an axis its index skips
+            # (a stride-0 broadcast), and it keeps its storage dtype: the dot
+            # body casts it to that anyway, so an upcast would emit a round trip
+            #   tmp0 = in0[tile_y, tile_r].to(torch.float32)
+            #   tmp1 = tmp0.to(torch.bfloat16)
+            batch = ["z"] if "z" in self.numels else []
+            operand = [*batch, "r0_", "x"] if "x" in axes else [*batch, "y", "r0_"]
+            found = OrderedSet(axes) <= OrderedSet(operand) and self.subscript(
+                buffer, index, operand, flat=False
+            )
+            if not found:
+                raise NotImplementedError(
+                    f"Cannot read a Helion dot operand at {index}"
+                )
+            arg, coordinates, shape = found
+            line = f"{arg.name}[{', '.join(coordinates)}]"
+            return self.cse.generate(
+                self.loads, line, dtype=buffer.get_dtype(), shape=shape
+            )
+        found = self.subscript(buffer, index, axes)
+        if found is None:
+            raise AssertionError("expected a flat subscript")
+        arg, coordinates, shape = found
         dtype = upcast_compute_type(buffer.get_dtype())
         cast_suffix = "" if dtype == buffer.get_dtype() else f".to({dtype})"
         subscript = ", ".join(coordinates)
@@ -725,34 +926,15 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # (tile_y,), a @ b + c for c of shape [40, 1] fails Inductor's shape
         # propagation, which broadcasts trailing dims:
         #   AssertionError: expected str(d1) == str(d2), got tile_x != tile_y
-        aligned = self.outer_shape([TILE_AXES[str(dim)] for dim in shape if dim != 1])
+        aligned = self.value_shape(axes)
         if aligned == shape:
             return value
         return self.cse.generate(
             self.loads,
-            self.align(value, self.outer_shape()),
+            self.align(value, self.value_shape()),
             dtype=dtype,
             shape=aligned,
         )
-
-    def load_dot_operand(self, buffer: IRNode, index: sympy.Expr) -> CSEVariable:
-        """Load a dot operand in the K loop: in0[tile_y, tile_r] or in1[tile_r, tile_x].
-
-        The tile keeps its storage dtype. The dot body casts the operand to it
-        anyway, so the upcast that load() applies would only emit a round trip:
-            tmp0 = in0[tile_y, tile_r].to(torch.float32)
-            tmp1 = tmp0.to(torch.bfloat16)
-        """
-        batch = ("z",) if "z" in self.numels else ()
-        for axes in [(*batch, "y", "r0_"), (*batch, "r0_", "x")]:
-            if (view := self.tiled_view(buffer, index, axes)) is None:
-                continue
-            tiles = tuple(TILE_NAMES[axis] for axis in axes)
-            line = f"{self.tensor_arg(view).name}[{', '.join(tiles)}]"
-            return self.cse.generate(
-                self.loads, line, dtype=buffer.get_dtype(), shape=tiles
-            )
-        raise NotImplementedError(f"Cannot read a Helion dot operand at {index}")
 
     def store(
         self,
@@ -772,13 +954,32 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             buffer = layout.get_buffer()
         elif name not in self.outputs:
             return
-        arg, coordinates, shape = self.subscript(
-            buffer, self.tile_index(index), output=True
-        )
+        index = self.tile_index(index)
+        # A size-1 tile that the index skips stays in the subscript, through a
+        # stride-0 view. x.sum() has one tile_x of size 1, and its acc of shape
+        # (tile_x,) stores as out0[tile_x] = acc into
+        # reinterpret_tensor(buf0, (1, ), (0, ), 0); out0[()] = acc would fail:
+        #   NotImplementedError: Cannot broadcast Helion ('tile_x',) to ()
+        value_axes = [TILE_AXES[str(dim)] for dim in value.shape or () if dim != 1]
+        axes = [
+            axis
+            for axis in self.axes
+            if self.symbols[axis] in index.free_symbols
+            or (axis in value_axes and self.numels[axis] == 1)
+        ]
+        found = self.subscript(buffer, index, axes, output=True)
+        if found is None:
+            raise AssertionError("expected a flat subscript")
+        arg, coordinates, shape = found
         dtype = buffer.get_dtype()
         cast_suffix = "" if value.dtype == dtype else f".to({dtype})"
-        # out0[tile_y, tile_x] = tmp4.to(torch.bfloat16)
-        self.stores.writeline(
+        # out0[tile_y, tile_x] = tmp4.to(torch.bfloat16). A store in a reduction
+        # loop, out0[tile_x, tile_r] = tmp4, stays in it; after the loop it would
+        # fail with CrossRootDeviceValue: Device value 'tmp4' cannot be carried
+        # between top-level loops. Reduction results (SIMDKernel.store_reduction)
+        # are stored after the loop.
+        buffer_code = self.compute if self.in_loop else self.stores
+        buffer_code.writeline(
             f"{arg.name}[{', '.join(coordinates)}] = "
             f"{self.align(value, shape)}{cast_suffix}"
         )
@@ -795,14 +996,12 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             value = int(index) if index.is_Integer else float(index)
             line = HelionOverrides.constant(value, dtype)
             return self.cse.generate(self.compute, line, dtype=dtype, shape=())
-        axes = [
-            axis for axis in self.outer_axes if self.symbols[axis] in index.free_symbols
-        ]
+        axes = self.index_axes(index)
         return self.cse.generate(
             self.compute,
             f"({self.index_tensor_expr(index, axes)}).to({dtype})",
             dtype=dtype,
-            shape=self.outer_shape(axes),
+            shape=self.value_shape(axes),
         )
 
     def index_tensor_expr(self, index: sympy.Expr, axes: Sequence[str]) -> str:
@@ -810,7 +1009,9 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 
         136*yindex + xindex -> 136*tile_y.index[:, None] + tile_x.index.
         """
-        if index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes):
+        if not OrderedSet(axes) <= OrderedSet(self.scope_axes) or (
+            index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes)
+        ):
             raise NotImplementedError(f"Unsupported Helion index: {index}")
         # tile.index is int32 (int64 only for tensors past 2**31 elements), so
         # widen it if any subexpression could overflow. Otherwise the mask of
@@ -878,6 +1079,25 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             raise AssertionError(f"expected a dtype for masked value {result}")
         return V.ops.where(mask, result, V.ops.constant(other, result.dtype))
 
+    def accumulator(self, init: bool | float | int, dtype: torch.dtype) -> CSEVariable:
+        """A new accumulator over the outer tiles, declared before its loop.
+
+        acc = hl.zeros([tile_y, tile_x], dtype=torch.float32), or
+        acc = hl.full([tile_x], float('-inf'), dtype=torch.float32) for a max.
+        """
+        tiles = tuple(TILE_NAMES[axis] for axis in self.outer_axes)
+        name = f"acc{self.accumulator_count or ''}"
+        self.accumulator_count += 1
+        acc = CSEVariable(name, ValueRanges.unknown(), dtype, tiles)
+        self.outer_vars.add(acc)
+        shape = ", ".join(tiles)
+        if init == 0 and dtype != torch.bool:
+            self.body.writeline(f"{acc} = hl.zeros([{shape}], dtype={dtype})")
+        else:
+            value = literal(init)
+            self.body.writeline(f"{acc} = hl.full([{shape}], {value}, dtype={dtype})")
+        return acc
+
     def dot(self, lhs: CSEVariable, rhs: CSEVariable) -> CSEVariable:
         """Accumulate one K tile of a dot into its accumulator.
 
@@ -892,18 +1112,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 tmp2 = in2[tile_r, tile_x]
                 acc1 = torch.addmm(acc1, tmp0, tmp2)
         """
-        if self.current_node is None:
-            raise AssertionError("expected a dot node")
-        node = self.current_node.get_name()
-        if node not in self.accumulators:
-            name = f"acc{len(self.accumulators) or ''}"
-            acc = CSEVariable(
-                name, ValueRanges.unknown(), torch.float32, self.outer_shape()
-            )
-            tiles = ", ".join(TILE_NAMES[axis] for axis in self.outer_axes)
-            self.body.writeline(f"{acc} = hl.zeros([{tiles}], dtype=torch.float32)")
-            self.accumulators[node] = acc
-        acc = self.accumulators[node]
+        acc = self.accumulator(0, torch.float32)
         op = "baddbmm" if "z" in self.numels else "addmm"
         self.compute.writeline(f"{acc} = torch.{op}({acc}, {lhs}, {rhs})")
         return acc
@@ -915,16 +1124,51 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         reduction_type: str,
         value: CSEVariable | tuple[CSEVariable, ...],
     ) -> CSEVariable | tuple[CSEVariable, ...]:
-        # Only native matmul dots for now; general reductions over r0_ would
-        # accumulate elementwise in the K loop and reduce after it.
-        if reduction_type != "dot":
+        """Reduce `value` over the reduction loop into an accumulator.
+
+        Each iteration reduces its tile_r block, the last dim of `value`, and
+        combines that with the accumulator. x.amax(-1) for x of shape [64, 100]:
+            acc = hl.full([tile_x], float('-inf'), dtype=torch.float32)
+            for tile_r in hl.tile(100):
+                tmp0 = in0[tile_x, tile_r]
+                acc = torch.maximum(acc, torch.amax(tmp0, -1))
+            out0[tile_x] = acc
+        Helion masks the lanes of a partial tile_r block in torch.amax, as in
+        torch.sum, so no lane past R joins the result.
+        """
+        if reduction_type == "dot":
+            # dot() already accumulated into acc.
+            return value
+        if self.is_matmul or reduction_type not in REDUCTIONS:
             raise NotImplementedError(f"Helion kernels do not support {reduction_type}")
-        # dot() already accumulated into acc.
-        return value
+        if not isinstance(value, CSEVariable) or "tile_r" not in map(
+            str, value.shape or ()
+        ):
+            raise NotImplementedError("Helion reductions need a tile_r value")
+        init = REDUCTIONS[reduction_type](upcast_compute_type(src_dtype))
+        acc = self.accumulator(init, upcast_compute_type(dtype))
+        block = {
+            "sum": f"{acc} + torch.sum({value}, -1)",
+            "prod": f"{acc} * torch.prod({value}, -1)",
+            "max": f"torch.maximum({acc}, torch.amax({value}, -1))",
+            "min": f"torch.minimum({acc}, torch.amin({value}, -1))",
+        }[reduction_type]
+        self.compute.writeline(f"{acc} = {block}")
+        return acc
 
 
 class HelionScheduling(TritonScheduling):
-    """Emit native matmul schedules as Helion kernels and the rest as Triton."""
+    """Emit schedules as Helion kernels where HelionKernel supports them.
+
+    Native matmul schedules are always Helion kernels. Another schedule is a
+    Helion kernel if HelionKernel generates it without NotImplementedError, e.g.
+    a pointwise or reduction kernel, and a Triton kernel otherwise.
+    """
+
+    def __init__(self, scheduler: Any) -> None:
+        super().__init__(scheduler)
+        # Set while codegen_node_schedule() tries a HelionKernel.
+        self.use_helion = False
 
     @staticmethod
     def format_kernel_definition(name: str, source: str) -> str:
@@ -1009,8 +1253,50 @@ class HelionScheduling(TritonScheduling):
             required_post_reduction_index=required_post_reduction_index,
         )
 
+    @staticmethod
+    def helion_candidate(kernel_features: Any) -> bool:
+        """Whether a schedule without a dot uses only what HelionKernel supports.
+
+        Checked before codegen, as SchedulerNode.codegen() logs any error at
+        critical level, e.g. "Error in codegen for ComputedBuffer(...
+        reduction_type=welford_reduce ...)" for a layer norm.
+        """
+        return all(
+            isinstance(node, SchedulerNode)
+            and not node.is_template()
+            and not is_helion_matmul(node)
+            and not OrderedSet(node._body.op_counts) - HELION_OPS
+            and (
+                not isinstance(node.node, ComputedBuffer)
+                or node.node.get_reduction_type() in (None, *REDUCTIONS)
+            )
+            and not any(
+                entry.mode for entry in node._body.memory_usage[MemoryUsageType.STORE]
+            )
+            and not any(
+                V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads
+            )
+            for node in kernel_features.scheduler_nodes()
+        )
+
+    def codegen_node_schedule(self, kernel_features):
+        if not self.helion_candidate(kernel_features):
+            return super().codegen_node_schedule(kernel_features)
+        # Codegen fails before anything reaches the wrapper (define_kernel), so
+        # the schedule can start over as a Triton kernel.
+        self.use_helion = True
+        try:
+            return super().codegen_node_schedule(kernel_features)
+        except NotImplementedError as e:
+            log.debug("Emitting a Triton kernel instead of a Helion kernel: %s", e)
+        finally:
+            self.use_helion = False
+        return super().codegen_node_schedule(kernel_features)
+
     def create_kernel_choices(self, kernel_features, kernel_args, kernel_kwargs):
-        if any(is_helion_matmul(node) for node in kernel_features.scheduler_nodes()):
+        if self.use_helion or any(
+            is_helion_matmul(node) for node in kernel_features.scheduler_nodes()
+        ):
             return [HelionKernel(*kernel_args, **kernel_kwargs)]
         return super().create_kernel_choices(
             kernel_features, kernel_args, kernel_kwargs
