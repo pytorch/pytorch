@@ -150,7 +150,7 @@ def deterministic_recompute(
             )
         ):
             constants.add(n)
-    copy_names = {n.name for n in copies}
+    copy_names = {n.name for n in copies if _draw_of(n) is None}
     in_regions = {n for nodes in regions.values() for n in nodes}
     direct = {
         c
@@ -318,9 +318,20 @@ def _recomputed_copies(
         for n in bw_module.graph.nodes
         if n.op not in ("placeholder", "output")
     }
+    # The backward replays a graphsafe RNG draw (e.g. dropout's) from its own
+    # generator, bwd_rng_state_i, which the runtime keeps in sync with the
+    # forward's fwd_rng_state_i (see initialize_rng_states), so the replay is a
+    # copy.
+    rng_state_names = {
+        p.name: "fwd" + p.name.removeprefix("bwd")
+        for p in bw_module.graph.find_nodes(op="placeholder")
+        if p.name.startswith("bwd_rng_state_")
+    }
 
     def _names(n: torch.fx.Node) -> Any:
-        return torch.fx.node.map_arg((n.args, n.kwargs), lambda a: a.name)
+        return torch.fx.node.map_arg(
+            (n.args, n.kwargs), lambda a: rng_state_names.get(a.name, a.name)
+        )
 
     copies: set[torch.fx.Node] = set()
     not_copies: set[torch.fx.Node] = set()
@@ -351,6 +362,10 @@ def _recomputed_copies(
             not_copies.update(missing)
             continue
         copies.add(n)
+        # The replayed draw is never part of a piece (a piece holding any other
+        # RNG op is left as partitioned); pieces read its result instead.
+        if _draw_of(n) is not None:
+            continue
         # Recompute the partitioner chose outside checkpoint regions (e.g. under
         # activation_memory_budget) forms one more region. A getitem goes with
         # its op, even if a custom pass moved only one of them out of a region.
@@ -463,9 +478,20 @@ def _dependency_order(
     for i, piece in enumerate(pieces):
         for n in piece:
             owner[n] = None if n in owner else i
+
+    def _inputs(n: torch.fx.Node) -> Iterable[torch.fx.Node]:
+        # The backward's RNG replay is in no piece: reading one reads what it
+        # reads.
+        stack = list(n.all_input_nodes)
+        while stack:
+            a = stack.pop()
+            if (draw := _draw_of(a)) is not None:
+                stack.extend(draw.all_input_nodes)
+            else:
+                yield a
+
     deps = [
-        {owner[a] for n in piece for a in n.all_input_nodes if owner.get(a, i) != i}
-        - {None}
+        {owner[a] for n in piece for a in _inputs(n) if owner.get(a, i) != i} - {None}
         for i, piece in enumerate(pieces)
     ]
 
@@ -641,6 +667,15 @@ def _accumulates(n: torch.fx.Node) -> bool:
     return n.target in (aten.scatter.reduce, aten.scatter.value_reduce)
 
 
+def _draw_of(n: torch.fx.Node) -> torch.fx.Node | None:
+    """The graphsafe RNG draw ``n`` is, or is a getitem of (on the aot backend
+    it returns a tuple), if any."""
+    from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+    op = n.all_input_nodes[0] if n.target is operator.getitem else n
+    return op if op.target is graphsafe_run_with_rng_state else None
+
+
 def _is_rng(n: torch.fx.Node) -> bool:
     from torch._functorch.partitioners import is_rng_op
     from torch._prims.rng_prims import (
@@ -697,6 +732,21 @@ def _share_region(
     while stack:
         a = stack.pop()
         if a in s_set or (a not in copies and a.op != "get_attr"):
+            continue
+        if (draw := _draw_of(a)) is not None:
+            # The backward's replay of the draw reproduces the forward's (see
+            # _recomputed_copies), so the piece reads it, if the draw reads the
+            # same values in both graphs: primals, saved values, outputs of
+            # earlier pieces, or views or draws of those.
+            reads = list(draw.all_input_nodes)
+            while reads:
+                d = reads.pop()
+                tensor = isinstance(d.meta.get("val"), (torch.Tensor, tuple, list))
+                if not tensor or d.op == "placeholder" or d in saved or d in bw_of:
+                    continue
+                if _draw_of(d) is None and not _is_view(d.target):
+                    return _skip(f"{draw.name} reads {d.name}, computed in each graph")
+                reads.extend(d.all_input_nodes)
             continue
         scalar = not isinstance(a.meta.get("val"), (torch.Tensor, tuple, list))
         cheap = a.op == "get_attr" or a in copied or _is_view(a.target) or scalar
@@ -809,7 +859,8 @@ def _share_region(
         s_inputs += [defining[sym] for sym in sorted(unbound, key=str)]
 
     # The backward must supply every input: primals and saved values (its
-    # placeholders), or outputs of pieces shared earlier.
+    # placeholders), outputs of pieces shared earlier, or a replayed RNG draw,
+    # which it computes itself.
     bw_operands: list[torch.fx.Node] = []
     for inp in s_inputs:
         if inp in bw_of:
@@ -818,7 +869,7 @@ def _share_region(
             m = bw_by_name.get(inp.name)
             m = m if m is not None and m.op == "placeholder" else None
         else:
-            m = None
+            m = bw_by_name.get(inp.name) if _draw_of(inp) is not None else None
         if m is None:
             return _skip(f"its input {inp.name} isn't available in the backward")
         bw_operands.append(m)
