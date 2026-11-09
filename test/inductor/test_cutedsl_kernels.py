@@ -21,6 +21,7 @@ import inspect
 import io
 import logging
 import os
+import platform
 import re
 import runpy
 import shlex
@@ -460,6 +461,21 @@ if HAS_CUTEDSL:
         cfg: cutlass.Constexpr,
         stream: cuda.CUstream,
     ):
+        _mul_const_k(mX, mOut, n, cfg.alpha).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    # Like cfg_scale_kernel, but the host code caches a layout on cfg as it compiles:
+    # mul_caching_cfg_kernel with a Constexpr cfg, which export_to_c can take.
+    @cute.jit
+    def caching_cfg_scale_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        cfg: cutlass.Constexpr,
+        stream: cuda.CUstream,
+    ):
+        cfg.layout = cute.make_layout((128,))
         _mul_const_k(mX, mOut, n, cfg.alpha).launch(
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
@@ -8252,6 +8268,24 @@ def _module_state(so, prefix):
     return refs, handle
 
 
+@contextlib.contextmanager
+def _own_exports():
+    """An empty registry of exports (user_kernel_aot._exports) for the duration, as
+    in a new process, so that a compile exports its kernels itself; yields a spy on
+    export_cutedsl_kernel."""
+    from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+    with (
+        mock.patch.object(user_kernel_aot, "_exports", weakref.WeakKeyDictionary()),
+        mock.patch.object(
+            user_kernel_aot,
+            "export_cutedsl_kernel",
+            wraps=user_kernel_aot.export_cutedsl_kernel,
+        ) as export,
+    ):
+        yield export
+
+
 @requires_cuda_and_triton
 @requires_cutedsl
 class CuteDSLAOTITests(TestCase):
@@ -8690,6 +8724,155 @@ class CuteDSLAOTITests(TestCase):
             with self.assertRaisesRegex(Exception, msg):
                 torch.compile(M(), fullgraph=True)(x)
 
+    def test_aoti_unsupported_tensor_dtype(self):
+        # The export compiles against fake tensors of the CuTe types torch2cute maps
+        # the dtypes to, so the C++ wrapper refuses a tensor whose dtype the table
+        # does not map (torch.bool), for AOTInductor and the JIT cpp_wrapper alike,
+        # before compiling (nor warming up the exporter), with an error that names
+        # the kernel and the parameter and lists the dtypes it takes.
+        from torch._inductor.exc import InductorError
+        from torch._native.cutedsl import export as cutedsl_export
+        from torch._native.cutedsl.dtypes import torch2cute
+
+        @cute.jit
+        def noop_kernel(mX: cute.Tensor, mOut: cute.Tensor, stream: cuda.CUstream):
+            pass
+
+        w = wrap_cutedsl(noop_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out)
+            return out
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return f(x)
+
+        x = torch.ones(8, dtype=torch.bool, device=DEVICE)
+        # Eager and the Python wrapper launch it ...
+        f(x)
+        torch.compile(f, fullgraph=True)(x)
+        torch._dynamo.reset()
+        # ... the C++ wrapper cannot export it.
+        msg = (
+            "CuTeDSL kernel noop_kernel: parameter 'mX': tensor dtype torch.bool is "
+            "not supported by the C++ wrapper (AOTInductor or cpp_wrapper); "
+            f"supported: {', '.join(map(str, torch2cute))}"
+        )
+        with mock.patch.object(cutedsl_export, "warm_up_exporter") as warm_up:
+            with self.assertRaises(InductorError) as aoti:
+                self._package(M(), (x,))
+            torch._dynamo.reset()
+            with inductor_config.patch(cpp_wrapper=True):
+                with self.assertRaises(InductorError) as jit:
+                    torch.compile(f, fullgraph=True)(x)
+        for path, compiled in (("aoti", aoti), ("jit_cpp_wrapper", jit)):
+            with self.subTest(path):
+                inner = compiled.exception.inner_exception
+                self.assertIs(type(inner), NotImplementedError)
+                self.assertEqual(str(inner), msg)
+        warm_up.assert_not_called()
+
+    @parametrize(
+        "default",
+        [
+            "set",
+            "ndarray",
+            "tensor_in_a_list",
+            "cycle",
+            "set_then_cycle",
+            "set_then_copy_raises",
+            "uncopyable",
+        ],
+    )
+    def test_aoti_unkeyable_default_refused_as_in_eager(self, default):
+        # The counterpart of test_cutedsl_kernel_unkeyable_default_refused_as_in_eager,
+        # with the same defaults: when the C++ wrapper defines the kernel,
+        # export_for_link keys the constants with key_constants, as the Python
+        # wrapper keys them, so AOTInductor and the JIT cpp_wrapper refuse a default
+        # that constant_key refuses with the eager launch's error, which names the
+        # kernel and the parameter. One that cannot be copied (cycle,
+        # set_then_cycle, set_then_copy_raises, uncopyable) fails before that, in
+        # split_args, which both wrappers share, with the eager launch's error too:
+        # for uncopyable, the copy's own error, unprefixed.
+        from torch._inductor.exc import InductorError
+
+        class CopyRaises:
+            # constant_key keys it by its attributes; copying it raises.
+            def __init__(self):
+                self.alpha = 2.0
+
+            def __copy__(self):
+                raise RuntimeError("no copies of CopyRaises")
+
+        class Pair(tuple):
+            # constant_key keys it by its items; _snapshot cannot rebuild it.
+            __slots__ = ()
+
+            def __new__(cls, *items):
+                if len(items) != 2:
+                    raise TypeError("Pair takes two items")
+                return super().__new__(cls, items)
+
+        cycle = []
+        cycle.append(cycle)
+        set_then_cycle = [{1, 2}]
+        set_then_cycle.append(set_then_cycle)
+        defaults = {
+            "set": {1, 2},
+            "ndarray": np.ones(2),
+            "tensor_in_a_list": [_rand(2)],
+            "cycle": cycle,
+            "set_then_cycle": set_then_cycle,
+            "set_then_copy_raises": [{1, 2}, CopyRaises()],
+            "uncopyable": Pair([1], [2]),
+        }
+
+        @cute.jit
+        def default_cfg_kernel(
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            stream: cuda.CUstream,
+            cfg: cutlass.Constexpr = defaults[default],
+        ):
+            pass
+
+        w = wrap_cutedsl(default_cfg_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out)
+            return out
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return f(x)
+
+        x = _rand(8)
+        # The eager launch names the kernel and the parameter, but for the copy's
+        # own error.
+        start = (
+            "Pair takes two items"
+            if default == "uncopyable"
+            else "CuTeDSL kernel default_cfg_kernel: parameter 'cfg': "
+        )
+        with self.assertRaisesRegex(
+            (TypeError, ValueError), f"^{re.escape(start)}"
+        ) as eager:
+            f(x)
+        with self.assertRaises(InductorError) as aoti:
+            self._package(M(), (x,))
+        torch._dynamo.reset()
+        with inductor_config.patch(cpp_wrapper=True):
+            with self.assertRaises(InductorError) as jit:
+                torch.compile(f, fullgraph=True)(x)
+        for path, compiled in (("aoti", aoti), ("jit_cpp_wrapper", jit)):
+            with self.subTest(path):
+                inner = compiled.exception.inner_exception
+                self.assertIs(type(inner), type(eager.exception))
+                self.assertEqual(str(inner), str(eager.exception))
+
     @parametrize(
         "option,value,message",
         [
@@ -8931,6 +9114,114 @@ class CuteDSLAOTITests(TestCase):
             self.assertEqual(cnt.frame_count, 2)
         FileCheck().check("call_cutedsl_cfg_scale_kernel_").run(code)
 
+    def test_aoti_kernel_object_that_sets_attributes(self):
+        # The export compiles a kernel object's __call__, which here caches a layout
+        # on the object. It compiles a copy of the side table's snapshot (see
+        # _fake_args), so the snapshot keeps the contents it was keyed by, and the
+        # second call site sharing its entry keys it as the first did and shares the
+        # export, for AOTInductor and the JIT cpp_wrapper alike.
+        from torch._higher_order_ops.user_kernel_hop import constant_key
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            a, b = torch.empty_like(x), torch.empty_like(x)
+            w(kernel, x, a, x.numel())
+            w(kernel, a, b, x.numel())
+            return b
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return f(x, CachingMulKernel(2.0))
+
+        x = _rand(1000)
+        ep = torch.export.export(M(), (x,), strict=False)
+        nodes = _hop_nodes(ep.graph_module, cutedsl_kernel_wrapper_mutation)
+        self.assertEqual(len(nodes), 2)
+        cidx = nodes[0].kwargs["constant_args_idx"]
+        self.assertEqual(nodes[1].kwargs["constant_args_idx"], cidx)
+        with _own_exports() as export:
+            pkg = torch._inductor.aoti_compile_and_package(ep)
+        self.assertEqual(export.call_count, 1)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x), 4 * x)
+        snapshot = cutedsl_kernel_side_table.get_constant_args(cidx)["kernel"]
+        self.assertEqual(vars(snapshot), {"alpha": 2.0})
+        key = cutedsl_kernel_side_table.get_constant_args_keys(cidx)["kernel"]
+        self.assertEqual(constant_key(snapshot, CUTEDSL_CONSTANT_RULES), key)
+        torch._dynamo.reset()
+        with _own_exports() as export, inductor_config.patch(cpp_wrapper=True):
+            cf = torch.compile(f, fullgraph=True)
+            self.assertEqual(cf(x, CachingMulKernel(2.0)), 4 * x)
+        self.assertEqual(export.call_count, 1)
+
+    def test_aoti_export_compiles_copies_of_the_constants(self):
+        # The host code that the export's compile runs can change a constant (here it
+        # caches a layout on cfg). The compile gets copies (see _fake_args), so the
+        # side table's snapshot keeps the contents it was keyed by, and a second
+        # program with an equal constant, which the side table maps to the same
+        # entry, reuses the export.
+        from torch._higher_order_ops.user_kernel_hop import constant_key
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(caching_cfg_scale_kernel, mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                self.cfg = cfg
+
+            def forward(self, x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), self.cfg)
+                return out
+
+        x = _rand(1000)
+        indices = []
+        with _own_exports() as export:
+            for model in (M(Cfg(3.0)), M(Cfg(3.0))):
+                ep = torch.export.export(model, (x,), strict=False)
+                (node,) = _hop_nodes(ep.graph_module, cutedsl_kernel_wrapper_mutation)
+                indices.append(node.kwargs["constant_args_idx"])
+                pkg = torch._inductor.aoti_compile_and_package(ep)
+                self.assertEqual(torch._inductor.aoti_load_package(pkg)(x), 3 * x)
+        self.assertEqual(export.call_count, 1)
+        cidx = indices[0]
+        self.assertEqual(indices[1], cidx)
+        snapshot = cutedsl_kernel_side_table.get_constant_args(cidx)["cfg"]
+        self.assertEqual(vars(snapshot), {"alpha": 3.0})
+        key = cutedsl_kernel_side_table.get_constant_args_keys(cidx)["cfg"]
+        self.assertEqual(constant_key(snapshot, CUTEDSL_CONSTANT_RULES), key)
+
+    def test_aoti_export_compile_logged_to_native_dsl_compile(self):
+        # The export's compile is instrumented as an eager compile is (see
+        # plan_cache.cached_plan), so TORCH_LOGS=+native_dsl_compile logs it (and
+        # TLParse records it) under the kernel's name, keyed by the export's prefix.
+        from torch.testing._internal.logging_utils import log_settings
+
+        records = []
+        handler = logging.Handler()
+        handler.emit = records.append
+        name = "torch._native.instrumentation.__native_dsl_compile"
+        logger = logging.getLogger(name)
+        x, y = _rand(1000), _rand(1000)
+        with log_settings("+native_dsl_compile"), _own_exports() as export:
+            logger.addHandler(handler)
+            try:
+                pkg = self._package(_AddModule(), (x, y))
+            finally:
+                logger.removeHandler(handler)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + y)
+        prefix = export.call_args.kwargs["prefix"]
+        messages = [record.getMessage() for record in records]
+        self.assertEqual(len(messages), 1, messages)
+        self.assertRegex(
+            messages[0],
+            rf"^add_kernel \[cutedsl\] compiled in .* \(key={prefix}, cache hits=",
+        )
+
     def test_cutedsl_kernel_jit_cpp_wrapper_link_args_stable(self):
         # Exported again (registry cleared, as in a new process), the kernel links
         # from the same paths, so the JIT module's link command, part of its cache
@@ -9132,6 +9423,115 @@ class CuteDSLAOTITests(TestCase):
                 self.assertNotIn(b"SetDevice", f.read())
         with open(cutedsl_runtime_archive(), "rb") as f:
             self.assertNotIn(b"cuCtx", f.read())
+
+    def test_aoti_export_pins_host_target(self):
+        # The export compiles its host code for the generic CPU of this machine's
+        # architecture when the DSL has --host-target, and otherwise for this
+        # machine's CPU.
+        import cutlass.base_dsl.compiler as dsl_compiler
+
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+        from torch._native.cutedsl.export import host_target, warm_up_exporter
+
+        def fake_compile(fn, *args, options):
+            raise RuntimeError(f"compiled with {options}")
+
+        specs = _abi_specs(lambda name: getattr(cutlass, name))
+        unpinned = "--gpu-arch sm_90a"
+        pinned = f"{unpinned} --host-target {shlex.quote(host_target())}"
+        # Its own compile, before compile is replaced.
+        warm_up_exporter()
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(cute, "compile", fake_compile),
+        ):
+            for dsl_host_target, options in ((object, pinned), (None, unpinned)):
+                with (
+                    mock.patch.object(
+                        dsl_compiler, "HostTarget", dsl_host_target, create=True
+                    ),
+                    self.assertRaisesRegex(
+                        RuntimeError, f"^compiled with {re.escape(options)}$"
+                    ),
+                ):
+                    user_kernel_aot.export_cutedsl_kernel(
+                        abi_kernel, specs, out_dir=d, prefix="p", arch="sm_90a"
+                    )
+
+    def test_aoti_export_pins_host_target_on_a_dsl_that_has_it(self):
+        # Unmocked: on nvidia-cutlass-dsl 4.6.1 and later (CI installs 4.8.0), which
+        # have --host-target, the export pins the host code's CPU. Were the option
+        # missed there, every package would be built for this machine's CPU, with
+        # only a warning.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import host_target_option
+        from torch._native.cutedsl.export import host_target
+        from torch._vendor.packaging.version import Version
+
+        if Version(cutlass.__version__) < Version("4.6.1"):
+            self.skipTest(
+                f"nvidia-cutlass-dsl {cutlass.__version__} has no --host-target "
+                "(4.6.1 and later have it)"
+            )
+        self.assertEqual(
+            host_target_option(), f"--host-target {shlex.quote(host_target())}"
+        )
+
+    def test_aoti_warns_when_host_code_is_unpinned(self):
+        # With a DSL that cannot pin the host target, an AOTInductor package warns
+        # that its kernels' host code is for this machine's CPU; the JIT C++ wrapper,
+        # whose module stays in this process, does not.
+        from torch._inductor.codegen import cpp_wrapper_gpu
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        torch._dynamo.reset()
+        torch._logging.warning_once.cache_clear()
+        no_pin = mock.patch.object(user_kernel_aot, "host_target_option", lambda: None)
+        with no_pin:
+            with (
+                inductor_config.patch(cpp_wrapper=True),
+                self.assertNoLogs(cpp_wrapper_gpu.log, logging.WARNING),
+            ):
+                compiled = torch.compile(_AddModule(), fullgraph=True)
+                self.assertEqual(compiled(x, y), x + y)
+            with self.assertLogs(cpp_wrapper_gpu.log, logging.WARNING) as logs:
+                pkg = self._package(_AddModule(), (x, y))
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + y)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn(
+            f"nvidia-cutlass-dsl {cutlass.__version__} has no --host-target",
+            logs.records[0].getMessage(),
+        )
+
+    @unittest.skipUnless(
+        platform.machine() == "x86_64" and shutil.which("objdump"),
+        "reads x86_64 code with objdump",
+    )
+    def test_aoti_export_host_code_is_portable(self):
+        # With the host target pinned, the object's host code has no AVX (VEX or EVEX
+        # encoded) instruction; built for the CPU of a machine that has AVX, its module
+        # load and launch wrapper use some.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            export_cutedsl_kernel,
+        )
+        from torch._vendor.packaging.version import Version
+
+        # By version, not by host_target_option, which the test must not trust.
+        if Version(cutlass.__version__) < Version("4.6.1"):
+            self.skipTest(f"nvidia-cutlass-dsl {cutlass.__version__}: no --host-target")
+        specs = _abi_specs(lambda name: getattr(cutlass, name))
+        with tempfile.TemporaryDirectory() as d:
+            exported = export_cutedsl_kernel(
+                abi_kernel, specs, out_dir=d, prefix="p", arch="sm_90a"
+            )
+            code = subprocess.run(
+                ["objdump", "-d", "--no-show-raw-insn", exported.object_path],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        self.assertIn("<_mlir_p_cuda_init>:", code)
+        self.assertFalse(re.findall(r"^\s*[0-9a-f]+:\s+(v\w+.*)$", code, re.MULTILINE))
 
 
 # Run by test_aoti_cross_arch_export_in_fresh_process as a script: exports a kernel
@@ -9520,6 +9920,20 @@ class CuteDSLExportTests(TestCase):
                 self.assertRaisesRegex(CuteDSLExportError, "is not supported"),
             ):
                 scalar_ctype(int32)
+
+    def test_export_host_target(self):
+        # Exports compile their host code for the generic CPU of the machine's
+        # architecture; a machine without one is refused, not served code for its
+        # own CPU.
+        from torch._native.cutedsl import export
+
+        for machine, target in export.HOST_TARGETS.items():
+            self.assertTrue(target.startswith("llvm -mtriple="), target)
+            with mock.patch.object(export.platform, "machine", return_value=machine):
+                self.assertEqual(export.host_target(), target)
+        with mock.patch.object(export.platform, "machine", return_value="ppc64le"):
+            with self.assertRaisesRegex(RuntimeError, "no pinned host target"):
+                export.host_target()
 
     def test_unexportable_parameter_names(self):
         # The header names the C parameters after the host function's, next to the
