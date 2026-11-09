@@ -225,6 +225,22 @@
 - .github/actions/binary-docker-build/**
 - .lintrunner.toml
 
+"ciflow/binaries":
+# Files that pin the CUDA, cuDNN, cuSPARSELt, NCCL and MKL builds shipped in the
+# wheels. generate_binary_build_matrix.py is the whole matrix generator and
+# install_cuda.sh is shared with the CI images, so an edit that changes no pin
+# also matches. This starts every ciflow/binaries/* workflow (Linux x86/aarch64/
+# s390x, Windows x64/arm64, macOS arm64) on each push.
+# The .ci/docker paths also get ciflow/docker, so both labels can land together;
+# that relies on get-docker-tag in the Linux binary workflows waiting until every
+# builder image is published (the CUDA wheel jobs pull a different image than the
+# CPU one that it waits for today).
+- .github/scripts/generate_binary_build_matrix.py
+- .ci/pytorch/windows/internal/cuda_install.bat
+- .ci/docker/common/install_cuda.sh
+- .ci/docker/common/install_mkl.sh
+- .ci/docker/ci_commit_pins/nccl.txt
+
 "ciflow/torchtitan":
 # torchtitan commit pin updates
 - .github/ci_commit_pins/torchtitan.txt

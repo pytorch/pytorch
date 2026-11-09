@@ -448,6 +448,7 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         import post_review
 
         self.assertEqual(fpc.MARKER, post_review.MARKER)
+        self.assertEqual(fpc.TOO_LARGE_TAG, post_review.TOO_LARGE_TAG)
         self.assertEqual(fpc.REVIEW_AUTHOR, post_review.DEFAULT_AUTHOR)
 
     def test_the_author_follows_post_reviews_override(self):
@@ -477,6 +478,36 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(
             [(i["id"], i["role"]) for i in out["items"]], [(50, fpc.AUTOMATED)]
         )
+
+    def test_the_commit_the_latest_review_saw_is_handed_on(self):
+        old, new, human = "1" * 40, "2" * 40, "4" * 40
+        # Latest by id, not by list order, and only the automated review's: a later human review is skipped.
+        later_human = {
+            "id": 52,
+            "user": user("maintainer"),
+            "body": "lgtm",
+            "state": "APPROVED",
+            "submitted_at": "2",
+            "commit_id": human,
+        }
+        api = FakeApi(
+            reviews=[
+                {**ours(51), "commit_id": new},
+                {**ours(50), "commit_id": old},
+                later_human,
+            ]
+        )
+        self.assertEqual(
+            fpc.collect(api, REPO, PR, "3" * 40)["previous_review_sha"], new
+        )
+        # A re-run on the same commit still names it; interdiff.py writes "nothing changed".
+        self.assertEqual(fpc.collect(api, REPO, PR, new)["previous_review_sha"], new)
+        # No earlier review, or a malformed id: nothing to compare.
+        self.assertEqual(
+            fpc.collect(FakeApi(), REPO, PR, new)["previous_review_sha"], ""
+        )
+        bad = FakeApi(reviews=[{**ours(), "commit_id": "not-a-sha"}])
+        self.assertEqual(fpc.collect(bad, REPO, PR, new)["previous_review_sha"], "")
 
     def test_inline_comments_say_which_commit_and_review_they_belong_to(self):
         api = FakeApi(
@@ -649,6 +680,26 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         )
         (item,) = fpc.collect(api, REPO, PR)["items"]
         self.assertEqual(item["id"], 51)
+
+    def test_a_too_large_notice_is_not_the_latest_review(self):
+        import post_review
+
+        notice = post_review.too_large_body("no automated review", (100, 400_000))
+        reviewed, skipped = "1" * 40, "2" * 40
+        api = FakeApi(
+            reviews=[
+                {
+                    **ours(rid=50, body=fpc.MARKER + "\nverdict"),
+                    "commit_id": reviewed,
+                },
+                {**ours(rid=51, body=notice), "commit_id": skipped},
+            ]
+        )
+        out = fpc.collect(api, REPO, PR)
+        (item,) = out["items"]
+        self.assertEqual(item["id"], 50)
+        # The notice reviewed nothing, so the interdiff starts from the verdict's commit.
+        self.assertEqual(out["previous_review_sha"], reviewed)
 
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
