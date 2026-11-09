@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
 
@@ -1625,3 +1625,37 @@ def active_fake_mode() -> FakeTensorMode | None:
             return m
 
     return None
+
+
+@overload
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode,
+    /,
+) -> FakeTensorMode: ...
+
+
+@overload
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None: ...
+
+
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None:
+    """
+    Returns mode, a fake mode from detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, for a caller that needs a Python FakeTensorMode: a
+    FakeTensorMode or None is returned as is, and a CppFakeTensorMode, which
+    does not have all of FakeTensorMode's interface, raises NotImplementedError.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise NotImplementedError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode
