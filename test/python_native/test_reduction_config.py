@@ -368,8 +368,9 @@ class TestReductionConfig(TestCase):
 
     def test_b200_rules_match_trait_types(self):
         """Match rules by trait type within each rule's measured scope: argmin shares the
-        index rules of full and strided reductions but not of ragged columns, and max_dim
-        and nansum match no index or one-field rule."""
+        index rules of full and strided reductions but not of ragged columns, max_dim and
+        nansum match no index or one-field rule, and amax and amin skip the wide strided
+        one-field rule."""
         count = (256 << 20) // torch.float16.itemsize
         index = dict(nfields=2, nouts=1, acc_bits=32)
         for trait_type in (T.ArgMaxOps, T.ArgMinOps):
@@ -385,6 +386,8 @@ class TestReductionConfig(TestCase):
             (T.ArgMinOps(), kg._GeneralConfig(block=32, rule="b200_strided_index")),
             (T.MaxDimOps(), default),
             (T.NanSumOps(), default),
+            (T.AMaxOps(), default),
+            (T.AMinOps(), default),
         ):
             cfg = self.general(cc=(10, 0), **strided, **_contract(trait))
             self.assertEqual(cfg, want, type(trait).__name__)

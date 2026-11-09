@@ -87,7 +87,9 @@ _ORDERED_LANE_UNROLL = 4
 
 
 class OrderedColConfig(NamedTuple):
-    # Useful 32-column blocks (partials * columns / WARP), whatever tile_columns is.
+    # Minimum useful 32-column blocks (partials * columns / WARP), whatever tile_columns
+    # is. Views the selector skips (batched, or below min_blocks) take the default
+    # mapping, so a non-default entry compiles a second kernel for the same R.
     min_blocks: int
     worker_warps: int = _ORDERED_WORKER_WARPS
     tile_columns: int = WARP
@@ -96,9 +98,9 @@ class OrderedColConfig(NamedTuple):
     out_dtypes: tuple[torch.dtype, ...] | None = None
 
 
-# kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and the (10, 7)
-# entries are reached through _reduce_col_tile's inner_tree hand-off; entries for other
-# architectures serve direct reduce_ordered_col calls alone.
+# kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
+# _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered) and
+# (10, 7); entries for other architectures serve direct reduce_ordered_col calls alone.
 _ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[type, OrderedColConfig]] = {
     # WelfordOps covers var and std of any correction.
     (10, 7): {
@@ -118,6 +120,11 @@ def _check_ordered_mapping(worker_warps: int, tile_columns: int) -> None:
         raise ValueError(
             f"tile_columns must be one of {_ORDERED_TILE_CHOICES}, got {tile_columns}"
         )
+
+
+_SM107_MEAN_AMAX = (MeanOps, AMaxOps)
+# Rule names of the _SM107_ONE_FIELD traits.
+_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
 
 
 def _sm107_welford_columns(dtype: torch.dtype, rows: int | None, columns: int) -> bool:
@@ -162,22 +169,26 @@ def select_ordered_col_config(
     """Return the mapping for an ordered column view, or None: looped plans then take the
     default mapping and split plans decline.
 
-    Entries are keyed by trait type; SM107's apply to its _SM107_DTYPES views only. Split
-    plans (partials > 1) without an entry take a clamp-free fallback on _ORDERED_COL_CCS,
-    which applies to any outputs. Mappings apply to unbatched _ORDERED_COL_DTYPES views
-    with 32-bit accumulators and, if the mapping has out_dtypes, only to those outputs;
-    SM107 mappings have _sm107_outputs. full_tiles means a split plan or an exact looped
-    plan; with rows, B200 single-field views whose mapping has full tiles then take
-    measured tile widths, and C 128-257 a band of widths. Views that fill fewer than the
-    mapping's min_blocks useful 32-column blocks get None.
+    Entries are keyed by trait type; SM107's apply to its _SM107_DTYPES views only.
+    Split plans (partials > 1) without an entry take a fallback on _ORDERED_COL_CCS that
+    applies to any outputs and inherits full_tiles (ragged splits still run clamped).
+    Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
+    if the mapping has out_dtypes, only to those outputs; SM107 mappings have
+    _sm107_outputs. full_tiles means a split plan or an exact looped plan; with rows,
+    B200 single-field views whose mapping has full tiles then take measured tile widths,
+    and C 128-257 a band of widths. Views that fill fewer than the mapping's min_blocks
+    useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
     sm107 = cc in _SM107_CCS and dtype in _SM107_DTYPES
     cfg = None
     if sm107 or cc not in _SM107_CCS:
         cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
+    # WelfordOps entries serve var and std, not return_mean traits.
+    if trait_type is WelfordOps and welford_outs != 1:
+        cfg = None
     # Looped exact columns ran within 1% with and without address clamps on B200, so
-    # only split plans take the clamp-free fallback.
+    # only split plans take the fallback.
     if (
         cfg is None
         and cc in kg._ORDERED_COL_CCS
@@ -188,7 +199,7 @@ def select_ordered_col_config(
     bf16 = dtype == torch.bfloat16
     size = rows * columns * dtype.itemsize if rows else 0
     column_anchor = sm107 and columns in (1024, 4096) and size in _SM107_LARGE_SIZES
-    mean_amax = sm107 and trait_type in (MeanOps, AMaxOps)
+    mean_amax = sm107 and trait_type in _SM107_MEAN_AMAX
     mean_anchor = mean_amax and full_tiles and _sm107_mean_columns(bf16, size, columns)
     if cfg is None and mean_amax and (mean_anchor or column_anchor and columns == 1024):
         cfg = OrderedColConfig(32)
@@ -222,7 +233,8 @@ def select_ordered_col_config(
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors. The default route reaches C
         # 128-191 from R = 32768 (kg._ORDERED_SPLIT_NARROW_MIN_R) and C >= 192 from
-        # R = 24577.
+        # R = 24577. On ragged (clamped) splits, R 32769-49153 and C 128-256, the band
+        # widths ran up to 1.7x the default mapping (fp32/bf16 sum, count_nonzero, all).
         elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
             width = WARP if partials >= 16 and columns == 257 else 16
             cfg = cfg._replace(tile_columns=width)
@@ -413,7 +425,7 @@ def select_col_config(
     inner = False
     if columns == 256:
         inner = (size == 16 << 20 and bf16 and welford) or (
-            size == 64 << 20 and trait_type not in (MeanOps, AMaxOps)
+            size == 64 << 20 and trait_type not in _SM107_MEAN_AMAX
         )
     elif columns == 1024:
         if size in _SM107_LARGE_SIZES:
@@ -423,7 +435,7 @@ def select_col_config(
             inner = not bf16 or not welford
         elif size == 64 << 20:
             inner = trait_type in (SumOps, MeanOps) if bf16 else not welford
-    if trait_type in (MeanOps, AMaxOps) and _sm107_mean_columns(bf16, size, columns):
+    if trait_type in _SM107_MEAN_AMAX and _sm107_mean_columns(bf16, size, columns):
         inner = True
     if welford and _sm107_welford_columns(dtype, rows, columns):
         inner = True
@@ -433,11 +445,14 @@ def select_col_config(
         return cfg
     # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
     large = size == 2 << 30
+    # Inner-tree rule names end in _ordered.
+    sfx = "_ordered" if cfg.kernel_order == "inner_tree" else ""
+    rule = f"rubin_c{columns}{sfx}"
     if columns == 256:
-        return cfg._replace(rule="rubin_c256", threads_per_block=64, npar=4096, vec=4)
+        return cfg._replace(rule=rule, threads_per_block=64, npar=4096, vec=4)
     if columns == 1024:
         return cfg._replace(
-            rule="rubin_c1024",
+            rule=rule,
             threads_per_block=64,
             npar=4096 if large else 1024,
             vec=8,
@@ -446,7 +461,7 @@ def select_col_config(
         return cfg
     if one_field:
         return cfg._replace(
-            rule=f"rubin_{_SM107_ONE_FIELD[trait_type]}_c4096_tiled",
+            rule=f"rubin_{_SM107_ONE_FIELD_NAMES[trait_type]}_c4096_tiled",
             threads_per_block=64,
             npar=(2048 if bf16 else 1024) if large else 256,
             vec=4 if large and not bf16 else 8,
@@ -456,16 +471,17 @@ def select_col_config(
         )
     if welford:
         # fp32 256 MiB views have 16384 rows, past reduce_ordered_col's unroll cap.
+        tree = (bf16 or large) and ordered
         return cfg._replace(
-            rule="rubin_var_c4096",
+            rule=f"rubin_var_c4096{'_ordered' if tree else ''}",
             threads_per_block=64,
             npar=(2048 if bf16 else 1024) if large else 256,
             vec=8,
-            kernel_order="inner_tree" if (bf16 or large) and ordered else "linear",
+            kernel_order="inner_tree" if tree else "linear",
         )
     tree = bf16 and large and ordered
     return cfg._replace(
-        rule=f"rubin_argmax_c4096_{'tree' if tree else 'tiled'}",
+        rule=f"rubin_argmax_c4096_{'ordered' if tree else 'tiled'}",
         threads_per_block=64,
         npar=(2048 if bf16 else 1024) if large else 512,
         vec=4,
@@ -602,15 +618,15 @@ class _OrderedColReduce:
         self.trait = trait
         self.plan = plan
         self.R = R
-        # C and the batch count are runtime, so each R compiles once. Each leaf costs an
-        # address multiply-add that a compile-time C folds into the load, but the clamp
-        # keeps addresses independent: against per-C kernels, B200 sum, argmax and
-        # var_mean (fp32/bf16) ran at 1.04x geomean (0.79-1.70x) for looped R 128-8192
-        # and 1.18x (0.69-1.68x) for split R 32768-131072, and a new C skips a 0.8 s
-        # (median) compile. Full tiles read rows in order, where per-C kernels fold the
-        # offsets into loads: there runtime C ran at 0.93x looped and 0.97x split
-        # (best tile mode each; short looped argmax 0.68-0.79x). Row views take a
-        # 64-bit stride once R * C needs one.
+        # C and the batch count are runtime, so each R compiles once per mapping (see
+        # OrderedColConfig.min_blocks). Each leaf costs an address multiply-add that a
+        # compile-time C folds into the load, but the clamp keeps addresses independent:
+        # against per-C kernels, B200 sum, argmax and var_mean (fp32/bf16) ran at 1.04x
+        # geomean (0.79-1.70x) for looped R 128-8192 and 1.18x (0.69-1.68x) for split R
+        # 32768-131072, and a new C skips a 0.8 s (median) compile. Full tiles read rows
+        # in order, where per-C kernels fold the offsets into loads: there runtime C ran
+        # at 0.93x looped and 0.97x split (best tile mode each; short looped argmax
+        # 0.68-0.79x). Row views take a 64-bit stride once R * C needs one.
         self.wide = R * C >= _INT32_LIMIT
         self.nouts = nouts
         # Split plans launch one block row per partition.
@@ -1108,8 +1124,6 @@ def _reduce_col_tile(
         vec=vec,
         out_dtypes=out_dtypes[:nouts],
     )
-    if cfg.kernel_order not in ("linear", "inner_tree"):
-        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:

@@ -177,9 +177,10 @@ class TestFullInnerTreeDevice(TestCase):
             (got,) = rt.reduce_row_tile(
                 trait, key, x, [torch.float32], order="inner_tree"
             )
-            # The ordered entry point takes the same profile and plans.
+            # The ordered entry point takes the same profile and plans, compiling its own
+            # kernels under a distinct key.
             ordered = torch.empty(1, device=device)
-            self.assertTrue(rt.reduce_row_itree(trait, key, x, ordered))
+            self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
         self.assertEqual(len(profiles), 2)
         self.assertIsNotNone(profiles[0])
         self.assertTrue(all(arch == profiles[0] for arch in archs))
@@ -197,8 +198,8 @@ class TestFullInnerTreeDevice(TestCase):
             self.assertIn(plan.sig, {k[-1] for k in rt._CACHE if k[:2] == (tag, key)})
         # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
         default = rt._ITREE_ARCH["default"]
-        self.assertNotEqual(default, profiles[0])
         ref_plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=default)
+        self.assertNotEqual(ref_plan.sig, split.sig)
         (want,) = rt._run_itree(
             trait, key + "_ref", x, [torch.float32], ref_plan, arch=default
         )
