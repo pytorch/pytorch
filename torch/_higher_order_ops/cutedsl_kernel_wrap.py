@@ -807,7 +807,13 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     """Orchestrator for converting a call to a CuTeDSL host function into a call to
     the cutedsl_kernel_wrapper_mutation HOP: the counterpart of TritonHOPifier.
 
-    For make_fx and non-strict export, wrap_cutedsl returns a
+    It has two main use cases.
+
+    1. When Dynamo sees a host function, raw or wrapped, it becomes a
+    CuteDSLKernelVariable, whose calls DynamoCuteDSLHOPifier turns into a call to the
+    HOP. A raw call (not through wrap_cutedsl) graph-breaks.
+
+    2. For make_fx and non-strict export, wrap_cutedsl returns a
     TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns into a
     call to the HOP (which can then be traced).
 
@@ -865,10 +871,22 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         variable: Any,
         kernel: Callable[..., Any],
         mutates_args: object,
+        kernel_idx: int | None = None,
+        *,
+        raw: bool = False,
     ) -> None:
-        """Record the host function and its write set on ``variable`` and add them
-        to the side table."""
+        """Record the host function on ``variable`` and add it, with its write set,
+        to the side table. A ``raw`` host function (Dynamo met the @cute.jit function
+        itself, not a wrapper) has no write set and gets no record of its own."""
         variable.kernel = kernel
+        variable.mutates_args = None
+        variable.kernel_idx = None
+        if raw:
+            if mutates_args is not None:
+                raise AssertionError(
+                    f"a raw host function has no write set, got {mutates_args!r}"
+                )
+            return
         try:
             normalized = normalize_mutates_args(kernel, mutates_args)
         except (TypeError, ValueError) as e:
@@ -878,6 +896,10 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         variable.kernel_idx = cutedsl_kernel_side_table.add_kernel(
             CuteDSLKernel(kernel, normalized)
         )
+        if kernel_idx is not None and variable.kernel_idx != kernel_idx:
+            raise AssertionError(
+                f"kernel_idx mismatch: expected {kernel_idx}, got {variable.kernel_idx}"
+            )
 
     def bind_call(
         self,
@@ -1063,7 +1085,10 @@ tracing_cutedsl_hopifier_singleton = TracingCuteDSLHOPifier()
 
 class TraceableCuteDSLKernelWrapper:
     """What wrap_cutedsl returns: calling it launches the host function eagerly, or
-    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export."""
+    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export.
+    Dynamo captures a call of it as that node too (see CuteDSLKernelVariable); a call
+    that Dynamo refuses graph-breaks, and runs eagerly unless fullgraph=True or strict
+    export refuses it."""
 
     kernel: Callable[..., Any]
     mutates_args: MutatesArgs
