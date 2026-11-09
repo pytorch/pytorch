@@ -30,6 +30,8 @@ runs:
         cat /etc/apt/sources.list.d/rocm.list || true
         cat /opt/rocm/.info/version || true
         whoami
+        free -m || true
+        ls -l /dev/kfd /dev/dri || true
 
     - name: Runner health check amdgpu info
       if: always()
@@ -43,6 +45,7 @@ runs:
       run: |
         amd-smi monitor -ptumv
         amd-smi list
+        rocm-smi --showpids || true
 
     - name: Runner health check rocminfo
       if: always()
