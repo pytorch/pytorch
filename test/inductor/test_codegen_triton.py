@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import itertools
 import re
 import unittest
 from collections import namedtuple, OrderedDict
@@ -446,15 +447,20 @@ class TestCodegenTriton(InductorTestCase):
             return x.sum(dim=0)
 
         x = torch.randn(17000, 1024, device=GPU_TYPE)
-        for preferred in (0, 1):
+        # cpp_wrapper drops config constexprs such as LOOP_UNROLL from the
+        # wrapper's arguments.
+        for cpp_wrapper, preferred in itertools.product((False, True), (0, 1)):
             torch._dynamo.reset()
-            with patch.object(
-                CachingAutotuner,
-                "bench",
-                lambda self, launcher, *a, **kw: (
-                    0.0
-                    if launcher.config.kwargs.get("LOOP_UNROLL") == preferred
-                    else 1.0
+            with (
+                inductor_config.patch(cpp_wrapper=cpp_wrapper),
+                patch.object(
+                    CachingAutotuner,
+                    "bench",
+                    lambda self, launcher, *a, **kw: (
+                        0.0
+                        if launcher.config.kwargs.get("LOOP_UNROLL") == preferred
+                        else 1.0
+                    ),
                 ),
             ):
                 actual, _, captured = self._compile_capturing_configs(fn, x)
