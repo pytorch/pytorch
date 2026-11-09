@@ -12,7 +12,7 @@ import threading
 import warnings
 import zlib
 from collections.abc import Callable
-from typing import cast, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -42,7 +42,7 @@ def export_python(
     backend: str = "inductor",
     dynamic: bool | None = None,
     mode: str | None = None,
-    options: dict[str, object] | None = None,
+    options: dict[str, Any] | None = None,
     check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
@@ -73,9 +73,7 @@ def export_python(
 
 
         y = step(x, scale=3.0)  # first run: captures and writes artifacts/step.py
-        y = step(
-            x, scale=3.0
-        )  # served from artifacts/step.py, here or in a new process
+        y = step(x, scale=3.0)  # served from the file, here or in a new process
 
     ``path`` is the graph's Inductor code, and that code is what runs; the rest of
     what Dynamo captured (the guards, the frame's bytecode and AOTAutograd's wrapper)
@@ -93,11 +91,12 @@ def export_python(
     template (flex attention, say) or a user-defined kernel keeps its config in its
     own decorator instead, editable the same way.
 
-    Hill-climbing an exported kernel is an edit-and-rerun loop on ``path``: change a
-    ``KERNEL_CONFIGS`` row, a template's ``num_warps`` or ``num_stages``, or a kernel
-    body; rerun with ``TORCH_EXPORT_PYTHON_CHECK=1`` so an edit that changes the
-    numerics raises; time it; keep or revert the edit. Delete ``path`` to start over
-    from a fresh capture.
+    Hill-climbing an exported kernel is an edit-and-rerun loop on ``path``, each run
+    in a new process: change a ``KERNEL_CONFIGS`` row, a template's ``num_warps`` or
+    ``num_stages``, or a kernel body; rerun with ``TORCH_EXPORT_PYTHON_CHECK=1`` so an
+    edit that changes the numerics raises; time it with the check off, since a
+    checked call also runs ``fn`` eagerly; keep or revert the edit. Delete ``path`` to
+    start over from a fresh capture.
 
     The file is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
@@ -112,22 +111,24 @@ def export_python(
             compiles under that mode's inductor config, so ``"max-autotune"`` tunes
             the graph's kernels, GEMM templates included, and the file holds the
             kernels and configs it chose. A served file does not run under CUDA
-            graphs, so ``triton.cudagraphs`` (which ``"max-autotune"`` and
-            ``"reduce-overhead"`` turn on) is left off for the capture, with a
-            warning.
+            graphs, so ``triton.cudagraphs``, which ``"max-autotune"`` turns on, is
+            left off for the capture with a warning; ``"reduce-overhead"``, which only
+            turns it on, raises.
         options: As ``torch.compile(options=)``: inductor config for the capture,
-            with ``triton.cudagraphs`` left off as for ``mode``. Pass ``mode`` or
-            ``options``, not both.
+            with ``triton.cudagraphs`` left off as for ``mode``, and a
+            ``guard_filter_fn`` passed to the tracer, as ``torch.compile`` passes it
+            to Dynamo. Pass ``mode`` or ``options``, not both.
         check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
             too, as during compiler-internal tracing) on every served call, on copies
             of the tensor arguments, and raise
             :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
             arguments after any in-place writes, differ beyond
             ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
-            A floating-point tensor is held no tighter than 1e-3
-            (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
-            minifier holds a compiled graph to), since a compiled kernel may sum in
-            another order than eager.
+            Since a compiled kernel may sum in another order than eager, a
+            floating-point or complex tensor is held to a relative tolerance of at
+            least 1e-3 (``torch._dynamo.config.repro_tolerance``) and an absolute one
+            of 1e-3 of its largest finite magnitude: smaller differences are not
+            caught.
             ``fn``'s outputs must be values ``assert_close`` compares. Tensor
             arguments are copied one by one, so arguments that alias each other (one
             tensor passed twice, or views of one tensor) do not alias in the eager
@@ -245,6 +246,31 @@ def _captured_artifact(text: str, path: str) -> str:
     return artifact.replace(_GRAPH_CODE, _source_literal(code), 1)
 
 
+def _assert_matches_eager(actual: object, expected: object) -> None:
+    """``torch.testing.assert_close``, loosened for compiled code: a compiled kernel may
+    sum in another order than eager, and its rounding error scales with the values it
+    sums. So a floating-point or complex tensor is held to a relative tolerance of at
+    least 1e-3 (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
+    minifier holds a compiled graph to) and an absolute one of 1e-3 of its largest
+    finite magnitude, which still checks a tensor of small values."""
+    from torch.testing._comparison import default_tolerances
+
+    floor = torch._dynamo.config.repro_tolerance
+    got, got_spec = pytree.tree_flatten(actual)
+    want, want_spec = pytree.tree_flatten(expected)
+    if got_spec != want_spec:
+        raise AssertionError(f"{got_spec} is not eager's {want_spec}")
+    for g, w in zip(got, want):
+        if isinstance(w, torch.Tensor) and (w.is_floating_point() or w.is_complex()):
+            rtol, atol = default_tolerances(w)
+            finite = w[w.isfinite()]
+            scale = finite.abs().max().item() if finite.numel() else 0.0
+            rtol, atol = max(rtol, floor), max(atol, floor * scale)
+            torch.testing.assert_close(g, w, rtol=rtol, atol=atol)
+        else:
+            torch.testing.assert_close(g, w)
+
+
 class _ExportedPython:
     def __init__(
         self,
@@ -253,7 +279,7 @@ class _ExportedPython:
         backend: str,
         dynamic: bool | None,
         mode: str | None,
-        options: dict[str, object] | None,
+        options: dict[str, Any] | None,
         check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
@@ -268,22 +294,49 @@ class _ExportedPython:
         self._cache_path = self._path + ".cache"
         self._backend = backend
         if mode is not None and options is not None:
-            raise ValueError(
-                "export_python: pass mode or options, not both, as torch.compile does."
+            raise RuntimeError(
+                "Either mode or options can be specified, but both can't be specified "
+                "at the same time."
             )
-        if backend != "inductor" and (mode is not None or options is not None):
+        options = dict(options or {})
+        # As torch.compile does, a guard filter goes to Dynamo rather than inductor.
+        guard_filter_fn = options.pop("guard_filter_fn", None)
+        if options.pop("use_aoti", False):
+            raise ValueError(
+                "export_python: use_aoti does not apply, since export_python writes the "
+                "graph's Python code rather than an AOTInductor package."
+            )
+        if backend != "inductor" and (mode is not None or options):
             raise ValueError(
                 f"export_python: mode and options configure the inductor backend, "
                 f"not {backend!r}."
             )
-        # torch.compile's own resolution and validation of mode and options.
-        self._inductor_config = (
-            torch._TorchCompileInductorWrapper(mode, options, dynamic).config
-            if backend == "inductor"
-            else {}
+        config: dict[str, object] = {}
+        if mode not in (None, "default"):
+            from torch._inductor import list_mode_options
+
+            config.update(list_mode_options(mode, dynamic))
+        config.update(options)
+        if config.pop("triton.cudagraphs", False):
+            if not config:
+                raise ValueError(
+                    f"export_python: {f'mode={mode!r}' if mode else 'options'} only "
+                    "turns on CUDA graphs (triton.cudagraphs), and a served file does "
+                    "not run under them."
+                )
+            warnings.warn(
+                "export_python: a served file does not run under CUDA graphs, so the "
+                "capture leaves off the triton.cudagraphs that mode or options set.",
+                stacklevel=3,
+            )
+        # torch.compile's own validation of option names and types; triton.cudagraphs
+        # is already out, so none of its CUDA graph setup runs.
+        self._inductor_config = torch._TorchCompileInductorWrapper(
+            None, config, dynamic
+        ).config
+        self._tracer = DynamoTracer(
+            dynamic=dynamic, fullgraph=True, guard_filter_fn=guard_filter_fn
         )
-        self._drop_cudagraphs = self._inductor_config.pop("triton.cudagraphs", False)
-        self._tracer = DynamoTracer(dynamic=dynamic, fullgraph=True)
         self._check = check
         self._runnable: PrecompiledRunnable | None = None
         self._lock = threading.Lock()
@@ -315,23 +368,8 @@ class _ExportedPython:
             [t for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)]
             for tree in ((args, kwargs), (eager_args, eager_kwargs))
         )
-        from torch.testing._comparison import default_tolerances
-
-        actual, actual_spec = pytree.tree_flatten((result, inputs))
-        wanted, wanted_spec = pytree.tree_flatten((expected, eager_inputs))
-        # A compiled kernel may sum in another order than eager, so a floating-point
-        # tensor is held no tighter than Dynamo's accuracy minifier holds a compiled
-        # graph to eager.
-        floor = torch._dynamo.config.repro_tolerance
         try:
-            if actual_spec != wanted_spec:
-                raise AssertionError(f"{actual_spec} is not eager's {wanted_spec}")
-            for got, want in zip(actual, wanted):
-                tolerances = {}
-                if isinstance(want, torch.Tensor) and want.is_floating_point():
-                    rtol, atol = default_tolerances(want)
-                    tolerances = {"rtol": max(rtol, floor), "atol": max(atol, floor)}
-                torch.testing.assert_close(got, want, **tolerances)
+            _assert_matches_eager((result, inputs), (expected, eager_inputs))
         except AssertionError as e:
             raise PrecompileError(
                 f"export_python: {self._path} does not match eager {self._name} "
@@ -339,7 +377,7 @@ class _ExportedPython:
             ) from e
         return result
 
-    def _load(self) -> PrecompiledRunnable:
+    def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         with open(self._path, "rb") as f:
             python_code = _captured_artifact(f.read().decode(), self._path)
         cache = _matching_cache(python_code, self._cache_path)
@@ -363,7 +401,7 @@ class _ExportedPython:
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graph compiles the kernels its code defines.
             log.info("export_python: %s; serving it without the cache", stale)
-        return _runnable_from_pair(python_code, cache)
+        return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         from torch._dynamo.exc import Unsupported
@@ -380,13 +418,6 @@ class _ExportedPython:
         )
         try:
             with contextlib.ExitStack() as stack:
-                if self._drop_cudagraphs:
-                    warnings.warn(
-                        "export_python: a served file does not run under CUDA graphs, "
-                        "so the capture leaves triton.cudagraphs off (mode="
-                        "'max-autotune' and 'reduce-overhead' turn it on).",
-                        stacklevel=4,
-                    )
                 if self._backend == "inductor":
                     from torch._inductor import config as inductor_config
 
@@ -427,7 +458,8 @@ class _ExportedPython:
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(artifact)
-        self._runnable = self._load()
+        # This process just wrote the file, so it skips the exec warning.
+        self._runnable = self._load(trusted=True)
         return result
 
 
