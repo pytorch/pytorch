@@ -10,7 +10,7 @@ HigherOrderKernel::HigherOrderKernel(
     std::vector<std::unique_ptr<GraphExecutorBase>> graphExecutors)
     : OpKernel(node), graphExecutors_(std::move(graphExecutors)) {
   static constexpr std::string_view prefix = "torch.ops.higher_order.";
-  TORCH_CHECK(c10::starts_with(node->target(), prefix));
+  TORCH_CHECK(node->target().starts_with(prefix));
   auto opName = node->target().substr(prefix.size());
   if (opName == "cond") {
     opType_ = OpType::COND;

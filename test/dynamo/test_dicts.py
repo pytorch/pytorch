@@ -148,7 +148,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             keys = ("extra_a", "extra_b") if kind == "invalid" else ("a", "b")
             kwargs = dict(zip(keys, (1, 2)))
             reversed_kwargs = dict(reversed(kwargs.items()))
-            self.assertNotEqual(compiled(x, **kwargs), compiled(x, **reversed_kwargs))
+            for kw in (kwargs, reversed_kwargs):
+                error_key = compiled(x, **kw)[1].split("'")[1]
+                self.assertEqual(error_key, fn(x, **kw)[1].split("'")[1])
         else:
             self.assertEqual(compiled(x, a=1, b=2), fn(x, a=1, b=2))
             self.assertEqual(compiled(x, b=2, a=1), fn(x, b=2, a=1))
@@ -170,8 +172,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             try:
                 return target(**mapping)
-            except TypeError:
-                return x - 1
+            except TypeError as exc:
+                return x - 1, str(exc)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -188,6 +190,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 if mapping_type is defaultdict
                 else actual_type(pairs)
             )
+            if not valid:
+                self.assertEqual(fn(x, mapping)[1], "keywords must be strings")
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         # Subclass keys retain positional guards; exact builtin keys bind by name.
         self.assertEqual(counter.frame_count, 2 if subclass and valid else 1)
