@@ -45,6 +45,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_constant,
     maybe_get_fake_device,
+    maybe_get_fake_dispatch_keys,
     maybe_get_fake_mode,
     maybe_get_real_tensor,
     MetadataMismatchError,
@@ -5866,6 +5867,69 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_set_get_fake_dispatch_keys(self):
+        mode, _ = self._make_mode()
+        meta = torch.empty(2, device="meta")
+        meta_fake = torch._C._from_meta_and_device(meta, torch.device("meta"), mode)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(meta_fake))
+        keys = torch._C._dispatch_keys(torch.empty(2))
+        torch._C._set_fake_dispatch_keys(meta_fake, keys)
+        self.assertEqual(maybe_get_fake_dispatch_keys(meta_fake), keys)
+        # Excluding Fake runs the kernels themselves. detach keeps them, like a
+        # Python FakeTensor's. alias's kernel does not: ops such as _conj call
+        # it internally, and Python gives their outputs no keys.
+        fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        with torch._C._ExcludeDispatchKeyGuard(fake_key):
+            detached = meta_fake.detach()
+            aliased = torch.ops.aten.alias(meta_fake)
+        self.assertEqual(maybe_get_fake_dispatch_keys(detached), keys)
+        self.assertTrue(torch._C._is_fake_tensor(aliased))
+        self.assertIsNone(torch._C._get_fake_dispatch_keys(aliased))
+        self.assertEqual(maybe_get_fake_dispatch_keys(meta_fake), keys)
+        # A functional wrapper copies the fake's ExtraMeta, keys included, but
+        # is not itself a fake
+        functional = torch._to_functional_tensor(meta_fake)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(functional))
+        for real in (torch.empty(2), functional):
+            with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+                torch._C._set_fake_dispatch_keys(real, keys)
+            with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+                torch._C._get_fake_dispatch_keys(real)
+        torch._C._set_fake_dispatch_keys(meta_fake, None)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(meta_fake))
+        # set_data replaces the whole ExtraMeta, so the destination takes the
+        # source's keys, or none
+        cpu = torch.device("cpu")
+        dst = torch._C._from_meta_and_device(torch.empty(2, device="meta"), cpu, mode)
+        src = torch._C._from_meta_and_device(torch.empty(2, device="meta"), cpu, mode)
+        torch._C._set_fake_dispatch_keys(dst, keys)
+        dst.data = src
+        self.assertIsNone(maybe_get_fake_dispatch_keys(dst))
+        torch._C._set_fake_dispatch_keys(src, keys)
+        dst.data = src
+        self.assertEqual(maybe_get_fake_dispatch_keys(dst), keys)
+        # Guards serialize the recorded keys, or the fake's own without them,
+        # and a loaded guard carries them, as tested for Python fakes in
+        # test_guard_serialization.py
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.package import load_guards_state
+
+        torch._C._set_fake_dispatch_keys(src, None)
+        for fake, expected in ((dst, keys), (src, torch._C._dispatch_keys(src))):
+            buf = io.BytesIO()
+            pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
+            template, _, _, keys_raw, _ = pickler.reducer_override(fake)[1]
+            self.assertIs(type(template), torch.Tensor)
+            self.assertFalse(torch._C._is_fake_tensor(template))
+            self.assertEqual(keys_raw, expected.raw_repr())
+            pickler.dump({"t": fake})
+            # Neither the C++ mode (_CppFakeTensorMode) nor its wrapper is pickled
+            for name in (b"FakeTensorMode", b"_CppModeWrapper"):
+                self.assertNotIn(name, buf.getvalue())
+            out = load_guards_state(buf.getvalue())["t"]
+            self.assertEqual(maybe_get_fake_dispatch_keys(out), expected)
 
 
 if __name__ == "__main__":
