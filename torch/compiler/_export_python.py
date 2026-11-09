@@ -111,6 +111,10 @@ def export_python(
             :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
             arguments after any in-place writes, differ beyond
             ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
+            A floating-point tensor is held no tighter than 1e-3
+            (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
+            minifier holds a compiled graph to), since a compiled kernel may sum in
+            another order than eager.
             ``fn``'s outputs must be values ``assert_close`` compares. Tensor
             arguments are copied one by one, so arguments that alias each other (one
             tensor passed twice, or views of one tensor) do not alias in the eager
@@ -274,8 +278,23 @@ class _ExportedPython:
             [t for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)]
             for tree in ((args, kwargs), (eager_args, eager_kwargs))
         )
+        from torch.testing._comparison import default_tolerances
+
+        actual, actual_spec = pytree.tree_flatten((result, inputs))
+        wanted, wanted_spec = pytree.tree_flatten((expected, eager_inputs))
+        # A compiled kernel may sum in another order than eager, so a floating-point
+        # tensor is held no tighter than Dynamo's accuracy minifier holds a compiled
+        # graph to eager.
+        floor = torch._dynamo.config.repro_tolerance
         try:
-            torch.testing.assert_close((result, inputs), (expected, eager_inputs))
+            if actual_spec != wanted_spec:
+                raise AssertionError(f"{actual_spec} is not eager's {wanted_spec}")
+            for got, want in zip(actual, wanted):
+                tolerances = {}
+                if isinstance(want, torch.Tensor) and want.is_floating_point():
+                    rtol, atol = default_tolerances(want)
+                    tolerances = {"rtol": max(rtol, floor), "atol": max(atol, floor)}
+                torch.testing.assert_close(got, want, **tolerances)
         except AssertionError as e:
             raise PrecompileError(
                 f"export_python: {self._path} does not match eager {self._name} "
