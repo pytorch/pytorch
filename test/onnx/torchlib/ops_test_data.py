@@ -40,6 +40,7 @@ import dataclasses
 import functools
 from typing import Any, Self, TYPE_CHECKING
 
+import extra_opinfo
 import numpy as np
 import ops_test_common
 
@@ -61,6 +62,7 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # Append extra op_db into the op database for testing
 OPS_DB.extend(opinfo_definitions.signal.op_db)
+OPS_DB.extend(extra_opinfo.OPS_DB)
 
 
 def _sample_inputs_local_scalar_dense(op_info, device, dtype, requires_grad, **kwargs):
@@ -787,6 +789,489 @@ TESTED_TORCHLIB_OPS += (
         core_ops.aten_logit,
         tolerance={torch.float16: (1e-1, 7e-4)},
         supported_dtypes=_FLOAT_DTYPES,
+    ),
+)
+
+
+# Source-supported dtypes are test metadata, not exporter dispatch constraints.
+TESTED_TORCHLIB_OPS += (
+    TorchLibOpInfo(
+        "all_dim", core_ops.aten_all_dim, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: (
+            not (len(sample.kwargs) > 0) or isinstance(sample.kwargs.get("dim"), tuple)
+        ),
+        reason="this Aten overload only support one tensor as input and {dim,keepdim} as kwargs by design. dim must be an integer",
+    ),
+    TorchLibOpInfo(
+        "all_dims", core_ops.aten_all_dims, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: not isinstance(sample.kwargs.get("dim"), tuple),
+        reason="this overload requires dim to be a tuple",
+    ),
+    TorchLibOpInfo("all", core_ops.aten_all, supported_dtypes=_TENSOR_DTYPES).skip(
+        matcher=lambda sample: len(sample.kwargs) != 0,
+        reason="this Aten overload only support one tensor as input by design",
+    ),
+    TorchLibOpInfo(
+        "amax",
+        core_ops.aten_amax,
+        input_wrangler=_amin_amax_input_wrangler,
+        supported_dtypes=_REAL_UINT8_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "amin",
+        core_ops.aten_amin,
+        input_wrangler=_amin_amax_input_wrangler,
+        supported_dtypes=_REAL_UINT8_DTYPES,
+    ),
+    TorchLibOpInfo("any", core_ops.aten_any, supported_dtypes=_TENSOR_DTYPES).skip(
+        matcher=lambda sample: len(sample.kwargs) != 0,
+        reason="this Aten overload only support one tensor as input by design",
+    ),
+    TorchLibOpInfo(
+        "any_dim", core_ops.aten_any_dim, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: (
+            not (len(sample.kwargs) > 0) or isinstance(sample.kwargs.get("dim"), tuple)
+        ),
+        reason="this Aten overload only support one tensor as input and {dim,keepdim} as kwargs by design. dim must be an integer",
+    ),
+    TorchLibOpInfo(
+        "any_dims", core_ops.aten_any_dims, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: not isinstance(sample.kwargs.get("dim"), tuple),
+        reason="this overload requires dim to be a tuple",
+    ),
+    TorchLibOpInfo(
+        "atleast_1d", core_ops.aten_atleast_1d, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: isinstance(sample.input, (list, tuple)),
+        reason="takes single tensor as input",
+    ),
+    TorchLibOpInfo(
+        "atleast_2d", core_ops.aten_atleast_2d, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: isinstance(sample.input, (list, tuple)),
+        reason="takes single tensor as input",
+    ),
+    TorchLibOpInfo(
+        "atleast_3d", core_ops.aten_atleast_3d, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: isinstance(sample.input, (list, tuple)),
+        reason="takes single tensor as input",
+    ),
+    TorchLibOpInfo(
+        "broadcast_to", core_ops.aten_broadcast_to, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo("diagonal", core_ops.aten_diagonal, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("expand", core_ops.aten_expand, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "expand_as", core_ops.aten_expand_as, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo("flip", core_ops.aten_flip, supported_dtypes=_TENSOR_DTYPES).skip(
+        reason="fixme: size 0 inputs are not handled yet",
+        matcher=lambda sample: sample.input.numel() == 0,
+    ),
+    TorchLibOpInfo(
+        "flip",
+        core_ops.aten_flip_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("flatten", core_ops.aten_flatten, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("gather", core_ops.aten_gather, supported_dtypes=_REAL_DTYPES).skip(
+        matcher=lambda sample: sample.input.numel() == 0 or sample.args[1].numel() == 0,
+        reason="fixme: ORT does not support empty tensors as input",
+    ),
+    TorchLibOpInfo(
+        "ops.aten.index.Tensor", core_ops.aten_index, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "ops.aten.index.Tensor.bool",
+        core_ops.aten_index,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "index_put",
+        core_ops.aten_index_put,
+        input_wrangler=_index_put_input_wrangler,
+        supported_dtypes=_REAL_DTYPES,
+    ).skip(
+        dtypes=(torch.float16,),
+        matcher=lambda sample: sample.kwargs.get("accumulate") is True,
+        reason="fixme: ORT only supports float32 when accumulate is True:  MLFloat16 data type is not supported with ScatterND when reduction is 'add'",
+    ),
+    TorchLibOpInfo(
+        "ops.aten.index_put", core_ops.aten_index_put, supported_dtypes=_REAL_DTYPES
+    ),
+    TorchLibOpInfo(
+        "ops.aten._unsafe_index_put",
+        core_ops.aten_index_put,
+        supported_dtypes=_REAL_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "index_select", core_ops.aten_index_select, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "logsumexp",
+        core_ops.aten_logsumexp,
+        tolerance={torch.float16: (2e-2, 1e-4)},
+        supported_dtypes=_FLOAT_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "masked_fill", core_ops.aten_masked_fill, supported_dtypes=_TENSOR_DTYPES
+    ).xfail(
+        dtypes=(torch.bool,),
+        reason="fixme: ORT does not have an implementation for Where with bool inputs.",
+    ),
+    TorchLibOpInfo(
+        "masked_scatter", core_ops.aten_masked_scatter, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "ops.aten.masked_scatter",
+        core_ops.aten_masked_scatter,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "mean",
+        core_ops.aten_mean,
+        input_wrangler=_mean_input_wrangler,
+        supported_dtypes=_REAL_DTYPES,
+    ).skip(
+        matcher=lambda sample: sample.kwargs.get("dim") is not None,
+        reason="this Aten overload only accept 1 inputs: self",
+    ),
+    TorchLibOpInfo(
+        "ops.aten.mean.dtype", core_ops.aten_mean, supported_dtypes=_REAL_DTYPES
+    ),
+    TorchLibOpInfo(
+        "mean",
+        core_ops.aten_mean_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ).skip(
+        matcher=lambda sample: sample.kwargs.get("dim") is not None,
+        reason="this Aten overload only accepts self and dtype",
+    ),
+    TorchLibOpInfo(
+        "mean_dim",
+        core_ops.aten_mean_dim_complex,
+        input_wrangler=_mean_input_wrangler,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ).skip(
+        matcher=lambda sample: sample.kwargs.get("dim") is None,
+        reason="the dimension-free overload is tested separately",
+    ),
+    TorchLibOpInfo(
+        "mean_dim",
+        core_ops.aten_mean_dim,
+        input_wrangler=_mean_input_wrangler,
+        supported_dtypes=_REAL_DTYPES,
+    ).skip(
+        matcher=lambda sample: sample.kwargs.get("dim") is None,
+        reason="this Aten overload can accept 2 inputs:(self, dim)",
+    ),
+    TorchLibOpInfo("mH", core_ops.aten_mH, supported_dtypes=_REAL_UINT8_DTYPES),
+    TorchLibOpInfo(
+        "mH", core_ops.aten_mH_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo(
+        "min_dim", core_ops.aten_min_dim, supported_dtypes=_REAL_DTYPES
+    ).xfail(
+        matcher=lambda sample: (
+            len(sample.args) == 0
+            or (len(sample.args) > 0 and not isinstance(sample.args[0], int))
+        ),
+        reason="this ATen overload only support one tensor as input and another int as args",
+    ),
+    TorchLibOpInfo("min", core_ops.aten_min, supported_dtypes=_REAL_DTYPES).skip(
+        matcher=lambda sample: len(sample.args) > 0,
+        reason="this ATen overload only supports one tensor as input by design",
+    ),
+    TorchLibOpInfo("mT", core_ops.aten_mT, supported_dtypes=_REAL_UINT8_DTYPES),
+    TorchLibOpInfo(
+        "mT", core_ops.aten_mT_complex, complex=True, supported_dtypes=_COMPLEX_DTYPES
+    ),
+    TorchLibOpInfo("narrow", core_ops.aten_narrow, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "nonzero",
+        core_ops.aten_nonzero,
+        input_wrangler=_nonzero_input_wrangler,
+        supported_dtypes=_TENSOR_DTYPES,
+    )
+    .xfail(
+        matcher=lambda sample: sample.kwargs.get("as_tuple"),
+        reason="as_tuple=True is not supported",
+    )
+    .xfail(
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
+    ),
+    TorchLibOpInfo("permute", core_ops.aten_permute, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "permute",
+        core_ops.aten_permute_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("prod", core_ops.aten_prod, supported_dtypes=_REAL_DTYPES).skip(
+        matcher=lambda sample: (
+            sample.kwargs.get("dim") is not None
+            or sample.kwargs.get("keepdim") is not None
+            or len(sample.args) > 0
+        ),
+        reason="this Aten overload only accept 1 inputs: self",
+    ),
+    TorchLibOpInfo(
+        "prod_dim_int", core_ops.aten_prod_dim_int, supported_dtypes=_REAL_DTYPES
+    ).skip(
+        matcher=lambda sample: (
+            (sample.kwargs.get("dim") is None and sample.kwargs.get("keepdim") is None)
+            or sample.kwargs.get("dtype") != -1
+        ),
+        reason="this Aten overload can accept 3 inputs:(self, dim, keepdim)",
+    ),
+    TorchLibOpInfo("repeat", core_ops.aten_repeat, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo("reshape", core_ops.aten_reshape, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "scatter_add", core_ops.aten_scatter_add, supported_dtypes=_REAL_DTYPES
+    )
+    .xfail(
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: Rank(0) input will lead ORT failed due to different rank(result) in if-else branch. https://github.com/onnx/onnx/issues/4986",
+    )
+    .xfail(
+        dtypes=(torch.float16,),
+        reason="fixme: ORT error: MLFloat16 data type is not supported with ScatterElements opset 16 when reduction is 'add'",
+    ),
+    TorchLibOpInfo("select", core_ops.aten_select, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "select_scatter", core_ops.aten_select_scatter, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo("sort", core_ops.aten_sort, supported_dtypes=_REAL_DTYPES).xfail(
+        dtypes=(torch.float16,),
+        reason="fixme: Tensor-likes are not close. Tests pass for float32.",
+    ),
+    TorchLibOpInfo(
+        "squeeze_dim", core_ops.aten_squeeze_dim, supported_dtypes=_TENSOR_DTYPES
+    )
+    .skip(
+        matcher=lambda sample: not (
+            len(sample.args) > 0 and isinstance(sample.args[0], int)
+        ),
+        reason="this Aten overload only support one tensor as input and one int as args by design",
+    )
+    .skip(
+        matcher=lambda sample: (
+            len(sample.input.shape) != 0 and sample.input.shape[sample.args[0]] != 1
+        ),
+        reason="this Aten overload only support squeeze dim with size 1",
+    ),
+    TorchLibOpInfo(
+        "squeeze_dim",
+        core_ops.aten_squeeze_dim_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    )
+    .skip(
+        matcher=lambda sample: not (
+            len(sample.args) > 0 and isinstance(sample.args[0], int)
+        ),
+        reason="this Aten overload only support one tensor as input and one int as args by design",
+    )
+    .skip(
+        matcher=lambda sample: (
+            len(sample.input.shape) != 0 and sample.input.shape[sample.args[0]] != 1
+        ),
+        reason="this Aten overload only support squeeze dim with size 1",
+    ),
+    TorchLibOpInfo(
+        "squeeze", core_ops.aten_squeeze, supported_dtypes=_TENSOR_DTYPES
+    ).skip(
+        matcher=lambda sample: len(sample.args) != 0,
+        reason="this Aten overload only support one tensor as input by design",
+    ),
+    TorchLibOpInfo("t", core_ops.aten_t, supported_dtypes=_TENSOR_DTYPES).xfail(
+        enabled_if=False,  # Native IR never creates the scripted If branches.
+        reason="fixme: ORT Graph attribute inferencing failed on rank-1 input. https://github.com/onnx/onnx/issues/4986",
+        test_class_name="TestOutputConsistencyFullGraph",
+    ),
+    TorchLibOpInfo("topk", core_ops.aten_topk, supported_dtypes=_REAL_DTYPES)
+    .xfail(
+        dtypes=(torch.int64, torch.int32),
+        enabled_if=not ops_test_common.IS_WINDOWS,
+        reason="fixme: result mismatch. https://github.com/microsoft/onnxscript/issues/853",
+    )
+    .skip(
+        dtypes=(torch.float16,),
+        reason="fixme: result mismatch. https://github.com/microsoft/onnxscript/issues/853",
+    )
+    .skip(
+        matcher=lambda sample: len(sample.input.shape) == 0
+        or sample.input.numel() == 0,
+        reason="scalar inputs or empty inputs are not handled",
+    ),
+    TorchLibOpInfo("unflatten", core_ops.aten_unflatten, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo("unfold", core_ops.aten_unfold, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "ops.aten.unfold", core_ops.aten_unfold, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "unsqueeze", core_ops.aten_unsqueeze, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "unsqueeze",
+        core_ops.aten_unsqueeze_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("view", core_ops.aten_view, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "view",
+        core_ops.aten_view_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("view_as", core_ops.aten_view_as, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "view_as_complex",
+        core_ops.aten_view_as_complex,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "view_as_complex_copy",
+        core_ops.aten_view_as_complex_copy,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "view_as_real",
+        core_ops.aten_view_as_real,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "view_as_real_copy",
+        core_ops.aten_view_as_real_copy,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "view_copy", core_ops.aten_view_copy, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "where",
+        core_ops.aten_where,
+        input_wrangler=_where_input_wrangler,
+        supported_dtypes=_TENSOR_DTYPES,
+    ).xfail(
+        dtypes=(torch.bool,),
+        reason="fixme: ORT does not have an implementation for Where with bool inputs.",
+    ),
+    TorchLibOpInfo("argmax", core_ops.aten_argmax, supported_dtypes=_REAL_UINT8_DTYPES),
+    TorchLibOpInfo("argmin", core_ops.aten_argmin, supported_dtypes=_REAL_UINT8_DTYPES),
+    TorchLibOpInfo(
+        "as_strided", core_ops.aten_as_strided, supported_dtypes=_TENSOR_DTYPES
+    ).xfail(
+        variant_name="partial_views", reason="ONNX doesn't have partial view for tensor"
+    ),
+    TorchLibOpInfo(
+        "cumsum",
+        core_ops.aten_cumsum,
+        supported_dtypes=(*_FLOAT_DTYPES, torch.int32, torch.int64),
+    ),
+    TorchLibOpInfo("max_dim", core_ops.aten_max_dim, supported_dtypes=_REAL_DTYPES)
+    .xfail(
+        variant_name="reduction_with_dim",
+        reason="fixme: ORT Graph attribute inferencing failed https://github.com/onnx/onnx/issues/4986",
+        test_class_name="TestOutputConsistencyFullGraph",
+        enabled_if=False,  # Native IR never creates the scripted If branches.
+    )
+    .xfail(
+        matcher=lambda sample: (
+            len(sample.args) == 0
+            or (len(sample.args) > 0 and not isinstance(sample.args[0], int))
+        ),
+        reason="this ATen overload only support one tensor as input and another int as args",
+    ),
+    TorchLibOpInfo("max", core_ops.aten_max, supported_dtypes=_REAL_DTYPES).skip(
+        matcher=lambda sample: len(sample.args) > 0,
+        reason="this ATen overload only supports one tensor as input by design",
+    ),
+    TorchLibOpInfo(
+        "scatter_reduce",
+        core_ops.aten_scatter_reduce,
+        input_wrangler=_scatter_reduce_input_wrangler,
+        supported_dtypes=_REAL_DTYPES,
+    )
+    .xfail(
+        variant_name="mean",
+        dtypes=(torch.float16, torch.float64),
+        reason="ORT does not implement ScatterElements additive reduction for these dtypes",
+    )
+    .xfail(
+        variant_name="prod",
+        dtypes=(torch.float16, torch.float64),
+        reason="fixme: MLFloat16 data type is not supported with ScatterElements opset 16 when reduction is 'mul'",
+    )
+    .xfail(
+        variant_name="sum",
+        dtypes=(torch.float16, torch.float64),
+        reason="fixme: MLFloat16 data type is not supported with ScatterElements opset 18 when reduction is 'add'",
+    )
+    .xfail(
+        variant_name="mean",
+        dtypes=(torch.bfloat16,),
+        reason="onnxruntime does not support ml_dtypes.bfloat16",
+    )
+    .xfail(
+        variant_name="prod",
+        dtypes=(torch.bfloat16,),
+        reason="onnxruntime does not support ml_dtypes.bfloat16",
+    )
+    .xfail(
+        variant_name="sum",
+        dtypes=(torch.bfloat16,),
+        reason="onnxruntime does not support ml_dtypes.bfloat16",
+    ),
+    TorchLibOpInfo(
+        "ops.aten.slice_scatter",
+        core_ops.aten_slice_scatter,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "ops.aten.scatter.src",
+        core_ops.aten_scatter_src,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "ops.aten.scatter.value",
+        core_ops.aten_scatter_value,
+        supported_dtypes=_TENSOR_DTYPES,
+    ),
+    TorchLibOpInfo("slice", core_ops.aten_slice, supported_dtypes=_TENSOR_DTYPES),
+    TorchLibOpInfo(
+        "slice",
+        core_ops.aten_slice_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo("sum", core_ops.aten_sum_dim_IntList, supported_dtypes=_REAL_DTYPES),
+    TorchLibOpInfo(
+        "sum",
+        core_ops.aten_sum_dim_IntList_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
+    ),
+    TorchLibOpInfo(
+        "transpose", core_ops.aten_transpose, supported_dtypes=_TENSOR_DTYPES
+    ),
+    TorchLibOpInfo(
+        "transpose",
+        core_ops.aten_transpose_complex,
+        complex=True,
+        supported_dtypes=_COMPLEX_DTYPES,
     ),
 )
 

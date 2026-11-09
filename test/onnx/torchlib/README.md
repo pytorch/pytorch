@@ -46,6 +46,16 @@ source-supported numerical coverage without depending on its old annotations.
 This metadata only filters tests; it does not participate in exporter dispatch.
 Keep source tolerances and sample-specific skips with the migrated mapping.
 
+Structural core translations (views, axis transforms, indexing, scattering, masking,
+and reductions) use native IR registrations. Additional source samples live in
+`extra_opinfo.py`; they cover broadcast masks, optional slice bounds, scalar
+scatter inputs, and advanced index placement. Native regressions in
+`../exporter/test_native_structural_ops.py` also exercise symbolic dimensions,
+complex component axes, duplicate-index reductions, and FX export with optimization
+both enabled and disabled. Those tests prohibit legacy graph construction.
+Use ONNX's reference evaluator when the installed runtime does not support a
+tested opset; do not skip a migrated translation merely because its opset is newer.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests
