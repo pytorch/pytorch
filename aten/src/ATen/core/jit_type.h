@@ -2174,21 +2174,31 @@ struct TORCH_API InterfaceType : public NamedType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  // try to find a method of this interface,
-  // returns nullptr if not found.
-  const FunctionSchema* getMethod(const std::string& name) const;
-  void addMethod(FunctionSchema schema);
-  const std::vector<FunctionSchema>& methods() const {
-    return *methods_;
-  }
+  bool hasMethod(const std::string& name) const;
+  std::vector<std::string> getMethodNames() const;
+  // Returned schemas own their self type and may outlive this interface.
+  // Returning a schema requires shared ownership of this interface.
+  // Returns nullptr if the method is not found.
+  std::unique_ptr<FunctionSchema> getMethodSchema(const std::string& name) const;
+  // Requires a self argument whose type and real_type are this interface.
+  void addMethod(const FunctionSchema& schema);
+  // Returning nonempty schemas requires shared ownership of this interface.
+  std::vector<FunctionSchema> methodSchemas() const;
 
   bool is_module() const override{
     return is_module_;
   }
   static const TypeKind Kind = TypeKind::InterfaceType;
+  InterfaceType(const InterfaceType&) = default;
+  InterfaceType& operator=(const InterfaceType&) = default;
   ~InterfaceType() override = default;
  private:
+  friend struct ClassType;
   InterfaceType(QualifiedName name, bool is_module);
+  std::vector<FunctionSchema>::const_iterator findMethodSchema(
+      const std::string& name) const;
+  FunctionSchema schemaWithSelf(const FunctionSchema& schema) const;
+  FunctionSchema schemaForDiagnostic(const FunctionSchema& schema) const;
   static bool isSubTypeImpl(
       const InterfaceType& lhs,
       const InterfaceType& rhs,

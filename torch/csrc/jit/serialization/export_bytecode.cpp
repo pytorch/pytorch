@@ -68,12 +68,13 @@ static std::vector<Method> findAllDependentFunctions(
     const Module& module,
     Graph& graph) {
   std::vector<Method> methods;
-  std::unordered_set<std::string_view> called_method_names;
+  std::unordered_set<std::string> called_method_names;
   auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
   for (Node* node : nodes) {
     if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
-      const FunctionSchema* schema = iface->getMethod(node->s(attr::name));
-      called_method_names.insert(schema->name());
+      const auto& method_name = node->s(attr::name);
+      TORCH_INTERNAL_ASSERT(iface->hasMethod(method_name));
+      called_method_names.insert(method_name);
     }
   }
 

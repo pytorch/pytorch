@@ -463,6 +463,7 @@ struct MethodValue : public SugaredValue {
     std::vector<NamedValue> argsWithSelf = {self_};
     argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
     std::vector<const FunctionSchema*> schemas;
+    std::vector<std::unique_ptr<FunctionSchema>> interface_schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
@@ -476,7 +477,9 @@ struct MethodValue : public SugaredValue {
         }
         schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
-        schemas.push_back(interface_type->getMethod(method_name));
+        interface_schemas.emplace_back(
+            interface_type->getMethodSchema(method_name));
+        schemas.push_back(interface_schemas.back().get());
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "method constructed that is not a class or interface");
