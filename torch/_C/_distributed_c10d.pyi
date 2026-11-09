@@ -400,6 +400,7 @@ class _DistributedBackendOptions:
     process_group: ProcessGroup | None
     split_from: Backend | None
     enable_reconfigure: bool
+    device_id: torch.device | None
 
 class Work:
     def is_completed(self) -> bool: ...
@@ -445,6 +446,10 @@ class Backend:
         rank: int,
         size: int,
     ) -> None: ...
+    @property
+    def bound_device_id(self) -> torch.device | None: ...
+    @bound_device_id.setter
+    def bound_device_id(self, device: torch.device | None) -> None: ...
     @property
     def supports_splitting(self) -> bool: ...
     @property

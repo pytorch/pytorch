@@ -128,7 +128,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
       blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
-      options_c10d_(options ? std::move(options) : Options::create()) {
+      options_c10d_(options ? std::move(options) : Options::create()),
+      lazy_init_(options_c10d_->lazy_init) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 
@@ -231,21 +232,43 @@ void ProcessGroupNCCL::setBoundDeviceId(std::optional<at::Device> device) {
     device = device_;
   }
   if (!device.has_value()) {
-    const auto deviceCount = c10::cuda::device_count_ensure_non_zero();
-    uint64_t deviceRank = static_cast<uint64_t>(getRank());
-    const auto& globalRanks = options_c10d_->global_ranks_in_group;
-    if (static_cast<size_t>(getRank()) < globalRanks.size()) {
-      deviceRank = globalRanks[getRank()];
-    }
-    device = at::Device(
-        at::kCUDA, static_cast<c10::DeviceIndex>(deviceRank % deviceCount));
+    // c10d pushes an unbound ProcessGroup's nullopt when it registers us.
+    device = getBoundDeviceId();
+  }
+  if (!device.has_value() && getSize() == 1 &&
+      init_state_ == InitializationState::UNINITIALIZED) {
+    // Like the legacy backend, a group nobody requested a device for creates
+    // its communicator on first use and stays unbound, so new_group does not
+    // pass the fallback device on as requested. Only single-rank groups:
+    // creating a multi-rank communicator on first use could hang on a
+    // point-to-point op. Single-rank groups are often placeholders that never
+    // communicate (e.g. vLLM's TP/PP/DP groups at world size 1), and each
+    // communicator pins hundreds of MiB of device memory. See #199957.
+    lazy_init_ = true;
+    device_ = defaultDevice();
+    return;
+  }
+  if (!device.has_value()) {
+    device = defaultDevice();
   }
   Backend::setBoundDeviceId(device);
-  if (options_c10d_->lazy_init &&
-      init_state_ == InitializationState::UNINITIALIZED) {
+  if (lazy_init_ && init_state_ == InitializationState::UNINITIALIZED) {
     return;
   }
   ensureInitialized(*device);
+}
+
+at::Device ProcessGroupNCCL::defaultDevice() const {
+  const auto deviceCount = c10::cuda::device_count_ensure_non_zero();
+  uint64_t deviceRank = static_cast<uint64_t>(getRank());
+  const auto& globalRanks = options_c10d_->global_ranks_in_group;
+  if (const auto localRank = getCvarInt({"LOCAL_RANK"}, -1); localRank >= 0) {
+    deviceRank = static_cast<uint64_t>(localRank);
+  } else if (static_cast<size_t>(getRank()) < globalRanks.size()) {
+    deviceRank = globalRanks[getRank()];
+  }
+  return at::Device(
+      at::kCUDA, static_cast<c10::DeviceIndex>(deviceRank % deviceCount));
 }
 
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
@@ -407,8 +430,11 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
       "NCCL tensor allocator expects a CUDA device but got ",
       device);
   if (!device.has_index()) {
+    // An unbound lazy single-rank group keeps its default device in device_.
     device = getBoundDeviceId().value_or(
-        at::Device(at::kCUDA, at::cuda::current_device()));
+        device_.has_index()
+            ? device_
+            : at::Device(at::kCUDA, at::cuda::current_device()));
     options = options.device(device);
   }
   TORCH_CHECK(

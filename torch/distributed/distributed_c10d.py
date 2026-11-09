@@ -831,36 +831,19 @@ def _nccl2_options(
     return backend_options
 
 
-def _nccl2_device(
-    opts: _DistributedBackendOptions,
-) -> torch.device | None:
-    if opts.enable_reconfigure:
-        return None
+def _nccl2_device(opts: _DistributedBackendOptions) -> torch.device | None:
+    return None if opts.enable_reconfigure else opts.device_id
 
-    process_group = opts.process_group
-    device = process_group.bound_device_id if process_group is not None else None
-    if device is not None:
-        return device
 
-    device_count = torch.cuda.device_count()
-    if device_count == 0:
-        raise RuntimeError("nccl2 requires at least one CUDA device")
-
-    if "LOCAL_RANK" in os.environ:
-        device_index = get_node_local_rank() % device_count
-    else:
-        global_rank = (
-            opts.global_ranks_in_group[opts.group_rank]
-            if opts.global_ranks_in_group
-            else opts.group_rank
-        )
-        device_index = global_rank % device_count
-
-    device = torch.device("cuda", device_index)
-    if process_group is not None:
-        process_group.bound_device_id = device
-
-    return device
+def _bind_nccl2_process_group(
+    opts: _DistributedBackendOptions, backend: C10DBackend
+) -> None:
+    # Without a requested device the backend binds itself to a default one,
+    # except a single-rank group, which stays unbound and creates its
+    # communicator on first use (see ProcessGroupNCCL::setBoundDeviceId).
+    device = backend.bound_device_id
+    if opts.process_group is not None and device is not None:
+        opts.process_group.bound_device_id = device
 
 
 def _create_nccl2_process_group(
@@ -889,6 +872,7 @@ def _create_nccl2_process_group(
         pg_options,
         _nccl2_device(opts),
     )
+    _bind_nccl2_process_group(opts, backend)
     return backend
 
 
@@ -918,6 +902,7 @@ def _create_nccl_lazy_process_group(
         pg_options,
         _nccl2_device(opts),
     )
+    _bind_nccl2_process_group(opts, backend)
     return backend
 
 
@@ -3144,6 +3129,7 @@ def _new_process_group_helper(
                 dist_backend_opts.process_group = pg
                 dist_backend_opts.split_from = split_from
                 dist_backend_opts.enable_reconfigure = enable_reconfigure
+                dist_backend_opts.device_id = device_id
                 backend_result = creator_fn(dist_backend_opts, backend_options)
 
             if backend_result is None:

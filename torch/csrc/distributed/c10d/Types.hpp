@@ -205,6 +205,10 @@ struct DistributedBackendOptions {
   c10::intrusive_ptr<ProcessGroup> process_group;
   c10::intrusive_ptr<Backend> split_from;
   bool enable_reconfigure = false;
+  // The device the group is bound to: init_process_group's or new_group's
+  // device_id, or the default group's bound device that new_group inherits.
+  // Unset if there is none, in which case the backend picks its own.
+  std::optional<at::Device> device_id;
 };
 
 // Fault tolerance / reconfigure API. A ReconfigureHandle is an opaque,
