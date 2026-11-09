@@ -918,7 +918,16 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if mask is None:
             line = f"{arg.name}[{subscript}]{cast_suffix}"
         else:
-            # hl.load zero-fills masked lanes; masked() then selects `other`.
+            # The body of ops.masked() may only read where its mask holds.
+            # F.pad(x, (8, 0)) for x of shape [40, 128] reads x at
+            # (-8) + 128*(tile_x.index // 136) + ((tile_x.index % 136)) where
+            # tile_x.index % 136 >= 8. Helion masks only lanes past the tile range
+            # (mask_0 = indices_0 < 5440), so without extra_mask the first 8
+            # columns read before each row of x, and before x itself for row 0:
+            #   tmp3 = tl.load(in0 + v_14 * 1, mask_0, other=0)
+            #   compute-sanitizer: Invalid __global__ read ... 32 bytes before the nearest allocation
+            # With it, the load is masked by mask_0 & v_5, and masked() then
+            # selects `other` for those lanes.
             # A 0-d tensor takes an empty index list. F.pad(x * s, (0, 1))[:, 3]
             # reads s under the constant mask 3 < 4, and its subscript in1[()]
             # as an index list would fail:
