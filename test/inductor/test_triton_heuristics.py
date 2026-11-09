@@ -41,6 +41,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.codegen import triton_utils
 from torch._inductor.heuristics.triton_codegen.reduction import (
     ROCmReductionHeuristic,
     XPUReductionHeuristic,
@@ -77,6 +78,7 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+from torch._inductor.virtualized import V
 
 
 class _FindNamesProbe:
@@ -2493,9 +2495,9 @@ class TestMakeLaunchersMemory(TestCase):
 
 
 @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-class TestRuntimeDivisibilitySpecialization(TestCase):
-    """config.triton.runtime_divisibility_specialization: a symbolic size whose hint
-    is a multiple of 16 is compiled as one and checked at launch."""
+class TestGuardSizeDivisibleBy16(TestCase):
+    """config.triton.guard_size_divisible_by_16: a backed symbolic size whose hint is a
+    multiple of 16 is guarded to stay one and passed to Triton as divisible by 16."""
 
     @staticmethod
     def fn(*xs):
@@ -2505,194 +2507,186 @@ class TestRuntimeDivisibilitySpecialization(TestCase):
         return acc
 
     @staticmethod
-    def inputs(n, count=3):
+    def inputs(n, count=3, requires_grad=False):
         return [
-            torch.randn(n, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(count)
+            torch.randn(
+                n, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=requires_grad
+            )
+            for _ in range(count)
         ]
 
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
 
-    def _compile(self, n, **compile_kwargs):
+    def num_graphs(self):
+        return torch._dynamo.utils.counters["stats"]["unique_graphs"]
+
+    def check(self, compiled, n, fn=None):
+        fn = fn or self.fn
+        xs = self.inputs(n)
+        self.assertEqual(compiled(*xs), fn(*xs))
+
+    def xnumel_divisible(self, code):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
+        if not triton_version_uses_attrs_dict():
+            self.skipTest("checks the attrs dict form of triton_meta configs")
+        # in_ptr0..2, out_ptr0, xnumel
+        return "(4,): [['tt.divisibility', 16]]" in code
+
+    def test_recompiles_once_on_non_multiple(self):
         from torch._inductor.utils import run_and_get_code
 
-        compiled = torch.compile(self.fn, **compile_kwargs)
-        xs = self.inputs(n)
+        compiled = torch.compile(self.fn, dynamic=True)
+        xs = self.inputs(4096)
         out, code = run_and_get_code(compiled, *xs)
         self.assertEqual(out, self.fn(*xs))
-        return compiled, "\n".join(code)
+        self.assertTrue(self.xnumel_divisible("\n".join(code)))
+        for n in (8192, 4096 * 33):
+            self.check(compiled, n)
+        self.assertEqual(self.num_graphs(), 1)
+        # breaks the guard: one recompile, and the new graph doesn't guard again
+        self.check(compiled, 4097)
+        self.assertEqual(self.num_graphs(), 2)
+        for n in (4104, 1000003, 4096, 8192):
+            self.check(compiled, n)
+        self.assertEqual(self.num_graphs(), 2)
 
-    def test_launch_breaking_divisibility_uses_generic_kernel(self):
-        compiled, code = self._compile(4096, dynamic=True)
-        self.assertIn("'runtime_divisibility_args': (", code)
-        self.assertIn("'generic_configs': [", code)
+    def test_at_most_one_recompile_per_frame(self):
+        # two sizes guarded independently: breaking one recompiles, and the new graph
+        # doesn't guard the other, which would cost another recompile when it breaks
+        def fn(a, b):
+            return a.float() * 2, b.float() + 1
 
-        get_generic = CachingAutotuner._get_generic_autotuner
-        with (
-            patch.object(
-                CachingAutotuner,
-                "_get_generic_autotuner",
-                autospec=True,
-                side_effect=get_generic,
-            ) as generic,
-            torch._dynamo.config.patch(error_on_recompile=True),
-        ):
-            for n in (8192, 4096 * 33):
-                xs = self.inputs(n)
-                self.assertEqual(compiled(*xs), self.fn(*xs))
-            self.assertEqual(generic.call_count, 0)
-            for n in (4097, 4104, 1000003, 8192):
-                xs = self.inputs(n)
-                self.assertEqual(compiled(*xs), self.fn(*xs))
-            # 4097, 4104 and 1000003 aren't multiples of 16
-            self.assertEqual(generic.call_count, 3)
+        def check(n, m):
+            a, b = self.inputs(n, count=1)[0], self.inputs(m, count=1)[0]
+            self.assertEqual(compiled(a, b), fn(a, b))
 
-    def test_generic_kernel_compiled_once_without_hint(self):
-        compiled, _ = self._compile(4096, dynamic=True)
-        built = []
-        get_generic = CachingAutotuner._get_generic_autotuner
-
-        def record(self):
-            generic = get_generic(self)
-            built.append((self, generic))
-            return generic
-
-        with patch.object(CachingAutotuner, "_get_generic_autotuner", record):
-            for n in (4097, 5001):
-                xs = self.inputs(n)
-                self.assertEqual(compiled(*xs), self.fn(*xs))
-        (specialized, generic), (specialized2, generic2) = built
-        self.assertIs(specialized, specialized2)
-        self.assertIs(generic, generic2)
-        self.assertEqual(generic.runtime_divisibility_args, ())
-        self.assertEqual(len(generic.launchers), 1)
-        # it reuses the specialized kernel's tuned config
-        self.assertEqual(
-            triton_config_to_hashable(generic.launchers[0].config),
-            triton_config_to_hashable(specialized.launchers[0].config),
-        )
-        self.assertEqual(
-            generic.triton_meta["configs"], specialized.triton_meta["generic_configs"]
-        )
-        self.assertNotEqual(
-            generic.triton_meta["configs"], specialized.triton_meta["configs"]
-        )
+        compiled = torch.compile(fn, dynamic=True)
+        check(4096, 2048)
+        check(4097, 2048)
+        self.assertEqual(self.num_graphs(), 2)
+        check(4097, 2049)
+        check(4096, 2049)
+        self.assertEqual(self.num_graphs(), 2)
 
     def test_not_specialized(self):
+        from torch._inductor.utils import run_and_get_code
+
         # the hint isn't a multiple of 16
-        _, code = self._compile(4099, dynamic=True)
-        self.assertNotIn("runtime_divisibility_args", code)
+        compiled = torch.compile(self.fn, dynamic=True)
+        xs = self.inputs(4099)
+        _, code = run_and_get_code(compiled, *xs)
+        self.assertFalse(self.xnumel_divisible("\n".join(code)))
+        for n in (4096, 4097):
+            self.check(compiled, n)
+        self.assertEqual(self.num_graphs(), 1)
+
         torch._dynamo.reset()
-        # static shapes are known
-        _, code = self._compile(4096, dynamic=False)
-        self.assertNotIn("runtime_divisibility_args", code)
-        torch._dynamo.reset()
-        with config.patch({"triton.runtime_divisibility_specialization": False}):
-            _, code = self._compile(4096, dynamic=True)
-        self.assertNotIn("runtime_divisibility_args", code)
+        torch._dynamo.utils.counters.clear()
+        with config.patch({"triton.guard_size_divisible_by_16": False}):
+            compiled = torch.compile(self.fn, dynamic=True)
+            xs = self.inputs(4096)
+            _, code = run_and_get_code(compiled, *xs)
+            self.assertFalse(self.xnumel_divisible("\n".join(code)))
+            self.check(compiled, 4097)
+        self.assertEqual(self.num_graphs(), 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_not_specialized_unbacked(self):
-        # an unbacked size's hint is a guess
+        # an unbacked size's hint is a guess, and nothing would recompile
         def fn(x, n):
             k = n.item()
             torch._check(k >= 16)
             torch._check(k <= x.size(0))
             return x[:k].float() * 2
 
-        from torch._inductor.utils import run_and_get_code
+        guarded = []
+        guard = triton_utils._guard_multiple_of
 
+        def record(expr, alignment):
+            result = guard(expr, alignment)
+            guarded.append((str(expr), result))
+            return result
+
+        compiled = torch.compile(fn, fullgraph=True)
         x = torch.randn(8192, device=GPU_TYPE, dtype=torch.bfloat16)
-        n = torch.tensor(4096, device=GPU_TYPE)
-        out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x, n)
-        self.assertEqual(out, fn(x, n))
-        self.assertNotIn("runtime_divisibility_args", "\n".join(code))
+        with patch.object(triton_utils, "_guard_multiple_of", record):
+            for k in (4096, 4097):
+                n = torch.tensor(k, device=GPU_TYPE)
+                self.assertEqual(compiled(x, n), fn(x, n))
+        self.assertTrue(any("u" in expr for expr, _ in guarded))
+        self.assertFalse(any(result for _, result in guarded))
+        self.assertEqual(self.num_graphs(), 1)
 
-    @config.patch(
-        {
-            "fx_graph_cache": True,
-            "force_disable_caches": False,
-            "autotune_local_cache": False,
-            "autotune_remote_cache": False,
-            # several configs to tune over
-            "max_autotune_pointwise": True,
-        }
-    )
-    def test_first_launch_breaks_divisibility_before_tuning(self):
-        # A graph cache hit reuses a kernel specialized at another size; its first
-        # launch can break the hint before any config has been picked.
-        fn = self.fn
+    def test_not_specialized_with_size_range(self):
+        # guarding a dim with a user-given range is a constraint violation
+        compiled = torch.compile(self.fn)
+        for n in (4096, 4097):
+            xs = self.inputs(n)
+            for x in xs:
+                torch._dynamo.mark_dynamic(x, 0, min=16, max=1 << 20)
+            self.assertEqual(compiled(*xs), self.fn(*xs))
+        self.assertEqual(self.num_graphs(), 1)
 
-        built = []
-        get_generic = CachingAutotuner._get_generic_autotuner
+    def test_not_specialized_with_hint_override(self):
+        # the hint is a multiple of 16 but the input's size isn't
+        compiled = torch.compile(self.fn)
+        xs = self.inputs(4097)
+        for x in xs:
+            torch._dynamo.mark_dynamic(x, 0, hint_override=4096)
+        self.assertEqual(compiled(*xs), self.fn(*xs))
+        self.assertEqual(self.num_graphs(), 1)
 
-        def record(self):
-            generic = get_generic(self)
-            built.append((len(self.launchers), list(generic.configs)))
-            return generic
+    def test_backward(self):
+        # Only the backward has a kernel over x's 8 * s0 elements: the forward reduces
+        # to s0, whose hint 4098 isn't a multiple of 16, but 8 * 4098 is. Nothing the
+        # forward could save for the backward is 8 * s0 elements but x itself.
+        def fn(x):
+            return x.float().pow(2).sum(1)
 
-        with fresh_cache():
-            xs = self.inputs(4096)
-            self.assertEqual(torch.compile(fn, dynamic=True)(*xs), fn(*xs))
-            torch._dynamo.reset()
-            counters_before = torch._dynamo.utils.counters["inductor"][
-                "fxgraph_cache_hit"
-            ]
-            ys = self.inputs(4097)
-            with patch.object(CachingAutotuner, "_get_generic_autotuner", record):
-                self.assertEqual(torch.compile(fn, dynamic=True)(*ys), fn(*ys))
-            self.assertEqual(
-                torch._dynamo.utils.counters["inductor"]["fxgraph_cache_hit"],
-                counters_before + 1,
-            )
-        self.assertEqual(len(built), 1)
-        num_launchers, generic_configs = built[0]
-        # untuned, so the generic copy tunes over all of the kernel's configs
-        self.assertGreater(num_launchers, 1)
-        self.assertEqual(len(generic_configs), num_launchers)
+        guarded = []
+        guard = triton_utils._guard_multiple_of
 
-    @config.patch(cpp_wrapper=True)
-    def test_not_specialized_with_cpp_wrapper(self):
-        # nothing would check the runtime values of a kernel launched from C++
-        _, code = self._compile(4096, dynamic=True)
-        self.assertNotIn("runtime_divisibility_args", code)
-
-    @config.patch(combo_kernels=True, benchmark_combo_kernel=False)
-    def test_combo_kernel(self):
-        def fn(a, b, c, d):
-            return a.float() + b.float(), c.float() * d.float()
-
-        def inputs(n, m):
-            return [
-                torch.randn(k, device=GPU_TYPE, dtype=torch.bfloat16)
-                for k in (n, n, m, m)
-            ]
-
-        from torch._inductor.utils import run_and_get_code
+        def record(expr, alignment):
+            result = guard(expr, alignment)
+            guarded.append((V.graph.is_backward, result))
+            return result
 
         compiled = torch.compile(fn, dynamic=True)
-        args = inputs(4096, 2048)
-        out, code = run_and_get_code(compiled, *args)
-        code = "\n".join(code)
-        self.assertEqual(out, fn(*args))
-        self.assertIn("SequentialComboKernelGrid", code)
-        self.assertIn("'runtime_divisibility_args': (", code)
-        get_generic = CachingAutotuner._get_generic_autotuner
-        with (
-            patch.object(
-                CachingAutotuner,
-                "_get_generic_autotuner",
-                autospec=True,
-                side_effect=get_generic,
-            ) as generic,
-            torch._dynamo.config.patch(error_on_recompile=True),
-        ):
-            # break each sub-kernel's divisibility on its own
-            for n, m in ((4096, 2049), (4097, 2048), (4097, 2049), (8192, 4096)):
-                args = inputs(n, m)
-                self.assertEqual(compiled(*args), fn(*args))
-        self.assertEqual(generic.call_count, 3)
+        with patch.object(triton_utils, "_guard_multiple_of", record):
+            for n, graphs in ((4098, 1), (4100, 1), (4099, 2), (4098, 2)):
+                x = torch.randn(
+                    n, 8, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+                )
+                xr = x.detach().clone().requires_grad_()
+                out = compiled(x)
+                out.sum().backward()
+                ref = fn(xr)
+                ref.sum().backward()
+                self.assertEqual(out, ref)
+                self.assertEqual(x.grad, xr.grad)
+                self.assertEqual(self.num_graphs(), graphs)
+        self.assertIn((True, True), guarded)
+        self.assertNotIn((False, True), guarded)
+
+    def test_not_specialized_after_guards_are_frozen(self):
+        # e.g. a backward compiled lazily, after Dynamo built its guards
+        from torch._inductor.graph import GraphLowering
+
+        init = GraphLowering.__init__
+
+        def frozen_init(self, *args, **kwargs):
+            init(self, *args, **kwargs)
+            self.sizevars.shape_env.frozen = True
+
+        compiled = torch.compile(self.fn, dynamic=True)
+        with patch.object(GraphLowering, "__init__", frozen_init):
+            self.check(compiled, 4096)
+        self.check(compiled, 4097)
+        self.assertEqual(self.num_graphs(), 1)
 
 
 if __name__ == "__main__":

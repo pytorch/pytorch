@@ -301,9 +301,6 @@ class TritonMeta(typing.TypedDict, total=False):
     device_type: str
     constants: dict[str, typing.Any]
     configs: list[typing.Any]
-    # configs without the runtime-checked divisibility hints, see
-    # runtime_divisibility_args
-    generic_configs: list[typing.Any]
     native_matmul: bool
     launch_cooperative_grid: bool
     enable_fp_fusion: bool
@@ -387,8 +384,6 @@ class InductorMeta(typing.TypedDict, total=False):
     strict_reduction_rblock: int
     kernel_num_gb: float
     kernel_flop: int
-    # Indices of size args that are compiled as divisible by 16 but only checked at launch
-    runtime_divisibility_args: tuple[int, ...]
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str

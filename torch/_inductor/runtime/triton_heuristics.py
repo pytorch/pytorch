@@ -817,18 +817,6 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
-        # Size args compiled as divisible by 16 from their hints only; see
-        # config.triton.runtime_divisibility_specialization. A launch that breaks
-        # that goes to _generic_autotuner, compiled without those hints on first use.
-        self.runtime_divisibility_args: tuple[int, ...] = tuple(
-            self.inductor_meta.get("runtime_divisibility_args", ())
-        )
-        self._generic_autotuner: CachingAutotuner | None = None
-        # _precompile_worker drops self.configs, and the generic copy may need to tune
-        self._generic_configs: list[Config] = (
-            list(self.configs) if self.runtime_divisibility_args else []
-        )
-
     @staticmethod
     def _close_compiled_kernel(kernel: Any) -> None:
         if kernel is None:
@@ -1377,7 +1365,6 @@ class CachingAutotuner(KernelInterface):
             "lock": None,
             "_plugins": [],
             "fallback": None,
-            "_generic_autotuner": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -2633,72 +2620,6 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
-    def _breaks_runtime_divisibility(self, args: tuple[Any, ...]) -> bool:
-        # The kernel was compiled as if these args were multiples of 16. Launching it
-        # with one that isn't would let vectorized masked accesses go out of bounds.
-        return any(args[i] % 16 for i in self.runtime_divisibility_args)
-
-    def _get_generic_autotuner(self) -> CachingAutotuner:
-        """
-        A copy of this autotuner compiled without the runtime-checked divisibility
-        hints, for launches whose size args break them. It reuses the winning
-        config if this one has already been tuned.
-        """
-        with self.lock:
-            if self._generic_autotuner is None:
-                self._ensure_kernel_loaded()
-                # not copy.copy, which goes through __getstate__
-                generic = object.__new__(type(self))
-                generic.__dict__.update(self.__dict__)
-                generic.triton_meta = cast(
-                    TritonMeta,
-                    {
-                        **self.triton_meta,
-                        "configs": self.triton_meta["generic_configs"],
-                    },
-                )
-                generic.inductor_meta = cast(
-                    InductorMeta,
-                    {
-                        k: v
-                        for k, v in self.inductor_meta.items()
-                        if k != "runtime_divisibility_args"
-                    },
-                )
-                generic.runtime_divisibility_args = ()
-                generic._generic_autotuner = None
-                generic._generic_configs = []
-                generic.configs = (
-                    [self.launchers[0].config]
-                    if len(self.launchers) == 1
-                    else list(self._generic_configs)
-                )
-                generic.compile_results = []
-                generic.launchers = []
-                generic._cached_launcher = None
-                generic.lock = threading.Lock()
-                # the autotune cache entry is keyed by the kernel source, which both share
-                generic.save_cache_hook = None
-                generic.benchmark_failure_reasons = {}
-                generic.coordesc_tuner = CoordescTuner(
-                    is_mm=False,
-                    is_native_matmul=generic.triton_meta.get("native_matmul", False),
-                    is_mix_order_reduction=self.is_mix_order_reduction,
-                    name=self.fn.__name__,
-                    size_hints=self.size_hints,
-                    inductor_meta=generic.inductor_meta,
-                )
-                generic.cuda_kernel_saved = False
-                generic.cpu_kernel_saved = False
-                generic.autotune_cache_info = copy.copy(self.autotune_cache_info)
-                if hasattr(generic, "cached"):
-                    # DebugAutotuner's measurement of the specialized kernel
-                    generic.cached = None
-                # plugins keep per-kernel state, e.g. an in-progress incremental autotune
-                generic._plugins = get_caching_autotuner_plugins(generic)
-                self._generic_autotuner = generic
-            return self._generic_autotuner
-
     def run(
         self,
         *args,
@@ -2707,10 +2628,6 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         """Launch triton kernel call and return result."""
-        if self._breaks_runtime_divisibility(args):
-            return self._get_generic_autotuner().run(
-                *args, stream=stream, benchmark_run=benchmark_run, **kwargs
-            )
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
@@ -3827,8 +3744,6 @@ class DebugAutotuner(CachingAutotuner):
         self.cached = None
 
     def run(self, *args, stream, **kwargs):
-        if self._breaks_runtime_divisibility(args):
-            return self._get_generic_autotuner().run(*args, stream=stream, **kwargs)
         if not self.with_bandwidth_info:
             super().run(*args, stream=stream, **kwargs, benchmark_run=True)
             return
