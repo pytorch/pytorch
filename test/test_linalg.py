@@ -10593,6 +10593,41 @@ class TestLinalgCudaOnly(TestCase):
                     find_tunableop_result(results, op_signature, params_signature)
                 )
 
+    @dtypes(torch.bfloat16)
+    def test_addmm_activation_signature_tunableop(self, device, dtype):
+        # GemmAndBiasParams::Signature() must include the activation epilogue.
+        # Without it, relu and gelu of the same shape collapse onto a single
+        # TunableOp entry, and the kernel tuned for one epilogue is replayed
+        # for the other.
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            M, K, N = 32, 64, 128
+            x = torch.randn(M, K, device=device, dtype=dtype)
+            w = torch.randn(K, N, device=device, dtype=dtype)
+            bias = torch.randn(N, device=device, dtype=dtype)
+
+            torch._addmm_activation(bias, x, w, use_gelu=False)
+            torch._addmm_activation(bias, x, w, use_gelu=True)
+
+            params_signatures = sorted(
+                result[1]
+                for result in torch.cuda.tunable.get_results()
+                if result[0].startswith("GemmAndBiasTunableOp")
+            )
+            self.assertEqual(
+                len(params_signatures), 2,
+                f"expected one entry per activation epilogue, got {params_signatures}")
+
+            gelu_signature, relu_signature = params_signatures
+            self.assertTrue(gelu_signature.endswith("_GELU"), gelu_signature)
+            self.assertTrue(relu_signature.endswith("_RELU"), relu_signature)
+            # Same shape, so the two keys may only differ in the epilogue suffix.
+            self.assertEqual(
+                gelu_signature[:-len("_GELU")], relu_signature[:-len("_RELU")])
+
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)
     def test_scaled_gemm_blockwise_tunableop(self, device):

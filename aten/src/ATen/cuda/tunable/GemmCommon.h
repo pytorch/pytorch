@@ -467,8 +467,9 @@ struct GemmAndBiasParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
-        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s_%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>(),
+        to_string_epilogue(activation));
   }
 
   std::string DynamicSignature() const override {
@@ -476,7 +477,7 @@ struct GemmAndBiasParams : OpParams {
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s_%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
@@ -484,7 +485,8 @@ struct GemmAndBiasParams : OpParams {
         MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
         MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
-        ComputeTypeSignature<T>());
+        ComputeTypeSignature<T>(),
+        to_string_epilogue(activation));
   }
 
   size_t GetSizeA() const {
