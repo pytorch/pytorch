@@ -69,9 +69,7 @@ def export_python(
 
 
         y = step(x, scale=3.0)  # first run: captures and writes artifacts/step.py
-        y = step(
-            x, scale=3.0
-        )  # served from artifacts/step.py, here or in a new process
+        y = step(x, scale=3.0)  # served from the file, here or in a new process
 
     ``path`` is the graph's Inductor code, and that code is what runs; the rest of
     what Dynamo captured (the guards, the frame's bytecode and AOTAutograd's wrapper)
@@ -230,7 +228,7 @@ class _ExportedPython:
                     self._runnable = self._load()
         return self._runnable(*args, **kwargs)
 
-    def _load(self) -> PrecompiledRunnable:
+    def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         with open(self._path, "rb") as f:
             python_code = _captured_artifact(f.read().decode(), self._path)
         cache = _matching_cache(python_code, self._cache_path)
@@ -254,7 +252,7 @@ class _ExportedPython:
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graph compiles the kernels its code defines.
             log.info("export_python: %s; serving it without the cache", stale)
-        return _runnable_from_pair(python_code, cache)
+        return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         from torch._dynamo.exc import Unsupported
@@ -306,7 +304,8 @@ class _ExportedPython:
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(artifact)
-        self._runnable = self._load()
+        # This process just wrote the file, so it skips the exec warning.
+        self._runnable = self._load(trusted=True)
         return result
 
 
