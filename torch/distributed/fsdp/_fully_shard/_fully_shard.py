@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from ._all_gather_layout import AllGatherLayout
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -778,6 +779,13 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        This only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`,
+        which packs the comm's input into the output that the comm allocated; a
+        custom layout carries its own comm instead (see
+        :meth:`set_all_gather_layout`). The comm can be replaced at any time,
+        since it owns no outputs.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -789,6 +797,8 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            layout = fsdp_param_group._all_gather_layout
+            fsdp_param_group._check_layout_comm(layout, type(comm))
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -898,6 +908,59 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
+
+    def set_all_gather_layout(
+        self, layout: AllGatherLayout, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the layout that packs and finalizes a parameter group's all-gather.
+
+        .. warning::
+            This API is experimental. The layout contract and supported FSDP
+            internals may change without backward compatibility.
+
+        The layout packs the group's all-gather inputs before the collective and
+        turns the collective output into the parameters' all-gather outputs
+        after it completes. This is the only way to install a layout.
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
+        packs rank-major input into the collective output and copies the output
+        with its ``output_fn``, e.g.
+        ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)`` for the
+        native copy. It is the only layout that works with the comms that
+        :meth:`set_custom_all_gather`, :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm` install, which
+        expect that copy-in. A custom layout, e.g. one whose collective writes
+        parameter-contiguous output, packs its own input and carries its own
+        all-gather as its ``comm``, which FSDP passes each call's layout
+        metadata; without a ``comm``, it runs FSDP's default all-gather. A
+        layout that keeps no per-call state can serve any number of modules. Set
+        custom layouts before the first unshard: layouts change only between
+        iterations, while no all-gather is pending and parameters are resharded,
+        and never after parameters adopt outputs from a custom layout, since
+        only the layout that created those outputs can refill them. FSDP checks
+        every group before changing any.
+
+        Args:
+            layout (AllGatherLayout): Layout to install; pass
+                ``DefaultAllGatherLayout()`` to restore the default.
+            recurse (bool): Whether to also set the layout for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        # Check every group before installing on any, so that a failed check leaves
+        # all groups on their old layout instead of a mix of old and new
+        groups = []
+        for module in modules:
+            if not isinstance(module, FSDPModule):
+                continue
+            for fsdp_param_group in module._get_fsdp_state()._fsdp_param_groups:
+                comm_type = type(fsdp_param_group._all_gather_comm)
+                fsdp_param_group._check_layout_comm(layout, comm_type)
+                if layout is not fsdp_param_group._all_gather_layout:
+                    fsdp_param_group._check_all_gather_replaceable()
+                groups.append(fsdp_param_group)
+        for fsdp_param_group in groups:
+            fsdp_param_group._all_gather_layout = layout
 
     def set_reduce_scatter_input_fn(
         self, fn: Callable | None, /, *, recurse: bool = True
@@ -1078,7 +1141,9 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy.
+        determine their staging buffer allocation strategy. ProcessGroup
+        allocation only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
@@ -1111,7 +1176,9 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`.
+        :meth:`set_custom_reduce_scatter`, and only works with the default
+        all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
